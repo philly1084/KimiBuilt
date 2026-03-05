@@ -1,7 +1,7 @@
 # ================================
 # Stage 1: Install dependencies
 # ================================
-FROM node:20-alpine AS deps
+FROM --platform=$TARGETPLATFORM node:20-alpine AS deps
 
 WORKDIR /app
 
@@ -11,16 +11,17 @@ RUN npm ci --only=production && npm cache clean --force
 # ================================
 # Stage 2: Production image
 # ================================
-FROM node:20-alpine
+FROM --platform=$TARGETPLATFORM node:20-alpine
 
 WORKDIR /app
 
 # Security: run as non-root
 RUN addgroup -g 1001 -S kimibuilt && \
-    adduser -S kimibuilt -u 1001
+  adduser -S kimibuilt -u 1001
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY src/ ./src/
+COPY frontend/ ./frontend/
 COPY package.json ./
 
 ENV NODE_ENV=production
