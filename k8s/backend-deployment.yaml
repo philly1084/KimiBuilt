@@ -17,8 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: kimibuilt:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/philly1084/kimibuilt:latest
           ports:
             - containerPort: 3000
               name: http
