@@ -1,6 +1,6 @@
 /**
  * AI Assistant Module - AI diagram generation panel
- * Enhanced: Added model selection and image generation mode
+ * Enhanced: Uses OpenAI SDK for diagram and image generation
  */
 
 class AIAssistant {
@@ -68,7 +68,7 @@ class AIAssistant {
     }
     
     async fetchModels() {
-        // Fetch chat models
+        // Fetch chat models using OpenAI SDK
         this.models = await window.apiManager.getModels();
         
         // Fetch image models
@@ -162,6 +162,7 @@ class AIAssistant {
             // Get current canvas state for context
             const existingContent = JSON.stringify(window.infiniteCanvas.elements);
             
+            // Use OpenAI SDK via apiManager
             const response = await window.apiManager.generateDiagram(prompt, existingContent);
             
             if (response.content) {
@@ -169,11 +170,6 @@ class AIAssistant {
                 this.showStatus('Diagram generated successfully!', 'success');
             } else {
                 this.showStatus('No diagram generated. Try a different prompt.', 'error');
-            }
-            
-            // Show suggestions if available
-            if (response.suggestions && response.suggestions.length > 0) {
-                this.updateSuggestions(response.suggestions);
             }
         } catch (error) {
             console.error('Generation error:', error);
@@ -190,6 +186,7 @@ class AIAssistant {
         this.generateBtn.disabled = true;
         
         try {
+            // Use OpenAI SDK via apiManager
             const response = await window.apiManager.generateImage({
                 prompt: prompt,
                 model: this.imageSettings.model,
@@ -475,27 +472,6 @@ class AIAssistant {
         // Extract text between quotes or after colons
         const match = line.match(/["'](.+?)["']|:\s*(.+)/);
         return match ? (match[1] || match[2] || line) : line;
-    }
-    
-    updateSuggestions(suggestions) {
-        const list = document.querySelector('.suggestion-list');
-        if (!list) return;
-        
-        // Clear existing
-        list.innerHTML = '';
-        
-        // Add new suggestions
-        for (const suggestion of suggestions.slice(0, 4)) {
-            const btn = document.createElement('button');
-            btn.className = 'suggestion-btn';
-            btn.textContent = suggestion;
-            btn.dataset.prompt = suggestion;
-            btn.addEventListener('click', () => {
-                this.input.value = suggestion;
-                this.generate();
-            });
-            list.appendChild(btn);
-        }
     }
     
     showStatus(message, type) {

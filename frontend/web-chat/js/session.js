@@ -1,6 +1,7 @@
 /**
  * Session Management for KimiBuilt AI Chat
  * Handles session state, local storage, and session operations with enhanced persistence
+ * Now works client-side only with OpenAI SDK backend
  */
 
 class SessionManager extends EventTarget {
@@ -22,105 +23,45 @@ class SessionManager extends EventTarget {
     // ============================================
 
     async loadSessions() {
-        try {
-            const sessions = await apiClient.getSessions();
-            this.sessions = sessions.map(s => ({
-                ...s,
-                title: s.title || this.generateTitle(s),
-                updatedAt: s.updatedAt || new Date().toISOString(),
-                mode: s.mode || 'chat',
-                model: s.model || localStorage.getItem('kimibuilt_default_model') || 'gpt-4o'
-            }));
-            this.saveToStorage();
-            this.dispatchEvent(new CustomEvent('sessionsChanged', { 
-                detail: { sessions: this.sessions } 
-            }));
-            return this.sessions;
-        } catch (error) {
-            console.error('Failed to load sessions:', error);
-            // Use cached sessions if available
-            if (this.sessions.length > 0) {
-                this.dispatchEvent(new CustomEvent('sessionsChanged', { 
-                    detail: { sessions: this.sessions } 
-                }));
-                return this.sessions;
-            }
-            throw error;
-        }
+        // With OpenAI SDK, sessions are managed client-side only
+        // Just dispatch the current state
+        this.dispatchEvent(new CustomEvent('sessionsChanged', { 
+            detail: { sessions: this.sessions } 
+        }));
+        return this.sessions;
     }
 
     async createSession(mode = 'chat', options = {}) {
-        try {
-            const session = await apiClient.createSession(mode);
-            const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
-            
-            const sessionWithMeta = {
-                ...session,
-                mode,
-                model: options.model || defaultModel,
-                title: 'New Chat',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                version: this.version
-            };
-            
-            this.sessions.unshift(sessionWithMeta);
-            this.sessionMessages.set(session.id, []);
-            this.currentSessionId = session.id;
-            
-            this.saveToStorage();
-            this.dispatchEvent(new CustomEvent('sessionCreated', { 
-                detail: { session: sessionWithMeta } 
-            }));
-            this.dispatchEvent(new CustomEvent('sessionsChanged', { 
-                detail: { sessions: this.sessions } 
-            }));
-            
-            return sessionWithMeta;
-        } catch (error) {
-            console.error('Failed to create session:', error);
-            
-            // Create local session as fallback
-            const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
-            
-            const localSession = {
-                id: this.generateLocalId(),
-                mode,
-                model: options.model || defaultModel,
-                title: 'New Chat',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                isLocal: true,
-                version: this.version
-            };
-            
-            this.sessions.unshift(localSession);
-            this.sessionMessages.set(localSession.id, []);
-            this.currentSessionId = localSession.id;
-            
-            this.saveToStorage();
-            this.dispatchEvent(new CustomEvent('sessionCreated', { 
-                detail: { session: localSession, isLocal: true } 
-            }));
-            this.dispatchEvent(new CustomEvent('sessionsChanged', { 
-                detail: { sessions: this.sessions } 
-            }));
-            
-            return localSession;
-        }
+        const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
+        
+        const localSession = {
+            id: this.generateLocalId(),
+            mode,
+            model: options.model || defaultModel,
+            title: 'New Chat',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            isLocal: true,
+            version: this.version
+        };
+        
+        this.sessions.unshift(localSession);
+        this.sessionMessages.set(localSession.id, []);
+        this.currentSessionId = localSession.id;
+        
+        this.saveToStorage();
+        this.dispatchEvent(new CustomEvent('sessionCreated', { 
+            detail: { session: localSession, isLocal: true } 
+        }));
+        this.dispatchEvent(new CustomEvent('sessionsChanged', { 
+            detail: { sessions: this.sessions } 
+        }));
+        
+        return localSession;
     }
 
     async deleteSession(sessionId) {
-        try {
-            // Try to delete from server
-            if (!this.isLocalSession(sessionId)) {
-                await apiClient.deleteSession(sessionId);
-            }
-        } catch (error) {
-            console.error('Failed to delete session from server:', error);
-        }
-
-        // Remove from local state regardless
+        // Remove from local state
         this.sessions = this.sessions.filter(s => s.id !== sessionId);
         this.sessionMessages.delete(sessionId);
         

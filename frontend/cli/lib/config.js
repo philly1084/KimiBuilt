@@ -6,7 +6,7 @@ const CONFIG_DIR = path.join(os.homedir(), '.kimibuilt');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 const DEFAULT_CONFIG = {
-  apiBaseUrl: process.env.KIMIBUILT_API_URL || 'http://localhost:3000',
+  apiBaseUrl: process.env.KIMIBUILT_API_URL || 'http://localhost:3000/v1',
   defaultMode: 'chat',
   defaultModel: null,
   theme: 'default',

@@ -18,7 +18,7 @@ const session = require('./lib/session');
 const api = require('./lib/api');
 
 // CLI metadata
-const CLI_VERSION = '2.1.0';
+const CLI_VERSION = '2.2.0';
 const CLI_NAME = 'KimiBuilt CLI';
 
 // Gradient presets

@@ -272,23 +272,63 @@ notes-notion/
 
 ## 🔌 API Integration
 
-The app connects to your KimiBuilt backend for AI features:
+The app uses the **OpenAI SDK** to connect to your KimiBuilt backend for AI features.
 
-### Endpoints Used
-- `POST /api/sessions` - Create new page session
-- `GET /api/sessions/:id` - Get session data
-- `DELETE /api/sessions/:id` - Delete session
-- `GET /api/models` - Get available chat models
-- `GET /api/images/models` - Get available image models
-- `POST /api/chat` - AI text generation
-- `POST /api/chat/stream` - Streaming AI responses
-- `POST /api/images` - Generate images
+### Configuration
+
+The OpenAI SDK is loaded via CDN in `index.html`:
+```html
+<script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+```
+
+### SDK Configuration
+
+In `js/api.js`, the SDK is configured to point to your KimiBuilt backend:
+```javascript
+const client = new OpenAI({
+    baseURL: 'http://localhost:3000/v1',  // KimiBuilt backend
+    apiKey: 'any-key',                     // Not required for local backend
+    dangerouslyAllowBrowser: true,         // Required for browser usage
+});
+```
+
+### API Methods Used
+
+| Method | SDK Endpoint | Purpose |
+|--------|--------------|---------|
+| `client.models.list()` | `GET /v1/models` | Get available AI models |
+| `client.chat.completions.create()` | `POST /v1/chat/completions` | Chat and text generation |
+| `client.images.generate()` | `POST /v1/images/generations` | Image generation |
+| `fetch /health` | Custom endpoint | Backend health check |
+
+### Session Management
+
+The SDK maintains session context via the `session_id` parameter, allowing KimiBuilt to track conversation context across requests:
+```javascript
+const params = {
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: message }],
+    session_id: currentSessionId,  // KimiBuilt extension
+};
+```
+
+### Streaming Responses
+
+The SDK handles streaming automatically:
+```javascript
+const stream = await client.chat.completions.create({ ...params, stream: true });
+for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || '';
+    // Handle streaming content
+}
+```
 
 ### Offline Mode
 If the backend is unavailable, the app works fully in local mode:
 - All data stored in LocalStorage
 - AI features use client-side fallbacks
 - No data is lost when backend reconnects
+- Placeholder responses generated for demo purposes
 
 ## 🎨 Customization
 
@@ -309,11 +349,27 @@ Edit CSS variables in `css/styles.css`:
 3. Add to slash menu in `index.html`
 4. Add CSS styles in `css/styles.css`
 
+### Updating OpenAI SDK Version
+To update the OpenAI SDK, change the CDN URL in `index.html`:
+```html
+<script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+```
+
+Check [OpenAI SDK releases](https://github.com/openai/openai-node/releases) for the latest version.
+
 ### Connecting to Different Backend
 Update `BASE_URL` in `js/api.js`:
 ```javascript
-const BASE_URL = 'http://your-backend-url';
+const BASE_URL = 'http://your-backend-url/v1';
 ```
+
+Or update the OpenAI client configuration:
+```javascript
+const client = new OpenAI({
+    baseURL: 'http://your-backend-url/v1',
+    apiKey: 'your-api-key',
+    dangerouslyAllowBrowser: true,
+});
 
 ## 🛠️ Development
 

@@ -1,65 +1,103 @@
 /**
- * API Module - Backend integration
- * Enhanced: Added model selection and image generation support
+ * API Module - Backend integration using OpenAI SDK
+ * Updated: Uses OpenAI SDK to connect to KimiBuilt backend at /v1
  */
 
-class APIManager {
-    constructor() {
-        this.baseUrl = 'http://localhost:3000';
-        this.wsUrl = 'ws://localhost:3000/ws';
-        this.ws = null;
+class OpenAICanvasAPI {
+    constructor(baseUrl = 'http://localhost:3000/v1') {
+        this.client = new OpenAI({
+            baseURL: baseUrl,
+            apiKey: 'any-key',
+            dangerouslyAllowBrowser: true,
+        });
         this.sessionId = null;
-        this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
-        
-        // Default model
         this.selectedModel = localStorage.getItem('kimi-canvas-model') || 'gpt-4o';
-        
-        // Available models cache
-        this.availableModels = [];
-        this.imageModels = [];
     }
-    
-    // Get selected model
-    getSelectedModel() {
-        return this.selectedModel;
-    }
-    
-    // Set selected model and save to localStorage
+
     setSelectedModel(model) {
         this.selectedModel = model;
         localStorage.setItem('kimi-canvas-model', model);
     }
-    
-    // Health check
-    async checkHealth() {
-        try {
-            const response = await fetch(`${this.baseUrl}/health`);
-            if (response.ok) {
-                const data = await response.json();
-                return { connected: true, data };
-            }
-            return { connected: false, error: 'Health check failed' };
-        } catch (error) {
-            return { connected: false, error: error.message };
-        }
+
+    getSelectedModel() {
+        return this.selectedModel;
     }
-    
-    // Fetch available chat models
+
+    // Generate diagram (uses chat completions with special prompt)
+    async generateDiagram(message, existingContent = null) {
+        const messages = [
+            {
+                role: 'system',
+                content: 'You are an AI canvas assistant. Generate structured content for a canvas interface. Respond with valid JSON containing elements array.'
+            },
+            {
+                role: 'user',
+                content: existingContent 
+                    ? `${message}\n\nExisting content:\n${existingContent}`
+                    : message
+            }
+        ];
+
+        const params = {
+            model: this.selectedModel,
+            messages,
+            stream: false,
+        };
+
+        if (this.sessionId) {
+            params.session_id = this.sessionId;
+        }
+
+        const response = await this.client.chat.completions.create(params);
+        
+        // Parse the response content as JSON
+        const content = response.choices[0]?.message?.content || '';
+        
+        // Update session ID if returned
+        if (response.session_id) {
+            this.sessionId = response.session_id;
+        }
+
+        return {
+            content,
+            sessionId: this.sessionId,
+            responseId: response.id,
+        };
+    }
+
+    // Generate image
+    async generateImage(options) {
+        const { prompt, model, size, quality, style, n } = options;
+        
+        const params = {
+            model: model || 'dall-e-3',
+            prompt,
+            n: n || 1,
+            size: size || '1024x1024',
+        };
+
+        if (quality) params.quality = quality;
+        if (style) params.style = style;
+        if (this.sessionId) params.session_id = this.sessionId;
+
+        const response = await this.client.images.generate(params);
+        
+        if (response.session_id) {
+            this.sessionId = response.session_id;
+        }
+
+        return response;
+    }
+
+    // Get models
     async getModels() {
         try {
-            const response = await fetch(`${this.baseUrl}/api/models`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            // Backend returns { object: 'list', data: [...] }
-            this.availableModels = (data.data || []).map(m => ({
+            const response = await this.client.models.list();
+            return (response.data || []).map(m => ({
                 id: m.id,
                 name: m.id,
                 provider: m.owned_by || 'unknown'
             }));
-            return this.availableModels;
         } catch (error) {
             console.error('Error fetching models:', error);
             // Return default models if fetch fails
@@ -71,159 +109,41 @@ class APIManager {
             ];
         }
     }
-    
-    // Fetch available image generation models
+
+    // Get image models (use hardcoded list or fetch from backend)
     async getImageModels() {
+        // For now return hardcoded, could add /v1/images/models endpoint
+        return [
+            { id: 'dall-e-3', name: 'DALL-E 3', description: 'High quality images' },
+            { id: 'dall-e-2', name: 'DALL-E 2', description: 'Standard quality' }
+        ];
+    }
+
+    // Health check (custom)
+    async checkHealth() {
         try {
-            const response = await fetch(`${this.baseUrl}/api/images/models`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            const baseUrl = this.client.baseURL.replace('/v1', '');
+            const response = await fetch(`${baseUrl}/health`);
+            if (response.ok) {
+                const data = await response.json();
+                return { connected: true, data };
             }
-            const data = await response.json();
-            this.imageModels = data.models || [];
-            return this.imageModels;
+            return { connected: false, error: 'Health check failed' };
         } catch (error) {
-            console.error('Error fetching image models:', error);
-            // Return default image models if fetch fails
-            return [
-                { id: 'dall-e-3', name: 'DALL-E 3', provider: 'openai' },
-                { id: 'dall-e-2', name: 'DALL-E 2', provider: 'openai' }
-            ];
+            return { connected: false, error: error.message };
         }
     }
     
-    // HTTP API Methods
-    async generateDiagram(message, existingContent = null) {
-        try {
-            const response = await fetch(`${this.baseUrl}/api/canvas`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message: message,
-                    sessionId: this.sessionId,
-                    canvasType: 'diagram',
-                    existingContent: existingContent,
-                    model: this.selectedModel
-                })
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            if (data.sessionId) {
-                this.sessionId = data.sessionId;
-            }
-            
-            return data;
-        } catch (error) {
-            console.error('API Error:', error);
-            throw error;
-        }
-    }
-    
-    // Generate image
-    async generateImage(options) {
-        try {
-            const response = await fetch(`${this.baseUrl}/api/images`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    prompt: options.prompt,
-                    model: options.model || 'dall-e-3',
-                    size: options.size || '1024x1024',
-                    quality: options.quality || 'standard',
-                    style: options.style || 'vivid',
-                    n: options.n || 1
-                })
-            });
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Image generation error:', error);
-            throw error;
-        }
-    }
-    
-    // WebSocket Methods
+    // WebSocket Methods (kept for compatibility)
     connectWebSocket() {
-        try {
-            this.ws = new WebSocket(this.wsUrl);
-            
-            this.ws.onopen = () => {
-                console.log('WebSocket connected');
-                this.reconnectAttempts = 0;
-            };
-            
-            this.ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    this.handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('WebSocket message error:', error);
-                }
-            };
-            
-            this.ws.onclose = () => {
-                console.log('WebSocket disconnected');
-                this.attemptReconnect();
-            };
-            
-            this.ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
-        } catch (error) {
-            console.error('WebSocket connection error:', error);
-        }
-    }
-    
-    attemptReconnect() {
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            setTimeout(() => {
-                console.log(`Reconnecting... Attempt ${this.reconnectAttempts}`);
-                this.connectWebSocket();
-            }, 1000 * this.reconnectAttempts);
-        }
-    }
-    
-    handleWebSocketMessage(data) {
-        // Handle incoming WebSocket messages
-        if (data.type === 'canvas' && data.payload) {
-            window.app?.handleAIGeneratedDiagram(data.payload);
-        }
-    }
-    
-    sendCanvasMessage(message) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
-                type: 'canvas',
-                payload: {
-                    message: message,
-                    canvasType: 'diagram',
-                    model: this.selectedModel
-                }
-            }));
-        }
+        // WebSocket not needed with OpenAI SDK - using HTTP requests
+        console.log('WebSocket not used with OpenAI SDK mode');
     }
     
     disconnect() {
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
-        }
+        // No-op for OpenAI SDK mode
     }
 }
 
 // Create global instance
-window.apiManager = new APIManager();
+window.apiManager = new OpenAICanvasAPI();

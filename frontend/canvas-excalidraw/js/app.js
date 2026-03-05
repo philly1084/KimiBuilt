@@ -1,6 +1,6 @@
 /**
  * Main App Controller - Event coordination and app initialization
- * Enhanced: Better export, import, keyboard handling
+ * Enhanced: Uses OpenAI SDK for API communication
  */
 
 class App {
@@ -18,8 +18,8 @@ class App {
             this.setupExport();
             this.setupKeyboardShortcuts();
             
-            // Connect WebSocket
-            window.apiManager?.connectWebSocket();
+            // Note: WebSocket not used with OpenAI SDK mode
+            console.log('OpenAI SDK mode: WebSocket not used');
             
             // Initial render
             window.infiniteCanvas?.render();
@@ -33,7 +33,7 @@ class App {
             // Setup AI panel mode toggles
             this.setupAIModeToggles();
             
-            console.log('Kimi Canvas initialized');
+            console.log('Kimi Canvas initialized with OpenAI SDK');
         });
     }
     
@@ -339,7 +339,7 @@ class App {
     setupModelSelector() {
         const topModelSelect = document.getElementById('topModelSelect');
         if (topModelSelect) {
-            // Set initial value from localStorage
+            // Set initial value from localStorage via apiManager
             topModelSelect.value = window.apiManager.getSelectedModel();
             
             // Handle model change

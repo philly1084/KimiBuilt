@@ -1,6 +1,6 @@
 {
   "name": "kimibuilt-cli",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "A premium Node.js CLI client for KimiBuilt AI backend with interactive REPL, streaming responses, session persistence, and support for multiple interaction modes",
   "main": "cli.js",
   "bin": {
@@ -34,6 +34,7 @@
     "marked": "^12.0.0",
     "marked-terminal": "^7.0.0",
     "minimist": "^1.2.8",
+    "openai": "^4.104.0",
     "ora": "^5.4.1",
     "strip-ansi": "^6.0.1"
   },

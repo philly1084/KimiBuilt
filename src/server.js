@@ -19,6 +19,7 @@ const notationRouter = require('./routes/notation');
 const sessionsRouter = require('./routes/sessions');
 const modelsRouter = require('./routes/models');
 const imagesRouter = require('./routes/images');
+const openaiCompatRouter = require('./routes/openai-compat');
 
 // Validate config on startup
 validate();
@@ -71,6 +72,9 @@ app.use('/api/notation', notationRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/images', imagesRouter);
+
+// OpenAI-compatible endpoints
+app.use('/v1', openaiCompatRouter);
 
 // ---------------------
 // Static Frontend Serving
@@ -125,10 +129,14 @@ async function start() {
 ║  Embed:   ${config.ollama.embedModel.padEnd(33)}║
 ║  Qdrant:  ${config.qdrant.url.padEnd(33)}║
 ╠══════════════════════════════════════════════╣
-║  Endpoints:                                  ║
+║  Custom Endpoints:                           ║
 ║  • /api/chat      • /api/models              ║
 ║  • /api/canvas    • /api/images              ║
 ║  • /api/notation  • /api/sessions            ║
+╠══════════════════════════════════════════════╣
+║  OpenAI-Compatible:                          ║
+║  • /v1/chat/completions  • /v1/models        ║
+║  • /v1/responses         • /v1/images/gen... ║
 ╚══════════════════════════════════════════════╝
     `);
     });

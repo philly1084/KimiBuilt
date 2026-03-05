@@ -1,248 +1,42 @@
 /**
- * API Client for KimiBuilt AI Chat
- * Handles WebSocket and HTTP API communication with robust error handling
+ * API Client for KimiBuilt AI Chat using OpenAI SDK
+ * Handles API communication with the KimiBuilt backend
  */
 
-const API_BASE_URL = 'http://localhost:3000';
-const WS_URL = 'ws://localhost:3000/ws';
+// Configuration
+const API_BASE_URL = 'http://kimibuilt.local/v1'; // Update this to your KimiBuilt backend URL
+const API_KEY = 'any-key'; // Required by SDK but not validated by KimiBuilt
 
-class APIClient extends EventTarget {
+class OpenAIAPIClient extends EventTarget {
     constructor() {
         super();
-        this.ws = null;
-        this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000;
-        this.isConnecting = false;
+        this.client = null;
         this.currentSessionId = null;
-        this.eventSource = null;
-        this.useWebSocket = true;
-        this.heartbeatInterval = null;
-        this.connectionTimeout = null;
-        this.messageQueue = [];
-        
-        // Model cache
         this.modelsCache = null;
         this.modelsCacheExpiry = null;
         this.modelsCacheDuration = 5 * 60 * 1000; // 5 minutes
+        
+        // Initialize OpenAI client
+        this.initClient();
     }
-
-    // ============================================
-    // WebSocket Connection
-    // ============================================
-
-    connect() {
-        if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) {
-            return;
-        }
-
-        this.isConnecting = true;
-        this.dispatchEvent(new CustomEvent('connectionChange', { 
-            detail: { status: 'connecting' } 
-        }));
-
-        // Set connection timeout
-        this.connectionTimeout = setTimeout(() => {
-            if (this.isConnecting) {
-                console.warn('Connection timeout, falling back to HTTP');
-                this.isConnecting = false;
-                this.useWebSocket = false;
-                this.dispatchEvent(new CustomEvent('fallbackToHTTP'));
-                this.dispatchEvent(new CustomEvent('connectionChange', { 
-                    detail: { status: 'connected' } // Consider connected via HTTP
-                }));
-            }
-        }, 5000);
-
+    
+    initClient() {
         try {
-            this.ws = new WebSocket(WS_URL);
-
-            this.ws.onopen = () => {
-                console.log('WebSocket connected');
-                this.isConnecting = false;
-                this.reconnectAttempts = 0;
-                this.useWebSocket = true;
-                
-                clearTimeout(this.connectionTimeout);
-                
-                this.dispatchEvent(new CustomEvent('connectionChange', { 
-                    detail: { status: 'connected' } 
-                }));
-                
-                // Start heartbeat
-                this.startHeartbeat();
-                
-                // Process any queued messages
-                this.processMessageQueue();
-            };
-
-            this.ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    this.handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('Failed to parse WebSocket message:', error);
-                }
-            };
-
-            this.ws.onclose = (event) => {
-                console.log('WebSocket disconnected', event.code, event.reason);
-                this.cleanupConnection();
-                
-                this.dispatchEvent(new CustomEvent('connectionChange', { 
-                    detail: { status: 'disconnected' } 
-                }));
-                
-                // Only attempt reconnect if it wasn't a clean close
-                if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
-                    this.attemptReconnect();
-                } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                    this.useWebSocket = false;
-                    this.dispatchEvent(new CustomEvent('fallbackToHTTP'));
-                }
-            };
-
-            this.ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                this.isConnecting = false;
-                clearTimeout(this.connectionTimeout);
-                
-                this.dispatchEvent(new CustomEvent('connectionChange', { 
-                    detail: { status: 'disconnected' } 
-                }));
-                
-                this.dispatchEvent(new CustomEvent('error', { 
-                    detail: { message: 'WebSocket connection error' } 
-                }));
-            };
-
+            // Check if OpenAI SDK is loaded
+            if (typeof OpenAI === 'undefined') {
+                console.error('OpenAI SDK not loaded. Make sure the CDN script is included.');
+                return;
+            }
+            
+            this.client = new OpenAI({
+                baseURL: API_BASE_URL,
+                apiKey: API_KEY,
+                dangerouslyAllowBrowser: true,
+            });
+            
+            console.log('OpenAI SDK client initialized');
         } catch (error) {
-            console.error('Failed to create WebSocket connection:', error);
-            this.isConnecting = false;
-            clearTimeout(this.connectionTimeout);
-            this.attemptReconnect();
-        }
-    }
-
-    disconnect() {
-        this.reconnectAttempts = this.maxReconnectAttempts; // Prevent auto-reconnect
-        this.cleanupConnection();
-    }
-
-    cleanupConnection() {
-        this.isConnecting = false;
-        clearTimeout(this.connectionTimeout);
-        this.stopHeartbeat();
-        
-        if (this.ws) {
-            try {
-                this.ws.close();
-            } catch (e) {
-                // Ignore errors on close
-            }
-            this.ws = null;
-        }
-        
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
-    }
-
-    attemptReconnect() {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.log('Max reconnect attempts reached, falling back to HTTP SSE');
-            this.useWebSocket = false;
-            this.dispatchEvent(new CustomEvent('fallbackToHTTP'));
-            this.dispatchEvent(new CustomEvent('connectionChange', { 
-                detail: { status: 'connected' } 
-            }));
-            return;
-        }
-
-        this.reconnectAttempts++;
-        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-        
-        console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-        
-        this.dispatchEvent(new CustomEvent('connectionChange', { 
-            detail: { status: 'connecting' } 
-        }));
-        
-        setTimeout(() => {
-            this.connect();
-        }, delay);
-    }
-
-    startHeartbeat() {
-        // Send ping every 30 seconds to keep connection alive
-        this.heartbeatInterval = setInterval(() => {
-            if (this.ws?.readyState === WebSocket.OPEN) {
-                this.ws.send(JSON.stringify({ type: 'ping' }));
-            }
-        }, 30000);
-    }
-
-    stopHeartbeat() {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
-            this.heartbeatInterval = null;
-        }
-    }
-
-    handleWebSocketMessage(data) {
-        // Handle pong response
-        if (data.type === 'pong') {
-            return;
-        }
-
-        switch (data.type) {
-            case 'session_created':
-                this.currentSessionId = data.sessionId;
-                this.dispatchEvent(new CustomEvent('sessionCreated', { 
-                    detail: data 
-                }));
-                break;
-                
-            case 'delta':
-                this.dispatchEvent(new CustomEvent('delta', { 
-                    detail: { content: data.content } 
-                }));
-                break;
-                
-            case 'done':
-                this.dispatchEvent(new CustomEvent('done', { 
-                    detail: data 
-                }));
-                break;
-                
-            case 'error':
-                this.dispatchEvent(new CustomEvent('error', { 
-                    detail: { message: data.message } 
-                }));
-                break;
-                
-            default:
-                console.log('Unknown message type:', data.type);
-        }
-    }
-
-    isConnected() {
-        return this.ws?.readyState === WebSocket.OPEN;
-    }
-
-    // ============================================
-    // Message Queue
-    // ============================================
-
-    queueMessage(payload) {
-        this.messageQueue.push(payload);
-    }
-
-    processMessageQueue() {
-        while (this.messageQueue.length > 0 && this.isConnected()) {
-            const payload = this.messageQueue.shift();
-            this.ws.send(JSON.stringify(payload));
+            console.error('Failed to initialize OpenAI client:', error);
         }
     }
 
@@ -250,109 +44,93 @@ class APIClient extends EventTarget {
     // Chat Methods
     // ============================================
 
-    sendMessage(message, sessionId = null, options = {}) {
-        const payload = {
-            type: 'chat',
-            payload: { 
-                message,
-                ...(options.model && { model: options.model })
-            }
+    /**
+     * Stream chat with the AI using OpenAI SDK
+     * @param {Array} messages - Array of messages in OpenAI format [{role, content}, ...]
+     * @param {string} model - Model ID to use
+     * @returns {AsyncGenerator} - Yields delta content
+     */
+    async *streamChat(messages, model = 'gpt-4o') {
+        if (!this.client) {
+            throw new Error('OpenAI client not initialized');
+        }
+
+        const params = {
+            model,
+            messages,
+            stream: true,
         };
-
-        if (sessionId) {
-            payload.sessionId = sessionId;
+        
+        if (this.currentSessionId) {
+            params.session_id = this.currentSessionId;
         }
 
-        if (this.useWebSocket && this.isConnected()) {
-            this.ws.send(JSON.stringify(payload));
-            return true;
-        } else {
-            // Fallback to HTTP SSE
-            this.sendMessageHTTP(message, sessionId, options);
-            return false;
-        }
-    }
-
-    async sendMessageHTTP(message, sessionId = null, options = {}) {
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-            const response = await fetch(`${API_BASE_URL}/api/chat`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message,
-                    sessionId,
-                    stream: true,
-                    ...(options.model && { model: options.model })
-                }),
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                
-                if (done) {
-                    this.dispatchEvent(new CustomEvent('done', { 
-                        detail: { sessionId: this.currentSessionId } 
-                    }));
-                    break;
+            const stream = await this.client.chat.completions.create(params);
+            
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    yield {
+                        type: 'delta',
+                        content,
+                    };
                 }
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop(); // Keep incomplete line in buffer
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (data === '[DONE]') {
-                            this.dispatchEvent(new CustomEvent('done', { 
-                                detail: { sessionId: this.currentSessionId } 
-                            }));
-                        } else {
-                            try {
-                                const parsed = JSON.parse(data);
-                                if (parsed.content) {
-                                    this.dispatchEvent(new CustomEvent('delta', { 
-                                        detail: { content: parsed.content } 
-                                    }));
-                                }
-                            } catch (e) {
-                                // Not JSON, treat as plain text
-                                this.dispatchEvent(new CustomEvent('delta', { 
-                                    detail: { content: data } 
-                                }));
-                            }
-                        }
-                    }
+                
+                // Extract session_id from the chunk if present (KimiBuilt extension)
+                if (chunk.session_id) {
+                    this.currentSessionId = chunk.session_id;
+                }
+                
+                if (chunk.choices[0]?.finish_reason) {
+                    yield {
+                        type: 'done',
+                        sessionId: this.currentSessionId,
+                    };
                 }
             }
         } catch (error) {
-            if (error.name === 'AbortError') {
-                console.error('HTTP chat request timed out');
-                this.dispatchEvent(new CustomEvent('error', { 
-                    detail: { message: 'Request timed out. Please try again.' } 
-                }));
-            } else {
-                console.error('HTTP chat error:', error);
-                this.dispatchEvent(new CustomEvent('error', { 
-                    detail: { message: error.message } 
-                }));
+            console.error('Stream chat error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Non-streaming chat with the AI
+     * @param {Array} messages - Array of messages in OpenAI format
+     * @param {string} model - Model ID to use
+     * @returns {Object} - Response with content and sessionId
+     */
+    async chat(messages, model = 'gpt-4o') {
+        if (!this.client) {
+            throw new Error('OpenAI client not initialized');
+        }
+
+        const params = {
+            model,
+            messages,
+            stream: false,
+        };
+        
+        if (this.currentSessionId) {
+            params.session_id = this.currentSessionId;
+        }
+
+        try {
+            const response = await this.client.chat.completions.create(params);
+            
+            // Extract session_id from response if present (KimiBuilt extension)
+            if (response.session_id) {
+                this.currentSessionId = response.session_id;
             }
+            
+            return {
+                content: response.choices[0]?.message?.content || '',
+                sessionId: this.currentSessionId,
+            };
+        } catch (error) {
+            console.error('Chat error:', error);
+            throw error;
         }
     }
 
@@ -381,21 +159,18 @@ class APIClient extends EventTarget {
             }
         }
 
+        if (!this.client) {
+            return this.getDefaultModels();
+        }
+
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            const response = await fetch(`${API_BASE_URL}/api/models`, {
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
+            const response = await this.client.models.list();
+            
+            // Format response to match OpenAI API structure
+            const data = {
+                object: 'list',
+                data: response.data || [],
+            };
             
             // Update cache
             this.modelsCache = data;
@@ -414,47 +189,31 @@ class APIClient extends EventTarget {
                 return this.modelsCache;
             }
             
-            // Return default models as fallback
-            return {
-                object: 'list',
-                data: [
-                    { id: 'gpt-4o', object: 'model', created: Date.now(), owned_by: 'openai' },
-                    { id: 'gpt-4o-mini', object: 'model', created: Date.now(), owned_by: 'openai' },
-                    { id: 'claude-3-opus', object: 'model', created: Date.now(), owned_by: 'anthropic' },
-                    { id: 'claude-3-sonnet', object: 'model', created: Date.now(), owned_by: 'anthropic' }
-                ]
-            };
+            return this.getDefaultModels();
         }
     }
 
+    getDefaultModels() {
+        return {
+            object: 'list',
+            data: [
+                { id: 'gpt-4o', object: 'model', created: Date.now(), owned_by: 'openai' },
+                { id: 'gpt-4o-mini', object: 'model', created: Date.now(), owned_by: 'openai' },
+                { id: 'claude-3-opus', object: 'model', created: Date.now(), owned_by: 'anthropic' },
+                { id: 'claude-3-sonnet', object: 'model', created: Date.now(), owned_by: 'anthropic' }
+            ]
+        };
+    }
+
     async getImageModels() {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            const response = await fetch(`${API_BASE_URL}/api/images/models`, {
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Failed to fetch image models:', error);
-            
-            // Return default image models as fallback
-            return {
-                object: 'list',
-                data: [
-                    { id: 'dall-e-3', object: 'model', created: Date.now(), owned_by: 'openai' },
-                    { id: 'dall-e-2', object: 'model', created: Date.now(), owned_by: 'openai' }
-                ]
-            };
-        }
+        // Image models are typically static, return defaults
+        return {
+            object: 'list',
+            data: [
+                { id: 'dall-e-3', object: 'model', created: Date.now(), owned_by: 'openai' },
+                { id: 'dall-e-2', object: 'model', created: Date.now(), owned_by: 'openai' }
+            ]
+        };
     }
 
     // ============================================
@@ -462,6 +221,10 @@ class APIClient extends EventTarget {
     // ============================================
 
     async generateImage(options = {}) {
+        if (!this.client) {
+            throw new Error('OpenAI client not initialized');
+        }
+
         const {
             prompt,
             model = 'dall-e-3',
@@ -472,116 +235,24 @@ class APIClient extends EventTarget {
             sessionId = null
         } = options;
 
+        const params = {
+            model,
+            prompt,
+            n: n || 1,
+            size: size || '1024x1024',
+        };
+
+        if (quality) params.quality = quality;
+        if (style) params.style = style;
+        if (sessionId || this.currentSessionId) {
+            params.session_id = sessionId || this.currentSessionId;
+        }
+
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for image generation
-
-            const response = await fetch(`${API_BASE_URL}/api/images`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    prompt,
-                    model,
-                    size,
-                    quality,
-                    style,
-                    n,
-                    sessionId
-                }),
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
+            const response = await this.client.images.generate(params);
+            return response;
         } catch (error) {
-            if (error.name === 'AbortError') {
-                console.error('Image generation timed out');
-                throw new Error('Image generation timed out. Please try again.');
-            }
             console.error('Image generation error:', error);
-            throw error;
-        }
-    }
-
-    // ============================================
-    // HTTP Sessions API
-    // ============================================
-
-    async getSessions() {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            const response = await fetch(`${API_BASE_URL}/api/sessions`, {
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return await response.json();
-        } catch (error) {
-            console.error('Failed to fetch sessions:', error);
-            throw error;
-        }
-    }
-
-    async createSession(mode = 'chat') {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            const response = await fetch(`${API_BASE_URL}/api/sessions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ mode }),
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Failed to create session:', error);
-            throw error;
-        }
-    }
-
-    async deleteSession(sessionId) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
-                method: 'DELETE',
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to delete session:', error);
             throw error;
         }
     }
@@ -592,14 +263,17 @@ class APIClient extends EventTarget {
 
     async checkHealth() {
         try {
+            // Extract base URL without /v1
+            const baseUrl = API_BASE_URL.replace('/v1', '');
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const response = await fetch(`${API_BASE_URL}/health`, {
+            const response = await fetch(`${baseUrl}/health`, {
                 signal: controller.signal
             });
 
             clearTimeout(timeoutId);
+
             if (response.ok) {
                 const data = await response.json();
                 return { connected: true, data };
@@ -616,7 +290,15 @@ class APIClient extends EventTarget {
         localStorage.removeItem('kimibuilt_models_cache');
         localStorage.removeItem('kimibuilt_models_cache_expiry');
     }
+
+    setSessionId(sessionId) {
+        this.currentSessionId = sessionId;
+    }
+
+    getSessionId() {
+        return this.currentSessionId;
+    }
 }
 
 // Create global API client instance
-const apiClient = new APIClient();
+const apiClient = new OpenAIAPIClient();

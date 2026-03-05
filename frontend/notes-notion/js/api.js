@@ -1,51 +1,28 @@
 /**
- * API Module - Backend integration for KimiBuilt AI
+ * API Module - OpenAI SDK integration for KimiBuilt AI
  */
 
 const API = (function() {
-    const BASE_URL = 'http://localhost:3000';
+    const BASE_URL = 'http://localhost:3000/v1';
     
-    // Cache for models
-    let cachedModels = null;
-    let cachedImageModels = null;
-    
-    /**
-     * Make a fetch request with error handling
-     */
-    async function request(endpoint, options = {}) {
-        const url = `${BASE_URL}${endpoint}`;
-        
-        const defaultOptions = {
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
-        };
-        
-        try {
-            const response = await fetch(url, { ...defaultOptions, ...options });
-            
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-                throw new Error(error.message || `HTTP ${response.status}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('API Error:', error);
-            throw error;
-        }
+    const client = new OpenAI({
+        baseURL: BASE_URL,
+        apiKey: 'any-key',
+        dangerouslyAllowBrowser: true,
+    });
+
+    // Current session/page ID for context
+    let currentSessionId = null;
+
+    function setSessionId(id) {
+        currentSessionId = id;
     }
-    
-    /**
-     * Check backend health status
-     */
+
+    // Health check (custom endpoint)
     async function checkHealth() {
         try {
-            const response = await fetch(`${BASE_URL}/health`, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
-            });
+            const baseUrl = BASE_URL.replace('/v1', '');
+            const response = await fetch(`${baseUrl}/health`);
             if (response.ok) {
                 const data = await response.json();
                 return { connected: true, data };
@@ -55,69 +32,18 @@ const API = (function() {
             return { connected: false, error: error.message };
         }
     }
-    
-    /**
-     * Create a new session (page)
-     */
-    async function createSession(title = 'New Page') {
-        try {
-            return await request('/api/sessions', {
-                method: 'POST',
-                body: JSON.stringify({ title })
-            });
-        } catch (error) {
-            console.warn('Backend unavailable, using local mode:', error.message);
-            return null;
-        }
-    }
-    
-    /**
-     * Get a session by ID
-     */
-    async function getSession(sessionId) {
-        try {
-            return await request(`/api/sessions/${sessionId}`);
-        } catch (error) {
-            console.warn('Backend unavailable:', error.message);
-            return null;
-        }
-    }
-    
-    /**
-     * Delete a session
-     */
-    async function deleteSession(sessionId) {
-        try {
-            return await request(`/api/sessions/${sessionId}`, {
-                method: 'DELETE'
-            });
-        } catch (error) {
-            console.warn('Backend unavailable:', error.message);
-            return null;
-        }
-    }
-    
-    /**
-     * Get available chat models
-     */
+
+    // Get models using OpenAI SDK
     async function getModels() {
-        if (cachedModels) {
-            return cachedModels;
-        }
-        
         try {
-            const response = await request('/api/models');
-            // Backend returns { object: 'list', data: [...] }
-            // Map to frontend format
-            cachedModels = (response.data || []).map(m => ({
+            const response = await client.models.list();
+            return (response.data || []).map(m => ({
                 id: m.id,
                 name: m.id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
                 provider: m.owned_by || 'unknown'
             }));
-            return cachedModels;
         } catch (error) {
             console.warn('Failed to fetch models:', error.message);
-            // Return default models as fallback
             return [
                 { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
                 { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai' },
@@ -127,104 +53,82 @@ const API = (function() {
             ];
         }
     }
-    
-    /**
-     * Get available image generation models
-     */
-    async function getImageModels() {
-        if (cachedImageModels) {
-            return cachedImageModels;
-        }
-        
-        try {
-            const response = await request('/api/images/models');
-            cachedImageModels = response.models || [];
-            return cachedImageModels;
-        } catch (error) {
-            console.warn('Failed to fetch image models:', error.message);
-            // Return default image models as fallback
-            return [
-                { id: 'dall-e-3', name: 'DALL-E 3', provider: 'openai' },
-                { id: 'dall-e-2', name: 'DALL-E 2', provider: 'openai' }
-            ];
-        }
-    }
-    
-    /**
-     * Send a chat message to AI
-     */
-    async function chat(message, sessionId = null, context = [], model = null) {
-        try {
-            return await request('/api/chat', {
-                method: 'POST',
-                body: JSON.stringify({
-                    message,
-                    sessionId,
-                    context,
-                    model
-                })
-            });
-        } catch (error) {
-            console.warn('Backend unavailable:', error.message);
-            // Return a simulated response for demo
-            return {
-                response: `[Offline Mode${model ? ` - ${model}` : ''}] AI response would be generated here for: "${message}"`,
-                sessionId: sessionId || 'local-' + Date.now()
-            };
-        }
-    }
-    
-    /**
-     * Stream chat response (for real-time updates)
-     */
+
+    // Chat with streaming
     async function* streamChat(message, sessionId = null, model = null) {
-        const url = `${BASE_URL}/api/chat/stream`;
-        
+        const params = {
+            model: model || 'gpt-4o',
+            messages: [{ role: 'user', content: message }],
+            stream: true,
+        };
+
+        if (sessionId || currentSessionId) {
+            params.session_id = sessionId || currentSessionId;
+        }
+
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ message, sessionId, model })
-            });
+            const stream = await client.chat.completions.create(params);
             
-            if (!response.ok) throw new Error('Stream failed');
-            
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    yield {
+                        type: 'delta',
+                        content,
+                    };
+                }
                 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
-                
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (data === '[DONE]') return;
-                        
-                        try {
-                            const parsed = JSON.parse(data);
-                            yield parsed;
-                        } catch (e) {
-                            yield { content: data };
-                        }
+                if (chunk.choices[0]?.finish_reason) {
+                    if (chunk.session_id) {
+                        currentSessionId = chunk.session_id;
                     }
+                    yield {
+                        type: 'done',
+                        sessionId: currentSessionId,
+                    };
                 }
             }
         } catch (error) {
-            console.warn('Stream failed, falling back to regular chat:', error);
-            const result = await chat(message, sessionId, [], model);
-            yield { content: result.response };
+            console.error('Stream error:', error);
+            // Fallback for offline mode
+            yield { type: 'delta', content: `[Offline] ${message}` };
+            yield { type: 'done', sessionId: currentSessionId };
         }
     }
-    
-    /**
-     * Generate content with AI
-     */
+
+    // Non-streaming chat
+    async function chat(message, sessionId = null, context = [], model = null) {
+        const params = {
+            model: model || 'gpt-4o',
+            messages: [{ role: 'user', content: message }],
+            stream: false,
+        };
+
+        if (sessionId || currentSessionId) {
+            params.session_id = sessionId || currentSessionId;
+        }
+
+        try {
+            const response = await client.chat.completions.create(params);
+            
+            if (response.session_id) {
+                currentSessionId = response.session_id;
+            }
+
+            return {
+                response: response.choices[0]?.message?.content || '',
+                sessionId: currentSessionId,
+            };
+        } catch (error) {
+            console.warn('Chat failed:', error.message);
+            return {
+                response: `[Offline Mode${model ? ` - ${model}` : ''}] AI response would be generated here for: "${message}"`,
+                sessionId: currentSessionId || 'local-' + Date.now()
+            };
+        }
+    }
+
+    // Generate content (for AI blocks)
     async function generate(prompt, type = 'text', model = null) {
         const prompts = {
             text: `Generate the following content:\n\n${prompt}`,
@@ -243,10 +147,8 @@ const API = (function() {
         const result = await chat(finalPrompt, null, [], model);
         return result.response;
     }
-    
-    /**
-     * Generate an image
-     */
+
+    // Generate image
     async function generateImage(options = {}) {
         const {
             prompt,
@@ -260,49 +162,51 @@ const API = (function() {
             throw new Error('Prompt is required for image generation');
         }
         
+        const params = {
+            model: model || 'dall-e-3',
+            prompt,
+            n: 1,
+            size: size || '1024x1024',
+        };
+
+        if (quality) params.quality = quality;
+        if (style) params.style = style;
+        if (currentSessionId) params.session_id = currentSessionId;
+
         try {
-            const response = await request('/api/images', {
-                method: 'POST',
-                body: JSON.stringify({
-                    prompt,
-                    model,
-                    size,
-                    quality,
-                    style
-                })
-            });
+            const response = await client.images.generate(params);
             
+            if (response.session_id) {
+                currentSessionId = response.session_id;
+            }
+
             return {
-                url: response.url,
-                revised_prompt: response.revised_prompt,
-                model
+                url: response.data[0]?.url,
+                revised_prompt: response.data[0]?.revised_prompt,
+                model: params.model,
             };
         } catch (error) {
             console.warn('Image generation failed:', error.message);
-            // Return a placeholder for demo
             return {
                 url: `https://placehold.co/${size}/4338ca/ffffff?text=${encodeURIComponent('AI Image: ' + prompt.substring(0, 30))}`,
                 revised_prompt: prompt,
-                model,
+                model: params.model,
                 offline: true
             };
         }
     }
-    
-    /**
-     * Simple check if backend is available (returns boolean)
-     */
-    async function isAvailable() {
-        const health = await checkHealth();
-        return health.connected;
+
+    // Get image models
+    async function getImageModels() {
+        return [
+            { id: 'dall-e-3', name: 'DALL-E 3', provider: 'openai', sizes: ['1024x1024', '1024x1792', '1792x1024'], qualities: ['standard', 'hd'] },
+            { id: 'dall-e-2', name: 'DALL-E 2', provider: 'openai', sizes: ['256x256', '512x512', '1024x1024'], qualities: ['standard'] }
+        ];
     }
-    
-    /**
-     * Fetch URL metadata for bookmarks
-     */
+
+    // Fetch URL metadata for bookmarks (not an OpenAI API, kept as-is)
     async function fetchBookmarkData(url) {
         try {
-            // Try to use a meta tag scraping approach or a service
             const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
             const response = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
             const html = await response.text();
@@ -319,7 +223,6 @@ const API = (function() {
             const description = getMeta('description') || '';
             const image = getMeta('image') || '';
             
-            // Get favicon
             let favicon = '';
             const faviconLink = doc.querySelector('link[rel*="icon"]');
             if (faviconLink) {
@@ -348,29 +251,53 @@ const API = (function() {
             };
         }
     }
-    
-    /**
-     * Clear model cache (useful when backend models change)
-     */
-    function clearModelCache() {
-        cachedModels = null;
-        cachedImageModels = null;
+
+    // Legacy compatibility: createSession (no longer needed with OpenAI SDK)
+    async function createSession(title = 'New Page') {
+        // Sessions are now managed via session_id parameter
+        currentSessionId = null;
+        return { id: 'local-' + Date.now(), title };
     }
-    
+
+    // Legacy compatibility: getSession
+    async function getSession(sessionId) {
+        return { id: sessionId, blocks: [] };
+    }
+
+    // Legacy compatibility: deleteSession
+    async function deleteSession(sessionId) {
+        if (currentSessionId === sessionId) {
+            currentSessionId = null;
+        }
+        return { success: true };
+    }
+
+    // Check if backend is available
+    async function isAvailable() {
+        const health = await checkHealth();
+        return health.connected;
+    }
+
+    // Clear model cache
+    function clearModelCache() {
+        // No cache with OpenAI SDK
+    }
+
     return {
-        createSession,
-        getSession,
-        deleteSession,
+        checkHealth,
         getModels,
         getImageModels,
         chat,
         streamChat,
         generate,
         generateImage,
-        checkHealth,
-        isAvailable,
+        setSessionId,
         fetchBookmarkData,
+        createSession,
+        getSession,
+        deleteSession,
+        isAvailable,
         clearModelCache,
-        BASE_URL
+        BASE_URL: BASE_URL.replace('/v1', ''),
     };
 })();

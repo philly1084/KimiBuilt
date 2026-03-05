@@ -1,6 +1,7 @@
 /**
  * Main Application for KimiBuilt AI Chat
  * Orchestrates all components and handles user interactions
+ * Now using OpenAI SDK for API communication
  */
 
 class ChatApp {
@@ -37,7 +38,6 @@ class ChatApp {
         
         // Setup event listeners
         this.setupEventListeners();
-        this.setupAPIListeners();
         this.setupSessionListeners();
         this.setupKeyboardShortcuts();
         this.setupModelListeners();
@@ -56,10 +56,6 @@ class ChatApp {
         // Load sessions
         await this.loadSessions();
         
-        // Connect to WebSocket
-        uiHelpers.showLoading();
-        apiClient.connect();
-        
         // Initialize Lucide icons
         uiHelpers.reinitializeIcons();
         
@@ -70,9 +66,6 @@ class ChatApp {
         setTimeout(() => {
             document.body.classList.remove('preload');
         }, 100);
-        
-        // Handle visibility change for mobile
-        this.setupVisibilityHandling();
     }
 
     // ============================================
@@ -148,41 +141,6 @@ class ChatApp {
     handleInputSlashCommand(value) {
         // Could implement inline command suggestions here
         // For now, commands are handled via the command palette
-    }
-
-    setupAPIListeners() {
-        // Connection status changes
-        apiClient.addEventListener('connectionChange', (e) => {
-            uiHelpers.updateConnectionStatus(e.detail.status);
-            
-            if (e.detail.status === 'connected') {
-                uiHelpers.hideLoading();
-            }
-        });
-        
-        // WebSocket messages
-        apiClient.addEventListener('sessionCreated', (e) => {
-            console.log('Session created via WebSocket:', e.detail.sessionId);
-            sessionManager.currentSessionId = e.detail.sessionId;
-        });
-        
-        apiClient.addEventListener('delta', (e) => {
-            this.handleDelta(e.detail.content);
-        });
-        
-        apiClient.addEventListener('done', (e) => {
-            this.handleDone();
-        });
-        
-        apiClient.addEventListener('error', (e) => {
-            this.handleError(e.detail.message);
-        });
-        
-        // Fallback to HTTP
-        apiClient.addEventListener('fallbackToHTTP', () => {
-            uiHelpers.showToast('Using HTTP fallback mode', 'warning', 'Connection');
-            uiHelpers.hideLoading();
-        });
     }
 
     setupSessionListeners() {
@@ -267,35 +225,6 @@ class ChatApp {
                 }
             }
         });
-    }
-
-    setupVisibilityHandling() {
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                // Reconnect if disconnected
-                if (!apiClient.isConnected() && !apiClient.isConnecting) {
-                    apiClient.connect();
-                }
-            }
-        });
-        
-        // Handle beforeunload
-        window.addEventListener('beforeunload', () => {
-            apiClient.disconnect();
-        });
-        
-        // Handle mobile keyboard
-        if ('visualViewport' in window) {
-            window.visualViewport.addEventListener('resize', () => {
-                const isKeyboardOpen = window.visualViewport.height < window.innerHeight * 0.8;
-                document.body.classList.toggle('keyboard-open', isKeyboardOpen);
-                
-                if (isKeyboardOpen) {
-                    // Scroll to bottom when keyboard opens
-                    setTimeout(() => uiHelpers.scrollToBottom(), 100);
-                }
-            });
-        }
     }
 
     // ============================================
@@ -468,13 +397,42 @@ class ChatApp {
             uiHelpers.scrollToBottom();
         }, 300);
         
-        // Send to API with model
-        const sent = apiClient.sendMessage(content, sessionId, { model });
+        // Build message history for OpenAI API format
+        const messages = this.buildMessageHistory(sessionId);
         
-        if (!sent) {
-            // Using HTTP fallback
-            uiHelpers.showToast('Using HTTP mode', 'info');
+        // Send to API using OpenAI SDK
+        try {
+            // Update API client session ID
+            apiClient.setSessionId(sessionId);
+            
+            // Stream the chat
+            for await (const chunk of apiClient.streamChat(messages, model)) {
+                if (chunk.type === 'delta') {
+                    this.handleDelta(chunk.content);
+                } else if (chunk.type === 'done') {
+                    this.handleDone();
+                }
+            }
+        } catch (error) {
+            console.error('Chat error:', error);
+            this.handleError(error.message || 'Failed to get response');
         }
+    }
+
+    /**
+     * Build message history in OpenAI format from session messages
+     */
+    buildMessageHistory(sessionId) {
+        const session = sessionManager.sessions.find(s => s.id === sessionId);
+        if (!session || !session.messages) return [];
+        
+        // Convert to OpenAI format: [{role, content}, ...]
+        return session.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({
+                role: m.role,
+                content: m.content || ''
+            }));
     }
 
     executeSlashCommand(command) {
@@ -651,11 +609,21 @@ class ChatApp {
         // Get current model
         const model = uiHelpers.getCurrentModel();
         
-        // Resend the user message with model
-        const sent = apiClient.sendMessage(userMessage.content, sessionId, { model });
-        
-        if (!sent) {
-            uiHelpers.showToast('Using HTTP mode', 'info');
+        // Build message history and stream
+        try {
+            apiClient.setSessionId(sessionId);
+            const history = this.buildMessageHistory(sessionId);
+            
+            for await (const chunk of apiClient.streamChat(history, model)) {
+                if (chunk.type === 'delta') {
+                    this.handleDelta(chunk.content);
+                } else if (chunk.type === 'done') {
+                    this.handleDone();
+                }
+            }
+        } catch (error) {
+            console.error('Regenerate error:', error);
+            this.handleError(error.message || 'Failed to regenerate response');
         }
     }
 
@@ -724,7 +692,8 @@ class ChatApp {
             // Add sessionId to options
             options.sessionId = sessionId;
             
-            // Call API
+            // Call API using OpenAI SDK
+            apiClient.setSessionId(sessionId);
             const result = await apiClient.generateImage(options);
             
             // Update the image message with the result
@@ -740,7 +709,7 @@ class ChatApp {
                         isLoading: false,
                         imageUrl: imageData.url || imageData.b64_json,
                         revisedPrompt: imageData.revised_prompt,
-                        model: result.model
+                        model: result.model || options.model
                     };
                     sessionManager.saveToStorage();
                 }
@@ -750,7 +719,7 @@ class ChatApp {
                     url: imageData.url || imageData.b64_json,
                     prompt: options.prompt,
                     revised_prompt: imageData.revised_prompt,
-                    model: result.model
+                    model: result.model || options.model
                 });
                 
                 uiHelpers.showToast('Image generated successfully', 'success');

@@ -1,13 +1,13 @@
-# KimiBuilt AI Web Chat v2.5
+# KimiBuilt AI Web Chat v3.0
 
-A premium, modern web chat interface for the KimiBuilt AI backend. Features real-time streaming, session management, markdown rendering with syntax highlighting, dark/light theme support, AI model selection, and image generation capabilities.
+A premium, modern web chat interface for the KimiBuilt AI backend. Now powered by the **OpenAI SDK** for seamless API integration with streaming support, session management, markdown rendering with syntax highlighting, dark/light theme support, AI model selection, and image generation capabilities.
 
 ![KimiBuilt AI Chat](https://via.placeholder.com/800x500/0d0d0d/3b82f6?text=KimiBuilt+AI+Chat)
 
 ## Features
 
 ### Core Chat Features
-- 🚀 **Real-time Streaming** - WebSocket-based streaming with HTTP SSE fallback
+- 🚀 **Real-time Streaming** - OpenAI SDK streaming with HTTP fallback
 - 🤖 **AI Model Selection** - Choose from multiple AI models (GPT-4o, Claude, etc.)
 - 🎨 **Image Generation** - Create stunning AI-generated images with DALL-E 3
 - 💬 **Session Management** - Create, switch, rename, and delete chat sessions
@@ -44,14 +44,14 @@ A premium, modern web chat interface for the KimiBuilt AI backend. Features real
 - 🔗 **Safe Links** - All external links open in new tabs with security attributes
 - 🔔 **Toast Notifications** - Non-intrusive feedback for all actions
 - 🎭 **Smooth Animations** - Subtle animations for better user experience
-- 📊 **Connection Status** - Real-time WebSocket connection indicator
+- 📊 **Connection Status** - Real-time backend connection indicator
 - 🖨️ **Print Styles** - Optimized styling for printing conversations
 
 ## Quick Start
 
 ### Prerequisites
 
-- KimiBuilt AI backend running on `http://localhost:3000`
+- KimiBuilt AI backend running with OpenAI-compatible API at `http://kimibuilt.local/v1`
 - Modern web browser (Chrome 80+, Firefox 75+, Safari 13.1+, Edge 80+)
 
 ### Running the Chat UI
@@ -95,11 +95,51 @@ web-chat/
 ├── css/
 │   └── styles.css      # All styling including model selector and image components
 ├── js/
-│   ├── api.js          # WebSocket/HTTP client with model and image APIs
+│   ├── api.js          # OpenAI SDK client with streaming support
 │   ├── session.js      # Session management with model persistence
 │   ├── ui.js           # UI rendering, search, command palette, model selector
 │   └── app.js          # Main application logic with image generation
 └── README.md           # This file
+```
+
+## Configuration
+
+### Backend URL
+
+To change the backend URL, edit `js/api.js`:
+
+```javascript
+const API_BASE_URL = 'http://your-backend/v1'; // Your KimiBuilt backend URL
+const API_KEY = 'any-key'; // Required by SDK but not validated by KimiBuilt
+```
+
+The OpenAI SDK is loaded via CDN in `index.html`:
+```html
+<script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+```
+
+### Default Model
+
+The default model is stored in localStorage. To change it programmatically:
+
+```javascript
+// Set default model
+localStorage.setItem('kimibuilt_default_model', 'claude-3-opus');
+
+// Get current default
+const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
+```
+
+### Theme
+
+The theme preference is automatically saved to `localStorage` and respects system preferences. Toggle between dark and light mode using the button in the sidebar or the command palette.
+
+### Model Cache
+
+Available models are cached for 5 minutes. To clear the cache:
+
+```javascript
+apiClient.clearModelsCache();
 ```
 
 ## Keyboard Shortcuts
@@ -129,106 +169,101 @@ Type `/` in the message input or open the command palette to use these commands:
 
 ## API Integration
 
-### WebSocket Connection
+### OpenAI SDK Usage
 
-The app connects to `ws://localhost:3000/ws` for real-time communication with automatic fallback to HTTP SSE.
+The frontend now uses the official OpenAI JavaScript SDK for all API communication:
 
-**Outgoing message format:**
+```javascript
+// Initialize client
+const client = new OpenAI({
+    baseURL: 'http://kimibuilt.local/v1',
+    apiKey: 'any-key',
+    dangerouslyAllowBrowser: true,
+});
+
+// Streaming chat
+const stream = await client.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: 'Hello!' }],
+    stream: true,
+});
+
+for await (const chunk of stream) {
+    console.log(chunk.choices[0]?.delta?.content);
+}
+
+// Image generation
+const response = await client.images.generate({
+    model: 'dall-e-3',
+    prompt: 'A futuristic cityscape',
+    size: '1024x1024',
+});
+```
+
+### Message Format
+
+Messages are sent in OpenAI-compatible format:
+
 ```json
+[
+  { "role": "user", "content": "Hello!" },
+  { "role": "assistant", "content": "Hi there!" }
+]
+```
+
+### Streaming Response Format
+
+The streaming API yields chunks in this format:
+
+```javascript
+// Delta chunk
 {
-  "type": "chat",
-  "sessionId": "optional-session-id",
-  "payload": {
-    "message": "Hello, AI!",
-    "model": "gpt-4o"
-  }
+  type: 'delta',
+  content: 'Hello'
+}
+
+// Done chunk
+{
+  type: 'done',
+  sessionId: 'session-123'
 }
 ```
 
-**Incoming events:**
-- `session_created` - New session established
-- `delta` - Streaming text chunk
-- `done` - Response complete
-- `error` - Error occurred
+### HTTP Endpoints (via OpenAI SDK)
 
-### HTTP Endpoints
+The following OpenAI-compatible endpoints are used:
 
-- `GET /api/health` - Health check
-- `GET /api/models` - List available chat models
-- `GET /api/images/models` - List available image models
-- `POST /api/sessions` - Create new session
-- `GET /api/sessions` - List all sessions
-- `DELETE /api/sessions/:id` - Delete session
-- `POST /api/chat` - SSE streaming chat endpoint (supports `model` parameter)
-- `POST /api/images` - Generate images with DALL-E
+- `GET /v1/models` - List available chat models
+- `POST /v1/chat/completions` - Chat completions with streaming
+- `POST /v1/images/generations` - Generate images with DALL-E
+- `GET /health` - Health check (KimiBuilt custom endpoint)
 
 ### Image Generation API
 
 **Request:**
 ```json
-POST /api/images
+POST /v1/images/generations
 {
   "prompt": "futuristic cityscape at night",
   "model": "dall-e-3",
   "size": "1024x1024",
   "quality": "hd",
   "style": "vivid",
-  "n": 1,
-  "sessionId": "optional-session-id"
+  "n": 1
 }
 ```
 
 **Response:**
 ```json
 {
-  "sessionId": "...",
   "created": 1234567890,
   "data": [
     {
       "url": "https://...",
       "revised_prompt": "A detailed futuristic cityscape..."
     }
-  ],
-  "model": "dall-e-3",
-  "size": "1024x1024",
-  "quality": "hd",
-  "style": "vivid"
+  ]
 }
-```
-
-## Configuration
-
-### Backend URL
-
-To change the backend URL, edit `js/api.js`:
-
-```javascript
-const API_BASE_URL = 'http://your-backend:3000';
-const WS_URL = 'ws://your-backend:3000/ws';
-```
-
-### Default Model
-
-The default model is stored in localStorage. To change it programmatically:
-
-```javascript
-// Set default model
-localStorage.setItem('kimibuilt_default_model', 'claude-3-opus');
-
-// Get current default
-const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
-```
-
-### Theme
-
-The theme preference is automatically saved to `localStorage` and respects system preferences. Toggle between dark and light mode using the button in the sidebar or the command palette.
-
-### Model Cache
-
-Available models are cached for 5 minutes. To clear the cache:
-
-```javascript
-apiClient.clearModelsCache();
 ```
 
 ## Supported Languages for Syntax Highlighting
@@ -250,7 +285,7 @@ apiClient.clearModelsCache();
 
 ## Supported AI Models
 
-The UI supports any model returned by the `/api/models` endpoint. Common models include:
+The UI supports any model returned by the `/v1/models` endpoint. Common models include:
 
 ### OpenAI
 - `gpt-4o` - Most capable multimodal model (default)
@@ -279,6 +314,7 @@ The UI supports any model returned by the `/api/models` endpoint. Common models 
 
 All dependencies are loaded via CDN:
 
+- [OpenAI SDK](https://github.com/openai/openai-node) - Official OpenAI JavaScript SDK
 - [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
 - [Marked.js](https://marked.js.org/) - Markdown parser
 - [Prism.js](https://prismjs.com/) - Syntax highlighting
@@ -296,7 +332,7 @@ All dependencies are loaded via CDN:
    ```
 
 2. **Debug mode:**
-   Open browser DevTools (F12) to see WebSocket messages and API calls.
+   Open browser DevTools (F12) to see API calls and streaming responses.
 
 3. **Test model selection:**
    ```javascript
@@ -307,16 +343,26 @@ All dependencies are loaded via CDN:
    uiHelpers.selectModel('claude-3-opus');
    ```
 
-4. **Test image generation:**
+4. **Test streaming chat:**
+   ```javascript
+   // Stream a chat (requires active session)
+   const messages = [{ role: 'user', content: 'Hello!' }];
+   for await (const chunk of apiClient.streamChat(messages, 'gpt-4o')) {
+     console.log(chunk);
+   }
+   ```
+
+5. **Test image generation:**
    ```javascript
    // Generate an image
-   app.generateImage({
+   const result = await apiClient.generateImage({
      prompt: 'a serene mountain landscape at sunset',
      model: 'dall-e-3',
      size: '1024x1024',
      quality: 'hd',
      style: 'vivid'
    });
+   console.log(result.data[0].url);
    ```
 
 ### Customization
@@ -358,10 +404,11 @@ To add icons for new model providers, edit the CSS in `styles.css`:
 
 If you see "Disconnected" in the status:
 
-1. Ensure the backend is running on `localhost:3000`
-2. Check browser console for WebSocket errors
-3. The app will automatically fall back to HTTP SSE mode
+1. Ensure the backend is running and accessible
+2. Check that `API_BASE_URL` in `js/api.js` points to the correct backend URL
+3. Verify the backend has the OpenAI-compatible `/v1` endpoints
 4. Try refreshing the page to reconnect
+5. Check browser console for CORS errors
 
 ### CORS Errors
 
@@ -373,6 +420,17 @@ app.use(cors({
   origin: 'http://localhost:8080'
 }));
 ```
+
+### OpenAI SDK Not Loading
+
+If you see "OpenAI SDK not loaded" errors:
+
+1. Check that the CDN script is included in `index.html`:
+   ```html
+   <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+   ```
+2. Ensure you have an internet connection to load the SDK
+3. Check browser DevTools Network tab for failed requests
 
 ### Messages Not Saving
 
@@ -391,18 +449,25 @@ For conversations with many messages:
 ### Image Generation Not Working
 
 1. Check that the backend has image generation enabled
-2. Verify the `/api/images` endpoint is accessible
+2. Verify the `/v1/images/generations` endpoint is accessible
 3. Check browser console for error messages
 4. Ensure the DALL-E API credentials are configured on the backend
 
 ### Models Not Loading
 
-1. Check that `/api/models` returns valid JSON
+1. Check that `/v1/models` returns valid JSON
 2. Verify the backend is accessible
 3. Clear the model cache: `apiClient.clearModelsCache()`
 4. Check browser console for error messages
 
 ## Changelog
+
+### v3.0 - OpenAI SDK Integration
+- 🚀 **OpenAI SDK** - Now uses official OpenAI JavaScript SDK
+- 🔄 **Streaming Support** - Native streaming with async generators
+- 🛡️ **Browser Support** - Uses `dangerouslyAllowBrowser` for browser compatibility
+- 🔧 **Simplified API** - Cleaner code with SDK abstraction
+- 📦 **CDN Loading** - OpenAI SDK loaded via unpkg CDN
 
 ### v2.5 - Model Selection & Image Generation
 - 🎯 **Model Selection** - Choose from multiple AI providers (OpenAI, Anthropic, etc.)

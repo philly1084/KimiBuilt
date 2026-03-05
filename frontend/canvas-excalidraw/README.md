@@ -100,11 +100,44 @@ A fully-featured Excalidraw-style infinite canvas frontend with AI-powered diagr
 
 ## Backend Integration
 
-The frontend connects to the KimiBuilt backend at `http://localhost:3000`:
+The frontend connects to the KimiBuilt backend using the OpenAI SDK at `http://localhost:3000/v1`:
 
-### API Endpoints
-- `POST /api/canvas` - Generate AI diagrams
-- `WebSocket ws://localhost:3000/ws` - Real-time collaboration
+### OpenAI SDK Configuration
+
+The frontend uses the OpenAI JavaScript SDK (loaded via CDN) to communicate with the KimiBuilt backend:
+
+```html
+<script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+```
+
+### API Methods
+
+The `OpenAICanvasAPI` class provides:
+
+- `generateDiagram(message, existingContent)` - Generate AI diagrams using chat completions
+- `generateImage(options)` - Generate images using DALL-E models
+- `getModels()` - Fetch available chat models from `/v1/models`
+- `getImageModels()` - Get available image generation models
+- `checkHealth()` - Check backend health status
+
+### Configuration
+
+The API client is configured in `js/api.js`:
+
+```javascript
+const client = new OpenAI({
+    baseURL: 'http://localhost:3000/v1',
+    apiKey: 'any-key',  // Backend doesn't require a real API key
+    dangerouslyAllowBrowser: true,  // Required for browser usage
+});
+```
+
+### Model Selection
+
+The selected model is persisted to `localStorage` and used for all AI requests:
+
+- Default model: `gpt-4o`
+- Supported models: gpt-4o, gpt-4o-mini, claude-3-opus, claude-3-sonnet, etc.
 
 ### Data Format
 ```json
@@ -163,10 +196,15 @@ canvas-excalidraw/
 
 - Modern browsers with ES6+ support
 - Canvas API support
-- WebSocket support (for real-time features)
 - Touch events support (for tablet/mobile)
 
 ## Recent Updates
+
+### Version 2.1
+- **OpenAI SDK**: Migrated from custom HTTP calls to OpenAI SDK
+- **Chat Completions**: Diagram generation now uses chat.completions API
+- **Image Generation**: Uses images.generate API for DALL-E models
+- **Model Management**: Fetches available models from `/v1/models` endpoint
 
 ### Version 2.0
 - **Fixed Tools**: All 10+ tools now working correctly

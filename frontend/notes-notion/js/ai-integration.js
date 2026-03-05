@@ -379,7 +379,7 @@ const AIIntegration = (function() {
             if (onProgress) {
                 let fullText = '';
                 for await (const chunk of API.streamChat(prompt, null, useModel)) {
-                    if (chunk.content) {
+                    if (chunk.type === 'delta' && chunk.content) {
                         fullText += chunk.content;
                         onProgress(fullText);
                     }

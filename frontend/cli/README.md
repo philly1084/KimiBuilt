@@ -1,6 +1,8 @@
-# KimiBuilt CLI v2.1 🚀
+# KimiBuilt CLI v2.2 🚀
 
 A premium Node.js CLI client for the KimiBuilt AI backend featuring an interactive REPL, real-time streaming responses, session persistence, beautiful terminal UI, model selection, image generation, and support for multiple interaction modes.
+
+> **Note:** v2.2+ uses the official OpenAI SDK to connect to KimiBuilt's OpenAI-compatible endpoints at `/v1/*`.
 
 ![Version](https://img.shields.io/badge/version-2.1.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen)
@@ -357,19 +359,32 @@ You> /import my-session.json
 
 ## 🔌 API Endpoints
 
-The CLI communicates with the following backend endpoints:
+The CLI uses the OpenAI SDK to communicate with KimiBuilt's OpenAI-compatible endpoints:
+
+### OpenAI-Compatible Endpoints (via OpenAI SDK)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/models` | GET | List available chat models |
-| `/api/chat` | POST | Send message (supports SSE streaming) |
-| `/api/canvas` | POST | Canvas mode interaction |
-| `/api/notation` | POST | Notation mode interaction |
-| `/api/images` | POST | Generate image |
-| `/api/images/models` | GET | List image generation models |
+| `/v1/models` | GET | List available models |
+| `/v1/chat/completions` | POST | Chat with streaming/non-streaming |
+| `/v1/images/generations` | POST | Generate images |
+
+### KimiBuilt Custom Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/sessions` | GET/POST | List/Create sessions |
 | `/api/sessions/:id` | GET/DELETE | Get/Delete session |
+| `/api/images/models` | GET | List image generation models |
+
+### Configuration
+
+The CLI now connects to `http://localhost:3000/v1` by default (previously `http://localhost:3000`).
+
+```bash
+# Update existing configs to use the /v1 endpoint
+You> /url http://localhost:3000/v1
+```
 
 ## 🛠️ Development
 
