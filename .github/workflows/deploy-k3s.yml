@@ -1,0 +1,79 @@
+name: Deploy to k3s
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Image"]
+    types:
+      - completed
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  KUBE_NAMESPACE: kimibuilt
+
+jobs:
+  deploy-to-k3s:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Update deployment image
+        run: |
+          # Update the image tag in deployment
+          sed -i "s|image: kimibuilt:latest|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}|g" k8s/backend-deployment.yaml
+          
+          # Verify the change
+          grep "image:" k8s/backend-deployment.yaml
+
+      - name: Deploy to k3s
+        run: |
+          # Apply namespace first
+          kubectl apply -f k8s/namespace.yaml
+          
+          # Apply configmap
+          kubectl apply -f k8s/configmap.yaml
+          
+          # Apply secret (should already exist with API key)
+          # kubectl apply -f k8s/secret.yaml
+          
+          # Apply dependencies
+          kubectl apply -f k8s/qdrant-deployment.yaml
+          kubectl apply -f k8s/ollama-deployment.yaml
+          
+          # Apply backend with updated image
+          kubectl apply -f k8s/backend-deployment.yaml
+          
+          # Apply ingress
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/backend -n ${{ env.KUBE_NAMESPACE }} --timeout=180s
+
+      - name: Verify deployment
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n ${{ env.KUBE_NAMESPACE }}
+          echo ""
+          echo "=== Services ==="
+          kubectl get svc -n ${{ env.KUBE_NAMESPACE }}
+          echo ""
+          echo "=== Deployment Status ==="
+          kubectl get deployment backend -n ${{ env.KUBE_NAMESPACE }}
