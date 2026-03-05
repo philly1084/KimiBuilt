@@ -1,0 +1,367 @@
+/**
+ * Notation Helper - API Module
+ * Handles HTTP and WebSocket communication with the backend
+ */
+
+const NotationAPI = {
+    // Configuration
+    config: {
+        baseUrl: 'http://localhost:3000',
+        wsUrl: 'ws://localhost:3000',
+        timeout: 30000,
+        retries: 3,
+        retryDelay: 1000
+    },
+
+    // State
+    ws: null,
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 5,
+    reconnectDelay: 3000,
+    isConnected: false,
+    sessionId: null,
+
+    // Callbacks
+    callbacks: {
+        onConnect: null,
+        onDisconnect: null,
+        onError: null,
+        onMessage: null,
+        onStatusChange: null
+    },
+
+    /**
+     * Initialize the API client
+     * @param {Object} options - Configuration options
+     * @param {string} options.baseUrl - API base URL
+     * @param {string} options.wsUrl - WebSocket URL
+     * @param {Object} callbacks - Event callbacks
+     */
+    init(options = {}, callbacks = {}) {
+        // Merge config
+        this.config = { ...this.config, ...options };
+        this.callbacks = { ...this.callbacks, ...callbacks };
+
+        // Initialize WebSocket
+        this.connectWebSocket();
+
+        return this;
+    },
+
+    /**
+     * Send notation for processing via HTTP
+     * @param {Object} data - Request data
+     * @param {string} data.notation - The notation to process
+     * @param {string} data.helperMode - Mode (expand, explain, validate)
+     * @param {string} data.context - Optional context
+     * @param {string} data.sessionId - Optional session ID
+     * @returns {Promise<Object>} API response
+     */
+    async process(data) {
+        const payload = {
+            notation: data.notation || '',
+            sessionId: data.sessionId || this.sessionId,
+            context: data.context || '',
+            helperMode: data.helperMode || 'expand'
+        };
+
+        try {
+            this._notifyStatus('processing');
+            
+            const response = await this._fetchWithRetry('/api/notation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            // Update session ID if returned
+            if (response.sessionId) {
+                this.sessionId = response.sessionId;
+            }
+
+            this._notifyStatus('idle');
+            return response;
+        } catch (error) {
+            this._notifyStatus('error');
+            throw error;
+        }
+    },
+
+    /**
+     * Send notation via WebSocket
+     * @param {Object} data - Request data
+     * @returns {boolean} Success status
+     */
+    processWS(data) {
+        if (!this.isConnected || !this.ws) {
+            console.warn('WebSocket not connected, falling back to HTTP');
+            return false;
+        }
+
+        const message = {
+            type: 'notation',
+            sessionId: data.sessionId || this.sessionId,
+            payload: {
+                notation: data.notation || '',
+                helperMode: data.helperMode || 'expand',
+                context: data.context || ''
+            }
+        };
+
+        try {
+            this.ws.send(JSON.stringify(message));
+            this._notifyStatus('processing');
+            return true;
+        } catch (error) {
+            console.error('WebSocket send error:', error);
+            return false;
+        }
+    },
+
+    /**
+     * Connect WebSocket
+     */
+    connectWebSocket() {
+        if (this.ws) {
+            this.ws.close();
+        }
+
+        try {
+            this.ws = new WebSocket(this.config.wsUrl);
+
+            this.ws.onopen = () => {
+                console.log('WebSocket connected');
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                this._notifyStatus('connected');
+                
+                if (this.callbacks.onConnect) {
+                    this.callbacks.onConnect();
+                }
+            };
+
+            this.ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this._handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Error parsing WebSocket message:', error);
+                }
+            };
+
+            this.ws.onclose = () => {
+                console.log('WebSocket closed');
+                this.isConnected = false;
+                this._notifyStatus('disconnected');
+                
+                if (this.callbacks.onDisconnect) {
+                    this.callbacks.onDisconnect();
+                }
+
+                // Attempt reconnection
+                this._attemptReconnect();
+            };
+
+            this.ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                this._notifyStatus('error');
+                
+                if (this.callbacks.onError) {
+                    this.callbacks.onError(error);
+                }
+            };
+        } catch (error) {
+            console.error('Error creating WebSocket:', error);
+            this._notifyStatus('error');
+        }
+    },
+
+    /**
+     * Disconnect WebSocket
+     */
+    disconnect() {
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
+        this.isConnected = false;
+    },
+
+    /**
+     * Get connection status
+     * @returns {Object} Status information
+     */
+    getStatus() {
+        return {
+            connected: this.isConnected,
+            sessionId: this.sessionId,
+            wsState: this.ws ? this.ws.readyState : 'closed'
+        };
+    },
+
+    /**
+     * Clear current session
+     */
+    clearSession() {
+        this.sessionId = null;
+    },
+
+    /**
+     * Check if backend is available
+     * @returns {Promise<boolean>}
+     */
+    async healthCheck() {
+        try {
+            const response = await fetch(`${this.config.baseUrl}/health`, {
+                method: 'GET',
+                signal: AbortSignal.timeout(5000)
+            });
+            return response.ok;
+        } catch {
+            return false;
+        }
+    },
+
+    // Private methods
+
+    /**
+     * Fetch with retry logic
+     * @param {string} endpoint - API endpoint
+     * @param {Object} options - Fetch options
+     * @returns {Promise<Object>} Response data
+     * @private
+     */
+    async _fetchWithRetry(endpoint, options) {
+        let lastError;
+        
+        for (let i = 0; i < this.config.retries; i++) {
+            try {
+                const response = await fetch(`${this.config.baseUrl}${endpoint}`, {
+                    ...options,
+                    signal: AbortSignal.timeout(this.config.timeout)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.message || `HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                lastError = error;
+                
+                if (i < this.config.retries - 1) {
+                    await this._delay(this.config.retryDelay * (i + 1));
+                }
+            }
+        }
+
+        throw lastError;
+    },
+
+    /**
+     * Handle WebSocket messages
+     * @param {Object} data - Parsed message data
+     * @private
+     */
+    _handleWebSocketMessage(data) {
+        switch (data.type) {
+            case 'done':
+                this._notifyStatus('idle');
+                
+                // Update session ID
+                if (data.sessionId) {
+                    this.sessionId = data.sessionId;
+                }
+
+                // Parse content if it's a JSON string
+                let content = data.content;
+                try {
+                    if (typeof content === 'string') {
+                        content = JSON.parse(content);
+                    }
+                } catch {
+                    // Keep as string if not valid JSON
+                }
+
+                if (this.callbacks.onMessage) {
+                    this.callbacks.onMessage({
+                        type: 'done',
+                        sessionId: data.sessionId,
+                        responseId: data.responseId,
+                        helperMode: data.helperMode,
+                        content: content
+                    });
+                }
+                break;
+
+            case 'error':
+                this._notifyStatus('error');
+                
+                if (this.callbacks.onError) {
+                    this.callbacks.onError(new Error(data.message || 'WebSocket error'));
+                }
+                break;
+
+            case 'ping':
+                // Send pong to keep connection alive
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: 'pong' }));
+                }
+                break;
+
+            default:
+                console.log('Unknown WebSocket message type:', data.type);
+        }
+    },
+
+    /**
+     * Attempt WebSocket reconnection
+     * @private
+     */
+    _attemptReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.warn('Max reconnection attempts reached');
+            this._notifyStatus('failed');
+            return;
+        }
+
+        this.reconnectAttempts++;
+        const delay = this.reconnectDelay * this.reconnectAttempts;
+        
+        console.log(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`);
+        this._notifyStatus('reconnecting');
+
+        setTimeout(() => {
+            this.connectWebSocket();
+        }, delay);
+    },
+
+    /**
+     * Notify status change
+     * @param {string} status - New status
+     * @private
+     */
+    _notifyStatus(status) {
+        if (this.callbacks.onStatusChange) {
+            this.callbacks.onStatusChange(status);
+        }
+    },
+
+    /**
+     * Delay helper
+     * @param {number} ms - Milliseconds to delay
+     * @returns {Promise<void>}
+     * @private
+     */
+    _delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+};
+
+// Export for module systems or make available globally
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = NotationAPI;
+}

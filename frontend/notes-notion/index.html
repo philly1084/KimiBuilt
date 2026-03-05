@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notes - Notion Style</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
+</head>
+<body>
+    <!-- App Container -->
+    <div id="app">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <div class="workspace-info">
+                    <div class="workspace-avatar">KB</div>
+                    <span class="workspace-name">KimiBuilt</span>
+                </div>
+                <button id="sidebar-toggle" class="icon-btn" title="Collapse sidebar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="sidebar-actions">
+                <button id="new-page-btn" class="new-page-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    New page
+                </button>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title">Private</div>
+                <div id="page-tree" class="page-tree">
+                    <!-- Pages will be rendered here -->
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button id="trash-btn" class="footer-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Trash
+                </button>
+                <button id="settings-btn" class="footer-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
+                    </svg>
+                    Settings
+                </button>
+                <button id="theme-toggle" class="footer-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sun-icon">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="moon-icon" style="display: none;">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <span class="theme-text">Dark mode</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main id="main-content" class="main-content">
+            <!-- Cover Image -->
+            <div id="cover-area" class="cover-area" style="display: none;">
+                <div id="cover-image" class="cover-image"></div>
+                <button id="cover-change-btn" class="cover-change-btn">Change cover</button>
+                <button id="cover-remove-btn" class="cover-remove-btn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Page Header -->
+            <div class="page-header">
+                <div class="page-icon-wrapper">
+                    <button id="page-icon-btn" class="page-icon-btn" title="Add icon">
+                        <span id="page-icon" class="page-icon">📝</span>
+                        <span class="add-icon-hint">Add icon</span>
+                    </button>
+                </div>
+                
+                <div class="page-title-wrapper">
+                    <input 
+                        type="text" 
+                        id="page-title" 
+                        class="page-title" 
+                        placeholder="Untitled" 
+                        autocomplete="off"
+                    >
+                </div>
+
+                <!-- Properties -->
+                <div id="properties-area" class="properties-area">
+                    <!-- Properties will be added here -->
+                </div>
+
+                <!-- Model Selector -->
+                <div class="page-model-selector">
+                    <div class="model-selector-wrapper">
+                        <span class="model-selector-label">🤖 AI Model:</span>
+                        <select id="page-model-dropdown" class="model-selector-dropdown" title="Set default AI model for this page">
+                            <option value="">Use Global Default</option>
+                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="claude-3-opus">Claude 3 Opus</option>
+                            <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                            <option value="claude-3-haiku">Claude 3 Haiku</option>
+                        </select>
+                        <span class="model-selector-hint">This model will be used for all AI operations on this page</span>
+                    </div>
+                </div>
+
+                <!-- Add cover button (when no cover) -->
+                <button id="add-cover-btn" class="add-cover-btn" style="display: none;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    Add cover
+                </button>
+            </div>
+
+            <!-- Block Editor -->
+            <div id="editor" class="editor">
+                <!-- Blocks will be rendered here -->
+            </div>
+
+            <!-- Empty state for new pages -->
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <p>Write something, or press '/' for AI and commands</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Slash Command Menu -->
+    <div id="slash-menu" class="slash-menu" style="display: none;">
+        <div class="slash-menu-header">Basic blocks</div>
+        <div class="slash-menu-items">
+            <div class="slash-item" data-type="text">
+                <div class="slash-item-icon">📝</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Text</div>
+                    <div class="slash-item-hint">Just start writing with plain text</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="heading_1">
+                <div class="slash-item-icon">H1</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Heading 1</div>
+                    <div class="slash-item-hint">Big section heading</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="heading_2">
+                <div class="slash-item-icon">H2</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Heading 2</div>
+                    <div class="slash-item-hint">Medium section heading</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="heading_3">
+                <div class="slash-item-icon">H3</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Heading 3</div>
+                    <div class="slash-item-hint">Small section heading</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="todo">
+                <div class="slash-item-icon">☐</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">To-do list</div>
+                    <div class="slash-item-hint">Track tasks with a to-do list</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="bulleted_list">
+                <div class="slash-item-icon">•</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Bulleted list</div>
+                    <div class="slash-item-hint">Create a simple bulleted list</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="numbered_list">
+                <div class="slash-item-icon">1.</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Numbered list</div>
+                    <div class="slash-item-hint">Create a list with numbering</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="toggle">
+                <div class="slash-item-icon">▶</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Toggle list</div>
+                    <div class="slash-item-hint">Toggles can hide and show content inside</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="quote">
+                <div class="slash-item-icon">"</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Quote</div>
+                    <div class="slash-item-hint">Capture a quote</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="divider">
+                <div class="slash-item-icon">—</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Divider</div>
+                    <div class="slash-item-hint">Visually divide blocks</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="callout">
+                <div class="slash-item-icon">💡</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Callout</div>
+                    <div class="slash-item-hint">Make writing stand out</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="code">
+                <div class="slash-item-icon"></></div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Code</div>
+                    <div class="slash-item-hint">Capture a code snippet</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="image">
+                <div class="slash-item-icon">🖼</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Image</div>
+                    <div class="slash-item-hint">Upload or embed with a link</div>
+                </div>
+            </div>
+            <div class="slash-item slash-item-ai" data-type="ai_image">
+                <div class="slash-item-icon">🎨</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">AI Image</div>
+                    <div class="slash-item-hint">Generate an image using DALL-E</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="bookmark">
+                <div class="slash-item-icon">🔗</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Bookmark</div>
+                    <div class="slash-item-hint">Save a link as a visual bookmark</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="database">
+                <div class="slash-item-icon">📊</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Database</div>
+                    <div class="slash-item-hint">Simple table view for tracking items</div>
+                </div>
+            </div>
+            <div class="slash-item slash-item-ai" data-type="ai">
+                <div class="slash-item-icon">✨</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">AI Assistant</div>
+                    <div class="slash-item-hint">Generate or transform content with AI</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Emoji Picker -->
+    <div id="emoji-picker" class="emoji-picker" style="display: none;">
+        <div class="emoji-picker-header">
+            <input type="text" id="emoji-search" placeholder="Search emoji...">
+        </div>
+        <div class="emoji-categories">
+            <div class="emoji-category active" data-category="recent">🕐</div>
+            <div class="emoji-category" data-category="smileys">😀</div>
+            <div class="emoji-category" data-category="people">👋</div>
+            <div class="emoji-category" data-category="animals">🐱</div>
+            <div class="emoji-category" data-category="food">🍎</div>
+            <div class="emoji-category" data-category="activities">⚽</div>
+            <div class="emoji-category" data-category="travel">🚗</div>
+            <div class="emoji-category" data-category="objects">💡</div>
+            <div class="emoji-category" data-category="symbols">❤️</div>
+        </div>
+        <div id="emoji-grid" class="emoji-grid">
+            <!-- Emojis will be rendered here -->
+        </div>
+    </div>
+
+    <!-- Block Context Menu -->
+    <div id="block-context-menu" class="block-context-menu" style="display: none;">
+        <div class="context-menu-item" data-action="duplicate">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Duplicate
+        </div>
+        <div class="context-menu-item" data-action="delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            Delete
+        </div>
+        <div class="context-divider"></div>
+        <div class="context-menu-item" data-action="turn-into">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            Turn into
+        </div>
+        <div class="context-menu-item" data-action="color">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+            </svg>
+            Color
+        </div>
+    </div>
+
+    <!-- Color Picker -->
+    <div id="color-picker" class="color-picker" style="display: none;">
+        <div class="color-section">
+            <div class="color-title">Background</div>
+            <div class="color-grid">
+                <div class="color-option" data-color="default" title="Default">⛔</div>
+                <div class="color-option" data-color="gray" style="background: #f1f1ef;" title="Gray"></div>
+                <div class="color-option" data-color="brown" style="background: #f4eeee;" title="Brown"></div>
+                <div class="color-option" data-color="orange" style="background: #faeddc;" title="Orange"></div>
+                <div class="color-option" data-color="yellow" style="background: #fbf3db;" title="Yellow"></div>
+                <div class="color-option" data-color="green" style="background: #edf3ec;" title="Green"></div>
+                <div class="color-option" data-color="blue" style="background: #e7f3f8;" title="Blue"></div>
+                <div class="color-option" data-color="purple" style="background: #f6f3f9;" title="Purple"></div>
+                <div class="color-option" data-color="pink" style="background: #faf1f5;" title="Pink"></div>
+                <div class="color-option" data-color="red" style="background: #fdebec;" title="Red"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Prompt Modal -->
+    <div id="ai-modal" class="ai-modal" style="display: none;">
+        <div class="ai-modal-content">
+            <div class="ai-modal-header">
+                <span class="ai-icon">✨</span>
+                <span>Ask AI</span>
+            </div>
+            <div class="ai-prompt-area">
+                <textarea id="ai-prompt" placeholder="Ask AI to write, edit, or generate content..."></textarea>
+            </div>
+            <div class="ai-actions">
+                <button id="ai-generate" class="ai-btn primary">Generate</button>
+                <button id="ai-cancel" class="ai-btn">Cancel</button>
+            </div>
+            <div class="ai-suggestions">
+                <div class="ai-suggestion" data-prompt="Summarize this">Summarize</div>
+                <div class="ai-suggestion" data-prompt="Improve writing">Improve writing</div>
+                <div class="ai-suggestion" data-prompt="Fix spelling and grammar">Fix spelling & grammar</div>
+                <div class="ai-suggestion" data-prompt="Make shorter">Make shorter</div>
+                <div class="ai-suggestion" data-prompt="Make longer">Make longer</div>
+                <div class="ai-suggestion" data-prompt="Change tone to professional">Professional tone</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/blocks.js"></script>
+    <script src="js/selection.js"></script>
+    <script src="js/slash-menu.js"></script>
+    <script src="js/editor.js"></script>
+    <script src="js/sidebar.js"></script>
+    <script src="js/ai-integration.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

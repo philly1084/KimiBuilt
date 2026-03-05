@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notation Helper | KimiBuilt AI</title>
+    
+    <!-- CodeMirror 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/dracula.min.css">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-theme="dark" data-mode="expand">
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="logo">
+                <i class="fas fa-shapes"></i>
+                <span>Notation Helper</span>
+            </div>
+            <div class="mode-selector">
+                <button class="mode-btn active" data-mode="expand" title="Expand notation into full description">
+                    <i class="fas fa-expand"></i>
+                    <span>Expand</span>
+                </button>
+                <button class="mode-btn" data-mode="explain" title="Explain what the notation means">
+                    <i class="fas fa-book-open"></i>
+                    <span>Explain</span>
+                </button>
+                <button class="mode-btn" data-mode="validate" title="Validate notation syntax">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Validate</span>
+                </button>
+            </div>
+        </div>
+        <div class="header-right">
+            <button class="icon-btn" id="themeToggle" title="Toggle theme">
+                <i class="fas fa-moon"></i>
+            </button>
+            <button class="icon-btn" id="settingsBtn" title="Settings">
+                <i class="fas fa-cog"></i>
+            </button>
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">Connecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" data-panel="templates">
+                    <i class="fas fa-th-large"></i>
+                    <span>Templates</span>
+                </button>
+                <button class="sidebar-tab" data-panel="history">
+                    <i class="fas fa-history"></i>
+                    <span>History</span>
+                </button>
+            </div>
+            
+            <!-- Templates Panel -->
+            <div class="sidebar-panel active" id="templatesPanel">
+                <div class="panel-header">
+                    <h3>Notation Templates</h3>
+                    <div class="template-categories">
+                        <button class="category-btn active" data-category="all">All</button>
+                        <button class="category-btn" data-category="system">System</button>
+                        <button class="category-btn" data-category="flowchart">Flow</button>
+                        <button class="category-btn" data-category="data">Data</button>
+                        <button class="category-btn" data-category="api">API</button>
+                    </div>
+                </div>
+                <div class="template-list" id="templateList">
+                    <!-- Templates loaded by JS -->
+                </div>
+            </div>
+            
+            <!-- History Panel -->
+            <div class="sidebar-panel" id="historyPanel">
+                <div class="panel-header">
+                    <h3>Recent Sessions</h3>
+                    <button class="text-btn" id="clearHistoryBtn">
+                        <i class="fas fa-trash"></i> Clear
+                    </button>
+                </div>
+                <div class="history-list" id="historyList">
+                    <!-- History loaded by JS -->
+                    <div class="empty-state">
+                        <i class="fas fa-clock"></i>
+                        <p>No recent sessions</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Editor Area -->
+        <main class="editor-area">
+            <!-- Context Bar -->
+            <div class="context-bar" id="contextBar">
+                <button class="toggle-context" id="toggleContext">
+                    <i class="fas fa-chevron-right"></i>
+                    <span>Context</span>
+                </button>
+                <div class="context-content" id="contextContent">
+                    <textarea 
+                        id="contextInput" 
+                        placeholder="Add optional context to help the AI understand your notation better... (e.g., 'This is for a microservices architecture', 'Using Mermaid syntax')"
+                        rows="2"
+                    ></textarea>
+                </div>
+            </div>
+
+            <!-- Dual Pane Container -->
+            <div class="dual-pane" id="dualPane">
+                <!-- Input Pane -->
+                <div class="pane input-pane">
+                    <div class="pane-header">
+                        <div class="pane-title">
+                            <i class="fas fa-pen"></i>
+                            <span>Notation Input</span>
+                        </div>
+                        <div class="pane-actions">
+                            <button class="icon-btn small" id="clearInput" title="Clear input">
+                                <i class="fas fa-eraser"></i>
+                            </button>
+                            <button class="icon-btn small" id="loadTemplateBtn" title="Load template">
+                                <i class="fas fa-file-import"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pane-content">
+                        <div class="editor-wrapper">
+                            <textarea id="notationInput" placeholder="Enter your shorthand notation here...
+
+Examples:
+• user -> auth -> dashboard -> api -> db
+• start -> [decision] -> yes -> process -> end
+• User { id, name } --has-many--> Post { id, title }
+• GET /api/users/:id -> 200 { user }"></textarea>
+                        </div>
+                        <div class="editor-toolbar">
+                            <div class="toolbar-left">
+                                <span class="char-count" id="charCount">0 chars</span>
+                                <span class="line-count" id="lineCount">1 line</span>
+                            </div>
+                            <div class="toolbar-right">
+                                <button class="primary-btn" id="processBtn">
+                                    <i class="fas fa-play"></i>
+                                    <span>Process</span>
+                                    <kbd class="shortcut">Ctrl+Enter</kbd>
+                                </button>
+                                <button class="secondary-btn" id="processWithContextBtn">
+                                    <span>With Context</span>
+                                    <kbd class="shortcut">Ctrl+Shift+Enter</kbd>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resize Handle -->
+                <div class="resize-handle" id="resizeHandle">
+                    <div class="handle-indicator">
+                        <i class="fas fa-grip-lines-vertical"></i>
+                    </div>
+                </div>
+
+                <!-- Output Pane -->
+                <div class="pane output-pane">
+                    <div class="pane-header">
+                        <div class="pane-title">
+                            <i class="fas fa-eye"></i>
+                            <span>Result</span>
+                            <span class="mode-badge" id="modeBadge">expand</span>
+                        </div>
+                        <div class="pane-actions">
+                            <button class="icon-btn small" id="copyResult" title="Copy to clipboard">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="icon-btn small" id="exportMd" title="Export as Markdown">
+                                <i class="fab fa-markdown"></i>
+                            </button>
+                            <button class="icon-btn small" id="exportAnnotations" title="Export with annotations">
+                                <i class="fas fa-comment-dots"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pane-content">
+                        <div class="output-wrapper">
+                            <div class="output-empty" id="outputEmpty">
+                                <div class="empty-icon">
+                                    <i class="fas fa-magic"></i>
+                                </div>
+                                <h3>Ready to Process</h3>
+                                <p>Enter your notation and click Process to see the result</p>
+                            </div>
+                            <div class="output-content hidden" id="outputContent">
+                                <div class="output-rendered" id="outputRendered"></div>
+                                
+                                <!-- Annotations Sidebar -->
+                                <div class="annotations-panel" id="annotationsPanel">
+                                    <div class="annotations-header">
+                                        <h4><i class="fas fa-sticky-note"></i> Annotations</h4>
+                                        <button class="icon-btn small" id="toggleAnnotations">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </button>
+                                    </div>
+                                    <div class="annotations-list" id="annotationsList"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Suggestions Panel -->
+                        <div class="suggestions-panel hidden" id="suggestionsPanel">
+                            <div class="suggestions-header">
+                                <h4><i class="fas fa-lightbulb"></i> Suggestions</h4>
+                            </div>
+                            <div class="suggestions-list" id="suggestionsList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner-ring"></div>
+            <p>Processing notation...</p>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/markdown/markdown.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Application Scripts -->
+    <script src="js/templates.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/annotations.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/output.js"></script>
+    <script src="js/editor.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

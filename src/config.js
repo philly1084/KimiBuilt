@@ -1,0 +1,40 @@
+require('dotenv').config();
+
+const config = {
+    // Server
+    port: parseInt(process.env.PORT, 10) || 3000,
+    nodeEnv: process.env.NODE_ENV || 'development',
+
+    // OpenAI — Generation
+    openai: {
+        apiKey: process.env.OPENAI_API_KEY,
+        baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+        model: process.env.OPENAI_MODEL || 'gpt-4o',
+    },
+
+    // Ollama — Embeddings
+    ollama: {
+        baseURL: process.env.OLLAMA_BASE_URL || 'http://ollama:11434',
+        embedModel: process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text:latest',
+    },
+
+    // Qdrant — Vector Store
+    qdrant: {
+        url: process.env.QDRANT_URL || 'http://qdrant:6333',
+        collection: process.env.QDRANT_COLLECTION || 'conversations',
+        vectorSize: 768, // nomic-embed-text output dimensions
+    },
+};
+
+// Validate required config
+function validate() {
+    const errors = [];
+    if (!config.openai.apiKey) {
+        errors.push('OPENAI_API_KEY is required');
+    }
+    if (errors.length > 0) {
+        throw new Error(`Config validation failed:\n  - ${errors.join('\n  - ')}`);
+    }
+}
+
+module.exports = { config, validate };

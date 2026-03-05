@@ -1,0 +1,68 @@
+version: "3.8"
+
+services:
+  # ================================
+  # Backend API
+  # ================================
+  backend:
+    build: .
+    container_name: kimibuilt-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ================================
+  # Qdrant — Vector Database
+  # ================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: kimibuilt-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ================================
+  # Ollama — Embedding Model
+  # ================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kimibuilt-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Pull embedding model on startup
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /bin/ollama serve &
+        sleep 5
+        /bin/ollama pull nomic-embed-text:latest
+        wait
+
+volumes:
+  qdrant_data:
+  ollama_data:

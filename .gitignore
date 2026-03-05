@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Environment (secrets)
+.env
+
+# Test & Build
+coverage/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.docker/
+
+# Gemini / Antigravity
+.gemini/

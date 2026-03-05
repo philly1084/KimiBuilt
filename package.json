@@ -1,0 +1,42 @@
+{
+    "name": "kimibuilt",
+    "version": "1.0.0",
+    "description": "Multi-interface AI backend with contextual memory — CLI, Web Chat, Canvas, and Notation Helper",
+    "main": "src/server.js",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "nodemon src/server.js",
+        "test": "jest --coverage",
+        "test:watch": "jest --watch",
+        "lint": "eslint src/",
+        "docker:build": "docker buildx build --platform linux/arm64 -t kimibuilt:latest .",
+        "docker:push": "docker buildx build --platform linux/arm64 -t kimibuilt:latest --push .",
+        "k8s:apply": "kubectl apply -f k8s/",
+        "k8s:delete": "kubectl delete -f k8s/"
+    },
+    "keywords": [
+        "ai",
+        "openai",
+        "qdrant",
+        "ollama",
+        "chat",
+        "canvas",
+        "notation"
+    ],
+    "license": "MIT",
+    "dependencies": {
+        "@qdrant/js-client-rest": "^1.12.0",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.7",
+        "express": "^4.21.2",
+        "helmet": "^8.0.0",
+        "openai": "^4.82.0",
+        "uuid": "^11.1.0",
+        "ws": "^8.18.0"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0",
+        "nodemon": "^3.1.9",
+        "supertest": "^7.0.0"
+    }
+}

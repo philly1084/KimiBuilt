@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kimi Canvas - Excalidraw Style</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://unpkg.com/roughjs@4.6.6/bundled/rough.js"></script>
+    <script src="https://unpkg.com/perfect-freehand@1.2.0/dist/perfect-freehand.umd.js"></script>
+</head>
+<body>
+    <!-- Top Bar -->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <button class="menu-btn" id="menuBtn" title="Menu">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                </svg>
+            </button>
+            <span class="logo">Kimi Canvas</span>
+        </div>
+        <div class="top-bar-center">
+            <div class="canvas-actions">
+                <button id="resetZoomBtn" title="Reset Zoom (Ctrl+0)">
+                    <svg viewBox="0 0 24 24" width="16" height="16">
+                        <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
+                    </svg>
+                    <span id="zoomLevel">100%</span>
+                </button>
+                <button id="zoomOutBtn" title="Zoom Out (Ctrl+-)">−</button>
+                <button id="zoomInBtn" title="Zoom In (Ctrl++)">+</button>
+            </div>
+            <!-- Model Selector Dropdown -->
+            <div class="model-selector">
+                <svg viewBox="0 0 24 24" width="14" height="14" class="model-icon">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                <select id="topModelSelect" title="Select AI Model">
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="claude-3-opus">Claude 3 Opus</option>
+                    <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                </select>
+            </div>
+        </div>
+        <div class="top-bar-right">
+            <button id="clearBtn" title="Clear Canvas">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+            <button id="importBtn" title="Import JSON (Ctrl+O)">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
+                </svg>
+            </button>
+            <button id="themeToggle" title="Toggle Theme">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-3.03 0-5.5-2.47-5.5-5.5 0-1.82.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
+                </svg>
+            </button>
+            <button id="exportBtn" title="Export">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                </svg>
+            </button>
+            <button id="shareBtn" title="Share">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Left Toolbar -->
+    <aside class="toolbar">
+        <div class="tool-group">
+            <button class="tool-btn active" data-tool="selection" data-key="v" title="Selection (V or 1)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="rectangle" data-key="r" title="Rectangle (R or 2)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <rect x="3" y="6" width="18" height="12" fill="none" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="diamond" data-key="d" title="Diamond (D or 3)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="none" stroke="currentColor" stroke-width="2" d="M12 3l9 9-9 9-9-9z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="ellipse" data-key="o" title="Ellipse (O or 4)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <ellipse cx="12" cy="12" rx="9" ry="6" fill="none" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="arrow" data-key="a" title="Arrow (A or 5)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="line" data-key="l" title="Line (L or 6)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <line x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="freedraw" data-key="p" title="Pencil (P or 7)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="text" data-key="t" title="Text (T or 8)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M5 4v3h5.5v12h3V7H19V4z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="sticky" data-key="s" title="Sticky Note (S)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h9l5-5V5c0-1.1-.9-2-2-2zm-7 14H7v-2h5v2zm5-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="frame" data-key="f" title="Frame (F)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <rect x="3" y="3" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4,2"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="image" data-key="i" title="Image (I or 0)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                </svg>
+            </button>
+            <button class="tool-btn" data-tool="eraser" data-key="e" title="Eraser (E or 9)">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20H12c.28 0 .55-.06.8-.17l7.23-7.23c.78-.78.78-2.05 0-2.83l-4.54-4.54c-.39-.39-.9-.59-1.42-.59z"/>
+                </svg>
+            </button>
+        </div>
+        <div class="tool-separator"></div>
+        <button class="tool-btn ai-btn" data-tool="ai-image" data-key="g" title="AI Image Generation (G)">
+            <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                <circle cx="18" cy="6" r="3" fill="#ff6b6b"/>
+            </svg>
+        </button>
+        <button class="tool-btn ai-btn" id="aiAssistantBtn" title="AI Assistant">
+            <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="currentColor" d="M7.5 2C7.5 2 8.5 5.5 12 5.5C15.5 5.5 16.5 2 16.5 2C16.5 2 15 9.5 12 9.5C9 9.5 7.5 2 7.5 2ZM2 12.5C2 12.5 5.5 11.5 5.5 15C5.5 18.5 2 19.5 2 19.5C2 19.5 9.5 18 9.5 15C9.5 12 2 12.5 2 12.5ZM22 12.5C22 12.5 14.5 12 14.5 15C14.5 18 22 19.5 22 19.5C22 19.5 18.5 18.5 18.5 15C18.5 11.5 22 12.5 22 12.5ZM7.5 22C7.5 22 9 15.5 12 15.5C15 15.5 16.5 22 16.5 22C16.5 22 15.5 18.5 12 18.5C8.5 18.5 7.5 22 7.5 22Z"/>
+            </svg>
+        </button>
+    </aside>
+
+    <!-- Main Canvas Container -->
+    <main class="canvas-container" id="canvasContainer">
+        <canvas id="canvas"></canvas>
+        <!-- Selection Box (created dynamically) -->
+        <div class="selection-box" id="selectionBox" style="display: none;">
+            <div class="resize-handle nw"></div>
+            <div class="resize-handle n"></div>
+            <div class="resize-handle ne"></div>
+            <div class="resize-handle e"></div>
+            <div class="resize-handle se"></div>
+            <div class="resize-handle s"></div>
+            <div class="resize-handle sw"></div>
+            <div class="resize-handle w"></div>
+        </div>
+        <!-- Inline Text Editor -->
+        <textarea class="text-editor" id="textEditor" style="display: none;"></textarea>
+        <!-- AI Image Prompt Tooltip -->
+        <div class="ai-image-tooltip" id="aiImageTooltip" style="display: none;">
+            Click on canvas to place AI-generated image
+        </div>
+    </main>
+
+    <!-- Properties Panel (Right Side) -->
+    <aside class="properties-panel" id="propertiesPanel">
+        <div class="panel-header">
+            <h3>Properties</h3>
+        </div>
+        <div class="panel-content">
+            <!-- Grid Snap Toggle -->
+            <div class="property-group">
+                <button id="snapToGridBtn" class="action-btn" title="Toggle Grid Snapping">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style="margin-right: 6px; vertical-align: middle;">
+                        <path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM8 18H4v-4h4v4zm0-6H4v-4h4v4zm0-6H4V4h4v2zm6 12h-4v-4h4v4zm0-6h-4v-4h4v4zm0-6h-4V4h4v2zm6 12h-4v-4h4v4zm0-6h-4v-4h4v4zm0-6h-4V4h4v2z"/>
+                    </svg>
+                    Snap to Grid
+                </button>
+            </div>
+
+            <!-- Stroke Color -->
+            <div class="property-group">
+                <label>Stroke</label>
+                <div class="color-picker" id="strokeColorPicker">
+                    <button class="color-btn active" data-color="#000000" style="background: #000000;"></button>
+                    <button class="color-btn" data-color="#e03131" style="background: #e03131;"></button>
+                    <button class="color-btn" data-color="#2f9e44" style="background: #2f9e44;"></button>
+                    <button class="color-btn" data-color="#1971c2" style="background: #1971c2;"></button>
+                    <button class="color-btn" data-color="#f08c00" style="background: #f08c00;"></button>
+                    <button class="color-btn" data-color="#9c36b5" style="background: #9c36b5;"></button>
+                </div>
+            </div>
+
+            <!-- Background Color -->
+            <div class="property-group">
+                <label>Background</label>
+                <div class="color-picker" id="backgroundColorPicker">
+                    <button class="color-btn transparent active" data-color="transparent" title="Transparent"></button>
+                    <button class="color-btn" data-color="#ffc9c9" style="background: #ffc9c9;"></button>
+                    <button class="color-btn" data-color="#b2f2bb" style="background: #b2f2bb;"></button>
+                    <button class="color-btn" data-color="#a5d8ff" style="background: #a5d8ff;"></button>
+                    <button class="color-btn" data-color="#ffec99" style="background: #ffec99;"></button>
+                    <button class="color-btn" data-color="#eebefa" style="background: #eebefa;"></button>
+                    <button class="color-btn" data-color="#ffffff" style="background: #ffffff;"></button>
+                </div>
+            </div>
+
+            <!-- Stroke Width -->
+            <div class="property-group">
+                <label>Stroke Width</label>
+                <div class="stroke-width-picker" id="strokeWidthPicker">
+                    <button class="stroke-btn active" data-width="1" title="Thin">
+                        <div style="width: 20px; height: 1px; background: currentColor;"></div>
+                    </button>
+                    <button class="stroke-btn" data-width="2" title="Regular">
+                        <div style="width: 20px; height: 2px; background: currentColor;"></div>
+                    </button>
+                    <button class="stroke-btn" data-width="4" title="Bold">
+                        <div style="width: 20px; height: 4px; background: currentColor;"></div>
+                    </button>
+                    <button class="stroke-btn" data-width="8" title="Extra Bold">
+                        <div style="width: 20px; height: 8px; background: currentColor;"></div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stroke Style -->
+            <div class="property-group">
+                <label>Stroke Style</label>
+                <div class="stroke-style-picker" id="strokeStylePicker">
+                    <button class="stroke-style-btn active" data-style="solid" title="Solid">
+                        <div style="width: 24px; height: 2px; background: currentColor;"></div>
+                    </button>
+                    <button class="stroke-style-btn" data-style="dashed" title="Dashed">
+                        <div style="width: 24px; height: 2px; background: repeating-linear-gradient(90deg, currentColor 0px, currentColor 4px, transparent 4px, transparent 8px);"></div>
+                    </button>
+                    <button class="stroke-style-btn" data-style="dotted" title="Dotted">
+                        <div style="width: 24px; height: 2px; background: repeating-linear-gradient(90deg, currentColor 0px, currentColor 2px, transparent 2px, transparent 6px);"></div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sloppiness / Roughness -->
+            <div class="property-group">
+                <label>Sloppiness</label>
+                <div class="roughness-picker" id="roughnessPicker">
+                    <button class="roughness-btn active" data-roughness="0" title="Architect">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <rect x="4" y="6" width="16" height="12" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                    </button>
+                    <button class="roughness-btn" data-roughness="1" title="Artist">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="none" stroke="currentColor" stroke-width="1.5" d="M5 7l1 10 12-1-1-9z"/>
+                        </svg>
+                    </button>
+                    <button class="roughness-btn" data-roughness="2" title="Cartoonist">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="none" stroke="currentColor" stroke-width="1.5" d="M4 6c2 1 3 4 4 6s2 6 3 6 4-2 6-4 3-6 3-8"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Edges -->
+            <div class="property-group">
+                <label>Edges</label>
+                <div class="edges-picker" id="edgesPicker">
+                    <button class="edge-btn active" data-edge="sharp" title="Sharp">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <rect x="6" y="6" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                    </button>
+                    <button class="edge-btn" data-edge="round" title="Round">
+                        <rect x="6" y="6" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Opacity -->
+            <div class="property-group">
+                <label>Opacity</label>
+                <input type="range" id="opacitySlider" min="0" max="100" value="100" class="opacity-slider">
+                <span id="opacityValue">100%</span>
+            </div>
+
+            <!-- Font Size (for text) -->
+            <div class="property-group" id="fontSizeGroup">
+                <label>Font Size</label>
+                <div class="font-size-picker" id="fontSizePicker">
+                    <button class="font-size-btn" data-size="16">S</button>
+                    <button class="font-size-btn active" data-size="20">M</button>
+                    <button class="font-size-btn" data-size="28">L</button>
+                    <button class="font-size-btn" data-size="36">XL</button>
+                </div>
+            </div>
+
+            <!-- Font Family (for text) -->
+            <div class="property-group" id="fontFamilyGroup">
+                <label>Font</label>
+                <select id="fontFamilySelect" class="font-select">
+                    <option value="Virgil, cursive">Hand-drawn</option>
+                    <option value="system-ui, sans-serif">Normal</option>
+                    <option value="monospace">Code</option>
+                </select>
+            </div>
+
+            <!-- Image Properties (for AI-generated images) -->
+            <div class="property-group" id="imagePropertiesGroup" style="display: none;">
+                <label>AI Image</label>
+                <div class="ai-image-info">
+                    <p id="aiImagePrompt" class="ai-image-prompt"></p>
+                    <button id="downloadImageBtn" class="action-btn">
+                        <svg viewBox="0 0 24 24" width="14" height="14" style="margin-right: 6px; vertical-align: middle;">
+                            <path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                        </svg>
+                        Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Alignment Tools (for multi-select) -->
+            <div class="property-group" id="alignmentGroup" style="display: none;">
+                <label>Align</label>
+                <div class="alignment-picker">
+                    <button id="alignLeftBtn" title="Align Left">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 3h18v2H3zm0 8h12v2H3zm0 8h18v2H3z"/>
+                        </svg>
+                    </button>
+                    <button id="alignCenterBtn" title="Align Center">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 3h18v2H3zm4 8h10v2H7zm-4 8h18v2H3z"/>
+                        </svg>
+                    </button>
+                    <button id="alignRightBtn" title="Align Right">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 3h18v2H3zm6 8h12v2H9zm-6 8h18v2H3z"/>
+                        </svg>
+                    </button>
+                    <button id="alignTopBtn" title="Align Top">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 3h2v18H3zm8 0h2v12h-2zm8 0h2v18h-2z"/>
+                        </svg>
+                    </button>
+                    <button id="alignMiddleBtn" title="Align Middle">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M11 3h2v18h-2zM3 11h6v2H3zm12 0h6v2h-6z"/>
+                        </svg>
+                    </button>
+                    <button id="alignBottomBtn" title="Align Bottom">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 21h2V3H3zm8 0h2V9h-2zm8 0h2V3h-2z"/>
+                        </svg>
+                    </button>
+                </div>
+                <label style="margin-top: 8px;">Distribute</label>
+                <div class="alignment-picker">
+                    <button id="distributeHBtn" title="Distribute Horizontally">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M2 4h2v16H2zm9 0h2v16h-2zm9 0h2v16h-2z"/>
+                        </svg>
+                    </button>
+                    <button id="distributeVBtn" title="Distribute Vertically">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M4 2h16v2H4zm0 9h16v2H4zm0 9h16v2H4z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Layer Actions -->
+            <div class="property-group layer-actions">
+                <button id="deleteBtn" class="action-btn danger">Delete</button>
+                <button id="duplicateBtn" class="action-btn">Duplicate</button>
+                <button id="bringToFrontBtn" class="action-btn">Bring to Front</button>
+                <button id="sendToBackBtn" class="action-btn">Send to Back</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Bottom Controls -->
+    <div class="bottom-controls">
+        <div class="bottom-left">
+            <button id="helpBtn" title="Help (?)">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/>
+                </svg>
+            </button>
+        </div>
+        <div class="bottom-right">
+            <div class="collab-cursors" id="collabCursors"></div>
+        </div>
+    </div>
+
+    <!-- AI Assistant Panel -->
+    <div class="ai-panel" id="aiPanel">
+        <div class="ai-panel-header">
+            <h3>
+                <svg viewBox="0 0 24 24" width="20" height="20" style="margin-right: 8px; vertical-align: middle;">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                AI Assistant
+            </h3>
+            <button class="close-btn" id="closeAiPanel">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        </div>
+        <div class="ai-panel-content">
+            <!-- Mode Toggle -->
+            <div class="ai-mode-toggle">
+                <button class="ai-mode-btn active" id="diagramModeBtn" data-mode="diagram">
+                    <svg viewBox="0 0 24 24" width="16" height="16" style="margin-right: 6px; vertical-align: middle;">
+                        <path fill="currentColor" d="M3 3h18v18H3V3zm16 16V5H5v14h14zM7 7h4v4H7V7zm0 6h4v4H7v-4zm6-6h4v4h-4V7zm0 6h4v4h-4v-4z"/>
+                    </svg>
+                    Generate Diagram
+                </button>
+                <button class="ai-mode-btn" id="imageModeBtn" data-mode="image">
+                    <svg viewBox="0 0 24 24" width="16" height="16" style="margin-right: 6px; vertical-align: middle;">
+                        <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                    </svg>
+                    Generate Image
+                </button>
+            </div>
+            
+            <p class="ai-description">Describe what you'd like me to draw, and I'll generate a diagram for you.</p>
+            
+            <!-- Diagram Options -->
+            <div id="diagramOptions" class="ai-options">
+                <div class="ai-option-group">
+                    <label>AI Model</label>
+                    <select id="diagramModelSelect" class="ai-select">
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                        <option value="claude-3-opus">Claude 3 Opus</option>
+                        <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- Image Options -->
+            <div id="imageOptions" class="ai-options hidden">
+                <div class="ai-option-group">
+                    <label>Image Model</label>
+                    <select id="imageModelSelect" class="ai-select">
+                        <option value="dall-e-3">DALL-E 3</option>
+                        <option value="dall-e-2">DALL-E 2</option>
+                    </select>
+                </div>
+                <div class="ai-option-row">
+                    <div class="ai-option-group">
+                        <label>Size</label>
+                        <select id="imageSizeSelect" class="ai-select">
+                            <option value="1024x1024">1024x1024</option>
+                            <option value="1024x1792">1024x1792</option>
+                            <option value="1792x1024">1792x1024</option>
+                        </select>
+                    </div>
+                    <div class="ai-option-group">
+                        <label>Quality</label>
+                        <select id="imageQualitySelect" class="ai-select">
+                            <option value="standard">Standard</option>
+                            <option value="hd">HD</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="ai-option-group">
+                    <label>Style</label>
+                    <select id="imageStyleSelect" class="ai-select">
+                        <option value="vivid">Vivid</option>
+                        <option value="natural">Natural</option>
+                    </select>
+                </div>
+            </div>
+            
+            <textarea id="aiInput" placeholder="e.g., 'Create a flowchart showing user authentication process' or 'Draw a mind map about machine learning'"></textarea>
+            <button id="aiGenerateBtn" class="ai-generate-btn">
+                <svg viewBox="0 0 24 24" width="16" height="16">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                Generate
+            </button>
+            <div class="ai-suggestions" id="aiSuggestions">
+                <h4>Suggestions</h4>
+                <div class="suggestion-list">
+                    <button class="suggestion-btn" data-prompt="User login flowchart">Login Flowchart</button>
+                    <button class="suggestion-btn" data-prompt="System architecture diagram">System Architecture</button>
+                    <button class="suggestion-btn" data-prompt="Decision tree for product selection">Decision Tree</button>
+                    <button class="suggestion-btn" data-prompt="Entity relationship diagram">ER Diagram</button>
+                </div>
+            </div>
+            <div class="ai-status" id="aiStatus"></div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal" id="exportModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Export</h3>
+                <button class="close-btn" id="closeExportModal">
+                    <svg viewBox="0 0 24 24" width="18" height="18">
+                        <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="export-options">
+                    <button class="export-btn" data-format="png">
+                        <svg viewBox="0 0 24 24" width="32" height="32">
+                            <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                        </svg>
+                        <span>PNG</span>
+                    </button>
+                    <button class="export-btn" data-format="svg">
+                        <svg viewBox="0 0 24 24" width="32" height="32">
+                            <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+                        </svg>
+                        <span>SVG</span>
+                    </button>
+                    <button class="export-btn" data-format="json">
+                        <svg viewBox="0 0 24 24" width="32" height="32">
+                            <path fill="currentColor" d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                        </svg>
+                        <span>JSON</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="modal" id="helpModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Keyboard Shortcuts</h3>
+                <button class="close-btn" id="closeHelpModal">
+                    <svg viewBox="0 0 24 24" width="18" height="18">
+                        <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcuts-list">
+                    <div class="shortcut-item">
+                        <span class="key">V / 1</span>
+                        <span>Selection</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">R / 2</span>
+                        <span>Rectangle</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">D / 3</span>
+                        <span>Diamond</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">O / 4</span>
+                        <span>Ellipse</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">A / 5</span>
+                        <span>Arrow</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">L / 6</span>
+                        <span>Line</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">P / 7</span>
+                        <span>Pencil</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">T / 8</span>
+                        <span>Text</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">E / 9</span>
+                        <span>Eraser</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">I / 0</span>
+                        <span>Image</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">G</span>
+                        <span>AI Image Tool</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">S</span>
+                        <span>Sticky Note</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">F</span>
+                        <span>Frame</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Space + Drag</span>
+                        <span>Pan</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl + Scroll</span>
+                        <span>Zoom</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+D</span>
+                        <span>Duplicate</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+G</span>
+                        <span>Group</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+Shift+G</span>
+                        <span>Ungroup</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+Z</span>
+                        <span>Undo</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+Y</span>
+                        <span>Redo</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+C</span>
+                        <span>Copy</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+V</span>
+                        <span>Paste</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+A</span>
+                        <span>Select All</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Delete</span>
+                        <span>Delete Selection</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Shift+Drag</span>
+                        <span>Constrain Proportions</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">?</span>
+                        <span>Show Help</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file input for image upload -->
+    <input type="file" id="imageInput" accept="image/*" style="display: none;">
+
+    <script src="js/history.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/renderer.js"></script>
+    <script src="js/selection.js"></script>
+    <script src="js/tools.js"></script>
+    <script src="js/properties.js"></script>
+    <script src="js/canvas.js"></script>
+    <script src="js/ai-assistant.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
