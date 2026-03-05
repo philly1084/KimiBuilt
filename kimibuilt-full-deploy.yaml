@@ -314,10 +314,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - kimibuilt.demoserver2.buzz
+        - kimibuilt.secdevsolutions.help
       secretName: kimibuilt-tls-cert
   rules:
-    - host: kimibuilt.demoserver2.buzz
+    - host: kimibuilt.secdevsolutions.help
       http:
         paths:
           - path: /
