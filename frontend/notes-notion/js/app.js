@@ -20,9 +20,19 @@
         
         console.log('🚀 Initializing Notes - Notion Style');
         
+        // Initialize connection status UI
+        updateConnectionStatus('checking');
+        
         // Check backend connection
-        state.backendConnected = await API.checkHealth();
+        const health = await API.checkHealth();
+        state.backendConnected = health.connected;
         console.log(state.backendConnected ? '✅ Backend connected' : '⚠️ Backend offline - using local mode');
+        
+        // Update connection status UI
+        updateConnectionStatus(state.backendConnected ? 'connected' : 'disconnected');
+        
+        // Start periodic health checks
+        startHealthCheckInterval();
         
         // Initialize modules
         initModules();
@@ -37,8 +47,61 @@
         
         // Show welcome toast
         setTimeout(() => {
-            Sidebar.showToast('Welcome! Press "/" for commands', 'info');
+            const mode = state.backendConnected ? 'connected' : 'offline';
+            Sidebar.showToast(`Welcome! (${mode} mode) Press "/" for commands`, 'info');
         }, 1000);
+    }
+    
+    /**
+     * Update connection status UI
+     */
+    function updateConnectionStatus(status) {
+        const indicator = document.getElementById('connection-indicator');
+        const text = document.getElementById('connection-text');
+        
+        if (!indicator || !text) return;
+        
+        indicator.className = 'connection-indicator';
+        
+        switch (status) {
+            case 'connected':
+                indicator.classList.add('connected');
+                text.textContent = 'AI Connected';
+                break;
+            case 'disconnected':
+                indicator.classList.add('disconnected');
+                text.textContent = 'Offline Mode';
+                break;
+            case 'checking':
+            default:
+                indicator.classList.add('checking');
+                text.textContent = 'Connecting...';
+                break;
+        }
+    }
+    
+    /**
+     * Start periodic health check
+     */
+    function startHealthCheckInterval() {
+        // Check every 30 seconds
+        setInterval(async () => {
+            const health = await API.checkHealth();
+            const wasConnected = state.backendConnected;
+            state.backendConnected = health.connected;
+            
+            // Update UI
+            updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
+            
+            // Show toast if status changed
+            if (wasConnected !== health.connected) {
+                if (health.connected) {
+                    Sidebar.showToast('Backend connected!', 'success');
+                } else {
+                    Sidebar.showToast('Backend disconnected - using offline mode', 'warning');
+                }
+            }
+        }, 30000);
     }
     
     /**

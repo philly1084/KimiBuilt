@@ -31,6 +31,20 @@ class APIManager {
         localStorage.setItem('kimi-canvas-model', model);
     }
     
+    // Health check
+    async checkHealth() {
+        try {
+            const response = await fetch(`${this.baseUrl}/health`);
+            if (response.ok) {
+                const data = await response.json();
+                return { connected: true, data };
+            }
+            return { connected: false, error: 'Health check failed' };
+        } catch (error) {
+            return { connected: false, error: error.message };
+        }
+    }
+    
     // Fetch available chat models
     async getModels() {
         try {
@@ -39,7 +53,12 @@ class APIManager {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            this.availableModels = data.models || [];
+            // Backend returns { object: 'list', data: [...] }
+            this.availableModels = (data.data || []).map(m => ({
+                id: m.id,
+                name: m.id,
+                provider: m.owned_by || 'unknown'
+            }));
             return this.availableModels;
         } catch (error) {
             console.error('Error fetching models:', error);

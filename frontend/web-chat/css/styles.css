@@ -456,6 +456,51 @@ body {
    Model Selector
    ============================================ */
 
+/* Connection Status */
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.connection-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #888;
+    transition: all 0.3s ease;
+}
+
+.connection-indicator.connected {
+    background-color: var(--success);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
+}
+
+.connection-indicator.disconnected {
+    background-color: var(--error);
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
+}
+
+.connection-indicator.checking {
+    background-color: var(--warning);
+    animation: pulse 1.5s infinite;
+}
+
+.connection-text {
+    color: var(--text-secondary);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 .model-selector-wrapper {
     position: relative;
 }

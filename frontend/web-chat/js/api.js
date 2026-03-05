@@ -595,14 +595,18 @@ class APIClient extends EventTarget {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const response = await fetch(`${API_BASE_URL}/api/health`, {
+            const response = await fetch(`${API_BASE_URL}/health`, {
                 signal: controller.signal
             });
 
             clearTimeout(timeoutId);
-            return response.ok;
-        } catch {
-            return false;
+            if (response.ok) {
+                const data = await response.json();
+                return { connected: true, data };
+            }
+            return { connected: false, error: 'Health check failed' };
+        } catch (error) {
+            return { connected: false, error: error.message };
         }
     }
 

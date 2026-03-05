@@ -294,6 +294,11 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
+                    <!-- Connection Status -->
+                    <div id="connection-status" class="connection-status" title="Backend connection status">
+                        <span id="connection-indicator" class="connection-indicator"></span>
+                        <span id="connection-text" class="connection-text text-xs">Connecting...</span>
+                    </div>
                     <!-- Model Selector -->
                     <div class="model-selector-wrapper">
                         <button id="model-selector-btn" class="model-selector-btn" onclick="uiHelpers.toggleModelSelector()" title="Change model">

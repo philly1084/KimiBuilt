@@ -560,6 +560,51 @@ body {
 }
 
 /* ===== Page Model Selector ===== */
+/* Connection Status */
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 6px 12px;
+    background: var(--bg-hover);
+    border-radius: 6px;
+    font-size: 13px;
+    width: fit-content;
+}
+
+.connection-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #888;
+    transition: background 0.3s ease;
+}
+
+.connection-indicator.connected {
+    background: #3fb950;
+    box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.3);
+}
+
+.connection-indicator.disconnected {
+    background: #f85149;
+    box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.3);
+}
+
+.connection-indicator.checking {
+    background: #d29922;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.connection-text {
+    color: var(--text-secondary);
+}
+
 .page-model-selector {
     margin-bottom: 16px;
     padding: 8px 0;

@@ -42,6 +42,14 @@ class ChatApp {
         this.setupKeyboardShortcuts();
         this.setupModelListeners();
         
+        // Check connection status
+        this.updateConnectionStatus('checking');
+        const health = await apiClient.checkHealth();
+        this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
+        
+        // Start periodic health checks
+        this.startHealthCheckInterval();
+        
         // Load models in background
         uiHelpers.loadModels();
         
@@ -970,6 +978,43 @@ class ChatApp {
             this.sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5"></i>`;
             uiHelpers.reinitializeIcons(this.sendBtn);
         }
+    }
+    
+    // ============================================
+    // Connection Status
+    // ============================================
+    
+    updateConnectionStatus(status) {
+        const indicator = document.getElementById('connection-indicator');
+        const text = document.getElementById('connection-text');
+        
+        if (!indicator || !text) return;
+        
+        indicator.className = 'connection-indicator';
+        
+        switch (status) {
+            case 'connected':
+                indicator.classList.add('connected');
+                text.textContent = 'Connected';
+                break;
+            case 'disconnected':
+                indicator.classList.add('disconnected');
+                text.textContent = 'Offline';
+                break;
+            case 'checking':
+            default:
+                indicator.classList.add('checking');
+                text.textContent = 'Connecting...';
+                break;
+        }
+    }
+    
+    startHealthCheckInterval() {
+        // Check every 30 seconds
+        setInterval(async () => {
+            const health = await apiClient.checkHealth();
+            this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
+        }, 30000);
     }
 }
 

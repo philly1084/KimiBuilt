@@ -38,6 +38,25 @@ const API = (function() {
     }
     
     /**
+     * Check backend health status
+     */
+    async function checkHealth() {
+        try {
+            const response = await fetch(`${BASE_URL}/health`, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                return { connected: true, data };
+            }
+            return { connected: false, error: 'Health check failed' };
+        } catch (error) {
+            return { connected: false, error: error.message };
+        }
+    }
+    
+    /**
      * Create a new session (page)
      */
     async function createSession(title = 'New Page') {
@@ -88,7 +107,13 @@ const API = (function() {
         
         try {
             const response = await request('/api/models');
-            cachedModels = response.models || [];
+            // Backend returns { object: 'list', data: [...] }
+            // Map to frontend format
+            cachedModels = (response.data || []).map(m => ({
+                id: m.id,
+                name: m.id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+                provider: m.owned_by || 'unknown'
+            }));
             return cachedModels;
         } catch (error) {
             console.warn('Failed to fetch models:', error.message);
@@ -265,18 +290,11 @@ const API = (function() {
     }
     
     /**
-     * Check if backend is available
+     * Simple check if backend is available (returns boolean)
      */
-    async function checkHealth() {
-        try {
-            const response = await fetch(`${BASE_URL}/api/health`, { 
-                method: 'GET',
-                signal: AbortSignal.timeout(3000)
-            });
-            return response.ok;
-        } catch (error) {
-            return false;
-        }
+    async function isAvailable() {
+        const health = await checkHealth();
+        return health.connected;
     }
     
     /**
@@ -350,6 +368,7 @@ const API = (function() {
         generate,
         generateImage,
         checkHealth,
+        isAvailable,
         fetchBookmarkData,
         clearModelCache,
         BASE_URL
