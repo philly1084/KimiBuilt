@@ -173,9 +173,10 @@ spec:
           args:
             - |
               /bin/ollama serve &
+              pid=$!
               sleep 10
               /bin/ollama pull nomic-embed-text:latest
-              kill %1
+              kill $pid || true
           volumeMounts:
             - name: ollama-storage
               mountPath: /root/.ollama
