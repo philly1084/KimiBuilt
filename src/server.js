@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -70,6 +71,14 @@ app.use('/api/notation', notationRouter);
 app.use('/api/sessions', sessionsRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/images', imagesRouter);
+
+// ---------------------
+// Static Frontend Serving
+// ---------------------
+app.use(express.static(path.join(__dirname, '../frontend')));
+app.get('/', (req, res) => {
+    res.redirect('/web-chat/');
+});
 
 // ---------------------
 // 404 handler
