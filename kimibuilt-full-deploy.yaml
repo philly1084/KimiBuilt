@@ -300,30 +300,20 @@ spec:
   type: ClusterIP
 
 ---
-# 9. Traefik Ingress with Let's Encrypt ACME
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# 9. Traefik IngressRoute
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
 metadata:
-  name: kimibuilt-ingress
+  name: kimibuilt-ingressroute
   namespace: kimibuilt
-  annotations:
-    traefik.ingress.kubernetes.io/router.tls.certresolver: "le"
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
-    traefik.ingress.kubernetes.io/router.middlewares: default-redirect-https@kubernetescrd
 spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`kimibuilt.secdevsolutions.help`)
+      services:
+        - name: backend
+          port: 3000
   tls:
-    - hosts:
-        - kimibuilt.secdevsolutions.help
-      secretName: kimibuilt-tls-cert
-  rules:
-    - host: kimibuilt.secdevsolutions.help
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: backend
-                port:
-                  number: 3000
+    secretName: kimibuilt-tls-cert
