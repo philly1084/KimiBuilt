@@ -322,10 +322,6 @@ class OpenAIAPIClient extends EventTarget {
     // ============================================
 
     async generateImage(options = {}) {
-        if (!this.client) {
-            throw new Error('OpenAI client not initialized');
-        }
-
         const {
             prompt,
             model = 'dall-e-3',
@@ -349,9 +345,29 @@ class OpenAIAPIClient extends EventTarget {
             params.session_id = sessionId || this.currentSessionId;
         }
 
+        // Use fetch if SDK not available
+        if (!this.client) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/images/generations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                console.error('Image generation error:', error);
+                throw error;
+            }
+        }
+
         try {
             const response = await this.client.images.generate(params);
-            return response;
+            return response
         } catch (error) {
             console.error('Image generation error:', error);
             throw error;

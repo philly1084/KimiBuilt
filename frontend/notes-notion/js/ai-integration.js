@@ -181,7 +181,17 @@ const AIIntegration = (function() {
         showLoading('Generating...');
         
         try {
-            const result = await API.generate(text, action, model);
+            // Build prompt based on action
+            const actionPrompts = {
+                improve: `Improve the following text to make it clearer and more engaging:\n\n${text}`,
+                shorten: `Make the following text shorter and more concise:\n\n${text}`,
+                lengthen: `Expand the following text with more detail:\n\n${text}`,
+                professional: `Rewrite the following text in a professional tone:\n\n${text}`,
+                casual: `Rewrite the following text in a casual, friendly tone:\n\n${text}`,
+            };
+            
+            const prompt = actionPrompts[action] || `${action}: ${text}`;
+            const result = await API.generate(prompt, model);
             
             // Replace selected text
             const range = selection.getRangeAt(0);

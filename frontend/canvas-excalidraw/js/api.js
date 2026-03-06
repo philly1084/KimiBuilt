@@ -48,6 +48,37 @@ class OpenAICanvasAPI {
             params.session_id = this.sessionId;
         }
 
+        // Use fetch if SDK not available
+        if (!this.client) {
+            try {
+                const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const content = data.choices?.[0]?.message?.content || '';
+                
+                if (data.session_id) {
+                    this.sessionId = data.session_id;
+                }
+                
+                return {
+                    content,
+                    sessionId: this.sessionId,
+                    responseId: data.id,
+                };
+            } catch (error) {
+                console.error('Diagram generation error:', error);
+                throw error;
+            }
+        }
+
         const response = await this.client.chat.completions.create(params);
         
         // Parse the response content as JSON
@@ -80,6 +111,32 @@ class OpenAICanvasAPI {
         if (style) params.style = style;
         if (this.sessionId) params.session_id = this.sessionId;
 
+        // Use fetch if SDK not available
+        if (!this.client) {
+            try {
+                const response = await fetch(`${this.baseUrl}/v1/images/generations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.session_id) {
+                    this.sessionId = data.session_id;
+                }
+                
+                return data;
+            } catch (error) {
+                console.error('Image generation error:', error);
+                throw error;
+            }
+        }
+
         const response = await this.client.images.generate(params);
         
         if (response.session_id) {
@@ -91,6 +148,24 @@ class OpenAICanvasAPI {
 
     // Get models
     async getModels() {
+        // Use fetch if SDK not available
+        if (!this.client) {
+            try {
+                const response = await fetch(`${this.baseUrl}/v1/models`);
+                if (response.ok) {
+                    const data = await response.json();
+                    return (data.data || []).map(m => ({
+                        id: m.id,
+                        name: m.id,
+                        provider: m.owned_by || 'unknown'
+                    }));
+                }
+            } catch (error) {
+                console.warn('Failed to fetch models:', error);
+            }
+            return this.getDefaultModels();
+        }
+        
         try {
             const response = await this.client.models.list();
             return (response.data || []).map(m => ({
