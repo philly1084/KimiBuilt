@@ -125,12 +125,7 @@
                     <div class="model-selector-wrapper">
                         <span class="model-selector-label">🤖 AI Model:</span>
                         <select id="page-model-dropdown" class="model-selector-dropdown" title="Set default AI model for this page">
-                            <option value="">Use Global Default</option>
-                            <option value="gpt-4o">GPT-4o</option>
-                            <option value="gpt-4o-mini">GPT-4o Mini</option>
-                            <option value="claude-3-opus">Claude 3 Opus</option>
-                            <option value="claude-3-sonnet">Claude 3 Sonnet</option>
-                            <option value="claude-3-haiku">Claude 3 Haiku</option>
+                            <option value="">Loading models...</option>
                         </select>
                         <span class="model-selector-hint">This model will be used for all AI operations on this page</span>
                     </div>
@@ -392,7 +387,8 @@
 
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+    <!-- OpenAI SDK (optional - will use fetch fallback if blocked) -->
+    <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js" crossorigin="anonymous" async></script>
     <script src="js/storage.js"></script>
     <script src="js/api.js"></script>
     <script src="js/blocks.js"></script>

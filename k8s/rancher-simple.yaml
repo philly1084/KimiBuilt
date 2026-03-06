@@ -1,0 +1,86 @@
+# Simplified Rancher Deployment - Same Domain
+# Backend at /v1, Frontend at root
+# Domain: kimibuilt.secdevsolutions.help
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kimibuilt-ingress
+  namespace: kimibuilt
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # CORS for frontend-backend same-domain
+    traefik.ingress.kubernetes.io/router.middlewares: default-strip-prefix@kubernetescrd
+    # Long timeouts for AI streaming
+    traefik.ingress.kubernetes.io/proxy-read-timeout: "300"
+    traefik.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  tls:
+    - hosts:
+        - kimibuilt.secdevsolutions.help
+      secretName: kimibuilt-tls
+  rules:
+    - host: kimibuilt.secdevsolutions.help
+      http:
+        paths:
+          # API Backend at /v1
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
+          # Health check at /health  
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
+          # WebSocket at /ws
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
+          # Everything else - serve frontend static files
+          # You'll need to deploy frontend files separately or use a CDN
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend  # Reuse backend for now, or create frontend service
+                port:
+                  number: 3000
+
+---
+# Alternative: Just update the backend to serve static files
+# Add this to your backend-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-with-frontend
+  namespace: kimibuilt
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/philly1084/kimibuilt:latest
+          # Add volume mount for frontend files
+          volumeMounts:
+            - name: frontend-static
+              mountPath: /app/frontend
+          env:
+            - name: FRONTEND_PATH
+              value: /app/frontend
+      volumes:
+        - name: frontend-static
+          configMap:
+            name: frontend-static-files

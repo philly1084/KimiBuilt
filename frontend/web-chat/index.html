@@ -43,7 +43,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <!-- OpenAI SDK -->
-    <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js"></script>
+    <!-- OpenAI SDK (optional - will use fetch fallback if blocked) -->
+    <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js" crossorigin="anonymous" async></script>
     
     <!-- Custom styles -->
     <link rel="stylesheet" href="css/styles.css">

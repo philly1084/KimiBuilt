@@ -64,6 +64,84 @@ app.get('/health', async (_req, res) => {
 });
 
 // ---------------------
+// Static Files (Frontend)
+// ---------------------
+const frontendPath = process.env.FRONTEND_PATH || path.join(__dirname, '../frontend');
+app.use('/cli', express.static(path.join(frontendPath, 'cli')));
+app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat')));
+app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw')));
+app.use('/notes', express.static(path.join(frontendPath, 'notes-notion')));
+
+// Simple index page
+app.get('/', (_req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KimiBuilt AI</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0d0d0d;
+            color: #fafafa;
+        }
+        h1 { color: #3b82f6; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .card {
+            background: #1f1f1f;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 20px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.2s;
+        }
+        .card:hover {
+            border-color: #3b82f6;
+            transform: translateY(-2px);
+        }
+        .card h3 {
+            margin-top: 0;
+            color: #3b82f6;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 KimiBuilt AI Platform</h1>
+    <p>Choose your interface:</p>
+    <div class="grid">
+        <a href="/cli/README.md" class="card">
+            <h3>💻 CLI</h3>
+            <p>Terminal-based interface</p>
+        </a>
+        <a href="/web-chat/" class="card">
+            <h3>💬 Web Chat</h3>
+            <p>ChatGPT-style interface</p>
+        </a>
+        <a href="/canvas/" class="card">
+            <h3>🎨 Canvas</h3>
+            <p>Excalidraw-style whiteboard</p>
+        </a>
+        <a href="/notes/" class="card">
+            <h3>📝 Notes</h3>
+            <p>Notion-style editor</p>
+        </a>
+    </div>
+</body>
+</html>
+    `);
+});
+
+// ---------------------
 // API Routes
 // ---------------------
 app.use('/api/chat', chatRouter);

@@ -22,18 +22,24 @@ function getClient() {
  */
 async function listModels() {
     const openai = getClient();
+    console.log(`[OpenAI] Fetching models from: ${config.openai.baseURL}`);
+    
     try {
         const response = await openai.models.list();
-        return response.data || [];
+        const models = response.data || [];
+        console.log(`[OpenAI] Successfully fetched ${models.length} models`);
+        
+        if (models.length > 0) {
+            console.log(`[OpenAI] Available models: ${models.map(m => m.id).join(', ')}`);
+        }
+        
+        return models;
     } catch (err) {
         console.error('[OpenAI] Failed to list models:', err.message);
-        // Return default models if API call fails
-        return [
-            { id: 'gpt-4o', object: 'model', owned_by: 'openai' },
-            { id: 'gpt-4o-mini', object: 'model', owned_by: 'openai' },
-            { id: 'gpt-4-turbo', object: 'model', owned_by: 'openai' },
-            { id: 'gpt-3.5-turbo', object: 'model', owned_by: 'openai' },
-        ];
+        console.error('[OpenAI] Error details:', err.code, err.type);
+        
+        // Return empty array - let frontend handle empty state
+        return [];
     }
 }
 

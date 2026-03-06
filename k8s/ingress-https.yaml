@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kimibuilt-ingress
+  namespace: kimibuilt
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - kimibuilt.secdevsolutions.help
+      secretName: kimibuilt-tls
+  rules:
+    - host: kimibuilt.secdevsolutions.help
+      http:
+        paths:
+          # Frontend files (root and all frontend paths)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
