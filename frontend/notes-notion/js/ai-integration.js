@@ -192,11 +192,17 @@ const AIIntegration = (function() {
             
             const prompt = actionPrompts[action] || `${action}: ${text}`;
             const result = await API.generate(prompt, model);
+            // Extract string response - handle various response formats
+            let responseText = result;
+            if (result && typeof result === 'object') {
+                responseText = result.response || result.text || result.content || JSON.stringify(result);
+            }
+            responseText = String(responseText || '');
             
             // Replace selected text
             const range = selection.getRangeAt(0);
             range.deleteContents();
-            range.insertNode(document.createTextNode(result));
+            range.insertNode(document.createTextNode(responseText));
             
             // Trigger input event for save
             const block = range.commonAncestorContainer.closest?.('.block');

@@ -938,8 +938,13 @@ const Blocks = (function() {
                     const page = window.Editor?.getCurrentPage?.();
                     const model = content.model || page?.defaultModel || DEFAULT_MODEL;
                     
-                    const result = await API.generate(content.prompt, 'text', model);
-                    content.result = result;
+                    const result = await API.generate(content.prompt, model);
+                    // Extract string response - handle various response formats
+                    let responseText = result;
+                    if (result && typeof result === 'object') {
+                        responseText = result.response || result.text || result.content || JSON.stringify(result);
+                    }
+                    content.result = String(responseText || '');
                     content.model = model;
                     
                     // Re-render with result
@@ -1039,8 +1044,13 @@ const Blocks = (function() {
                 wrapper.appendChild(loading);
                 
                 try {
-                    const result = await API.generate(prompt, 'text', selectedModel);
-                    block.content.result = result;
+                    const result = await API.generate(prompt, selectedModel);
+                    // Extract string response - handle various response formats
+                    let responseText = result;
+                    if (result && typeof result === 'object') {
+                        responseText = result.response || result.text || result.content || JSON.stringify(result);
+                    }
+                    block.content.result = String(responseText || '');
                     block.content.model = selectedModel;
                     
                     // Re-render with result
@@ -1132,7 +1142,11 @@ const Blocks = (function() {
      * Format content with inline formatting
      */
     function formatContent(text, formatting = {}) {
-        if (!text) return '';
+        // Handle non-string inputs
+        if (typeof text !== 'string') {
+            if (text === null || text === undefined) return '';
+            text = String(text);
+        }
         
         // Escape HTML
         let html = text
