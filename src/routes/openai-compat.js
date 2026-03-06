@@ -45,7 +45,10 @@ router.post('/chat/completions', async (req, res, next) => {
             session_id, // KimiBuilt extension
         } = req.body;
 
+        console.log(`[Chat] Request: model=${model}, stream=${stream}, messages=${messages?.length}`);
+
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            console.log('[Chat] Error: No messages provided');
             return res.status(400).json({
                 error: {
                     message: 'messages is required and must be an array',
@@ -185,6 +188,8 @@ router.post('/chat/completions', async (req, res, next) => {
             });
         }
     } catch (err) {
+        console.error('[Chat] Error:', err.message);
+        console.error('[Chat] Stack:', err.stack);
         next(err);
     }
 });

@@ -101,12 +101,20 @@ async function createResponse({
         params.instructions = instructions;
     }
 
-    if (stream) {
-        params.stream = true;
-        return openai.responses.create(params);
-    }
+    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, inputLength=${inputArray.length}`);
 
-    return openai.responses.create(params);
+    try {
+        if (stream) {
+            params.stream = true;
+            return await openai.responses.create(params);
+        }
+        return await openai.responses.create(params);
+    } catch (error) {
+        console.error('[OpenAI] Error creating response:', error.message);
+        console.error('[OpenAI] Error type:', error.type);
+        console.error('[OpenAI] Error code:', error.code);
+        throw error;
+    }
 }
 
 /**
