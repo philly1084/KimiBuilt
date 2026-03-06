@@ -51,7 +51,7 @@ class OpenAICanvasAPI {
         // Use fetch if SDK not available
         if (!this.client) {
             try {
-                const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+                const response = await fetch(`${this.baseURL}/chat/completions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(params),
@@ -114,7 +114,7 @@ class OpenAICanvasAPI {
         // Use fetch if SDK not available
         if (!this.client) {
             try {
-                const response = await fetch(`${this.baseUrl}/v1/images/generations`, {
+                const response = await fetch(`${this.baseURL}/images/generations`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(params),
@@ -151,7 +151,7 @@ class OpenAICanvasAPI {
         // Use fetch if SDK not available
         if (!this.client) {
             try {
-                const response = await fetch(`${this.baseUrl}/v1/models`);
+                const response = await fetch(`${this.baseURL}/models`);
                 if (response.ok) {
                     const data = await response.json();
                     return (data.data || []).map(m => ({

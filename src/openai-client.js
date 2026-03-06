@@ -44,12 +44,13 @@ async function listModels() {
 }
 
 /**
- * Create a response using the OpenAI Response API.
+ * Create a response using the OpenAI Chat Completions API.
  * Supports both streaming and non-streaming modes.
+ * Compatible with n8n-openai-cli-gateway and standard OpenAI-compatible APIs.
  *
  * @param {Object} options
- * @param {string} options.input - The user message or input
- * @param {string} [options.previousResponseId] - Previous response ID for conversation continuity
+ * @param {string|Array} options.input - The user message or input array
+ * @param {string} [options.previousResponseId] - Previous response ID for conversation continuity (unused, kept for compatibility)
  * @param {string[]} [options.contextMessages] - Additional context (e.g. from memory retrieval)
  * @param {string} [options.instructions] - System-level instructions
  * @param {boolean} [options.stream] - Whether to stream the response
@@ -66,54 +67,133 @@ async function createResponse({
 }) {
     const openai = getClient();
 
-    // Build input array: context memories + user message
-    const inputArray = [];
+    // Build messages array for Chat Completions API
+    const messages = [];
+
+    // Add system instructions if provided
+    if (instructions) {
+        messages.push({
+            role: 'system',
+            content: instructions,
+        });
+    }
 
     // Inject retrieved memories as context
     if (contextMessages.length > 0) {
-        inputArray.push({
-            role: 'user',
+        messages.push({
+            role: 'system',
             content: `[Relevant context from memory]\n${contextMessages.join('\n---\n')}`,
         });
     }
 
     // Add the actual user input
     if (typeof input === 'string') {
-        inputArray.push({
+        messages.push({
             role: 'user',
             content: input,
         });
+    } else if (Array.isArray(input)) {
+        // Input is already an array of messages
+        messages.push(...input);
     } else {
-        // Allow pre-structured input arrays
-        inputArray.push(...(Array.isArray(input) ? input : [input]));
+        // Single message object
+        messages.push(input);
     }
 
     const params = {
         model: model || config.openai.model,
-        input: inputArray,
+        messages,
+        stream,
     };
 
-    if (previousResponseId) {
-        params.previous_response_id = previousResponseId;
-    }
-
-    if (instructions) {
-        params.instructions = instructions;
-    }
-
-    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, inputLength=${inputArray.length}`);
+    console.log(`[OpenAI] Creating chat completion: model=${params.model}, stream=${stream}, messages=${messages.length}`);
 
     try {
+        const response = await openai.chat.completions.create(params);
+        
+        // Normalize response format to match what the routes expect
         if (stream) {
-            params.stream = true;
-            return await openai.responses.create(params);
+            // For streaming, return an async iterable that yields normalized events
+            return normalizeStreamResponse(response);
+        } else {
+            // For non-streaming, wrap the response to match expected format
+            return normalizeChatResponse(response);
         }
-        return await openai.responses.create(params);
     } catch (error) {
-        console.error('[OpenAI] Error creating response:', error.message);
+        console.error('[OpenAI] Error creating chat completion:', error.message);
         console.error('[OpenAI] Error type:', error.type);
         console.error('[OpenAI] Error code:', error.code);
         throw error;
+    }
+}
+
+/**
+ * Normalize Chat Completions API response to match the expected format
+ * @param {Object} response - OpenAI chat completion response
+ * @returns {Object} Normalized response
+ */
+function normalizeChatResponse(response) {
+    return {
+        id: response.id,
+        object: 'response',
+        created: response.created,
+        model: response.model,
+        output: [
+            {
+                type: 'message',
+                role: 'assistant',
+                content: [
+                    {
+                        type: 'text',
+                        text: response.choices[0]?.message?.content || '',
+                    },
+                ],
+            },
+        ],
+        session_id: response.session_id,
+    };
+}
+
+/**
+ * Normalize streaming Chat Completions response to yield expected event format
+ * @param {AsyncIterable} stream - OpenAI stream
+ * @returns {AsyncGenerator} Normalized events
+ */
+async function* normalizeStreamResponse(stream) {
+    let responseId = null;
+    let model = null;
+    
+    for await (const chunk of stream) {
+        // Capture metadata from first chunk
+        if (!responseId && chunk.id) {
+            responseId = chunk.id;
+        }
+        if (!model && chunk.model) {
+            model = chunk.model;
+        }
+        
+        const delta = chunk.choices[0]?.delta?.content || '';
+        const finishReason = chunk.choices[0]?.finish_reason;
+        
+        // Yield delta event
+        if (delta) {
+            yield {
+                type: 'response.output_text.delta',
+                delta,
+            };
+        }
+        
+        // Yield completion event
+        if (finishReason) {
+            yield {
+                type: 'response.completed',
+                response: {
+                    id: responseId,
+                    model,
+                    output: [],
+                },
+            };
+        }
     }
 }
 
