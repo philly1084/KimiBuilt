@@ -68,6 +68,7 @@ app.get('/health', async (_req, res) => {
 // ---------------------
 const frontendPath = process.env.FRONTEND_PATH || path.join(__dirname, '../frontend');
 app.use('/cli', express.static(path.join(frontendPath, 'cli')));
+app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli')));
 app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat')));
 app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw')));
 app.use('/notes', express.static(path.join(frontendPath, 'notes-notion')));
@@ -141,6 +142,10 @@ app.get('/', (_req, res) => {
         <a href="/web-chat/" class="card">
             <h3>💬 Web Chat</h3>
             <p>ChatGPT-style interface</p>
+        </a>
+        <a href="/web-cli/" class="card">
+            <h3>⌨️ Web CLI</h3>
+            <p>Terminal-style AI interface</p>
         </a>
         <a href="/canvas/" class="card">
             <h3>🎨 Canvas</h3>

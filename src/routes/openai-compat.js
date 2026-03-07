@@ -46,9 +46,11 @@ router.post('/chat/completions', async (req, res, next) => {
         } = req.body;
 
         console.log(`[Chat] Request: model=${model}, stream=${stream}, messages=${messages?.length}`);
+        console.log(`[Chat] Request body:`, JSON.stringify(req.body, null, 2));
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             console.log('[Chat] Error: No messages provided');
+            console.log(`[Chat] Received body:`, req.body);
             return res.status(400).json({
                 error: {
                     message: 'messages is required and must be an array',

@@ -107,6 +107,7 @@ async function createResponse({
     };
 
     console.log(`[OpenAI] Creating chat completion: model=${params.model}, stream=${stream}, messages=${messages.length}`);
+    console.log(`[OpenAI] Full params:`, JSON.stringify(params, null, 2));
 
     try {
         const response = await openai.chat.completions.create(params);
