@@ -32,8 +32,25 @@ jobs:
       - name: Configure kubeconfig
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "KUBECONFIG secret is empty or not configured"
+            exit 1
+          fi
+
+          if echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config 2>/dev/null; then
+            echo "Decoded base64 kubeconfig secret"
+          else
+            echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+            echo "Using raw kubeconfig secret"
+          fi
+
           chmod 600 ~/.kube/config
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Verify kubeconfig
+        run: |
+          test -s "$HOME/.kube/config"
+          kubectl config current-context
 
       - name: Update deployment image
         env:
