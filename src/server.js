@@ -11,6 +11,7 @@ const { memoryService } = require('./memory/memory-service');
 const { setupWebSocket } = require('./ws/handler');
 const { embedder } = require('./memory/embedder');
 const { vectorStore } = require('./memory/vector-store');
+const { sessionStore } = require('./session-store');
 
 // Routes
 const chatRouter = require('./routes/chat');
@@ -41,6 +42,7 @@ app.get('/health', async (_req, res) => {
         server: 'ok',
         qdrant: 'unknown',
         ollama: 'unknown',
+        postgres: 'unknown',
     };
 
     try {
@@ -55,7 +57,17 @@ app.get('/health', async (_req, res) => {
         checks.ollama = 'down';
     }
 
-    const allOk = Object.values(checks).every((v) => v === 'ok');
+    if (!sessionStore.isPersistent()) {
+        checks.postgres = 'disabled';
+    } else {
+        try {
+            checks.postgres = (await sessionStore.healthCheck()) ? 'ok' : 'down';
+        } catch {
+            checks.postgres = 'down';
+        }
+    }
+
+    const allOk = Object.values(checks).every((v) => v === 'ok' || v === 'disabled');
     res.status(allOk ? 200 : 503).json({
         status: allOk ? 'healthy' : 'degraded',
         components: checks,
@@ -212,6 +224,10 @@ setupWebSocket(wss);
 // ---------------------
 async function start() {
     try {
+        console.log('[Boot] Initializing session store...');
+        await sessionStore.initialize();
+        console.log('[Boot] Session store ready');
+
         // Initialize memory service (creates Qdrant collection if needed)
         console.log('[Boot] Initializing memory service...');
         await memoryService.initialize();

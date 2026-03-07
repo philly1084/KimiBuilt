@@ -66,7 +66,16 @@ fi
 echo -e "${YELLOW}Applying ConfigMap...${NC}"
 kubectl apply -f configmap.yaml
 
+if ! kubectl get secret kimibuilt-secrets -n "$NAMESPACE" -o jsonpath='{.data.POSTGRES_PASSWORD}' | grep -q .; then
+    echo -e "${RED}Error: kimibuilt-secrets is missing POSTGRES_PASSWORD${NC}"
+    echo -e "${YELLOW}Update the secret before deploying Postgres-backed sessions${NC}"
+    exit 1
+fi
+
 # Deploy dependencies
+echo -e "${YELLOW}Deploying Postgres...${NC}"
+kubectl apply -f postgres-deployment.yaml
+
 echo -e "${YELLOW}Deploying Qdrant...${NC}"
 kubectl apply -f qdrant-deployment.yaml
 
@@ -77,6 +86,7 @@ kubectl apply -f ollama-deployment.yaml
 echo -e "${YELLOW}Waiting for dependencies...${NC}"
 echo -e "${BLUE}This may take a few minutes...${NC}"
 
+kubectl wait --for=condition=ready pod -l app=postgres -n "$NAMESPACE" --timeout=120s || true
 kubectl wait --for=condition=ready pod -l app=qdrant -n "$NAMESPACE" --timeout=120s || true
 kubectl wait --for=condition=ready pod -l app=ollama -n "$NAMESPACE" --timeout=120s || true
 

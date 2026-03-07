@@ -8,46 +8,62 @@ const router = Router();
  * POST /api/sessions
  * Create a new session.
  */
-router.post('/', (req, res) => {
+router.post('/', async (req, res, next) => {
+    try {
     const { metadata } = req.body || {};
-    const session = sessionStore.create(metadata);
+    const session = await sessionStore.create(metadata);
     res.status(201).json(session);
+    } catch (err) {
+        next(err);
+    }
 });
 
 /**
  * GET /api/sessions
  * List all sessions.
  */
-router.get('/', (_req, res) => {
-    const sessions = sessionStore.list();
-    res.json({ sessions, count: sessions.length });
+router.get('/', async (_req, res, next) => {
+    try {
+        const sessions = await sessionStore.list();
+        res.json({ sessions, count: sessions.length });
+    } catch (err) {
+        next(err);
+    }
 });
 
 /**
  * GET /api/sessions/:id
  * Get a session by ID.
  */
-router.get('/:id', (req, res) => {
-    const session = sessionStore.get(req.params.id);
-    if (!session) {
-        return res.status(404).json({ error: { message: 'Session not found' } });
+router.get('/:id', async (req, res, next) => {
+    try {
+        const session = await sessionStore.get(req.params.id);
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
+        res.json(session);
+    } catch (err) {
+        next(err);
     }
-    res.json(session);
 });
 
 /**
  * PATCH /api/sessions/:id
  * Update session metadata such as saved agent configuration.
  */
-router.patch('/:id', (req, res) => {
-    const { metadata } = req.body || {};
-    const session = sessionStore.update(req.params.id, { metadata: metadata || {} });
+router.patch('/:id', async (req, res, next) => {
+    try {
+        const { metadata } = req.body || {};
+        const session = await sessionStore.update(req.params.id, { metadata: metadata || {} });
 
-    if (!session) {
-        return res.status(404).json({ error: { message: 'Session not found' } });
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
+
+        res.json(session);
+    } catch (err) {
+        next(err);
     }
-
-    res.json(session);
 });
 
 /**
@@ -57,7 +73,7 @@ router.patch('/:id', (req, res) => {
 router.delete('/:id', async (req, res, next) => {
     try {
         const { id } = req.params;
-        const session = sessionStore.get(id);
+        const session = await sessionStore.get(id);
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -66,7 +82,7 @@ router.delete('/:id', async (req, res, next) => {
         await memoryService.forget(id);
 
         // Remove from session store
-        sessionStore.delete(id);
+        await sessionStore.delete(id);
 
         res.status(204).end();
     } catch (err) {

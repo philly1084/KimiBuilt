@@ -33,12 +33,17 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         let { sessionId } = req.body;
 
         // Auto-create session for image generation
+        let session;
         if (!sessionId) {
-            const session = sessionStore.create({ mode: 'image' });
+            session = await sessionStore.create({ mode: 'image' });
             sessionId = session.id;
+        } else {
+            session = await sessionStore.getOrCreate(sessionId, { mode: 'image' });
         }
 
-        const session = sessionStore.get(sessionId);
+        if (!session) {
+            session = await sessionStore.get(sessionId);
+        }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -55,7 +60,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         });
 
         // Store in session for history
-        sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
+        await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
 
         res.json({
             sessionId,

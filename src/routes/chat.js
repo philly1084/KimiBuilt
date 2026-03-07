@@ -25,12 +25,17 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         let { sessionId } = req.body;
 
         // Auto-create session if not provided
+        let session;
         if (!sessionId) {
-            const session = sessionStore.create({ mode: 'chat' });
+            session = await sessionStore.create({ mode: 'chat' });
             sessionId = session.id;
+        } else {
+            session = await sessionStore.getOrCreate(sessionId, { mode: 'chat' });
         }
 
-        const session = sessionStore.get(sessionId);
+        if (!session) {
+            session = await sessionStore.get(sessionId);
+        }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -66,7 +71,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
-                    sessionStore.recordResponse(sessionId, event.response.id);
+                    await sessionStore.recordResponse(sessionId, event.response.id);
                     // Store the assistant response in memory
                     memoryService.rememberResponse(sessionId, fullText);
                     res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id })}\n\n`);
@@ -88,7 +93,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 model,
             });
 
-            sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(sessionId, response.id);
 
             const outputText = response.output
                 .filter((o) => o.type === 'message')

@@ -26,12 +26,17 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         let { sessionId } = req.body;
 
         // Auto-create session
+        let session;
         if (!sessionId) {
-            const session = sessionStore.create({ mode: 'notation', helperMode });
+            session = await sessionStore.create({ mode: 'notation', helperMode });
             sessionId = session.id;
+        } else {
+            session = await sessionStore.getOrCreate(sessionId, { mode: 'notation', helperMode });
         }
 
-        const session = sessionStore.get(sessionId);
+        if (!session) {
+            session = await sessionStore.get(sessionId);
+        }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -54,7 +59,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             model,
         });
 
-        sessionStore.recordResponse(sessionId, response.id);
+        await sessionStore.recordResponse(sessionId, response.id);
 
         const outputText = response.output
             .filter((o) => o.type === 'message')

@@ -33,13 +33,18 @@ function setupWebSocket(wss) {
                 let { sessionId } = msg;
 
                 // Auto-create session
+                let session;
                 if (!sessionId) {
-                    const session = sessionStore.create({ mode: type, transport: 'ws' });
+                    session = await sessionStore.create({ mode: type, transport: 'ws' });
                     sessionId = session.id;
                     ws.send(JSON.stringify({ type: 'session_created', sessionId }));
+                } else {
+                    session = await sessionStore.getOrCreate(sessionId, { mode: type, transport: 'ws' });
                 }
 
-                const session = sessionStore.get(sessionId);
+                if (!session) {
+                    session = await sessionStore.get(sessionId);
+                }
                 if (!session) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
                     return;
@@ -103,7 +108,7 @@ async function handleChat(ws, session, payload) {
         }
 
         if (event.type === 'response.completed') {
-            sessionStore.recordResponse(session.id, event.response.id);
+            await sessionStore.recordResponse(session.id, event.response.id);
             memoryService.rememberResponse(session.id, fullText);
             ws.send(JSON.stringify({
                 type: 'done',
@@ -141,7 +146,7 @@ Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [
         model,
     });
 
-    sessionStore.recordResponse(session.id, response.id);
+    await sessionStore.recordResponse(session.id, response.id);
 
     const outputText = response.output
         .filter((o) => o.type === 'message')
@@ -187,7 +192,7 @@ ${context ? `Context: ${context}` : ''}`,
         model,
     });
 
-    sessionStore.recordResponse(session.id, response.id);
+    await sessionStore.recordResponse(session.id, response.id);
 
     const outputText = response.output
         .filter((o) => o.type === 'message')

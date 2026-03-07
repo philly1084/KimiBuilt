@@ -86,12 +86,17 @@ router.post('/chat/completions', async (req, res, next) => {
 
         // Get or create session
         let sessionId = session_id;
+        let session;
         if (!sessionId) {
-            const session = sessionStore.create({ mode: 'chat' });
+            session = await sessionStore.create({ mode: 'chat' });
             sessionId = session.id;
+        } else {
+            session = await sessionStore.getOrCreate(sessionId, { mode: 'chat' });
         }
 
-        const session = sessionStore.get(sessionId);
+        if (!session) {
+            session = await sessionStore.get(sessionId);
+        }
         if (!session) {
             return res.status(404).json({
                 error: {
@@ -153,7 +158,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
-                    sessionStore.recordResponse(sessionId, event.response.id);
+                    await sessionStore.recordResponse(sessionId, event.response.id);
                     memoryService.rememberResponse(sessionId, fullText);
                     
                     // Send final chunk
@@ -185,7 +190,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 model,
             });
 
-            sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(sessionId, response.id);
 
             const outputText = response.output
                 .filter((o) => o.type === 'message')
@@ -239,12 +244,17 @@ router.post('/responses', async (req, res, next) => {
 
         // Get or create session
         let sessionId = session_id;
+        let session;
         if (!sessionId) {
-            const session = sessionStore.create({ mode: 'chat' });
+            session = await sessionStore.create({ mode: 'chat' });
             sessionId = session.id;
+        } else {
+            session = await sessionStore.getOrCreate(sessionId, { mode: 'chat' });
         }
 
-        const session = sessionStore.get(sessionId);
+        if (!session) {
+            session = await sessionStore.get(sessionId);
+        }
         if (!session) {
             return res.status(404).json({
                 error: {
@@ -286,7 +296,7 @@ router.post('/responses', async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
-                    sessionStore.recordResponse(sessionId, event.response.id);
+                    await sessionStore.recordResponse(sessionId, event.response.id);
                     memoryService.rememberResponse(sessionId, fullText);
                     res.write(`data: ${JSON.stringify({
                         type: 'response.completed',
@@ -306,7 +316,7 @@ router.post('/responses', async (req, res, next) => {
                 model,
             });
 
-            sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(sessionId, response.id);
 
             const outputText = response.output
                 .filter((o) => o.type === 'message')
@@ -343,12 +353,17 @@ router.post('/images/generations', async (req, res, next) => {
 
         // Get or create session
         let sessionId = session_id;
+        let session;
         if (!sessionId) {
-            const session = sessionStore.create({ mode: 'image' });
+            session = await sessionStore.create({ mode: 'image' });
             sessionId = session.id;
+        } else {
+            session = await sessionStore.getOrCreate(sessionId, { mode: 'image' });
         }
 
-        const session = sessionStore.get(sessionId);
+        if (!session) {
+            session = await sessionStore.get(sessionId);
+        }
         if (!session) {
             return res.status(404).json({
                 error: {
@@ -367,7 +382,7 @@ router.post('/images/generations', async (req, res, next) => {
             n: Math.min(n, 10),
         });
 
-        sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
+        await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
 
         res.json({
             ...response,

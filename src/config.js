@@ -1,5 +1,4 @@
 require('dotenv').config();
-const path = require('path');
 
 const config = {
     // Server
@@ -26,8 +25,14 @@ const config = {
         vectorSize: 768, // nomic-embed-text output dimensions
     },
 
-    sessions: {
-        filePath: process.env.SESSION_STORE_FILE || path.join(process.cwd(), 'data', 'sessions.json'),
+    postgres: {
+        url: process.env.POSTGRES_URL || process.env.DATABASE_URL || null,
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT, 10) || 5432,
+        database: process.env.POSTGRES_DB || 'kimibuilt',
+        user: process.env.POSTGRES_USER || 'kimibuilt',
+        password: process.env.POSTGRES_PASSWORD || null,
+        ssl: process.env.POSTGRES_SSL === 'true',
     },
 };
 
