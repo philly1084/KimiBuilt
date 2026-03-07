@@ -2,11 +2,12 @@ name: Deploy to k3s
 
 on:
   workflow_run:
-    workflows: ["Build and Push Docker Image"]
+    workflows: ["Build, Package, and Publish"]
     types:
       - completed
     branches:
       - master
+      - main
   workflow_dispatch:
 
 env:
@@ -17,7 +18,7 @@ env:
 jobs:
   deploy-to-k3s:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     
     steps:
       - name: Checkout repository
@@ -35,9 +36,11 @@ jobs:
           chmod 600 ~/.kube/config
 
       - name: Update deployment image
+        env:
+          IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && format('sha-{0}', github.sha) || format('sha-{0}', github.event.workflow_run.head_sha) }}
         run: |
           # Update the image tag in deployment
-          sed -i "s|image: kimibuilt:latest|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}|g" k8s/backend-deployment.yaml
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}|g" k8s/backend-deployment.yaml
           
           # Verify the change
           grep "image:" k8s/backend-deployment.yaml
