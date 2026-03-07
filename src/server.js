@@ -113,16 +113,31 @@ app.get('/', (_req, res) => {
             margin-top: 0;
             color: #3b82f6;
         }
+        .cli-info {
+            background: #1f1f1f;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .cli-info code {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .cli-info pre {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
     </style>
 </head>
 <body>
     <h1>🚀 KimiBuilt AI Platform</h1>
     <p>Choose your interface:</p>
     <div class="grid">
-        <a href="/cli/README.md" class="card">
-            <h3>💻 CLI</h3>
-            <p>Terminal-based interface</p>
-        </a>
         <a href="/web-chat/" class="card">
             <h3>💬 Web Chat</h3>
             <p>ChatGPT-style interface</p>
@@ -135,6 +150,15 @@ app.get('/', (_req, res) => {
             <h3>📝 Notes</h3>
             <p>Notion-style editor</p>
         </a>
+    </div>
+    <div class="cli-info">
+        <h3>💻 CLI (Command Line Interface)</h3>
+        <p>The CLI is a Node.js application that runs in your terminal:</p>
+        <pre><code># Clone and run the CLI
+cd /mnt/c/Users/phill/KimiBuilt/frontend/cli
+npm install
+node cli.js</code></pre>
+        <p>Or <a href="/cli/README.md" style="color: #3b82f6;">view CLI documentation</a></p>
     </div>
 </body>
 </html>
@@ -158,9 +182,6 @@ app.use('/v1', openaiCompatRouter);
 // Static Frontend Serving
 // ---------------------
 app.use(express.static(path.join(__dirname, '../frontend')));
-app.get('/', (req, res) => {
-    res.redirect('/web-chat/');
-});
 
 // ---------------------
 // 404 handler
