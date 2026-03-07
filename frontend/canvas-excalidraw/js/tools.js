@@ -843,7 +843,7 @@ class ToolManager {
         window.aiAssistant?.setMode('image');
         
         // Open AI panel
-        window.aiAssistant?.togglePanel();
+        window.aiAssistant?.showPanel();
         
         // Reset tool to selection
         this.setTool('selection');

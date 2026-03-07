@@ -423,7 +423,13 @@
         <div class="ai-panel-content">
             <!-- Mode Toggle -->
             <div class="ai-mode-toggle">
-                <button class="ai-mode-btn active" id="diagramModeBtn" data-mode="diagram">
+                <button class="ai-mode-btn active" id="chatModeBtn" data-mode="chat">
+                    <svg viewBox="0 0 24 24" width="16" height="16" style="margin-right: 6px; vertical-align: middle;">
+                        <path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/>
+                    </svg>
+                    Agent Chat
+                </button>
+                <button class="ai-mode-btn" id="diagramModeBtn" data-mode="diagram">
                     <svg viewBox="0 0 24 24" width="16" height="16" style="margin-right: 6px; vertical-align: middle;">
                         <path fill="currentColor" d="M3 3h18v18H3V3zm16 16V5H5v14h14zM7 7h4v4H7V7zm0 6h4v4H7v-4zm6-6h4v4h-4V7zm0 6h4v4h-4v-4z"/>
                     </svg>
@@ -437,7 +443,13 @@
                 </button>
             </div>
             
-            <p class="ai-description">Describe what you'd like me to draw, and I'll generate a diagram for you.</p>
+            <p class="ai-description">Chat with the canvas agent about the current board, then ask it to make changes.</p>
+
+            <div class="ai-conversation" id="aiConversation">
+                <div class="ai-conversation-empty" id="aiConversationEmpty">
+                    Start a chat with the canvas agent or ask it to generate something directly on the board.
+                </div>
+            </div>
             
             <!-- Diagram Options -->
             <div id="diagramOptions" class="ai-options">
@@ -487,12 +499,12 @@
                 </div>
             </div>
             
-            <textarea id="aiInput" placeholder="e.g., 'Create a flowchart showing user authentication process' or 'Draw a mind map about machine learning'"></textarea>
+            <textarea id="aiInput" placeholder="e.g., 'What is missing from this flow?' or 'Suggest a cleaner layout for these boxes'"></textarea>
             <button id="aiGenerateBtn" class="ai-generate-btn">
                 <svg viewBox="0 0 24 24" width="16" height="16">
                     <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
                 </svg>
-                Generate
+                Send
             </button>
             <div class="ai-suggestions" id="aiSuggestions">
                 <h4>Suggestions</h4>

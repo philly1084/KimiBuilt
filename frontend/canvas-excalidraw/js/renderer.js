@@ -95,18 +95,16 @@ class Renderer {
         const y = element.y - element.height / 2;
         const w = element.width;
         const h = element.height;
-        
-        const radius = element.edgeType === 'round' ? Math.min(w, h) * 0.1 : 0;
-        
-        if (radius > 0) {
-            // Draw rounded rectangle using path
-            const path = this.createRoundedRectPath(x, y, w, h, radius);
-            const drawable = rc.path(path, options);
-            this.renderDrawable(ctx, rc, drawable);
-        } else {
-            const drawable = rc.rectangle(x, y, w, h, options);
-            this.renderDrawable(ctx, rc, drawable);
+
+        ctx.save();
+        this.applyStrokeStyle(ctx, element);
+        this.applyFillStyle(ctx, element);
+        this.beginRoundedRect(ctx, x, y, w, h, element.edgeType === 'round' ? Math.min(w, h) * 0.1 : 0);
+        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+            ctx.fill();
         }
+        ctx.stroke();
+        ctx.restore();
         
         // Draw text if present
         if (element.text) {
@@ -131,10 +129,21 @@ class Renderer {
         const cy = element.y;
         const hw = element.width / 2;
         const hh = element.height / 2;
-        
-        const path = `M ${cx} ${cy - hh} L ${cx + hw} ${cy} L ${cx} ${cy + hh} L ${cx - hw} ${cy} Z`;
-        const drawable = rc.path(path, options);
-        this.renderDrawable(ctx, rc, drawable);
+
+        ctx.save();
+        this.applyStrokeStyle(ctx, element);
+        this.applyFillStyle(ctx, element);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - hh);
+        ctx.lineTo(cx + hw, cy);
+        ctx.lineTo(cx, cy + hh);
+        ctx.lineTo(cx - hw, cy);
+        ctx.closePath();
+        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+            ctx.fill();
+        }
+        ctx.stroke();
+        ctx.restore();
         
         // Draw text if present
         if (element.text) {
@@ -145,11 +154,17 @@ class Renderer {
     drawEllipse(ctx, rc, element, options) {
         const cx = element.x;
         const cy = element.y;
-        const rx = element.width / 2;
-        const ry = element.height / 2;
-        
-        const drawable = rc.ellipse(cx, cy, element.width, element.height, options);
-        this.renderDrawable(ctx, rc, drawable);
+
+        ctx.save();
+        this.applyStrokeStyle(ctx, element);
+        this.applyFillStyle(ctx, element);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, element.width / 2, element.height / 2, 0, 0, Math.PI * 2);
+        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+            ctx.fill();
+        }
+        ctx.stroke();
+        ctx.restore();
         
         // Draw text if present
         if (element.text) {
@@ -162,9 +177,14 @@ class Renderer {
         
         const p1 = element.points[0];
         const p2 = element.points[1];
-        
-        const drawable = rc.line(p1.x, p1.y, p2.x, p2.y, options);
-        this.renderDrawable(ctx, rc, drawable);
+
+        ctx.save();
+        this.applyStrokeStyle(ctx, element);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+        ctx.restore();
     }
     
     drawArrow(ctx, rc, element, options) {
@@ -174,8 +194,12 @@ class Renderer {
         const p2 = element.points[1];
         
         // Draw line
-        const lineDrawable = rc.line(p1.x, p1.y, p2.x, p2.y, options);
-        this.renderDrawable(ctx, rc, lineDrawable);
+        ctx.save();
+        this.applyStrokeStyle(ctx, element);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
         
         // Draw arrowhead
         const arrowSize = Math.max(10, (element.strokeWidth || 2) * 4);
@@ -189,14 +213,14 @@ class Renderer {
         const ax2 = p2.x + Math.cos(arrowAngle2) * arrowSize;
         const ay2 = p2.y + Math.sin(arrowAngle2) * arrowSize;
         
-        const arrowPath = `M ${ax1} ${ay1} L ${p2.x} ${p2.y} L ${ax2} ${ay2}`;
-        const arrowOptions = { 
-            ...options, 
-            fill: element.strokeColor || '#000000',
-            fillStyle: 'solid'
-        };
-        const arrowDrawable = rc.path(arrowPath, arrowOptions);
-        this.renderDrawable(ctx, rc, arrowDrawable);
+        ctx.fillStyle = element.strokeColor || '#000000';
+        ctx.beginPath();
+        ctx.moveTo(ax1, ay1);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(ax2, ay2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
     }
     
     drawFreedraw(ctx, element) {
@@ -553,13 +577,45 @@ class Renderer {
         ctx.restore();
     }
     
-    // Modern rough.js rendering helper
-    renderDrawable(ctx, rc, drawable) {
-        // Rough.js returns drawables that can be drawn to a canvas
-        // Use the generator's draw method or toCanvas
-        if (rc.draw) {
-            rc.draw(drawable);
+    beginRoundedRect(ctx, x, y, width, height, radius) {
+        if (!radius) {
+            ctx.beginPath();
+            ctx.rect(x, y, width, height);
+            return;
         }
+
+        const safeRadius = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + safeRadius, y);
+        ctx.lineTo(x + width - safeRadius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+        ctx.lineTo(x + width, y + height - safeRadius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+        ctx.lineTo(x + safeRadius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+        ctx.lineTo(x, y + safeRadius);
+        ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+        ctx.closePath();
+    }
+
+    applyStrokeStyle(ctx, element) {
+        ctx.strokeStyle = element.strokeColor || '#000000';
+        ctx.lineWidth = element.strokeWidth || 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.setLineDash([]);
+
+        if (element.strokeStyle === 'dashed') {
+            ctx.setLineDash([8, 8]);
+        } else if (element.strokeStyle === 'dotted') {
+            ctx.setLineDash([2, 6]);
+        }
+    }
+
+    applyFillStyle(ctx, element) {
+        ctx.fillStyle = element.backgroundColor && element.backgroundColor !== 'transparent'
+            ? element.backgroundColor
+            : 'transparent';
     }
     
     // Update selection box UI

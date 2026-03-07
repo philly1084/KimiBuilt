@@ -9,10 +9,12 @@ class AIAssistant {
         this.input = document.getElementById('aiInput');
         this.generateBtn = document.getElementById('aiGenerateBtn');
         this.status = document.getElementById('aiStatus');
+        this.conversation = document.getElementById('aiConversation');
+        this.conversationEmpty = document.getElementById('aiConversationEmpty');
         this.isGenerating = false;
         
-        // Mode: 'diagram' or 'image'
-        this.mode = 'diagram';
+        // Mode: 'chat' | 'diagram' | 'image'
+        this.mode = 'chat';
         
         // Available models
         this.models = [];
@@ -28,6 +30,8 @@ class AIAssistant {
         
         // Image click position for placing generated images
         this.pendingImagePosition = null;
+
+        this.chatHistory = [];
         
         this.init();
     }
@@ -65,6 +69,7 @@ class AIAssistant {
         
         // Fetch models on init
         this.fetchModels();
+        this.setMode('chat');
     }
     
     async fetchModels() {
@@ -116,6 +121,13 @@ class AIAssistant {
             this.input?.focus();
         }
     }
+
+    showPanel() {
+        if (!this.panel?.classList.contains('active')) {
+            this.panel?.classList.add('active');
+        }
+        this.input?.focus();
+    }
     
     hidePanel() {
         this.panel?.classList.remove('active');
@@ -126,12 +138,29 @@ class AIAssistant {
         
         // Update UI
         const diagramModeBtn = document.getElementById('diagramModeBtn');
+        const chatModeBtn = document.getElementById('chatModeBtn');
         const imageModeBtn = document.getElementById('imageModeBtn');
         const diagramOptions = document.getElementById('diagramOptions');
         const imageOptions = document.getElementById('imageOptions');
         const aiDescription = document.querySelector('.ai-description');
         
-        if (mode === 'diagram') {
+        if (mode === 'chat') {
+            chatModeBtn?.classList.add('active');
+            diagramModeBtn?.classList.remove('active');
+            imageModeBtn?.classList.remove('active');
+            diagramOptions?.classList.remove('hidden');
+            imageOptions?.classList.add('hidden');
+            if (aiDescription) {
+                aiDescription.textContent = 'Chat with the canvas agent about the current board, then ask it to make changes.';
+            }
+            if (this.input) {
+                this.input.placeholder = "e.g., 'What is missing from this flow?' or 'Suggest a cleaner layout for these boxes'";
+            }
+            if (this.generateBtn) {
+                this.generateBtn.lastChild.textContent = 'Send';
+            }
+        } else if (mode === 'diagram') {
+            chatModeBtn?.classList.remove('active');
             diagramModeBtn?.classList.add('active');
             imageModeBtn?.classList.remove('active');
             diagramOptions?.classList.remove('hidden');
@@ -142,7 +171,11 @@ class AIAssistant {
             if (this.input) {
                 this.input.placeholder = "e.g., 'Create a flowchart showing user authentication process' or 'Draw a mind map about machine learning'";
             }
+            if (this.generateBtn) {
+                this.generateBtn.lastChild.textContent = 'Generate';
+            }
         } else {
+            chatModeBtn?.classList.remove('active');
             diagramModeBtn?.classList.remove('active');
             imageModeBtn?.classList.add('active');
             diagramOptions?.classList.add('hidden');
@@ -153,6 +186,9 @@ class AIAssistant {
             if (this.input) {
                 this.input.placeholder = "e.g., 'A cute robot illustration, flat design' or 'Abstract geometric pattern in blue tones'";
             }
+            if (this.generateBtn) {
+                this.generateBtn.lastChild.textContent = 'Generate';
+            }
         }
     }
     
@@ -160,10 +196,40 @@ class AIAssistant {
         const prompt = this.input?.value.trim();
         if (!prompt || this.isGenerating) return;
         
-        if (this.mode === 'diagram') {
+        if (this.mode === 'chat') {
+            await this.sendAgentMessage(prompt);
+        } else if (this.mode === 'diagram') {
             await this.generateDiagram(prompt);
         } else {
             await this.generateImage(prompt);
+        }
+    }
+
+    async sendAgentMessage(prompt) {
+        this.isGenerating = true;
+        this.showStatus('Thinking...', 'loading');
+        this.generateBtn.disabled = true;
+
+        this.chatHistory.push({ role: 'user', content: prompt });
+        this.trimChatHistory();
+        this.addConversationMessage('user', prompt);
+
+        try {
+            const messages = this.buildChatMessages();
+            const response = await window.apiManager.chat(messages);
+            const content = response.content || 'No response received.';
+            this.chatHistory.push({ role: 'assistant', content });
+            this.trimChatHistory();
+            this.addConversationMessage('assistant', content);
+            this.showStatus('Agent response ready.', 'success');
+            this.input.value = '';
+        } catch (error) {
+            console.error('Agent chat error:', error);
+            this.addConversationMessage('assistant', `Error: ${error.message}`);
+            this.showStatus('Error talking to agent.', 'error');
+        } finally {
+            this.isGenerating = false;
+            this.generateBtn.disabled = false;
         }
     }
     
@@ -175,13 +241,16 @@ class AIAssistant {
         try {
             // Get current canvas state for context
             const existingContent = JSON.stringify(window.infiniteCanvas.elements);
+            this.addConversationMessage('user', prompt);
             
             // Use OpenAI SDK via apiManager
             const response = await window.apiManager.generateDiagram(prompt, existingContent);
             
             if (response.content) {
                 this.processGeneratedContent(response);
+                this.addConversationMessage('assistant', 'Applied a new diagram to the canvas.');
                 this.showStatus('Diagram generated successfully!', 'success');
+                this.input.value = '';
             } else {
                 this.showStatus('No diagram generated. Try a different prompt.', 'error');
             }
@@ -200,6 +269,7 @@ class AIAssistant {
         this.generateBtn.disabled = true;
         
         try {
+            this.addConversationMessage('user', prompt);
             // Use OpenAI SDK via apiManager
             const response = await window.apiManager.generateImage({
                 prompt: prompt,
@@ -211,7 +281,9 @@ class AIAssistant {
             
             if (response.data && response.data.length > 0) {
                 await this.addImageToCanvas(response.data[0]);
+                this.addConversationMessage('assistant', 'Generated an image and placed it on the canvas.');
                 this.showStatus('Image generated successfully!', 'success');
+                this.input.value = '';
                 
                 // Show revised prompt if available
                 if (response.data[0].revised_prompt) {
@@ -505,6 +577,57 @@ class AIAssistant {
                 this.status.className = 'ai-status';
             }, 3000);
         }
+    }
+
+    buildChatMessages(prompt) {
+        const canvasContext = JSON.stringify(
+            window.infiniteCanvas?.elements?.slice(-30).map((element) => ({
+                id: element.id,
+                type: element.type,
+                text: element.text || '',
+                name: element.name || '',
+                x: element.x,
+                y: element.y,
+                width: element.width,
+                height: element.height,
+            })) || []
+        );
+
+        return [
+            {
+                role: 'system',
+                content: 'You are a canvas agent helping the user reason about and improve a visual whiteboard. Be concise, concrete, and reference the current canvas state when useful. If the user asks you to change the canvas, explain what you would change so they can then switch to diagram or image generation.',
+            },
+            {
+                role: 'system',
+                content: `Current canvas snapshot: ${canvasContext}`,
+            },
+            ...this.chatHistory,
+        ];
+    }
+
+    trimChatHistory() {
+        if (this.chatHistory.length > 12) {
+            this.chatHistory = this.chatHistory.slice(-12);
+        }
+    }
+
+    addConversationMessage(role, content) {
+        if (!this.conversation) return;
+
+        if (this.conversationEmpty) {
+            this.conversationEmpty.style.display = 'none';
+        }
+
+        const message = document.createElement('div');
+        message.className = `ai-message ${role}`;
+        message.innerHTML = `
+            <div class="ai-message-role">${role === 'user' ? 'You' : 'Agent'}</div>
+            <div class="ai-message-bubble"></div>
+        `;
+        message.querySelector('.ai-message-bubble').textContent = content;
+        this.conversation.appendChild(message);
+        this.conversation.scrollTop = this.conversation.scrollHeight;
     }
 }
 

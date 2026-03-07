@@ -3,6 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
+const { buildSessionInstructions } = require('../session-instructions');
 
 const router = Router();
 
@@ -39,7 +40,10 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         const contextMessages = await memoryService.process(sessionId, notation);
 
         // Build notation-specific instructions
-        const instructions = buildNotationInstructions(helperMode, context);
+        const instructions = buildSessionInstructions(
+            session,
+            buildNotationInstructions(helperMode, context),
+        );
 
         const response = await createResponse({
             input: notation,

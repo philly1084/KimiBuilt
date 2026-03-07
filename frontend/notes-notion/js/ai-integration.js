@@ -7,6 +7,18 @@ const AIIntegration = (function() {
     let selectionToolbar = null;
     let availableModels = [];
     let currentModel = null;
+
+    function getResponseText(result) {
+        if (typeof result === 'string') {
+            return result;
+        }
+
+        if (result && typeof result === 'object') {
+            return String(result.response || result.text || result.content || '');
+        }
+
+        return '';
+    }
     
     /**
      * Initialize AI integration
@@ -192,12 +204,7 @@ const AIIntegration = (function() {
             
             const prompt = actionPrompts[action] || `${action}: ${text}`;
             const result = await API.generate(prompt, model);
-            // Extract string response - handle various response formats
-            let responseText = result;
-            if (result && typeof result === 'object') {
-                responseText = result.response || result.text || result.content || JSON.stringify(result);
-            }
-            responseText = String(responseText || '');
+            const responseText = getResponseText(result);
             
             // Replace selected text
             const range = selection.getRangeAt(0);
@@ -357,9 +364,7 @@ const AIIntegration = (function() {
         
         try {
             const result = await API.generate(prompt, model);
-            const generatedText = typeof result === 'string'
-                ? result
-                : (result?.response || result?.text || result?.content || '');
+            const generatedText = getResponseText(result);
               
             // Insert result as new block
             const page = window.Editor?.getCurrentPage?.();
@@ -406,7 +411,7 @@ const AIIntegration = (function() {
                 return { text: fullText, model: useModel };
             } else {
                 const result = await API.generate(prompt, useModel);
-                return { text: result, model: useModel };
+                return { text: getResponseText(result), model: useModel };
             }
         } catch (error) {
             console.error('Generation error:', error);
@@ -428,7 +433,8 @@ const AIIntegration = (function() {
      * Summarize content
      */
     async function summarize(content, model = null) {
-        return API.generate(`Summarize the following content:\n\n${content}`, model);
+        const result = await API.generate(`Summarize the following content:\n\n${content}`, model);
+        return getResponseText(result);
     }
     
     /**
@@ -436,7 +442,8 @@ const AIIntegration = (function() {
      */
     async function extractActionItems(content, model = null) {
         const prompt = `Extract action items from the following text as a todo list:\n\n${content}`;
-        return API.generate(prompt, model);
+        const result = await API.generate(prompt, model);
+        return getResponseText(result);
     }
     
     /**

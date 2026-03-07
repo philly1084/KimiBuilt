@@ -1,6 +1,7 @@
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
+const { buildSessionInstructions } = require('../session-instructions');
 
 /**
  * WebSocket handler for real-time bidirectional streaming.
@@ -85,7 +86,10 @@ async function handleChat(ws, session, payload) {
         input: message,
         previousResponseId: session.previousResponseId,
         contextMessages,
-        instructions: 'You are a helpful AI assistant. Be concise and informative.',
+        instructions: buildSessionInstructions(
+            session,
+            'You are a helpful AI assistant. Be concise and informative.',
+        ),
         stream: true,
         model,
     });
@@ -122,8 +126,11 @@ async function handleCanvas(ws, session, payload) {
 
     const contextMessages = await memoryService.process(session.id, message);
 
-    const instructions = `You are an AI canvas assistant generating ${canvasType} content.
-Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }`;
+    const instructions = buildSessionInstructions(
+        session,
+        `You are an AI canvas assistant generating ${canvasType} content.
+Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }`,
+    );
 
     const response = await createResponse({
         input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
@@ -164,9 +171,12 @@ async function handleNotation(ws, session, payload) {
 
     const contextMessages = await memoryService.process(session.id, notation);
 
-    const instructions = `You are an AI notation helper in ${helperMode} mode.
+    const instructions = buildSessionInstructions(
+        session,
+        `You are an AI notation helper in ${helperMode} mode.
 Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }
-${context ? `Context: ${context}` : ''}`;
+${context ? `Context: ${context}` : ''}`,
+    );
 
     const response = await createResponse({
         input: notation,

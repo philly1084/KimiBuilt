@@ -32,6 +32,7 @@ class App {
             
             // Setup AI panel mode toggles
             this.setupAIModeToggles();
+            window.aiAssistant?.setMode('chat');
             
             console.log('Kimi Canvas initialized with OpenAI SDK');
         });
@@ -340,7 +341,10 @@ class App {
         const topModelSelect = document.getElementById('topModelSelect');
         if (topModelSelect) {
             // Set initial value from localStorage via apiManager
-            topModelSelect.value = window.apiManager.getSelectedModel();
+            const selectedModel = window.apiManager.getSelectedModel();
+            if ([...topModelSelect.options].some((option) => option.value === selectedModel)) {
+                topModelSelect.value = selectedModel;
+            }
             
             // Handle model change
             topModelSelect.addEventListener('change', (e) => {
@@ -357,9 +361,16 @@ class App {
     
     setupAIModeToggles() {
         // Mode toggle buttons
+        const chatModeBtn = document.getElementById('chatModeBtn');
         const diagramModeBtn = document.getElementById('diagramModeBtn');
         const imageModeBtn = document.getElementById('imageModeBtn');
         
+        if (chatModeBtn) {
+            chatModeBtn.addEventListener('click', () => {
+                window.aiAssistant?.setMode('chat');
+            });
+        }
+
         if (diagramModeBtn) {
             diagramModeBtn.addEventListener('click', () => {
                 window.aiAssistant?.setMode('diagram');
@@ -375,7 +386,10 @@ class App {
         // Diagram model selector
         const diagramModelSelect = document.getElementById('diagramModelSelect');
         if (diagramModelSelect) {
-            diagramModelSelect.value = window.apiManager.getSelectedModel();
+            const selectedModel = window.apiManager.getSelectedModel();
+            if ([...diagramModelSelect.options].some((option) => option.value === selectedModel)) {
+                diagramModelSelect.value = selectedModel;
+            }
             diagramModelSelect.addEventListener('change', (e) => {
                 window.apiManager.setSelectedModel(e.target.value);
                 

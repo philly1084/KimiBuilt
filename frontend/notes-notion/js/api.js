@@ -66,6 +66,40 @@ const API = (function() {
         return response.json();
     }
 
+    function filterModels(models = []) {
+        return models.filter((model) => {
+            const id = String(model.id || '').toLowerCase();
+            if (!id) return false;
+
+            const looksLikeChatModel = [
+                'gpt',
+                'claude',
+                'gemini',
+                'kimi',
+                'llama',
+                'mistral',
+                'qwen',
+                'phi',
+                'ollama',
+                'antigravity',
+            ].some((token) => id.includes(token));
+
+            return looksLikeChatModel && !id.includes('image');
+        });
+    }
+
+    function buildMessages(message, context = []) {
+        if (Array.isArray(context) && context.length > 0) {
+            return [...context, { role: 'user', content: message }];
+        }
+
+        return [{ role: 'user', content: message }];
+    }
+
+    function extractChatContent(response) {
+        return response?.choices?.[0]?.message?.content || '';
+    }
+
     function setSessionId(id) {
         currentSessionId = id;
     }
@@ -93,7 +127,7 @@ const API = (function() {
             // Fallback: fetch directly
             try {
                 const data = await fetchAPI('/models');
-                return (data.data || []).map(m => ({
+                return filterModels(data.data || []).map(m => ({
                     id: m.id,
                     name: m.id,
                     provider: m.owned_by || 'unknown'
@@ -106,7 +140,7 @@ const API = (function() {
         
         try {
             const response = await openai.models.list();
-            return (response.data || []).map(m => ({
+            return filterModels(response.data || []).map(m => ({
                 id: m.id,
                 name: m.id,
                 provider: m.owned_by || 'unknown'
@@ -127,11 +161,9 @@ const API = (function() {
     
     // Streaming chat - uses fetch fallback
     async function* streamChat(message, sessionId = null, context = [], model = null) {
-        const openai = getClient();
-        
         const params = {
             model: model || 'gpt-4o',
-            messages: [{ role: 'user', content: message }],
+            messages: buildMessages(message, context),
             stream: true,
         };
 
@@ -172,6 +204,9 @@ const API = (function() {
                         try {
                             const parsed = JSON.parse(data);
                             const content = parsed.choices?.[0]?.delta?.content || '';
+                            if (parsed.session_id) {
+                                currentSessionId = parsed.session_id;
+                            }
                             if (content) {
                                 yield { type: 'delta', content };
                             }
@@ -194,7 +229,7 @@ const API = (function() {
         
         const params = {
             model: model || 'gpt-4o',
-            messages: [{ role: 'user', content: message }],
+            messages: buildMessages(message, context),
             stream: false,
         };
 
@@ -219,7 +254,7 @@ const API = (function() {
             }
             
             return {
-                response: response.choices?.[0]?.message?.content || '',
+                response: extractChatContent(response),
                 sessionId: currentSessionId,
             };
         } catch (error) {

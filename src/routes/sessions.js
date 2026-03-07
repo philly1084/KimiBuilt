@@ -36,6 +36,21 @@ router.get('/:id', (req, res) => {
 });
 
 /**
+ * PATCH /api/sessions/:id
+ * Update session metadata such as saved agent configuration.
+ */
+router.patch('/:id', (req, res) => {
+    const { metadata } = req.body || {};
+    const session = sessionStore.update(req.params.id, { metadata: metadata || {} });
+
+    if (!session) {
+        return res.status(404).json({ error: { message: 'Session not found' } });
+    }
+
+    res.json(session);
+});
+
+/**
  * DELETE /api/sessions/:id
  * Delete a session and its associated memories.
  */

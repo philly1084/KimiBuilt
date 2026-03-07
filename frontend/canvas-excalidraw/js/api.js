@@ -39,6 +39,52 @@ class OpenAICanvasAPI {
         return this.selectedModel;
     }
 
+    async chat(messages) {
+        const params = {
+            model: this.selectedModel,
+            messages,
+            stream: false,
+        };
+
+        if (this.sessionId) {
+            params.session_id = this.sessionId;
+        }
+
+        if (!this.client) {
+            const response = await fetch(`${this.baseURL}/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params),
+            });
+
+            if (!response.ok) {
+                throw await this.buildRequestError(response);
+            }
+
+            const data = await response.json();
+            if (data.session_id) {
+                this.sessionId = data.session_id;
+            }
+
+            return {
+                content: data.choices?.[0]?.message?.content || '',
+                sessionId: this.sessionId,
+                responseId: data.id,
+            };
+        }
+
+        const response = await this.client.chat.completions.create(params);
+        if (response.session_id) {
+            this.sessionId = response.session_id;
+        }
+
+        return {
+            content: response.choices?.[0]?.message?.content || '',
+            sessionId: this.sessionId,
+            responseId: response.id,
+        };
+    }
+
     // Generate diagram (uses chat completions with special prompt)
     async generateDiagram(message, existingContent = null) {
         const messages = [
@@ -74,7 +120,7 @@ class OpenAICanvasAPI {
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                    throw await this.buildRequestError(response);
                 }
                 
                 const data = await response.json();
@@ -137,7 +183,7 @@ class OpenAICanvasAPI {
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                    throw await this.buildRequestError(response);
                 }
                 
                 const data = await response.json();
@@ -258,6 +304,17 @@ class OpenAICanvasAPI {
 
             return looksLikeChatModel && !id.includes('image');
         });
+    }
+
+    async buildRequestError(response) {
+        let message = `HTTP ${response.status}`;
+
+        try {
+            const data = await response.json();
+            message = data?.error?.message || data?.message || message;
+        } catch {}
+
+        return new Error(message);
     }
 }
 

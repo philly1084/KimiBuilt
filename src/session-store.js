@@ -1,94 +1,155 @@
+const fs = require('fs');
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { config } = require('./config');
 
-/**
- * In-memory session store.
- * Tracks conversation state including the previous_response_id
- * for OpenAI Response API continuity.
- */
 class SessionStore {
     constructor() {
         this.sessions = new Map();
+        this.filePath = config.sessions.filePath;
+        this.initialized = false;
     }
 
-    /**
-     * Create a new session.
-     * @param {Object} [metadata] - Optional metadata for the session
-     * @returns {Object} The created session
-     */
+    initialize() {
+        if (this.initialized) return;
+
+        this.ensureStorageDir();
+        this.loadFromDisk();
+        this.initialized = true;
+    }
+
+    ensureStorageDir() {
+        const dir = path.dirname(this.filePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    }
+
+    loadFromDisk() {
+        if (!fs.existsSync(this.filePath)) {
+            return;
+        }
+
+        try {
+            const raw = fs.readFileSync(this.filePath, 'utf8');
+            const sessions = JSON.parse(raw);
+
+            if (!Array.isArray(sessions)) {
+                return;
+            }
+
+            for (const session of sessions) {
+                if (session?.id) {
+                    this.sessions.set(session.id, session);
+                }
+            }
+        } catch (err) {
+            console.error('[SessionStore] Failed to load sessions:', err.message);
+        }
+    }
+
+    persist() {
+        this.ensureStorageDir();
+
+        try {
+            const sessions = this.list();
+            fs.writeFileSync(this.filePath, JSON.stringify(sessions, null, 2));
+        } catch (err) {
+            console.error('[SessionStore] Failed to persist sessions:', err.message);
+        }
+    }
+
+    normalizeMetadata(metadata = {}) {
+        return {
+            ...metadata,
+            agent: metadata.agent
+                ? {
+                    id: metadata.agent.id || null,
+                    name: metadata.agent.name || null,
+                    instructions: metadata.agent.instructions || '',
+                    tools: Array.isArray(metadata.agent.tools) ? metadata.agent.tools : [],
+                }
+                : undefined,
+        };
+    }
+
     create(metadata = {}) {
+        this.initialize();
+
         const id = uuidv4();
+        const now = new Date().toISOString();
         const session = {
             id,
             previousResponseId: null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            createdAt: now,
+            updatedAt: now,
             messageCount: 0,
-            metadata,
+            metadata: this.normalizeMetadata(metadata),
         };
+
         this.sessions.set(id, session);
+        this.persist();
         return session;
     }
 
-    /**
-     * Get a session by ID.
-     * @param {string} id
-     * @returns {Object|null}
-     */
     get(id) {
+        this.initialize();
         return this.sessions.get(id) || null;
     }
 
-    /**
-     * Update a session (typically after a response is received).
-     * @param {string} id
-     * @param {Object} updates
-     * @returns {Object|null}
-     */
-    update(id, updates) {
+    update(id, updates = {}) {
+        this.initialize();
+
         const session = this.sessions.get(id);
         if (!session) return null;
 
-        Object.assign(session, updates, {
+        const next = {
+            ...session,
+            ...updates,
+            metadata: updates.metadata
+                ? this.normalizeMetadata({
+                    ...(session.metadata || {}),
+                    ...updates.metadata,
+                })
+                : session.metadata,
             updatedAt: new Date().toISOString(),
-        });
-        return session;
+        };
+
+        this.sessions.set(id, next);
+        this.persist();
+        return next;
     }
 
-    /**
-     * Increment message count and update previousResponseId.
-     * @param {string} id
-     * @param {string} responseId - The response ID from the OpenAI API
-     * @returns {Object|null}
-     */
     recordResponse(id, responseId) {
+        this.initialize();
+
         const session = this.sessions.get(id);
         if (!session) return null;
 
         session.previousResponseId = responseId;
         session.messageCount += 1;
         session.updatedAt = new Date().toISOString();
+        this.persist();
         return session;
     }
 
-    /**
-     * Delete a session.
-     * @param {string} id
-     * @returns {boolean}
-     */
     delete(id) {
-        return this.sessions.delete(id);
+        this.initialize();
+        const deleted = this.sessions.delete(id);
+        if (deleted) {
+            this.persist();
+        }
+        return deleted;
     }
 
-    /**
-     * List all sessions.
-     * @returns {Object[]}
-     */
     list() {
-        return Array.from(this.sessions.values());
+        this.initialize();
+        return Array.from(this.sessions.values()).sort((a, b) => {
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
     }
 }
 
-// Singleton
 const sessionStore = new SessionStore();
 
 module.exports = { sessionStore, SessionStore };

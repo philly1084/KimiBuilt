@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 const config = {
     // Server
@@ -23,6 +24,10 @@ const config = {
         url: process.env.QDRANT_URL || 'http://qdrant:6333',
         collection: process.env.QDRANT_COLLECTION || 'conversations',
         vectorSize: 768, // nomic-embed-text output dimensions
+    },
+
+    sessions: {
+        filePath: process.env.SESSION_STORE_FILE || path.join(process.cwd(), 'data', 'sessions.json'),
     },
 };
 

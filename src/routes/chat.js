@@ -3,6 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
+const { buildSessionInstructions } = require('../session-instructions');
 
 const router = Router();
 
@@ -48,7 +49,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 input: message,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions: 'You are a helpful AI assistant. Be concise and informative.',
+                instructions: buildSessionInstructions(
+                    session,
+                    'You are a helpful AI assistant. Be concise and informative.',
+                ),
                 stream: true,
                 model,
             });
@@ -76,7 +80,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 input: message,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions: 'You are a helpful AI assistant. Be concise and informative.',
+                instructions: buildSessionInstructions(
+                    session,
+                    'You are a helpful AI assistant. Be concise and informative.',
+                ),
                 stream: false,
                 model,
             });

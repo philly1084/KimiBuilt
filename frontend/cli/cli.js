@@ -636,7 +636,7 @@ async function handleImport(filename) {
   spinner.start();
   
   try {
-    const imported = session.importSession(filename);
+    const imported = session.import(filename);
     if (imported) {
       currentSessionId = imported.id;
       session.setCurrent(currentSessionId, imported);

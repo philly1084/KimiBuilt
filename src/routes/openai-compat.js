@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse, generateImage, listModels } = require('../openai-client');
+const { buildSessionInstructions } = require('../session-instructions');
 
 const router = Router();
 
@@ -123,6 +124,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
+                instructions: buildSessionInstructions(session),
                 stream: true,
                 model,
             });
@@ -178,6 +180,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
+                instructions: buildSessionInstructions(session),
                 stream: false,
                 model,
             });
@@ -266,7 +269,7 @@ router.post('/responses', async (req, res, next) => {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions,
+                instructions: buildSessionInstructions(session, instructions),
                 stream: true,
                 model,
             });
@@ -298,7 +301,7 @@ router.post('/responses', async (req, res, next) => {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions,
+                instructions: buildSessionInstructions(session, instructions),
                 stream: false,
                 model,
             });
