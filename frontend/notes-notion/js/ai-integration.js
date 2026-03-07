@@ -356,13 +356,16 @@ const AIIntegration = (function() {
         }
         
         try {
-            const result = await API.generate(prompt, 'text', model);
-            
+            const result = await API.generate(prompt, model);
+            const generatedText = typeof result === 'string'
+                ? result
+                : (result?.response || result?.text || result?.content || '');
+              
             // Insert result as new block
             const page = window.Editor?.getCurrentPage?.();
             if (page && page.blocks.length > 0) {
                 const lastBlock = page.blocks[page.blocks.length - 1];
-                window.Editor?.insertBlockAfter?.(lastBlock.id, 'text', result);
+                window.Editor?.insertBlockAfter?.(lastBlock.id, 'text', generatedText);
             }
             
             hideAIModal();
@@ -394,7 +397,7 @@ const AIIntegration = (function() {
             // Try streaming first
             if (onProgress) {
                 let fullText = '';
-                for await (const chunk of API.streamChat(prompt, null, useModel)) {
+                for await (const chunk of API.streamChat(prompt, null, [], useModel)) {
                     if (chunk.type === 'delta' && chunk.content) {
                         fullText += chunk.content;
                         onProgress(fullText);
@@ -402,7 +405,7 @@ const AIIntegration = (function() {
                 }
                 return { text: fullText, model: useModel };
             } else {
-                const result = await API.generate(prompt, 'text', useModel);
+                const result = await API.generate(prompt, useModel);
                 return { text: result, model: useModel };
             }
         } catch (error) {
@@ -425,7 +428,7 @@ const AIIntegration = (function() {
      * Summarize content
      */
     async function summarize(content, model = null) {
-        return API.generate(content, 'summarize', model);
+        return API.generate(`Summarize the following content:\n\n${content}`, model);
     }
     
     /**
@@ -433,7 +436,7 @@ const AIIntegration = (function() {
      */
     async function extractActionItems(content, model = null) {
         const prompt = `Extract action items from the following text as a todo list:\n\n${content}`;
-        return API.generate(prompt, 'text', model);
+        return API.generate(prompt, model);
     }
     
     /**

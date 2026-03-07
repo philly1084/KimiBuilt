@@ -428,7 +428,7 @@ class ChatApp {
         
         // Convert to OpenAI format: [{role, content}, ...]
         return session.messages
-            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.isStreaming && String(m.content || '').trim())
             .map(m => ({
                 role: m.role,
                 content: m.content || ''

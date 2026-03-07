@@ -10,6 +10,9 @@ class SessionManager extends EventTarget {
         this.sessions = [];
         this.currentSessionId = null;
         this.sessionMessages = new Map(); // sessionId -> messages array
+        this.apiBaseUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:3000/api'
+            : `${window.location.protocol}//${window.location.host}/api`;
         this.storageKey = 'kimibuilt_sessions_v3';
         this.currentSessionKey = 'kimibuilt_current_session';
         this.version = '3.0';
@@ -23,8 +26,42 @@ class SessionManager extends EventTarget {
     // ============================================
 
     async loadSessions() {
-        // With OpenAI SDK, sessions are managed client-side only
-        // Just dispatch the current state
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions`);
+            if (response.ok) {
+                const data = await response.json();
+                const storedSessions = new Map(this.sessions.map((session) => [session.id, session]));
+
+                this.sessions = (data.sessions || []).map((session) => {
+                    const stored = storedSessions.get(session.id);
+                    return {
+                        id: session.id,
+                        mode: session.metadata?.mode || stored?.mode || 'chat',
+                        model: stored?.model || localStorage.getItem('kimibuilt_default_model') || 'gpt-4o',
+                        title: stored?.title || 'New Chat',
+                        createdAt: session.createdAt,
+                        updatedAt: session.updatedAt,
+                        isLocal: false,
+                        version: this.version,
+                    };
+                });
+
+                for (const sessionId of Array.from(this.sessionMessages.keys())) {
+                    if (!this.sessions.find((session) => session.id === sessionId)) {
+                        this.sessionMessages.delete(sessionId);
+                    }
+                }
+
+                if (!this.sessions.find((session) => session.id === this.currentSessionId)) {
+                    this.currentSessionId = this.sessions[0]?.id || null;
+                }
+
+                this.saveToStorage();
+            }
+        } catch (error) {
+            console.warn('Failed to load backend sessions, using local cache:', error);
+        }
+
         this.dispatchEvent(new CustomEvent('sessionsChanged', { 
             detail: { sessions: this.sessions } 
         }));
@@ -33,15 +70,43 @@ class SessionManager extends EventTarget {
 
     async createSession(mode = 'chat', options = {}) {
         const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
-        
+        let sessionId = this.generateLocalId();
+        let createdAt = new Date().toISOString();
+        let updatedAt = createdAt;
+        let isLocal = true;
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    metadata: {
+                        mode,
+                    },
+                }),
+            });
+
+            if (response.ok) {
+                const backendSession = await response.json();
+                sessionId = backendSession.id;
+                createdAt = backendSession.createdAt || createdAt;
+                updatedAt = backendSession.updatedAt || updatedAt;
+                isLocal = false;
+            }
+        } catch (error) {
+            console.warn('Failed to create backend session, using local session:', error);
+        }
+
         const localSession = {
-            id: this.generateLocalId(),
+            id: sessionId,
             mode,
             model: options.model || defaultModel,
             title: 'New Chat',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            isLocal: true,
+            createdAt,
+            updatedAt,
+            isLocal,
             version: this.version
         };
         
@@ -61,6 +126,16 @@ class SessionManager extends EventTarget {
     }
 
     async deleteSession(sessionId) {
+        if (!this.isLocalSession(sessionId)) {
+            try {
+                await fetch(`${this.apiBaseUrl}/sessions/${sessionId}`, {
+                    method: 'DELETE',
+                });
+            } catch (error) {
+                console.warn('Failed to delete backend session:', error);
+            }
+        }
+
         // Remove from local state
         this.sessions = this.sessions.filter(s => s.id !== sessionId);
         this.sessionMessages.delete(sessionId);

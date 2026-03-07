@@ -5,18 +5,34 @@
 
 class OpenAICanvasAPI {
     constructor(baseUrl = 'http://localhost:3000/v1') {
-        this.client = new OpenAI({
-            baseURL: baseUrl,
-            apiKey: 'any-key',
-            dangerouslyAllowBrowser: true,
-        });
+        this.baseURL = baseUrl;
+        this.client = null;
         this.sessionId = null;
-        this.selectedModel = localStorage.getItem('kimi-canvas-model') || 'gpt-4o';
+        try {
+            this.selectedModel = localStorage.getItem('kimi-canvas-model') || 'gpt-4o';
+        } catch {
+            this.selectedModel = 'gpt-4o';
+        }
+
+        if (typeof OpenAI !== 'undefined') {
+            try {
+                this.client = new OpenAI({
+                    baseURL: baseUrl,
+                    apiKey: 'any-key',
+                    dangerouslyAllowBrowser: true,
+                });
+            } catch (error) {
+                console.warn('Failed to initialize OpenAI SDK, using fetch fallback:', error);
+                this.client = null;
+            }
+        }
     }
 
     setSelectedModel(model) {
         this.selectedModel = model;
-        localStorage.setItem('kimi-canvas-model', model);
+        try {
+            localStorage.setItem('kimi-canvas-model', model);
+        } catch {}
     }
 
     getSelectedModel() {
@@ -175,13 +191,7 @@ class OpenAICanvasAPI {
             }));
         } catch (error) {
             console.error('Error fetching models:', error);
-            // Return default models if fetch fails
-            return [
-                { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
-                { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai' },
-                { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic' },
-                { id: 'claude-3-sonnet', name: 'Claude 3 Sonnet', provider: 'anthropic' }
-            ];
+            return this.getDefaultModels();
         }
     }
 
@@ -197,7 +207,7 @@ class OpenAICanvasAPI {
     // Health check (custom)
     async checkHealth() {
         try {
-            const baseUrl = this.client.baseURL.replace('/v1', '');
+            const baseUrl = this.baseURL.replace('/v1', '');
             const response = await fetch(`${baseUrl}/health`);
             if (response.ok) {
                 const data = await response.json();
@@ -217,6 +227,15 @@ class OpenAICanvasAPI {
     
     disconnect() {
         // No-op for OpenAI SDK mode
+    }
+
+    getDefaultModels() {
+        return [
+            { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai' },
+            { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic' },
+            { id: 'claude-3.7-sonnet', name: 'Claude 3.7 Sonnet', provider: 'anthropic' }
+        ];
     }
 }
 

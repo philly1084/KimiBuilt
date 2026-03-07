@@ -65,7 +65,7 @@ class OpenAIAPIClient extends EventTarget {
             stream: true,
         };
         
-        if (this.currentSessionId) {
+        if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
             params.session_id = this.currentSessionId;
         }
 
@@ -80,6 +80,11 @@ class OpenAIAPIClient extends EventTarget {
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
+                }
+
+                const responseSessionId = response.headers.get('X-Session-Id');
+                if (responseSessionId) {
+                    this.currentSessionId = responseSessionId;
                 }
                 
                 const reader = response.body.getReader();
@@ -159,7 +164,7 @@ class OpenAIAPIClient extends EventTarget {
             stream: false,
         };
         
-        if (this.currentSessionId) {
+        if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
             params.session_id = this.currentSessionId;
         }
 
@@ -178,8 +183,8 @@ class OpenAIAPIClient extends EventTarget {
                 
                 const data = await response.json();
                 
-                if (data.session_id) {
-                    this.currentSessionId = data.session_id;
+                if (data.session_id || data.sessionId) {
+                    this.currentSessionId = data.session_id || data.sessionId;
                 }
                 
                 return {
