@@ -170,7 +170,7 @@ class OpenAICanvasAPI {
                 const response = await fetch(`${this.baseURL}/models`);
                 if (response.ok) {
                     const data = await response.json();
-                    return (data.data || []).map(m => ({
+                    return this.filterModels(data.data || []).map(m => ({
                         id: m.id,
                         name: m.id,
                         provider: m.owned_by || 'unknown'
@@ -184,7 +184,7 @@ class OpenAICanvasAPI {
         
         try {
             const response = await this.client.models.list();
-            return (response.data || []).map(m => ({
+            return this.filterModels(response.data || []).map(m => ({
                 id: m.id,
                 name: m.id,
                 provider: m.owned_by || 'unknown'
@@ -236,6 +236,28 @@ class OpenAICanvasAPI {
             { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic' },
             { id: 'claude-3.7-sonnet', name: 'Claude 3.7 Sonnet', provider: 'anthropic' }
         ];
+    }
+
+    filterModels(models = []) {
+        return models.filter((model) => {
+            const id = String(model.id || '').toLowerCase();
+            if (!id) return false;
+
+            const looksLikeChatModel = [
+                'gpt',
+                'claude',
+                'gemini',
+                'kimi',
+                'llama',
+                'mistral',
+                'qwen',
+                'phi',
+                'ollama',
+                'antigravity',
+            ].some((token) => id.includes(token));
+
+            return looksLikeChatModel && !id.includes('image');
+        });
     }
 }
 

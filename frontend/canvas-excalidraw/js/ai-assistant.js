@@ -79,11 +79,25 @@ class AIAssistant {
     }
     
     updateModelSelectors() {
+        const selectedModel = window.apiManager.getSelectedModel();
+        const resolvedModel = this.models.find((model) => model.id === selectedModel)?.id || this.models[0]?.id || selectedModel;
+
+        if (resolvedModel !== selectedModel) {
+            window.apiManager.setSelectedModel(resolvedModel);
+        }
+
         // Update diagram model selector
         const diagramModelSelect = document.getElementById('diagramModelSelect');
         if (diagramModelSelect) {
             diagramModelSelect.innerHTML = this.models.map(m => 
-                `<option value="${m.id}" ${m.id === window.apiManager.getSelectedModel() ? 'selected' : ''}>${m.name}</option>`
+                `<option value="${m.id}" ${m.id === resolvedModel ? 'selected' : ''}>${m.name}</option>`
+            ).join('');
+        }
+
+        const topModelSelect = document.getElementById('topModelSelect');
+        if (topModelSelect) {
+            topModelSelect.innerHTML = this.models.map(m =>
+                `<option value="${m.id}" ${m.id === resolvedModel ? 'selected' : ''}>${m.name}</option>`
             ).join('');
         }
         

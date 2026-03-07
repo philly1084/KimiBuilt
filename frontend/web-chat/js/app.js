@@ -423,11 +423,11 @@ class ChatApp {
      * Build message history in OpenAI format from session messages
      */
     buildMessageHistory(sessionId) {
-        const session = sessionManager.sessions.find(s => s.id === sessionId);
-        if (!session || !session.messages) return [];
+        const messages = sessionManager.getMessages(sessionId);
+        if (!messages || messages.length === 0) return [];
         
         // Convert to OpenAI format: [{role, content}, ...]
-        return session.messages
+        return messages
             .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.isStreaming && String(m.content || '').trim())
             .map(m => ({
                 role: m.role,

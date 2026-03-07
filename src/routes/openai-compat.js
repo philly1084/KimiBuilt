@@ -5,6 +5,30 @@ const { createResponse, generateImage, listModels } = require('../openai-client'
 
 const router = Router();
 
+function isChatCapableModel(modelId = '') {
+    const normalizedId = String(modelId).toLowerCase();
+
+    if (!normalizedId) return false;
+
+    const looksLikeChatModel = [
+        'gpt',
+        'claude',
+        'gemini',
+        'kimi',
+        'llama',
+        'mistral',
+        'qwen',
+        'phi',
+        'ollama',
+        'antigravity',
+    ].some((token) => normalizedId.includes(token));
+
+    const imageOnly = normalizedId.includes('image') && !normalizedId.includes('vision');
+    const audioOnly = normalizedId.includes('tts') || normalizedId.includes('speech') || normalizedId.includes('transcribe');
+
+    return looksLikeChatModel && !imageOnly && !audioOnly;
+}
+
 /**
  * GET /v1/models
  * OpenAI-compatible models endpoint
@@ -14,12 +38,14 @@ router.get('/models', async (_req, res, next) => {
         const models = await listModels();
         res.json({
             object: 'list',
-            data: models.map(m => ({
+            data: models
+                .filter((model) => isChatCapableModel(model.id))
+                .map(m => ({
                 id: m.id,
                 object: 'model',
                 created: m.created || Math.floor(Date.now() / 1000),
                 owned_by: m.owned_by || 'openai',
-            })),
+                })),
         });
     } catch (err) {
         next(err);
@@ -46,11 +72,9 @@ router.post('/chat/completions', async (req, res, next) => {
         } = req.body;
 
         console.log(`[Chat] Request: model=${model}, stream=${stream}, messages=${messages?.length}`);
-        console.log(`[Chat] Request body:`, JSON.stringify(req.body, null, 2));
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             console.log('[Chat] Error: No messages provided');
-            console.log(`[Chat] Received body:`, req.body);
             return res.status(400).json({
                 error: {
                     message: 'messages is required and must be an array',
