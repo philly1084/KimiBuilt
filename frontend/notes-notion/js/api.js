@@ -5,11 +5,12 @@
 
 const API = (function() {
     // Auto-detect backend URL
+    const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
     const currentHost = window.location.hostname;
-    const currentProtocol = window.location.protocol;
-    const BASE_URL = currentHost === 'localhost' 
+    const currentOrigin = `${window.location.protocol}//${window.location.host}`;
+    const BASE_URL = localHostnames.has(currentHost)
         ? 'http://localhost:3000/v1'
-        : `${currentProtocol}//${currentHost}/v1`;
+        : `${currentOrigin}/v1`;
     
     // Lazy-loaded OpenAI client
     let client = null;
@@ -327,28 +328,6 @@ const API = (function() {
     
     // Fetch bookmark metadata from URL
     async function fetchBookmarkData(url) {
-        try {
-            // Try to fetch metadata from backend
-            const response = await fetch(`${BASE_URL.replace('/v1', '')}/bookmark`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                return {
-                    url: data.url || url,
-                    title: data.title || url,
-                    description: data.description || '',
-                    favicon: data.favicon || '',
-                    image: data.image || ''
-                };
-            }
-        } catch (e) {
-            console.warn('Bookmark fetch failed:', e);
-        }
-        
         // Fallback: extract domain and create basic info
         try {
             const urlObj = new URL(url);
@@ -360,6 +339,7 @@ const API = (function() {
                 image: ''
             };
         } catch {
+            console.warn('Bookmark metadata fallback failed for URL:', url);
             return {
                 url: url,
                 title: url,

@@ -584,7 +584,7 @@
     <!-- Header -->
     <header class="terminal p-4 flex items-center justify-between flex-wrap gap-2">
         <div class="flex items-center gap-4">
-            <h1 class="text-lg font-semibold" style="color: var(--text-primary);">🚀 KimiBuilt Web CLI</h1>
+            <h1 class="text-lg font-semibold" style="color: var(--text-primary);">KimiBuilt Web CLI</h1>
             <span id="modeBadge" class="mode-badge">chat</span>
             <span id="connectionStatus" class="text-xs" style="color: var(--text-muted);">● Connecting...</span>
         </div>
@@ -592,7 +592,7 @@
             <select id="modelSelect" class="model-select">
                 <option value="">Loading models...</option>
             </select>
-            <button onclick="app.cycleTheme()" id="themeBtn" class="toolbar-btn" title="Toggle Theme">🌙</button>
+            <button onclick="app.cycleTheme()" id="themeBtn" class="toolbar-btn" title="Toggle Theme">Theme</button>
             <button onclick="app.clearOutput()" class="toolbar-btn" title="Clear (Ctrl+L)">
                 <span>Clear</span>
             </button>
@@ -600,7 +600,7 @@
                 <span>Export</span>
             </button>
             <button onclick="app.showShortcuts()" class="toolbar-btn" title="Shortcuts (F1)">?</button>
-            <a href="/" class="toolbar-btn no-underline" style="text-decoration: none;">🏠</a>
+            <a href="/" class="toolbar-btn no-underline" style="text-decoration: none;">Home</a>
         </div>
     </header>
 
@@ -614,7 +614,6 @@
     <!-- Output Area -->
     <div id="outputArea" class="output-area">
         <div class="system">
-            <div class="timestamp">${new Date().toLocaleTimeString()}</div>
             <div>Welcome to KimiBuilt Web CLI v2.0</div>
             <div>Type <span class="prompt">/help</span> for available commands</div>
             <div>Current mode: <span class="prompt">chat</span></div>
@@ -652,7 +651,7 @@
     <!-- Session Info -->
     <div class="terminal px-4 py-2 text-xs flex justify-between flex-wrap gap-2">
         <span id="sessionInfo">Session: <span style="color: var(--text-muted);">none</span></span>
-        <span style="color: var(--text-muted);">Shortcuts: Ctrl+L=Clear | Ctrl+C=Copy | ↑↓=History | F1=Help</span>
+        <span style="color: var(--text-muted);">Shortcuts: Ctrl+L=Clear | Ctrl+C=Copy | Up/Down=History | F1=Help</span>
     </div>
 
     <!-- Loading Indicator -->
@@ -675,7 +674,7 @@
                 </div>
                 <div class="shortcut-item">
                     <span class="shortcut-desc">Navigate command history</span>
-                    <span class="shortcut-key">↑ / ↓</span>
+                    <span class="shortcut-key">Up / Down</span>
                 </div>
                 <div class="shortcut-item">
                     <span class="shortcut-desc">Command autocomplete</span>

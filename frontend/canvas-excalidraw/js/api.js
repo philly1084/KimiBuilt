@@ -333,10 +333,11 @@ class OpenAICanvasAPI {
 
 // Create global instance
 // Auto-detect backend URL
+const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
 const currentHost = window.location.hostname;
-const currentProtocol = window.location.protocol;
-const autoBaseUrl = currentHost === 'localhost' 
+const currentOrigin = `${window.location.protocol}//${window.location.host}`;
+const autoBaseUrl = localHostnames.has(currentHost)
     ? 'http://localhost:3000/v1'
-    : `${currentProtocol}//${currentHost}/v1`;
+    : `${currentOrigin}/v1`;
 
 window.apiManager = new OpenAICanvasAPI(autoBaseUrl);

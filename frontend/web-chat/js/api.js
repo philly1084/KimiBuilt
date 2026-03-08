@@ -4,15 +4,13 @@
  */
 
 // Configuration
-// Auto-detect backend URL based on current host
-const CURRENT_HOST = window.location.hostname;
-const CURRENT_PROTOCOL = window.location.protocol;
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+const CURRENT_HOSTNAME = window.location.hostname;
+const CURRENT_ORIGIN = `${window.location.protocol}//${window.location.host}`;
 
-// If running on localhost, use localhost:3000
-// Otherwise use the same host with /v1 path
-const API_BASE_URL = CURRENT_HOST === 'localhost' 
+const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     ? 'http://localhost:3000/v1'
-    : `${CURRENT_PROTOCOL}//${CURRENT_HOST}/v1`;
+    : `${CURRENT_ORIGIN}/v1`;
 const API_KEY = 'any-key'; // Required by SDK but not validated by KimiBuilt
 
 // Retry configuration

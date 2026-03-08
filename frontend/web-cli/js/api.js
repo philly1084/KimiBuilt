@@ -3,9 +3,10 @@
  * Uses OpenAI-compatible endpoints with fetch only (no SDK)
  */
 
-const API_BASE_URL = window.location.hostname === 'localhost' 
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+const API_BASE_URL = LOCAL_HOSTNAMES.has(window.location.hostname)
     ? 'http://localhost:3000/v1'
-    : `${window.location.protocol}//${window.location.hostname}/v1`;
+    : `${window.location.protocol}//${window.location.host}/v1`;
 
 // Default request timeout in milliseconds
 const DEFAULT_TIMEOUT = 30000;
@@ -296,7 +297,7 @@ class WebCLIAPI {
         const baseUrl = API_BASE_URL.replace('/v1', '');
         
         try {
-            const response = await this.fetchWithRetry(`${baseUrl}/api/images/generate`, {
+            const response = await this.fetchWithRetry(`${baseUrl}/api/images`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -326,30 +327,8 @@ class WebCLIAPI {
     }
 
     async uploadFile(file, purpose = 'assistants') {
-        const baseUrl = API_BASE_URL.replace('/v1', '');
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('purpose', purpose);
-        
-        try {
-            const response = await this.fetchWithTimeout(
-                `${baseUrl}/api/files/upload`,
-                {
-                    method: 'POST',
-                    body: formData,
-                },
-                60000 // Longer timeout for file uploads
-            );
-
-            if (!response.ok) {
-                throw new Error(`File upload failed: HTTP ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('File upload error:', error);
-            throw error;
-        }
+        console.warn('File upload requested, but this backend does not expose a file upload API.', { file, purpose });
+        throw new Error('File upload is not implemented by this backend yet.');
     }
 
     setModel(model) {
