@@ -132,6 +132,39 @@
                     </div>
                 </div>
 
+                <!-- Page AI Actions -->
+                <div class="page-ai-actions">
+                    <button id="page-ai-btn" class="page-ai-btn" title="AI Actions for this page">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
+                        </svg>
+                        Ask AI ✨
+                    </button>
+                    <div id="page-ai-dropdown" class="page-ai-dropdown" style="display: none;">
+                        <div class="ai-dropdown-item" data-action="improve-page">
+                            <span>✨</span> Improve entire page
+                        </div>
+                        <div class="ai-dropdown-item" data-action="summarize">
+                            <span>📝</span> Summarize content
+                        </div>
+                        <div class="ai-dropdown-item" data-action="expand">
+                            <span>📖</span> Expand all sections
+                        </div>
+                        <div class="ai-dropdown-item" data-action="rewrite">
+                            <span>🔄</span> Rewrite in professional tone
+                        </div>
+                        <div class="ai-dropdown-item" data-action="generate-toc">
+                            <span>📑</span> Generate table of contents
+                        </div>
+                        <div class="ai-dropdown-divider"></div>
+                        <div class="ai-dropdown-item" data-action="custom">
+                            <span>💬</span> Custom prompt...
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Add cover button (when no cover) -->
                 <button id="add-cover-btn" class="add-cover-btn" style="display: none;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -311,6 +344,15 @@
 
     <!-- Block Context Menu -->
     <div id="block-context-menu" class="block-context-menu" style="display: none;">
+        <div class="context-menu-item" data-action="ask-ai">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                <path d="M2 17l10 5 10-5"></path>
+                <path d="M2 12l10 5 10-5"></path>
+            </svg>
+            Ask AI ✨
+        </div>
+        <div class="context-divider"></div>
         <div class="context-menu-item" data-action="duplicate">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>

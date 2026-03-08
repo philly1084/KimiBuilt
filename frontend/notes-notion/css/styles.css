@@ -2638,3 +2638,81 @@ body {
         padding-bottom: 0;
     }
 }
+
+
+/* ===== Page AI Button ===== */
+.page-ai-actions {
+    position: relative;
+    margin-top: 12px;
+}
+
+.page-ai-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.page-ai-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.page-ai-btn:active {
+    transform: translateY(0);
+}
+
+.page-ai-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    min-width: 220px;
+    z-index: 1000;
+    padding: 6px;
+}
+
+.ai-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-primary);
+    transition: background 0.15s ease;
+}
+
+.ai-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+
+.ai-dropdown-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 6px 0;
+}
+
+/* ===== Block Context Menu Enhancements ===== */
+.context-menu-item[data-action="ask-ai"] {
+    color: var(--accent-color);
+    font-weight: 500;
+}
+
+.context-menu-item[data-action="ask-ai"] svg {
+    stroke: var(--accent-color);
+}

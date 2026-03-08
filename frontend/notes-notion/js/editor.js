@@ -581,13 +581,27 @@ const Editor = (function() {
         });
         
         // Selection change - show inline toolbar
-        input.addEventListener('mouseup', () => {
+        const showToolbarOnSelection = () => {
             setTimeout(() => {
                 const sel = window.getSelection();
-                if (sel.toString().trim().length > 0) {
-                    showInlineToolbar(sel.getRangeAt(0));
+                const text = sel.toString().trim();
+                if (text.length > 0) {
+                    // Don't show toolbar for AI placeholder text
+                    if (!text.startsWith('?? ')) {
+                        showInlineToolbar(sel.getRangeAt(0));
+                    }
+                } else {
+                    hideInlineToolbar();
                 }
             }, 10);
+        };
+        
+        input.addEventListener('mouseup', showToolbarOnSelection);
+        input.addEventListener('keyup', (e) => {
+            // Show toolbar on selection keys (Shift+Arrow, Ctrl+A, etc.)
+            if (e.shiftKey || e.key === 'Select' || e.ctrlKey || e.metaKey) {
+                showToolbarOnSelection();
+            }
         });
         
         // Keydown - navigation and shortcuts
@@ -831,6 +845,28 @@ const Editor = (function() {
         if (index === -1) return null;
         
         const newBlock = Blocks.createBlock(type, content);
+        currentPage.blocks.splice(index, 0, newBlock);
+        
+        refreshEditor();
+        autoSave();
+        
+        return newBlock;
+    }
+    
+    /**
+     * Insert a block at specific index
+     */
+    function insertBlockAtIndex(index, type = 'text', content = '') {
+        if (!currentPage) return null;
+        
+        saveToHistory();
+        
+        const newBlock = Blocks.createBlock(type, content);
+        
+        // Ensure index is valid
+        if (index < 0) index = 0;
+        if (index > currentPage.blocks.length) index = currentPage.blocks.length;
+        
         currentPage.blocks.splice(index, 0, newBlock);
         
         refreshEditor();
@@ -1237,6 +1273,7 @@ const Editor = (function() {
         loadPage,
         insertBlockAfter,
         insertBlockBefore,
+        insertBlockAtIndex,
         deleteBlock,
         duplicateBlock,
         convertBlockType,
@@ -1250,7 +1287,8 @@ const Editor = (function() {
         exportToMarkdown,
         insertDatabaseBlock,
         showInlineToolbar,
-        hideInlineToolbar
+        hideInlineToolbar,
+        updateBlockContent
     };
     
     return window.Editor;

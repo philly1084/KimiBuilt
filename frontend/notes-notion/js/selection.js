@@ -327,8 +327,20 @@ const Selection = (function() {
         handle.addEventListener('click', (e) => {
             if (!isDragging) {
                 e.stopPropagation();
+                e.preventDefault();
+                selectBlock(blockId);
                 showContextMenu(blockId, e);
             }
+        });
+        
+        // Right-click on block to show context menu
+        blockElement.addEventListener('contextmenu', (e) => {
+            // Don't show if clicking on input
+            if (e.target.closest('.block-input, [contenteditable="true"]')) return;
+            
+            e.preventDefault();
+            selectBlock(blockId);
+            showContextMenu(blockId, e);
         });
         
         // Native drag events as fallback
@@ -608,6 +620,9 @@ const Selection = (function() {
             menu.style.display = 'none';
             
             switch (action) {
+                case 'ask-ai':
+                    showBlockAIModal(blockId);
+                    break;
                 case 'duplicate':
                     if (callbacks.onDuplicate) callbacks.onDuplicate(blockId);
                     break;
@@ -748,6 +763,28 @@ const Selection = (function() {
         range.collapse(false);
         sel.removeAllRanges();
         sel.addRange(range);
+    }
+    
+    /**
+     * Show AI modal for a specific block
+     */
+    function showBlockAIModal(blockId) {
+        const block = document.querySelector(`.block[data-block-id="${blockId}"]`);
+        if (!block) return;
+        
+        const blockInput = block.querySelector('.block-input, [contenteditable="true"]');
+        const blockContent = blockInput ? blockInput.textContent : '';
+        
+        // Use the existing AI integration modal
+        if (window.AIIntegration && window.AIIntegration.showBlockAIModal) {
+            window.AIIntegration.showBlockAIModal(blockId, blockContent);
+        } else {
+            // Fallback: Show a simple prompt
+            const prompt = prompt('Ask AI to transform this block:', '');
+            if (prompt && window.AIIntegration) {
+                window.AIIntegration.generateBlockContent(blockId, prompt);
+            }
+        }
     }
     
     // Initialize context menus
