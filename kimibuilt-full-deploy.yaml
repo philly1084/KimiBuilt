@@ -3,7 +3,6 @@
 # ==========================================
 
 ---
-# 1. Namespace
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -12,14 +11,6 @@ metadata:
     app.kubernetes.io/name: kimibuilt
 
 ---
-# 2. GHCR Registry Secret Replication
-# Note: The user mentioned `ghcr-secret` exists in the `default` namespace.
-# Kubernetes cannot pull secrets across namespaces. To pull the image into `kimibuilt`,
-# the secret MUST be copied into the `kimibuilt` namespace.
-# Please copy the secret `ghcr-secret` from the `default` namespace to the `kimibuilt` namespace via the Rancher UI BEFORE applying.
-
----
-# 3. KimiBuilt Configuration
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -32,22 +23,37 @@ data:
   OLLAMA_EMBED_MODEL: "nomic-embed-text:latest"
   QDRANT_URL: "http://qdrant:6333"
   QDRANT_COLLECTION: "conversations"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "kimibuilt"
+  POSTGRES_USER: "kimibuilt"
+  ARTIFACT_BROWSER_PATH: "/usr/bin/chromium"
+  ARTIFACT_PDF_TIMEOUT_MS: "15000"
   PORT: "3000"
   NODE_ENV: "production"
 
 ---
-# 4. KimiBuilt API Key Secret
-apiVersion: v1
-kind: Secret
-metadata:
-  name: kimibuilt-secrets
-  namespace: kimibuilt
-type: Opaque
-stringData:
-  OPENAI_API_KEY: "sk_3e8a1c6d9f0b4a72e5d1c9f3b6a8e2d4f7c1b0a9e6d3f5a2c8b1e7d4f9a0c6b"
+# Existing secret required:
+#   kubectl create secret generic kimibuilt-secrets \
+#     --from-literal=OPENAI_API_KEY='your-gateway-api-key' \
+#     --from-literal=POSTGRES_PASSWORD='choose-a-strong-password' \
+#     -n kimibuilt
+# Or create the same secret through Rancher before applying this manifest.
 
 ---
-# 5. Persistent Volumes
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: kimibuilt
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -74,7 +80,97 @@ spec:
       storage: 10Gi
 
 ---
-# 6. Qdrant (Vector Database)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: kimibuilt
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+        - name: postgres
+          image: postgres:16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: kimibuilt-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: kimibuilt-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kimibuilt-secrets
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: kimibuilt
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  type: ClusterIP
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -92,9 +188,12 @@ spec:
       labels:
         app: qdrant
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       containers:
         - name: qdrant
           image: qdrant/qdrant:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 6333
               name: http
@@ -148,7 +247,6 @@ spec:
   type: ClusterIP
 
 ---
-# 7. Ollama (Embedding Model)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,9 +264,12 @@ spec:
       labels:
         app: ollama
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       initContainers:
         - name: model-pull
           image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -183,6 +284,7 @@ spec:
       containers:
         - name: ollama
           image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 11434
               name: http
@@ -231,7 +333,6 @@ spec:
   type: ClusterIP
 
 ---
-# 8. Backend Node.js Server
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -249,11 +350,14 @@ spec:
       labels:
         app: backend
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       imagePullSecrets:
         - name: ghcr-secret
       containers:
         - name: backend
           image: ghcr.io/philly1084/kimibuilt:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http
@@ -266,21 +370,21 @@ spec:
             httpGet:
               path: /health
               port: 3000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health
               port: 3000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 20
             periodSeconds: 30
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "256Mi"
+              cpu: "150m"
             limits:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "1Gi"
+              cpu: "1000m"
 
 ---
 apiVersion: v1
@@ -300,7 +404,6 @@ spec:
   type: ClusterIP
 
 ---
-# 9. Traefik IngressRoute
 apiVersion: traefik.containo.us/v1alpha1
 kind: IngressRoute
 metadata:

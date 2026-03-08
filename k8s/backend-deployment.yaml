@@ -15,9 +15,12 @@ spec:
       labels:
         app: backend
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       containers:
         - name: backend
           image: ghcr.io/philly1084/kimibuilt:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
               name: http

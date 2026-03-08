@@ -27,6 +27,8 @@ spec:
       labels:
         app: ollama
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       initContainers:
         # Pull the embedding model before the main container starts
         - name: model-pull

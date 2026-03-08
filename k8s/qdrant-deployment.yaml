@@ -27,6 +27,8 @@ spec:
       labels:
         app: qdrant
     spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
       containers:
         - name: qdrant
           image: qdrant/qdrant:latest
