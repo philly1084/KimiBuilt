@@ -268,7 +268,8 @@ const API = (function() {
     
     // Generate content (for AI blocks)
     async function generate(prompt, model = null) {
-        return chat(prompt, null, [], model);
+        const result = await chat(prompt, null, [], model);
+        return result;
     }
     
     // Generate image
@@ -324,6 +325,51 @@ const API = (function() {
         // No-op for this implementation
     }
     
+    // Fetch bookmark metadata from URL
+    async function fetchBookmarkData(url) {
+        try {
+            // Try to fetch metadata from backend
+            const response = await fetch(`${BASE_URL.replace('/v1', '')}/bookmark`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                return {
+                    url: data.url || url,
+                    title: data.title || url,
+                    description: data.description || '',
+                    favicon: data.favicon || '',
+                    image: data.image || ''
+                };
+            }
+        } catch (e) {
+            console.warn('Bookmark fetch failed:', e);
+        }
+        
+        // Fallback: extract domain and create basic info
+        try {
+            const urlObj = new URL(url);
+            return {
+                url: url,
+                title: urlObj.hostname,
+                description: '',
+                favicon: `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`,
+                image: ''
+            };
+        } catch {
+            return {
+                url: url,
+                title: url,
+                description: '',
+                favicon: '',
+                image: ''
+            };
+        }
+    }
+    
     // Legacy session functions (no backend)
     async function createSession(title = 'New Page') {
         return { id: 'local-' + Date.now(), title };
@@ -350,6 +396,7 @@ const API = (function() {
         createSession,
         getSession,
         deleteSession,
+        fetchBookmarkData,
         BASE_URL,
     };
 })();

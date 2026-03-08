@@ -1,5 +1,6 @@
 /**
  * Editor Module - Core block-based editor
+ * Enhanced with undo/redo, improved drag-and-drop, and better features
  */
 
 const Editor = (function() {
@@ -9,6 +10,14 @@ const Editor = (function() {
     let saveTimeout = null;
     let inlineToolbar = null;
     let mentionPopup = null;
+    
+    // Page history for undo/redo
+    const history = {
+        stack: [],
+        index: -1,
+        maxSize: 50,
+        isUndoing: false
+    };
     
     /**
      * Initialize the editor
@@ -20,6 +29,105 @@ const Editor = (function() {
         setupEventListeners();
         setupInlineToolbar();
         setupMentions();
+        setupUndoRedo();
+    }
+    
+    /**
+     * Setup undo/redo keyboard shortcuts
+     */
+    function setupUndoRedo() {
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    redo();
+                } else {
+                    undo();
+                }
+            }
+            
+            if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+                e.preventDefault();
+                redo();
+            }
+        });
+    }
+    
+    /**
+     * Save current state to history
+     */
+    function saveToHistory() {
+        if (history.isUndoing || !currentPage) return;
+        
+        const state = JSON.stringify(currentPage);
+        
+        // Don't save if same as last state
+        if (history.index >= 0 && history.stack[history.index] === state) {
+            return;
+        }
+        
+        // Remove any redo states
+        history.stack = history.stack.slice(0, history.index + 1);
+        
+        // Add new state
+        history.stack.push(state);
+        
+        // Limit history size
+        if (history.stack.length > history.maxSize) {
+            history.stack.shift();
+        } else {
+            history.index++;
+        }
+    }
+    
+    /**
+     * Undo last change
+     */
+    function undo() {
+        if (history.index <= 0) {
+            showToast('Nothing to undo', 'info');
+            return;
+        }
+        
+        history.isUndoing = true;
+        history.index--;
+        
+        const state = JSON.parse(history.stack[history.index]);
+        currentPage = state;
+        
+        // Update storage without triggering history
+        Storage.updatePage(currentPage.id, currentPage);
+        
+        // Refresh editor
+        refreshEditor();
+        
+        showToast('Undo', 'info');
+        history.isUndoing = false;
+    }
+    
+    /**
+     * Redo last undone change
+     */
+    function redo() {
+        if (history.index >= history.stack.length - 1) {
+            showToast('Nothing to redo', 'info');
+            return;
+        }
+        
+        history.isUndoing = true;
+        history.index++;
+        
+        const state = JSON.parse(history.stack[history.index]);
+        currentPage = state;
+        
+        // Update storage without triggering history
+        Storage.updatePage(currentPage.id, currentPage);
+        
+        // Refresh editor
+        refreshEditor();
+        
+        showToast('Redo', 'info');
+        history.isUndoing = false;
     }
     
     /**
@@ -29,6 +137,7 @@ const Editor = (function() {
         // Handle slash commands
         document.addEventListener('slash-command', (e) => {
             const { type, blockId } = e.detail;
+            saveToHistory();
             convertBlockType(blockId, type);
         });
         
@@ -307,6 +416,10 @@ const Editor = (function() {
         currentPage = page;
         editorContainer.innerHTML = '';
         
+        // Save initial state to history
+        history.stack = [JSON.stringify(page)];
+        history.index = 0;
+        
         if (!page.blocks || page.blocks.length === 0) {
             // Create initial block
             const block = Blocks.createBlock('text', '');
@@ -537,6 +650,7 @@ const Editor = (function() {
             case 'Enter':
                 if (!e.shiftKey) {
                     e.preventDefault();
+                    saveToHistory();
                     
                     // Split content at cursor
                     let beforeText, afterText;
@@ -583,12 +697,14 @@ const Editor = (function() {
                     (!range.startContainer.previousSibling || 
                      (range.startContainer === input && !input.textContent)))) {
                     e.preventDefault();
+                    saveToHistory();
                     mergeWithPrevious(block.id);
                 }
                 break;
                 
             case 'Tab':
                 e.preventDefault();
+                saveToHistory();
                 if (e.shiftKey) {
                     unindentBlock(block.id);
                 } else {
@@ -729,6 +845,8 @@ const Editor = (function() {
     function deleteBlock(blockId) {
         if (!currentPage) return;
         
+        saveToHistory();
+        
         const index = currentPage.blocks.findIndex(b => b.id === blockId);
         if (index === -1) return;
         
@@ -755,6 +873,8 @@ const Editor = (function() {
      */
     function duplicateBlock(blockId) {
         if (!currentPage) return;
+        
+        saveToHistory();
         
         const block = currentPage.blocks.find(b => b.id === blockId);
         if (!block) return;
@@ -834,7 +954,7 @@ const Editor = (function() {
     }
     
     /**
-     * Unindent a block
+     * Unindent a block (move out of parent)
      */
     function unindentBlock(blockId) {
         console.log('Unindent:', blockId);
@@ -1024,6 +1144,8 @@ const Editor = (function() {
     function setBlockColor(blockId, color) {
         if (!currentPage) return;
         
+        saveToHistory();
+        
         const block = currentPage.blocks.find(b => b.id === blockId);
         if (!block) return;
         
@@ -1051,6 +1173,8 @@ const Editor = (function() {
      */
     function reorderBlocks(draggedId, targetId) {
         if (!currentPage || draggedId === targetId) return;
+        
+        saveToHistory();
         
         const draggedIndex = currentPage.blocks.findIndex(b => b.id === draggedId);
         const targetIndex = currentPage.blocks.findIndex(b => b.id === targetId);
@@ -1092,8 +1216,19 @@ const Editor = (function() {
             rows: [
                 ['Task 1', 'In Progress', 'Today'],
                 ['Task 2', 'Not Started', 'Tomorrow']
-            ]
+            ],
+            sortColumn: null,
+            sortDirection: 'asc'
         });
+    }
+    
+    /**
+     * Show toast notification helper
+     */
+    function showToast(message, type = 'info') {
+        if (window.Sidebar?.showToast) {
+            window.Sidebar.showToast(message, type);
+        }
     }
     
     // Expose to window for access from other modules
@@ -1109,6 +1244,8 @@ const Editor = (function() {
         reorderBlocks,
         focusBlock,
         savePage,
+        undo,
+        redo,
         getCurrentPage,
         exportToMarkdown,
         insertDatabaseBlock,

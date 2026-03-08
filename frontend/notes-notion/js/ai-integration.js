@@ -1,5 +1,6 @@
 /**
  * AI Integration Module - AI features for the editor
+ * Enhanced with better response handling and inline suggestions
  */
 
 const AIIntegration = (function() {
@@ -7,17 +8,55 @@ const AIIntegration = (function() {
     let selectionToolbar = null;
     let availableModels = [];
     let currentModel = null;
+    let inlineSuggestions = null;
 
+    /**
+     * Safely extract text from API response
+     * Fixes the [object Object] display issue
+     */
     function getResponseText(result) {
+        if (result === null || result === undefined) {
+            return '';
+        }
+
         if (typeof result === 'string') {
             return result;
         }
 
         if (result && typeof result === 'object') {
-            return String(result.response || result.text || result.content || '');
+            // Try common response formats
+            if (result.response && typeof result.response === 'string') {
+                return result.response;
+            }
+            if (result.text && typeof result.text === 'string') {
+                return result.text;
+            }
+            if (result.content && typeof result.content === 'string') {
+                return result.content;
+            }
+            if (result.message && typeof result.message === 'string') {
+                return result.message;
+            }
+            
+            // Deep search for any string property
+            for (const key in result) {
+                if (typeof result[key] === 'string' && result[key].length > 0) {
+                    return result[key];
+                }
+            }
         }
 
-        return '';
+        // Fallback: stringify carefully
+        try {
+            const str = JSON.stringify(result);
+            if (str !== '{}' && str !== '[]') {
+                return str;
+            }
+        } catch (e) {
+            // Ignore
+        }
+
+        return String(result);
     }
     
     /**
@@ -26,6 +65,7 @@ const AIIntegration = (function() {
     async function init() {
         setupSelectionToolbar();
         setupAIModal();
+        setupInlineSuggestions();
         
         // Load available models
         try {
@@ -46,6 +86,146 @@ const AIIntegration = (function() {
         const page = window.Editor?.getCurrentPage?.();
         if (page?.defaultModel) {
             currentModel = page.defaultModel;
+        }
+    }
+    
+    /**
+     * Setup inline AI suggestions (like Notion AI)
+     */
+    function setupInlineSuggestions() {
+        // Listen for space key to trigger inline suggestions
+        document.addEventListener('keydown', async (e) => {
+            if (e.key !== ' ' && e.key !== 'Spacebar') return;
+            
+            const sel = window.getSelection();
+            if (!sel.rangeCount) return;
+            
+            const range = sel.getRangeAt(0);
+            const element = range.commonAncestorContainer.parentElement;
+            if (!element?.closest('.block-input')) return;
+            
+            const text = element.textContent;
+            
+            // Trigger suggestions for certain patterns
+            if (text.endsWith('?? ')) {
+                e.preventDefault();
+                element.textContent = text.slice(0, -3); // Remove trigger
+                showInlineSuggestion(element, 'ask');
+            }
+        });
+    }
+    
+    /**
+     * Show inline AI suggestion
+     */
+    function showInlineSuggestion(element, type) {
+        hideInlineSuggestion();
+        
+        const rect = element.getBoundingClientRect();
+        const suggestion = document.createElement('div');
+        suggestion.className = 'inline-ai-suggestion';
+        suggestion.style.cssText = `
+            position: fixed;
+            left: ${rect.left}px;
+            top: ${rect.bottom + 8}px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            padding: 12px;
+            z-index: 1000;
+            max-width: 400px;
+        `;
+        
+        if (type === 'ask') {
+            suggestion.innerHTML = `
+                <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Ask AI to...</div>
+                <div class="ai-suggestion-options" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <button data-action="continue" class="ai-suggestion-chip">Continue writing</button>
+                    <button data-action="summarize" class="ai-suggestion-chip">Summarize</button>
+                    <button data-action="improve" class="ai-suggestion-chip">Improve</button>
+                    <button data-action="brainstorm" class="ai-suggestion-chip">Brainstorm</button>
+                </div>
+            `;
+        }
+        
+        suggestion.querySelectorAll('.ai-suggestion-chip').forEach(btn => {
+            btn.style.cssText = `
+                padding: 4px 10px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: 12px;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.15s;
+            `;
+            btn.addEventListener('click', () => {
+                handleInlineAction(btn.dataset.action, element);
+                hideInlineSuggestion();
+            });
+        });
+        
+        document.body.appendChild(suggestion);
+        inlineSuggestions = suggestion;
+        
+        // Close on click outside
+        setTimeout(() => {
+            document.addEventListener('click', function closeSuggestions(e) {
+                if (!suggestion.contains(e.target)) {
+                    hideInlineSuggestion();
+                    document.removeEventListener('click', closeSuggestions);
+                }
+            });
+        }, 0);
+    }
+    
+    /**
+     * Hide inline suggestion
+     */
+    function hideInlineSuggestion() {
+        if (inlineSuggestions) {
+            inlineSuggestions.remove();
+            inlineSuggestions = null;
+        }
+    }
+    
+    /**
+     * Handle inline AI action
+     */
+    async function handleInlineAction(action, element) {
+        if (isGenerating) return;
+        
+        const text = element.textContent;
+        const page = window.Editor?.getCurrentPage?.();
+        const model = page?.defaultModel || currentModel;
+        
+        const actionPrompts = {
+            continue: `Continue writing from here:\n\n${text}`,
+            summarize: `Summarize the following:\n\n${text}`,
+            improve: `Improve the following:\n\n${text}`,
+            brainstorm: `Brainstorm ideas about:\n\n${text}`
+        };
+        
+        isGenerating = true;
+        showLoading('AI thinking...');
+        
+        try {
+            const result = await API.generate(actionPrompts[action], model);
+            const responseText = getResponseText(result);
+            
+            // Insert after current block
+            const blockEl = element.closest('.block');
+            if (blockEl && window.Editor?.insertBlockAfter) {
+                const blockId = blockEl.dataset.blockId;
+                window.Editor.insertBlockAfter(blockId, 'text', responseText);
+            }
+            
+            showToast(`AI ${action} complete`, 'success');
+        } catch (error) {
+            showToast('AI generation failed: ' + error.message, 'error');
+        } finally {
+            isGenerating = false;
+            hideLoading();
         }
     }
     
@@ -204,6 +384,8 @@ const AIIntegration = (function() {
             
             const prompt = actionPrompts[action] || `${action}: ${text}`;
             const result = await API.generate(prompt, model);
+            
+            // FIX: Use safe text extraction
             const responseText = getResponseText(result);
             
             // Replace selected text
@@ -364,12 +546,14 @@ const AIIntegration = (function() {
         
         try {
             const result = await API.generate(prompt, model);
+            
+            // FIX: Use safe text extraction
             const generatedText = getResponseText(result);
-              
+            
             // Insert result as new block
-            const page = window.Editor?.getCurrentPage?.();
-            if (page && page.blocks.length > 0) {
-                const lastBlock = page.blocks[page.blocks.length - 1];
+            const currentPage = window.Editor?.getCurrentPage?.();
+            if (currentPage && currentPage.blocks.length > 0) {
+                const lastBlock = currentPage.blocks[currentPage.blocks.length - 1];
                 window.Editor?.insertBlockAfter?.(lastBlock.id, 'text', generatedText);
             }
             
@@ -411,6 +595,7 @@ const AIIntegration = (function() {
                 return { text: fullText, model: useModel };
             } else {
                 const result = await API.generate(prompt, useModel);
+                // FIX: Use safe text extraction
                 return { text: getResponseText(result), model: useModel };
             }
         } catch (error) {
@@ -517,6 +702,7 @@ const AIIntegration = (function() {
         extractActionItems,
         getAvailableModels,
         getCurrentModel,
-        setCurrentModel
+        setCurrentModel,
+        getResponseText
     };
 })();

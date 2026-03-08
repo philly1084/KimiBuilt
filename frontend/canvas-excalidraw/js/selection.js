@@ -396,22 +396,25 @@ class SelectionManager {
 // Create global instance
 window.selectionManager = new SelectionManager();
 
-// Hook into tool manager mouse events
-const originalHandleMouseMove = window.toolManager?.handleMouseMove;
-if (originalHandleMouseMove) {
-    window.toolManager.handleMouseMove = function(e) {
-        if (window.selectionManager.isResizing) {
-            window.selectionManager.handleResizeMove(e);
-            return;
+// Hook into tool manager mouse events after DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait for all modules to initialize
+    setTimeout(() => {
+        if (window.toolManager) {
+            const originalHandleMouseMove = window.toolManager.handleMouseMove;
+            window.toolManager.handleMouseMove = function(e) {
+                if (window.selectionManager.isResizing) {
+                    window.selectionManager.handleResizeMove(e);
+                    return;
+                }
+                return originalHandleMouseMove.call(this, e);
+            };
+            
+            const originalHandleMouseUp = window.toolManager.handleMouseUp;
+            window.toolManager.handleMouseUp = function(e) {
+                window.selectionManager.handleResizeEnd();
+                return originalHandleMouseUp.call(this, e);
+            };
         }
-        originalHandleMouseMove.call(this, e);
-    };
-}
-
-const originalHandleMouseUp = window.toolManager?.handleMouseUp;
-if (originalHandleMouseUp) {
-    window.toolManager.handleMouseUp = function(e) {
-        window.selectionManager.handleResizeEnd();
-        originalHandleMouseUp.call(this, e);
-    };
-}
+    }, 0);
+});

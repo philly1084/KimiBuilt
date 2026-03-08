@@ -1,5 +1,5 @@
 /* ============================================
-   KimiBuilt AI Chat - Premium Styles v2.0
+   KimiBuilt AI Chat - Premium Styles v2.1
    ============================================ */
 
 /* CSS Variables for theming */
@@ -329,6 +329,11 @@ body {
     opacity: 1;
 }
 
+.session-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
 .session-icon {
     width: 2.25rem;
     height: 2.25rem;
@@ -420,6 +425,11 @@ body {
 
 .btn-primary:active:not(:disabled) {
     transform: translateY(0);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .btn-secondary {
@@ -599,6 +609,11 @@ body {
 .model-item.active {
     background-color: var(--accent-light);
     border-color: var(--accent);
+}
+
+.model-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 
 .model-item-icon {
@@ -828,6 +843,7 @@ body {
     transition: opacity var(--transition-fast);
     display: flex;
     gap: 0.25rem;
+    margin-left: auto;
 }
 
 .message:hover .message-actions {
@@ -847,6 +863,11 @@ body {
 .message-action-btn:hover {
     color: var(--text-primary);
     background-color: var(--bg-hover);
+}
+
+.message-action-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .message-text {
@@ -1041,6 +1062,11 @@ body {
     color: var(--text-primary);
 }
 
+.image-action-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* ============================================
    Image Lightbox
    ============================================ */
@@ -1087,6 +1113,12 @@ body {
 
 .image-lightbox-close:hover {
     opacity: 1;
+}
+
+.image-lightbox-close:focus-visible {
+    outline: 2px solid white;
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
 }
 
 .image-lightbox-content img {
@@ -1306,6 +1338,11 @@ body {
     border-color: #4d4d4d;
 }
 
+.code-copy-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .code-copy-btn.copied {
     background-color: rgba(34, 197, 94, 0.15);
     border-color: var(--success);
@@ -1419,44 +1456,57 @@ code[class*="language-"] {
     box-shadow: var(--shadow-md);
 }
 
+.suggestion-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* ============================================
    Connection Status
    ============================================ */
 
-#connection-status {
+#connection-status,
+#sidebar-connection-status {
     transition: all var(--transition-fast);
 }
 
-#connection-status.connected {
+#connection-status.connected,
+#sidebar-connection-status.connected {
     background-color: rgba(34, 197, 94, 0.1);
     color: var(--success);
 }
 
-#connection-status.connecting {
+#connection-status.connecting,
+#sidebar-connection-status.connecting {
     background-color: rgba(245, 158, 11, 0.1);
     color: var(--warning);
 }
 
-#connection-status.disconnected {
+#connection-status.disconnected,
+#sidebar-connection-status.disconnected {
     background-color: rgba(239, 68, 68, 0.1);
     color: var(--error);
 }
 
-#status-dot {
+#status-dot,
+#sidebar-status-dot {
     transition: all var(--transition-fast);
 }
 
-#status-dot.connected {
+#status-dot.connected,
+#sidebar-status-dot.connected {
     background-color: var(--success) !important;
     box-shadow: 0 0 8px var(--success);
 }
 
-#status-dot.connecting {
+#status-dot.connecting,
+#sidebar-status-dot.connecting {
     background-color: var(--warning) !important;
     animation: pulse 1.5s infinite;
 }
 
-#status-dot.disconnected {
+#status-dot.disconnected,
+#sidebar-status-dot.disconnected {
     background-color: var(--error) !important;
 }
 
@@ -1624,6 +1674,11 @@ code[class*="language-"] {
     background-color: var(--bg-tertiary);
 }
 
+.command-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
 .command-item-icon {
     width: 2rem;
     height: 2rem;
@@ -1672,6 +1727,93 @@ code[class*="language-"] {
     background-color: var(--bg-tertiary);
     border-radius: var(--radius-sm);
     font-family: inherit;
+}
+
+/* ============================================
+   Keyboard Shortcuts Modal
+   ============================================ */
+
+.shortcuts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.shortcut-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background-color: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+}
+
+.shortcut-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    background-color: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+}
+
+.shortcut-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+/* ============================================
+   Import Modal
+   ============================================ */
+
+.import-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-lg);
+    background-color: var(--bg-tertiary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.import-dropzone:hover,
+.import-dropzone.dragover {
+    border-color: var(--accent);
+    background-color: var(--accent-light);
+}
+
+.import-dropzone:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.import-preview {
+    padding: 1rem;
+    background-color: var(--bg-tertiary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+}
+
+.import-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.import-error {
+    color: var(--error);
+    padding: 0.75rem;
+    background-color: rgba(239, 68, 68, 0.1);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--error);
 }
 
 /* ============================================
@@ -1752,6 +1894,11 @@ code[class*="language-"] {
     transform: translateX(4px);
 }
 
+.export-option:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .export-name {
     font-weight: 500;
     color: var(--text-primary);
@@ -1780,6 +1927,12 @@ code[class*="language-"] {
     background: linear-gradient(135deg, var(--purple), #7c3aed);
     color: white;
     border-color: var(--purple);
+}
+
+.quality-btn:focus-visible,
+.style-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 #image-generate-btn {
@@ -2059,6 +2212,15 @@ code[class*="language-"] {
         max-width: 100%;
         margin: 0 0.5rem;
     }
+    
+    .chat-header {
+        padding-left: 3.5rem;
+        padding-right: 0.75rem;
+    }
+    
+    #connection-status {
+        display: none;
+    }
 }
 
 /* ============================================
@@ -2075,6 +2237,17 @@ code[class*="language-"] {
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border-width: 0;
+}
+
+.sr-only:focus {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: inherit;
+    margin: inherit;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
 }
 
 .text-gradient {
@@ -2116,8 +2289,21 @@ code[class*="language-"] {
 }
 
 /* Disable transitions on page load */
-.preload * {
+.preload *,
+.preload *::before,
+.preload *::after {
     transition: none !important;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
 
 /* ============================================
@@ -2138,7 +2324,9 @@ code[class*="language-"] {
     .model-selector-wrapper,
     .image-btn,
     .image-lightbox,
-    .model-selector-dropdown {
+    .model-selector-dropdown,
+    #shortcuts-modal,
+    #import-modal {
         display: none !important;
     }
     

@@ -2149,6 +2149,19 @@ body {
     border-bottom: 1px solid var(--border-color);
 }
 
+.database-header-cell {
+    transition: background 0.15s;
+}
+
+.database-header-cell:hover {
+    background: var(--bg-hover);
+}
+
+.database-rows {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
 .database-cell {
     flex: 1;
     padding: 10px 12px;
@@ -2156,15 +2169,40 @@ body {
     font-weight: 600;
     color: var(--text-secondary);
     border-right: 1px solid var(--border-color);
+    min-width: 100px;
+}
+
+.database-cell:focus {
+    outline: none;
+    background: var(--bg-hover);
 }
 
 .database-cell:last-child {
     border-right: none;
 }
 
+.database-action-cell {
+    flex: 0 0 30px;
+    padding: 10px 0;
+    text-align: center;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.database-action-cell:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
 .database-row {
     display: flex;
     border-bottom: 1px solid var(--border-color);
+    transition: background 0.15s;
+}
+
+.database-row:hover {
+    background: var(--bg-hover);
 }
 
 .database-row:last-child {
@@ -2176,7 +2214,8 @@ body {
     color: var(--text-primary);
 }
 
-.database-add-row {
+.database-add-row,
+.database-add-column {
     padding: 10px 12px;
     text-align: center;
     color: var(--text-muted);
@@ -2185,9 +2224,44 @@ body {
     transition: background 0.15s, color 0.15s;
 }
 
-.database-add-row:hover {
+.database-add-row:hover,
+.database-add-column:hover {
     background: var(--bg-hover);
     color: var(--text-secondary);
+}
+
+/* ===== Math Block ===== */
+.block[data-type="math"] .block-content {
+    width: 100%;
+}
+
+.math-container {
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+}
+
+.math-input {
+    width: 100%;
+    min-height: 60px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    resize: vertical;
+    outline: none;
+}
+
+.math-input:focus {
+    border-color: var(--accent-color);
+}
+
+/* KaTeX customizations */
+.katex-display {
+    margin: 0 !important;
 }
 
 /* ===== Drag Preview ===== */
@@ -2446,4 +2520,121 @@ body {
 
 .block-input a:hover {
     text-decoration: underline;
+}
+
+/* ===== Search Results ===== */
+.search-result-item {
+    transition: background 0.15s;
+}
+
+.search-result-item:hover {
+    background: var(--bg-hover);
+}
+
+.search-result-item.selected {
+    background: var(--bg-selected);
+}
+
+/* ===== Inline AI Suggestions ===== */
+.inline-ai-suggestion {
+    animation: fadeIn 0.2s ease;
+}
+
+.ai-suggestion-chip:hover {
+    background: var(--accent-color) !important;
+    color: white !important;
+    border-color: var(--accent-color) !important;
+}
+
+/* ===== Enhanced Selection Toolbar ===== */
+.selection-toolbar {
+    max-width: 95vw;
+    flex-wrap: wrap;
+}
+
+/* ===== Math Input ===== */
+.math-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.2);
+}
+
+/* ===== Database Cell Editing ===== */
+.database-cell[contenteditable="true"]:focus {
+    outline: none;
+    background: var(--bg-primary);
+    box-shadow: inset 0 0 0 2px var(--accent-color);
+}
+
+/* ===== Keyboard Shortcut Help ===== */
+.keyboard-shortcut {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* ===== Undo/Redo Indicators ===== */
+.undo-indicator {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    font-size: 13px;
+    color: var(--text-secondary);
+    z-index: 3000;
+    animation: fadeIn 0.2s ease;
+}
+
+/* ===== Enhanced Block Animations ===== */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.block {
+    animation: slideIn 0.1s ease;
+}
+
+/* ===== Focus Mode ===== */
+.focus-mode .sidebar {
+    transform: translateX(-100%);
+}
+
+.focus-mode .main-content {
+    max-width: 100%;
+}
+
+/* ===== Print Styles ===== */
+@media print {
+    .sidebar,
+    .block-handle,
+    .add-block-btn,
+    .selection-toolbar,
+    .inline-toolbar {
+        display: none !important;
+    }
+    
+    .main-content {
+        overflow: visible;
+    }
+    
+    .editor {
+        padding-bottom: 0;
+    }
 }

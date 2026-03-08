@@ -17,15 +17,17 @@ class App {
             this.setupTheme();
             this.setupExport();
             this.setupKeyboardShortcuts();
+            this.setupAutoSave();
             
             // Note: WebSocket not used with OpenAI SDK mode
             console.log('OpenAI SDK mode: WebSocket not used');
             
-            // Initial render
+            // Load saved canvas or initial render
+            this.loadCanvasFromStorage();
             window.infiniteCanvas?.render();
             
             // Push initial state for undo
-            window.historyManager?.pushState([]);
+            window.historyManager?.pushState(window.infiniteCanvas?.elements || []);
             
             // Setup model selector
             this.setupModelSelector();
@@ -36,6 +38,83 @@ class App {
             
             console.log('Kimi Canvas initialized with OpenAI SDK');
         });
+    }
+    
+    setupAutoSave() {
+        // Auto-save every 30 seconds
+        this.autoSaveInterval = setInterval(() => {
+            this.saveCanvasToStorage();
+        }, 30000);
+        
+        // Save on page unload
+        window.addEventListener('beforeunload', () => {
+            this.saveCanvasToStorage();
+        });
+        
+        // Save on visibility change (tab switch)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                this.saveCanvasToStorage();
+            }
+        });
+    }
+    
+    saveCanvasToStorage() {
+        try {
+            const canvas = window.infiniteCanvas;
+            if (!canvas || canvas.elements.length === 0) return;
+            
+            // Don't save image elements (can't serialize Image objects)
+            const serializableElements = canvas.elements.map(el => {
+                const copy = { ...el };
+                delete copy.imageElement; // Remove non-serializable Image objects
+                return copy;
+            });
+            
+            const data = {
+                elements: serializableElements,
+                timestamp: Date.now(),
+                version: '1.0'
+            };
+            
+            localStorage.setItem('kimi-canvas-autosave', JSON.stringify(data));
+        } catch (error) {
+            console.warn('Failed to auto-save canvas:', error);
+        }
+    }
+    
+    loadCanvasFromStorage() {
+        try {
+            const saved = localStorage.getItem('kimi-canvas-autosave');
+            if (!saved) return;
+            
+            const data = JSON.parse(saved);
+            if (!data.elements || !Array.isArray(data.elements)) return;
+            
+            const canvas = window.infiniteCanvas;
+            if (!canvas) return;
+            
+            // Ask user if they want to restore (if elements exist and saved data is newer)
+            const savedTime = new Date(data.timestamp).toLocaleString();
+            
+            // Load elements
+            for (const el of data.elements) {
+                // Restore default properties if missing
+                if (!el.strokeColor) el.strokeColor = '#000000';
+                if (!el.backgroundColor) el.backgroundColor = 'transparent';
+                if (!el.strokeWidth) el.strokeWidth = 2;
+                if (!el.strokeStyle) el.strokeStyle = 'solid';
+                if (el.roughness === undefined) el.roughness = 1;
+                if (el.opacity === undefined) el.opacity = 1;
+                
+                canvas.elements.push(el);
+            }
+            
+            canvas.render();
+            console.log(`Restored ${data.elements.length} elements from auto-save (${savedTime})`);
+        } catch (error) {
+            console.warn('Failed to load auto-saved canvas:', error);
+        }
     }
     
     setupEventListeners() {
@@ -138,13 +217,23 @@ class App {
         // Global keyboard shortcuts handled in individual modules
         // Additional app-level shortcuts:
         document.addEventListener('keydown', (e) => {
+            // Don't process shortcuts when in input fields
+            const isInputActive = document.activeElement.tagName === 'TEXTAREA' || 
+                                  document.activeElement.tagName === 'INPUT';
+            
             // Help shortcut
-            if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && !isInputActive) {
                 this.showHelpModal();
             }
             
             // Escape to close modals and deselect
             if (e.key === 'Escape') {
+                // First check if text editor is open
+                const textEditor = document.getElementById('textEditor');
+                if (textEditor && textEditor.style.display === 'block') {
+                    textEditor.blur(); // Will trigger save/cancel
+                    return;
+                }
                 this.hideExportModal();
                 this.hideHelpModal();
                 window.aiAssistant?.hidePanel();
@@ -152,7 +241,7 @@ class App {
             }
             
             // Ctrl/Cmd shortcuts
-            if (e.ctrlKey || e.metaKey) {
+            if ((e.ctrlKey || e.metaKey) && !isInputActive) {
                 switch (e.key.toLowerCase()) {
                     case 'z':
                         e.preventDefault();
@@ -169,6 +258,20 @@ class App {
                     case 'd':
                         e.preventDefault();
                         window.selectionManager?.duplicateSelection();
+                        break;
+                    case 'c':
+                        e.preventDefault();
+                        window.toolManager?.copySelection();
+                        this.showToast('Copied to clipboard');
+                        break;
+                    case 'x':
+                        e.preventDefault();
+                        window.toolManager?.cutSelection();
+                        this.showToast('Cut to clipboard');
+                        break;
+                    case 'v':
+                        e.preventDefault();
+                        window.toolManager?.paste();
                         break;
                     case 'g':
                         e.preventDefault();
@@ -313,12 +416,8 @@ class App {
         // Update properties panel
         window.propertiesManager?.updateForSelection();
         
-        // Update selection box
-        if (canvas.selectedElements.length === 1) {
-            window.renderer?.updateSelectionBox(canvas.selectedElements[0]);
-        } else {
-            window.renderer?.hideSelectionBox();
-        }
+        // Selection box update is now handled in canvas.render()
+        // which is called after selection changes
     }
     
     showExportModal() {
@@ -467,10 +566,17 @@ class App {
             window.historyManager?.pushState([]);
             canvas.render();
             this.onSelectionChange();
+            
+            // Clear auto-save
+            try {
+                localStorage.removeItem('kimi-canvas-autosave');
+            } catch (e) {
+                console.warn('Failed to clear auto-save:', e);
+            }
         }
     }
     
-    async exportCanvas(format) {
+    async exportCanvas(format, options = {}) {
         this.hideExportModal();
         
         const canvas = window.infiniteCanvas;
@@ -478,41 +584,47 @@ class App {
         
         switch (format) {
             case 'png':
-                const dataURL = canvas.exportToDataURL('image/png');
+                const dataURL = canvas.exportToDataURL('image/png', options);
                 this.downloadFile(dataURL, `canvas-${timestamp}.png`);
+                this.showToast('Exported to PNG');
                 break;
                 
             case 'svg':
-                const svgData = this.exportToSVG();
+                const svgData = this.exportToSVG(options);
                 this.downloadFile('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData), `canvas-${timestamp}.svg`);
+                this.showToast('Exported to SVG');
                 break;
                 
             case 'json':
                 const jsonData = JSON.stringify(canvas.elements, null, 2);
                 const blob = new Blob([jsonData], { type: 'application/json' });
                 this.downloadFile(URL.createObjectURL(blob), `canvas-${timestamp}.json`);
+                this.showToast('Exported to JSON');
                 break;
         }
     }
     
-    exportToSVG() {
+    exportToSVG(options = {}) {
         const canvas = window.infiniteCanvas;
         
         // Calculate bounds
         const bounds = canvas.getBounds();
-        const padding = 20;
+        const padding = options.padding !== undefined ? options.padding : 20;
         
         const width = bounds.width + padding * 2;
         const height = bounds.height + padding * 2;
         const offsetX = -bounds.x + padding;
         const offsetY = -bounds.y + padding;
         
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const bgColor = isDark ? '#1e1e1e' : '#ffffff';
-        
         let svg = `<?xml version="1.0" encoding="UTF-8"?>`;
-        svg += `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
-        svg += `<rect width="100%" height="100%" fill="${bgColor}"/>`;
+        svg += `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+        
+        // Add background (unless transparent)
+        if (!options.transparent) {
+            const bgColor = options.backgroundColor || 
+                (document.documentElement.getAttribute('data-theme') === 'dark' ? '#1e1e1e' : '#ffffff');
+            svg += `<rect width="100%" height="100%" fill="${bgColor}"/>`;
+        }
         
         // Export each element
         for (const el of canvas.elements) {
@@ -544,15 +656,27 @@ class App {
                     svg += ` rx="${r}" ry="${r}"`;
                 }
                 svg += '/>';
+                // Add text if present
+                if (el.text) {
+                    svg += this.shapeTextToSVG(el, x, y, hw, hh, opacity);
+                }
                 break;
                 
             case 'diamond':
                 const points = `${x},${y - hh} ${x + hw},${y} ${x},${y + hh} ${x - hw},${y}`;
                 svg = `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"/>`;
+                // Add text if present
+                if (el.text) {
+                    svg += this.shapeTextToSVG(el, x, y, hw, hh, opacity);
+                }
                 break;
                 
             case 'ellipse':
                 svg = `<ellipse cx="${x}" cy="${y}" rx="${hw}" ry="${hh}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"/>`;
+                // Add text if present
+                if (el.text) {
+                    svg += this.shapeTextToSVG(el, x, y, hw, hh, opacity);
+                }
                 break;
                 
             case 'text':
@@ -605,11 +729,49 @@ class App {
                 
             case 'freedraw':
                 if (el.points && el.points.length >= 2) {
+                    // Use quadratic curves for smoother lines
                     let path = `M ${el.points[0].x + offsetX} ${el.points[0].y + offsetY}`;
-                    for (let i = 1; i < el.points.length; i++) {
-                        path += ` L ${el.points[i].x + offsetX} ${el.points[i].y + offsetY}`;
+                    for (let i = 1; i < el.points.length - 1; i++) {
+                        const xc = (el.points[i].x + el.points[i + 1].x) / 2;
+                        const yc = (el.points[i].y + el.points[i + 1].y) / 2;
+                        path += ` Q ${el.points[i].x + offsetX} ${el.points[i].y + offsetY}, ${xc + offsetX} ${yc + offsetY}`;
                     }
-                    svg = `<path d="${path}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"/>`;
+                    if (el.points.length > 1) {
+                        const last = el.points[el.points.length - 1];
+                        path += ` L ${last.x + offsetX} ${last.y + offsetY}`;
+                    }
+                    
+                    let strokeDash = '';
+                    if (el.strokeStyle === 'dashed') {
+                        strokeDash = ' stroke-dasharray="8,8"';
+                    } else if (el.strokeStyle === 'dotted') {
+                        strokeDash = ' stroke-dasharray="2,4"';
+                    }
+                    
+                    svg = `<path d="${path}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"${strokeDash}/>`;
+                }
+                break;
+                
+            case 'frame':
+                // Frame background
+                if (el.backgroundColor && el.backgroundColor !== 'transparent') {
+                    svg += `<rect x="${x - hw}" y="${y - hh}" width="${el.width}" height="${el.height}" fill="${el.backgroundColor}" opacity="${opacity * 0.3}"/>`;
+                }
+                // Frame border (dashed)
+                svg += `<rect x="${x - hw}" y="${y - hh}" width="${el.width}" height="${el.height}" fill="none" stroke="${el.strokeColor || '#999999'}" stroke-width="${strokeWidth * 2}" stroke-dasharray="5,5" opacity="${opacity}"/>`;
+                // Title bar
+                const titleHeight = 30;
+                svg += `<rect x="${x - hw}" y="${y - hh}" width="${el.width}" height="${titleHeight}" fill="${el.strokeColor || '#999999'}" opacity="${opacity}"/>`;
+                if (el.name) {
+                    svg += `<text x="${x - hw + 10}" y="${y - hh + titleHeight/2}" dominant-baseline="middle" fill="#ffffff" font-size="14" font-family="system-ui, sans-serif" font-weight="bold">${this.escapeXml(el.name)}</text>`;
+                }
+                break;
+                
+            case 'image':
+                if (el.imageElement && el.imageElement.src) {
+                    svg += `<image x="${x - hw}" y="${y - hh}" width="${el.width}" height="${el.height}" href="${el.imageElement.src}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
+                } else if (el.imageUrl) {
+                    svg += `<image x="${x - hw}" y="${y - hh}" width="${el.width}" height="${el.height}" href="${el.imageUrl}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet"/>`;
                 }
                 break;
         }
@@ -618,6 +780,7 @@ class App {
     }
     
     escapeXml(text) {
+        if (!text) return '';
         return text.replace(/[<>&'"]/g, c => ({
             '<': '&lt;',
             '>': '&gt;',
@@ -625,6 +788,51 @@ class App {
             "'": '&apos;',
             '"': '&quot;'
         })[c]);
+    }
+    
+    shapeTextToSVG(el, x, y, hw, hh, opacity) {
+        if (!el.text) return '';
+        
+        const lines = el.text.split('\n');
+        const fontSize = el.fontSize || 20;
+        const lineHeight = fontSize * 1.4;
+        const maxWidth = (el.width || 200) - 20; // padding
+        const fontFamily = this.escapeXml(el.fontFamily || 'sans-serif');
+        const fill = el.strokeColor || '#000000';
+        
+        let svg = `<g opacity="${opacity}">`;
+        
+        // Simple word wrapping
+        const wrappedLines = [];
+        for (const line of lines) {
+            const words = line.split(' ');
+            let currentLine = words[0] || '';
+            
+            for (let i = 1; i < words.length; i++) {
+                const testLine = currentLine + ' ' + words[i];
+                // Estimate width (rough approximation)
+                if (testLine.length * fontSize * 0.6 < maxWidth) {
+                    currentLine = testLine;
+                } else {
+                    wrappedLines.push(currentLine);
+                    currentLine = words[i];
+                }
+            }
+            wrappedLines.push(currentLine);
+        }
+        
+        const totalHeight = wrappedLines.length * lineHeight;
+        const startY = y - totalHeight / 2 + lineHeight / 2;
+        
+        wrappedLines.forEach((line, i) => {
+            if (i < 5) { // Limit to 5 lines
+                const lineY = startY + i * lineHeight;
+                svg += `<text x="${x}" y="${lineY}" text-anchor="middle" dominant-baseline="middle" fill="${fill}" font-size="${fontSize}" font-family="${fontFamily}">${this.escapeXml(line)}</text>`;
+            }
+        });
+        
+        svg += '</g>';
+        return svg;
     }
     
     downloadFile(url, filename) {

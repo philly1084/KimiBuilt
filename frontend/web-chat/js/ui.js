@@ -20,7 +20,13 @@ class UIHelpers {
         
         // Model selector state
         this.availableModels = [];
-        this.currentModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
+        let savedModel;
+        try {
+            savedModel = localStorage.getItem('kimibuilt_default_model');
+        } catch (e) {
+            savedModel = null;
+        }
+        this.currentModel = savedModel || 'gpt-4o';
         this.updateModelUI();
     }
 
@@ -59,8 +65,8 @@ class UIHelpers {
                     <div class="code-header">
                         <span class="code-language">${lang}</span>
                         <div class="code-actions">
-                            <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${this.escapeHtmlAttr(code)}">
-                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                            <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${this.escapeHtmlAttr(code)}" aria-label="Copy code to clipboard">
+                                <i data-lucide="copy" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                 <span>Copy</span>
                             </button>
                         </div>
@@ -118,7 +124,13 @@ class UIHelpers {
             'ruby': 'ruby',
             'php': 'php',
             'docker': 'docker',
-            'dockerfile': 'docker'
+            'dockerfile': 'docker',
+            'md': 'markdown',
+            'markdown': 'markdown',
+            'sql': 'sql',
+            'psql': 'sql',
+            'mysql': 'sql',
+            'postgres': 'sql'
         };
         return languageMap[lang?.toLowerCase()] || lang || 'text';
     }
@@ -149,16 +161,20 @@ class UIHelpers {
         }
         
         const isUser = message.role === 'user';
-        const messageId = message.id || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const messageId = message.id || this.generateMessageId();
         
         const messageEl = document.createElement('div');
         messageEl.className = `message ${isUser ? 'user' : 'assistant'}`;
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
+        
+        // Add ARIA attributes for accessibility
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', `${isUser ? 'Your message' : 'Assistant response'}`);
 
         const avatar = isUser ? 
-            `<div class="message-avatar user"><i data-lucide="user" class="w-4 h-4"></i></div>` :
-            `<div class="message-avatar assistant"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
+            `<div class="message-avatar user" aria-hidden="true"><i data-lucide="user" class="w-4 h-4"></i></div>` :
+            `<div class="message-avatar assistant" aria-hidden="true"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
 
         const content = isUser ? 
             this.renderUserMessage(message.content) :
@@ -174,12 +190,12 @@ class UIHelpers {
                     <span class="message-author">${isUser ? 'You' : 'Assistant'}</span>
                     <span class="message-time" title="${fullTimestamp}">${time}</span>
                     <div class="message-actions">
-                        <button class="message-action-btn" onclick="uiHelpers.copyMessage('${messageId}')" title="Copy message">
-                            <i data-lucide="copy" class="w-4 h-4"></i>
+                        <button class="message-action-btn" onclick="uiHelpers.copyMessage('${messageId}')" title="Copy message" aria-label="Copy message to clipboard">
+                            <i data-lucide="copy" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
                         ${!isUser ? `
-                        <button class="message-action-btn" onclick="uiHelpers.regenerateMessage('${messageId}')" title="Regenerate response">
-                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        <button class="message-action-btn" onclick="uiHelpers.regenerateMessage('${messageId}')" title="Regenerate response" aria-label="Regenerate response">
+                            <i data-lucide="refresh-cw" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
                         ` : ''}
                     </div>
@@ -219,21 +235,22 @@ class UIHelpers {
             ],
             ALLOWED_ATTR: [
                 'href', 'title', 'target', 'rel', 'src', 'alt', 
-                'class', 'data-code', 'onclick', 'type', 'checked', 'disabled'
+                'class', 'data-code', 'onclick', 'type', 'checked', 'disabled',
+                'aria-label', 'aria-hidden'
             ],
             ALLOW_DATA_ATTR: false
         });
 
         // Add streaming cursor if needed
         if (isStreaming) {
-            html += '<span class="streaming-cursor"></span>';
+            html += '<span class="streaming-cursor" aria-hidden="true"></span>';
         }
 
         return html;
     }
 
     renderImageMessage(message) {
-        const messageId = message.id || `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const messageId = message.id || this.generateMessageId();
         const time = this.formatTime(message.timestamp);
         const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
         
@@ -246,11 +263,13 @@ class UIHelpers {
         messageEl.className = 'message assistant';
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', 'Generated image');
         
         const imageHtml = isLoading ? `
-            <div class="image-container loading">
+            <div class="image-container loading" aria-busy="true" aria-label="Generating image">
                 <div class="image-loading-indicator">
-                    <div class="spinner"></div>
+                    <div class="spinner" role="progressbar" aria-valuemin="0" aria-valuemax="100"></div>
                     <span class="text">${message.loadingText || 'Generating image...'}</span>
                 </div>
             </div>
@@ -258,7 +277,8 @@ class UIHelpers {
             <div class="image-container">
                 <img src="${imageUrl}" alt="${this.escapeHtmlAttr(prompt || 'Generated image')}" 
                      onclick="uiHelpers.openImageLightbox('${imageUrl}')" 
-                     onload="uiHelpers.scrollToBottom()">
+                     onload="uiHelpers.scrollToBottom()"
+                     loading="lazy">
             </div>
             ${revisedPrompt ? `
                 <div class="image-revised-prompt">
@@ -267,19 +287,19 @@ class UIHelpers {
                 </div>
             ` : ''}
             <div class="image-actions">
-                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${imageUrl}', '${this.escapeHtmlAttr(prompt || 'generated-image')}.png')">
-                    <i data-lucide="download" class="w-4 h-4"></i>
+                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${imageUrl}', '${this.escapeHtmlAttr(prompt || 'generated-image')}.png')" aria-label="Download image">
+                    <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Download</span>
                 </button>
-                <button class="image-action-btn" onclick="uiHelpers.copyImageUrl('${imageUrl}')">
-                    <i data-lucide="link" class="w-4 h-4"></i>
+                <button class="image-action-btn" onclick="uiHelpers.copyImageUrl('${imageUrl}')" aria-label="Copy image URL">
+                    <i data-lucide="link" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Copy URL</span>
                 </button>
             </div>
         `;
         
         messageEl.innerHTML = `
-            <div class="message-avatar assistant">
+            <div class="message-avatar assistant" aria-hidden="true">
                 <i data-lucide="image" class="w-4 h-4"></i>
             </div>
             <div class="message-content">
@@ -288,15 +308,15 @@ class UIHelpers {
                     <span class="message-time" title="${fullTimestamp}">${time}</span>
                     <div class="message-actions">
                         ${!isLoading ? `
-                        <button class="message-action-btn" onclick="uiHelpers.copyMessage('${messageId}')" title="Copy prompt">
-                            <i data-lucide="copy" class="w-4 h-4"></i>
+                        <button class="message-action-btn" onclick="uiHelpers.copyMessage('${messageId}')" title="Copy prompt" aria-label="Copy prompt">
+                            <i data-lucide="copy" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
                         ` : ''}
                     </div>
                 </div>
                 <div class="message-image">
                     <div class="image-generation-info">
-                        <div class="icon">
+                        <div class="icon" aria-hidden="true">
                             <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
                         </div>
                         <span class="text">Generated Image</span>
@@ -406,6 +426,18 @@ class UIHelpers {
     }
 
     // ============================================
+    // Static ID Generator
+    // ============================================
+
+    static generateMessageId() {
+        return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    generateMessageId() {
+        return UIHelpers.generateMessageId();
+    }
+
+    // ============================================
     // Image Handling
     // ============================================
 
@@ -413,15 +445,23 @@ class UIHelpers {
         const lightbox = document.getElementById('image-lightbox');
         const img = document.getElementById('lightbox-image');
         img.src = imageUrl;
+        img.alt = 'Generated image preview';
         lightbox.classList.remove('hidden');
+        lightbox.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
+        
+        // Focus trap for accessibility
+        const closeBtn = lightbox.querySelector('.image-lightbox-close');
+        if (closeBtn) closeBtn.focus();
     }
 
     closeImageLightbox() {
         const lightbox = document.getElementById('image-lightbox');
         const img = document.getElementById('lightbox-image');
         lightbox.classList.add('hidden');
+        lightbox.setAttribute('aria-hidden', 'true');
         img.src = '';
+        img.alt = '';
         document.body.style.overflow = '';
     }
 
@@ -436,6 +476,7 @@ class UIHelpers {
         const a = document.createElement('a');
         a.href = imageUrl;
         a.download = filename;
+        a.setAttribute('aria-label', `Download ${filename}`);
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -458,24 +499,35 @@ class UIHelpers {
     openImageModal() {
         const modal = document.getElementById('image-modal');
         modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
         
         // Focus the prompt input
         setTimeout(() => {
-            document.getElementById('image-prompt-input').focus();
+            const input = document.getElementById('image-prompt-input');
+            if (input) input.focus();
         }, 100);
         
         // Setup toggle buttons
         this.setupImageGenerationToggles();
+        
+        // Trap focus for accessibility
+        this.trapFocus(modal);
     }
 
     closeImageModal() {
         const modal = document.getElementById('image-modal');
         modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
         
         // Reset form
-        document.getElementById('image-prompt-input').value = '';
-        document.getElementById('image-model-select').value = 'dall-e-3';
-        document.getElementById('image-size-select').value = '1024x1024';
+        const promptInput = document.getElementById('image-prompt-input');
+        const modelSelect = document.getElementById('image-model-select');
+        const sizeSelect = document.getElementById('image-size-select');
+        
+        if (promptInput) promptInput.value = '';
+        if (modelSelect) modelSelect.value = 'dall-e-3';
+        if (sizeSelect) sizeSelect.value = '1024x1024';
+        
         this.imageGenerationState.quality = 'standard';
         this.imageGenerationState.style = 'vivid';
         this.updateToggleButtons();
@@ -499,20 +551,27 @@ class UIHelpers {
         });
         
         // Model change handler - update available options
-        document.getElementById('image-model-select').addEventListener('change', (e) => {
-            this.updateImageOptionsForModel(e.target.value);
-        });
+        const modelSelect = document.getElementById('image-model-select');
+        if (modelSelect) {
+            modelSelect.addEventListener('change', (e) => {
+                this.updateImageOptionsForModel(e.target.value);
+            });
+        }
         
         this.updateToggleButtons();
-        this.updateImageOptionsForModel(document.getElementById('image-model-select').value);
+        if (modelSelect) {
+            this.updateImageOptionsForModel(modelSelect.value);
+        }
     }
 
     updateToggleButtons() {
         document.querySelectorAll('.quality-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.quality === this.imageGenerationState.quality);
+            btn.setAttribute('aria-pressed', btn.dataset.quality === this.imageGenerationState.quality);
         });
         document.querySelectorAll('.style-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.style === this.imageGenerationState.style);
+            btn.setAttribute('aria-pressed', btn.dataset.style === this.imageGenerationState.style);
         });
     }
 
@@ -521,6 +580,8 @@ class UIHelpers {
         const qualityContainer = document.getElementById('image-quality-container');
         const styleContainer = document.getElementById('image-style-container');
         
+        if (!sizeSelect) return;
+        
         if (model === 'dall-e-3') {
             // DALL-E 3 supports all sizes
             sizeSelect.innerHTML = `
@@ -528,8 +589,8 @@ class UIHelpers {
                 <option value="1792x1024">1792x1024 (Landscape)</option>
                 <option value="1024x1792">1024x1792 (Portrait)</option>
             `;
-            qualityContainer.style.display = 'block';
-            styleContainer.style.display = 'block';
+            if (qualityContainer) qualityContainer.style.display = 'block';
+            if (styleContainer) styleContainer.style.display = 'block';
         } else {
             // DALL-E 2 supports different sizes
             sizeSelect.innerHTML = `
@@ -537,17 +598,21 @@ class UIHelpers {
                 <option value="512x512">512x512</option>
                 <option value="1024x1024">1024x1024</option>
             `;
-            qualityContainer.style.display = 'none';
-            styleContainer.style.display = 'none';
+            if (qualityContainer) qualityContainer.style.display = 'none';
+            if (styleContainer) styleContainer.style.display = 'none';
         }
     }
 
     getImageGenerationOptions() {
-        const model = document.getElementById('image-model-select').value;
+        const modelSelect = document.getElementById('image-model-select');
+        const promptInput = document.getElementById('image-prompt-input');
+        const sizeSelect = document.getElementById('image-size-select');
+        
+        const model = modelSelect?.value || 'dall-e-3';
         const options = {
-            prompt: document.getElementById('image-prompt-input').value.trim(),
+            prompt: promptInput?.value?.trim() || '',
             model: model,
-            size: document.getElementById('image-size-select').value
+            size: sizeSelect?.value || '1024x1024'
         };
         
         if (model === 'dall-e-3') {
@@ -560,18 +625,22 @@ class UIHelpers {
 
     setImageGenerateButtonState(isGenerating) {
         const btn = document.getElementById('image-generate-btn');
+        if (!btn) return;
+        
         if (isGenerating) {
             btn.disabled = true;
             btn.classList.add('generating');
+            btn.setAttribute('aria-busy', 'true');
             btn.innerHTML = `
-                <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true"></div>
                 <span>Generating...</span>
             `;
         } else {
             btn.disabled = false;
             btn.classList.remove('generating');
+            btn.setAttribute('aria-busy', 'false');
             btn.innerHTML = `
-                <i data-lucide="wand-2" class="w-5 h-5"></i>
+                <i data-lucide="wand-2" class="w-5 h-5" aria-hidden="true"></i>
                 <span>Generate Image</span>
             `;
             this.reinitializeIcons(btn);
@@ -605,6 +674,7 @@ class UIHelpers {
     async openModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
         dropdown.classList.remove('hidden');
+        dropdown.setAttribute('aria-hidden', 'false');
         
         // Load models if not already loaded
         if (this.availableModels.length === 0) {
@@ -612,11 +682,15 @@ class UIHelpers {
         }
         
         this.renderModelList();
+        
+        // Trap focus
+        this.trapFocus(dropdown);
     }
 
     closeModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
         dropdown.classList.add('hidden');
+        dropdown.setAttribute('aria-hidden', 'true');
     }
 
     renderModelList() {
@@ -648,6 +722,8 @@ class UIHelpers {
                 this.selectModel(modelId);
             });
         });
+        
+        this.reinitializeIcons(listContainer);
     }
 
     renderModelItem(model) {
@@ -657,15 +733,15 @@ class UIHelpers {
         const description = this.getModelDescription(model);
         
         return `
-            <div class="model-item ${isActive ? 'active' : ''}" data-model-id="${model.id}">
+            <div class="model-item ${isActive ? 'active' : ''}" data-model-id="${model.id}" role="option" aria-selected="${isActive}">
                 <div class="model-item-icon ${provider}">
-                    <i data-lucide="cpu" class="w-4 h-4"></i>
+                    <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
                 </div>
                 <div class="model-item-info">
                     <div class="model-item-name">${displayName}</div>
                     <div class="model-item-desc">${description}</div>
                 </div>
-                <div class="model-item-check">
+                <div class="model-item-check" aria-hidden="true">
                     <i data-lucide="check" class="w-4 h-4"></i>
                 </div>
             </div>
@@ -718,7 +794,8 @@ class UIHelpers {
             'claude-3-opus': 'Claude 3 Opus',
             'claude-3-sonnet': 'Claude 3 Sonnet',
             'claude-3-haiku': 'Claude 3 Haiku',
-            'claude-3-5-sonnet': 'Claude 3.5 Sonnet'
+            'claude-3-5-sonnet': 'Claude 3.5 Sonnet',
+            'claude-3.5-sonnet-latest': 'Claude 3.5 Sonnet Latest'
         };
         return names[id] || id;
     }
@@ -738,7 +815,11 @@ class UIHelpers {
 
     selectModel(modelId) {
         this.currentModel = modelId;
-        localStorage.setItem('kimibuilt_default_model', modelId);
+        try {
+            localStorage.setItem('kimibuilt_default_model', modelId);
+        } catch (e) {
+            console.warn('Failed to save model preference:', e);
+        }
         this.updateModelUI();
         this.closeModelSelector();
         this.showToast(`Model changed to ${this.getModelDisplayName({ id: modelId })}`, 'success');
@@ -762,7 +843,11 @@ class UIHelpers {
 
     setCurrentModel(modelId) {
         this.currentModel = modelId;
-        localStorage.setItem('kimibuilt_default_model', modelId);
+        try {
+            localStorage.setItem('kimibuilt_default_model', modelId);
+        } catch (e) {
+            console.warn('Failed to save model preference:', e);
+        }
         this.updateModelUI();
     }
 
@@ -773,7 +858,9 @@ class UIHelpers {
     highlightCodeBlocks(container) {
         const codeBlocks = container.querySelectorAll('pre code');
         codeBlocks.forEach(block => {
-            Prism.highlightElement(block);
+            if (window.Prism) {
+                Prism.highlightElement(block);
+            }
         });
     }
 
@@ -787,7 +874,7 @@ class UIHelpers {
             const originalHTML = button.innerHTML;
             button.classList.add('copied');
             button.innerHTML = `
-                <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                <i data-lucide="check" class="w-3.5 h-3.5" aria-hidden="true"></i>
                 <span>Copied!</span>
             `;
             this.reinitializeIcons(button);
@@ -813,7 +900,7 @@ class UIHelpers {
         if (sessions.length === 0) {
             this.sessionsList.innerHTML = `
                 <div class="empty-state py-8">
-                    <i data-lucide="message-square" class="w-12 h-12 mb-3 text-text-muted"></i>
+                    <i data-lucide="message-square" class="w-12 h-12 mb-3 text-text-muted" aria-hidden="true"></i>
                     <p class="text-sm text-text-secondary">No conversations yet</p>
                     <p class="text-xs text-text-muted mt-1">Start a new chat to begin</p>
                 </div>
@@ -830,8 +917,8 @@ class UIHelpers {
             const messageCount = sessionManager.getMessages(session.id)?.length || 0;
             
             return `
-                <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}">
-                    <div class="session-icon ${modeClass}">
+                <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}" role="button" tabindex="0" aria-label="${this.escapeHtmlAttr(session.title || 'New Chat')}">
+                    <div class="session-icon ${modeClass}" aria-hidden="true">
                         <i data-lucide="${modeIcon}" class="w-4 h-4 text-white"></i>
                     </div>
                     <div class="session-info">
@@ -841,8 +928,8 @@ class UIHelpers {
                         </div>
                     </div>
                     <div class="session-actions">
-                        <button class="btn-icon danger p-1.5 rounded delete-session-btn" data-session-id="${session.id}" title="Delete conversation">
-                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        <button class="btn-icon danger p-1.5 rounded delete-session-btn" data-session-id="${session.id}" title="Delete conversation" aria-label="Delete conversation">
+                            <i data-lucide="trash-2" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
                     </div>
                 </div>
@@ -856,12 +943,22 @@ class UIHelpers {
     attachSessionListeners() {
         // Session item clicks (for switching)
         this.sessionsList.querySelectorAll('.session-item').forEach(item => {
-            item.addEventListener('click', (e) => {
+            const clickHandler = (e) => {
                 // Don't switch if clicking delete button
                 if (e.target.closest('.delete-session-btn')) return;
                 
                 const sessionId = item.dataset.sessionId;
                 sessionManager.switchSession(sessionId);
+            };
+            
+            item.addEventListener('click', clickHandler);
+            
+            // Keyboard support
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    clickHandler(e);
+                }
             });
         });
 
@@ -894,6 +991,8 @@ class UIHelpers {
         const dotEl = document.getElementById('status-dot');
         const textEl = document.getElementById('status-text');
 
+        if (!statusEl || !dotEl || !textEl) return;
+
         // Remove all status classes
         statusEl.classList.remove('connected', 'connecting', 'disconnected');
         dotEl.classList.remove('connected', 'connecting', 'disconnected');
@@ -924,7 +1023,13 @@ class UIHelpers {
 
     initTheme() {
         // Check for saved theme or system preference
-        const savedTheme = localStorage.getItem('kimibuilt_theme');
+        let savedTheme;
+        try {
+            savedTheme = localStorage.getItem('kimibuilt_theme');
+        } catch (e) {
+            savedTheme = null;
+        }
+        
         const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         
         const theme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
@@ -932,7 +1037,13 @@ class UIHelpers {
         
         // Listen for system theme changes
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (!localStorage.getItem('kimibuilt_theme')) {
+            let hasSavedTheme;
+            try {
+                hasSavedTheme = localStorage.getItem('kimibuilt_theme');
+            } catch (e) {
+                hasSavedTheme = null;
+            }
+            if (!hasSavedTheme) {
                 this.setTheme(e.matches ? 'dark' : 'light');
             }
         });
@@ -940,7 +1051,11 @@ class UIHelpers {
 
     setTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('kimibuilt_theme', theme);
+        try {
+            localStorage.setItem('kimibuilt_theme', theme);
+        } catch (e) {
+            console.warn('Failed to save theme preference:', e);
+        }
 
         // Update theme toggle UI
         const lightIcon = document.getElementById('theme-icon-light');
@@ -951,13 +1066,13 @@ class UIHelpers {
         if (theme === 'light') {
             lightIcon?.classList.remove('hidden');
             darkIcon?.classList.add('hidden');
-            themeText.textContent = 'Light Mode';
-            prismTheme?.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css');
+            if (themeText) themeText.textContent = 'Light Mode';
+            if (prismTheme) prismTheme.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css');
         } else {
             lightIcon?.classList.add('hidden');
             darkIcon?.classList.remove('hidden');
-            themeText.textContent = 'Dark Mode';
-            prismTheme?.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css');
+            if (themeText) themeText.textContent = 'Dark Mode';
+            if (prismTheme) prismTheme.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css');
         }
     }
 
@@ -1165,14 +1280,19 @@ class UIHelpers {
         const palette = document.getElementById('command-palette');
         const input = document.getElementById('command-input');
         palette.classList.remove('hidden');
+        palette.setAttribute('aria-hidden', 'false');
         input.value = '';
         input.focus();
         this.renderCommandResults('');
+        
+        // Trap focus
+        this.trapFocus(palette);
     }
 
     closeCommandPalette() {
         const palette = document.getElementById('command-palette');
         palette.classList.add('hidden');
+        palette.setAttribute('aria-hidden', 'true');
     }
 
     renderCommandResults(query) {
@@ -1214,9 +1334,9 @@ class UIHelpers {
             <div class="command-group">
                 <div class="command-group-title">${category}</div>
                 ${cmds.map((cmd, index) => `
-                    <div class="command-item ${index === 0 ? 'selected' : ''}" data-action="${cmd.action}">
+                    <div class="command-item ${index === 0 ? 'selected' : ''}" data-action="${cmd.action}" role="option" tabindex="0">
                         <div class="command-item-icon">
-                            <i data-lucide="${cmd.icon}" class="w-4 h-4"></i>
+                            <i data-lucide="${cmd.icon}" class="w-4 h-4" aria-hidden="true"></i>
                         </div>
                         <div class="command-item-content">
                             <div class="command-item-title">${cmd.title}</div>
@@ -1234,6 +1354,12 @@ class UIHelpers {
         resultsContainer.querySelectorAll('.command-item').forEach(item => {
             item.addEventListener('click', () => {
                 this.executeCommand(item.dataset.action);
+            });
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.executeCommand(item.dataset.action);
+                }
             });
         });
     }
@@ -1256,9 +1382,9 @@ class UIHelpers {
                     <div class="command-group">
                         <div class="command-group-title">Matching Models</div>
                         ${matchingModels.map((model, index) => `
-                            <div class="command-item ${index === 0 ? 'selected' : ''}" data-action="set-model:${model.id}">
+                            <div class="command-item ${index === 0 ? 'selected' : ''}" data-action="set-model:${model.id}" role="option" tabindex="0">
                                 <div class="command-item-icon">
-                                    <i data-lucide="cpu" class="w-4 h-4"></i>
+                                    <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
                                 </div>
                                 <div class="command-item-content">
                                     <div class="command-item-title">${this.getModelDisplayName(model)}</div>
@@ -1282,9 +1408,9 @@ class UIHelpers {
             resultsContainer.innerHTML = `
                 <div class="command-group">
                     <div class="command-group-title">Image Generation</div>
-                    <div class="command-item selected" data-action="open-image-modal">
+                    <div class="command-item selected" data-action="open-image-modal" role="option" tabindex="0">
                         <div class="command-item-icon">
-                            <i data-lucide="image" class="w-4 h-4"></i>
+                            <i data-lucide="image" class="w-4 h-4" aria-hidden="true"></i>
                         </div>
                         <div class="command-item-content">
                             <div class="command-item-title">Open Image Generator</div>
@@ -1305,6 +1431,12 @@ class UIHelpers {
         resultsContainer.querySelectorAll('.command-item').forEach(item => {
             item.addEventListener('click', () => {
                 this.executeCommand(item.dataset.action);
+            });
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.executeCommand(item.dataset.action);
+                }
             });
         });
     }
@@ -1329,15 +1461,15 @@ class UIHelpers {
             <div class="command-group">
                 <div class="command-group-title">${provider}</div>
                 ${models.map((model, index) => `
-                    <div class="command-item ${model.id === this.currentModel ? 'selected' : ''}" data-action="set-model:${model.id}">
+                    <div class="command-item ${model.id === this.currentModel ? 'selected' : ''}" data-action="set-model:${model.id}" role="option" tabindex="0">
                         <div class="command-item-icon">
-                            <i data-lucide="cpu" class="w-4 h-4"></i>
+                            <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
                         </div>
                         <div class="command-item-content">
                             <div class="command-item-title">${this.getModelDisplayName(model)}</div>
                             <div class="command-item-desc">${this.getModelDescription(model)}</div>
                         </div>
-                        ${model.id === this.currentModel ? `<i data-lucide="check" class="w-4 h-4 text-accent"></i>` : ''}
+                        ${model.id === this.currentModel ? `<i data-lucide="check" class="w-4 h-4 text-accent" aria-hidden="true"></i>` : ''}
                     </div>
                 `).join('')}
             </div>
@@ -1350,8 +1482,9 @@ class UIHelpers {
         
         return [
             { category: 'Actions', icon: 'plus', title: 'New Chat', description: 'Start a new conversation', action: 'new-chat', shortcut: 'Ctrl+N' },
-            { category: 'Actions', icon: 'image', title: 'Generate Image', description: 'Open image generation panel', action: 'open-image-modal' },
+            { category: 'Actions', icon: 'image', title: 'Generate Image', description: 'Open image generation panel', action: 'open-image-modal', shortcut: 'Ctrl+I' },
             { category: 'Actions', icon: 'search', title: 'Search Messages', description: 'Search in current conversation', action: 'search', shortcut: 'Ctrl+F' },
+            { category: 'Actions', icon: 'keyboard', title: 'Keyboard Shortcuts', description: 'View all keyboard shortcuts', action: 'show-shortcuts' },
             { category: 'Model', icon: 'cpu', title: 'Change Model', description: 'Select a different AI model', action: 'open-model-selector' },
             { category: 'Navigation', icon: 'sidebar', title: 'Toggle Sidebar', description: 'Show or hide the sidebar', action: 'toggle-sidebar', shortcut: 'Ctrl+B' },
             { category: 'View', icon: 'sun', title: 'Toggle Theme', description: 'Switch between light and dark mode', action: 'toggle-theme' },
@@ -1359,6 +1492,7 @@ class UIHelpers {
                 { category: 'Export', icon: 'download', title: 'Export as Markdown', description: 'Download conversation as .md file', action: 'export-md' },
                 { category: 'Export', icon: 'download', title: 'Export as JSON', description: 'Download conversation as .json file', action: 'export-json' },
                 { category: 'Export', icon: 'download', title: 'Export as Text', description: 'Download conversation as .txt file', action: 'export-txt' },
+                { category: 'Data', icon: 'upload', title: 'Import Conversations', description: 'Import conversations from JSON', action: 'import-conversations' },
             ] : []),
             ...(currentSession ? [
                 { category: 'Session', icon: 'trash-2', title: 'Clear Messages', description: 'Clear all messages in current session', action: 'clear-messages' },
@@ -1413,7 +1547,223 @@ class UIHelpers {
             case 'open-model-selector':
                 this.openModelSelector();
                 break;
+            case 'show-shortcuts':
+                this.openShortcutsModal();
+                break;
+            case 'import-conversations':
+                this.openImportModal();
+                break;
         }
+    }
+
+    // ============================================
+    // Keyboard Shortcuts Help
+    // ============================================
+
+    openShortcutsModal() {
+        const modal = document.createElement('div');
+        modal.id = 'shortcuts-modal';
+        modal.className = 'modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'shortcuts-title');
+        
+        const shortcuts = [
+            { key: 'Ctrl + K', description: 'Open command palette' },
+            { key: 'Ctrl + N', description: 'New chat' },
+            { key: 'Ctrl + F', description: 'Search messages' },
+            { key: 'Ctrl + I', description: 'Generate image' },
+            { key: 'Ctrl + B', description: 'Toggle sidebar' },
+            { key: 'Shift + Enter', description: 'New line in input' },
+            { key: 'Enter', description: 'Send message' },
+            { key: 'Esc', description: 'Close modals/panels' },
+            { key: 'Ctrl + /', description: 'Show this help' },
+        ];
+        
+        modal.innerHTML = `
+            <div class="modal-overlay" onclick="uiHelpers.closeShortcutsModal()"></div>
+            <div class="modal-content" style="max-width: 480px;">
+                <div class="modal-header">
+                    <h3 id="shortcuts-title">Keyboard Shortcuts</h3>
+                    <button class="btn-icon" onclick="uiHelpers.closeShortcutsModal()" aria-label="Close">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="shortcuts-list">
+                        ${shortcuts.map(s => `
+                            <div class="shortcut-item">
+                                <kbd class="shortcut-key">${s.key}</kbd>
+                                <span class="shortcut-desc">${s.description}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        this.reinitializeIcons(modal);
+        this.trapFocus(modal);
+        
+        // Close on escape
+        modal.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeShortcutsModal();
+            }
+        });
+    }
+
+    closeShortcutsModal() {
+        const modal = document.getElementById('shortcuts-modal');
+        if (modal) {
+            modal.remove();
+        }
+    }
+
+    // ============================================
+    // Import Modal
+    // ============================================
+
+    openImportModal() {
+        const modal = document.createElement('div');
+        modal.id = 'import-modal';
+        modal.className = 'modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'import-title');
+        
+        modal.innerHTML = `
+            <div class="modal-overlay" onclick="uiHelpers.closeImportModal()"></div>
+            <div class="modal-content" style="max-width: 480px;">
+                <div class="modal-header">
+                    <h3 id="import-title">Import Conversations</h3>
+                    <button class="btn-icon" onclick="uiHelpers.closeImportModal()" aria-label="Close">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-text-secondary mb-4">Import conversations from a previously exported JSON file.</p>
+                    <div class="import-dropzone" id="import-dropzone">
+                        <i data-lucide="upload-cloud" class="w-12 h-12 text-text-secondary mb-3"></i>
+                        <p class="text-sm text-text-secondary mb-2">Drag and drop a JSON file here</p>
+                        <p class="text-xs text-text-muted">or click to browse</p>
+                        <input type="file" id="import-file-input" accept=".json" class="hidden">
+                    </div>
+                    <div id="import-preview" class="import-preview hidden mt-4"></div>
+                    <div id="import-error" class="import-error hidden mt-4 text-error text-sm"></div>
+                </div>
+                <div class="modal-footer" style="padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.75rem;">
+                    <button class="btn-secondary px-4 py-2 rounded-lg" onclick="uiHelpers.closeImportModal()">Cancel</button>
+                    <button class="btn-primary px-4 py-2 rounded-lg" id="import-confirm-btn" disabled onclick="uiHelpers.confirmImport()">Import</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        this.reinitializeIcons(modal);
+        this.setupImportHandlers(modal);
+        this.trapFocus(modal);
+    }
+
+    setupImportHandlers(modal) {
+        const dropzone = modal.querySelector('#import-dropzone');
+        const fileInput = modal.querySelector('#import-file-input');
+        
+        dropzone.addEventListener('click', () => fileInput.click());
+        
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+        
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+        
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                this.handleImportFile(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                this.handleImportFile(e.target.files[0]);
+            }
+        });
+        
+        // Close on escape
+        modal.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.closeImportModal();
+            }
+        });
+    }
+
+    handleImportFile(file) {
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+            const content = e.target.result;
+            const validation = sessionManager.validateImport(content);
+            
+            const preview = document.getElementById('import-preview');
+            const error = document.getElementById('import-error');
+            const confirmBtn = document.getElementById('import-confirm-btn');
+            
+            if (validation.valid) {
+                this.pendingImport = content;
+                preview.innerHTML = `
+                    <div class="import-stats bg-bg-tertiary p-3 rounded-lg">
+                        <div class="flex justify-between mb-1">
+                            <span class="text-sm text-text-secondary">Sessions:</span>
+                            <span class="text-sm font-medium">${validation.sessionCount}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-text-secondary">Messages:</span>
+                            <span class="text-sm font-medium">${validation.messageCount}</span>
+                        </div>
+                    </div>
+                `;
+                preview.classList.remove('hidden');
+                error.classList.add('hidden');
+                confirmBtn.disabled = false;
+            } else {
+                this.pendingImport = null;
+                preview.classList.add('hidden');
+                error.textContent = `Error: ${validation.error}`;
+                error.classList.remove('hidden');
+                confirmBtn.disabled = true;
+            }
+        };
+        
+        reader.readAsText(file);
+    }
+
+    confirmImport() {
+        if (this.pendingImport) {
+            const result = sessionManager.importAll(this.pendingImport);
+            if (result.success) {
+                this.showToast(`Imported ${result.importedCount} conversations`, 'success');
+                this.closeImportModal();
+            } else {
+                const error = document.getElementById('import-error');
+                error.textContent = `Import failed: ${result.error}`;
+                error.classList.remove('hidden');
+            }
+        }
+    }
+
+    closeImportModal() {
+        const modal = document.getElementById('import-modal');
+        if (modal) {
+            modal.remove();
+        }
+        this.pendingImport = null;
     }
 
     // ============================================
@@ -1428,11 +1778,31 @@ class UIHelpers {
         
         const modal = document.getElementById('export-modal');
         modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        
+        // Add export all option if we have multiple sessions
+        if (sessionManager.sessions.length > 1) {
+            const exportOptions = modal.querySelector('.export-options');
+            if (!exportOptions.querySelector('[data-action="export-all"]')) {
+                const exportAllBtn = document.createElement('button');
+                exportAllBtn.className = 'export-option';
+                exportAllBtn.setAttribute('data-action', 'export-all');
+                exportAllBtn.setAttribute('onclick', 'app.exportAllConversations()');
+                exportAllBtn.innerHTML = `
+                    <i data-lucide="archive" class="w-8 h-8 text-orange-500"></i>
+                    <span class="export-name">All Conversations</span>
+                    <span class="export-desc">Export all sessions as JSON</span>
+                `;
+                exportOptions.appendChild(exportAllBtn);
+                this.reinitializeIcons(exportAllBtn);
+            }
+        }
     }
 
     closeExportModal() {
         const modal = document.getElementById('export-modal');
         modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
     }
 
     // ============================================
@@ -1443,6 +1813,8 @@ class UIHelpers {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
+        toast.setAttribute('role', 'alert');
+        toast.setAttribute('aria-live', 'polite');
 
         const icons = {
             success: 'check-circle',
@@ -1454,7 +1826,7 @@ class UIHelpers {
         const icon = icons[type] || icons.info;
 
         toast.innerHTML = `
-            <div class="toast-icon">
+            <div class="toast-icon" aria-hidden="true">
                 <i data-lucide="${icon}" class="w-5 h-5"></i>
             </div>
             <div class="toast-content">
@@ -1462,7 +1834,7 @@ class UIHelpers {
                 <div class="toast-message">${message}</div>
             </div>
             <button class="toast-close" aria-label="Close notification">
-                <i data-lucide="x" class="w-4 h-4"></i>
+                <i data-lucide="x" class="w-4 h-4" aria-hidden="true"></i>
             </button>
         `;
 
@@ -1527,11 +1899,13 @@ class UIHelpers {
     showTypingIndicator() {
         const indicator = document.getElementById('typing-indicator');
         indicator.classList.remove('hidden');
+        indicator.setAttribute('aria-hidden', 'false');
     }
 
     hideTypingIndicator() {
         const indicator = document.getElementById('typing-indicator');
         indicator.classList.add('hidden');
+        indicator.setAttribute('aria-hidden', 'true');
     }
 
     // ============================================
@@ -1544,6 +1918,10 @@ class UIHelpers {
         
         sidebar.classList.toggle('open');
         overlay.classList.toggle('hidden');
+        
+        // Update aria attributes
+        const isOpen = sidebar.classList.contains('open');
+        sidebar.setAttribute('aria-hidden', !isOpen);
     }
 
     closeSidebar() {
@@ -1552,6 +1930,7 @@ class UIHelpers {
         
         sidebar.classList.remove('open');
         overlay.classList.add('hidden');
+        sidebar.setAttribute('aria-hidden', 'true');
     }
 
     // ============================================
@@ -1562,6 +1941,40 @@ class UIHelpers {
         if (window.lucide) {
             lucide.createIcons({ attrs: { 'stroke-width': 2 }, parent: container });
         }
+    }
+
+    // ============================================
+    // Accessibility - Focus Trap
+    // ============================================
+
+    trapFocus(element) {
+        const focusableElements = element.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        
+        if (focusableElements.length === 0) return;
+        
+        const firstFocusable = focusableElements[0];
+        const lastFocusable = focusableElements[focusableElements.length - 1];
+        
+        // Focus first element
+        firstFocusable.focus();
+        
+        element.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab') return;
+            
+            if (e.shiftKey) {
+                if (document.activeElement === firstFocusable) {
+                    lastFocusable.focus();
+                    e.preventDefault();
+                }
+            } else {
+                if (document.activeElement === lastFocusable) {
+                    firstFocusable.focus();
+                    e.preventDefault();
+                }
+            }
+        });
     }
 
     // ============================================
@@ -1625,12 +2038,30 @@ class UIHelpers {
             }
         });
 
+        // Keyboard shortcut for shortcuts help (Ctrl + /)
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+                e.preventDefault();
+                this.openShortcutsModal();
+            }
+        });
+
         // Close modals on escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 this.closeImageModal();
                 this.closeImageLightbox();
                 this.closeModelSelector();
+                this.closeShortcutsModal();
+                this.closeImportModal();
+            }
+        });
+        
+        // Handle visibility change for connection monitoring
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && window.chatApp) {
+                // Re-check connection when tab becomes visible
+                window.chatApp.checkConnection?.();
             }
         });
     }
@@ -1649,10 +2080,6 @@ class UIHelpers {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
-
-    generateMessageId() {
-        return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
 }
 

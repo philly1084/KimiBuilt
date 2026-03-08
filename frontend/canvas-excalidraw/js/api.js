@@ -8,23 +8,36 @@ class OpenAICanvasAPI {
         this.baseURL = baseUrl;
         this.client = null;
         this.sessionId = null;
+        this.sdkAvailable = false;
         try {
             this.selectedModel = localStorage.getItem('kimi-canvas-model') || 'gpt-4o';
         } catch {
             this.selectedModel = 'gpt-4o';
         }
 
-        if (typeof OpenAI !== 'undefined') {
+        // Check if OpenAI SDK is available and working
+        this.initSDK();
+    }
+    
+    initSDK() {
+        // Try to initialize OpenAI SDK with proper error handling
+        if (typeof window.OpenAI !== 'undefined') {
             try {
-                this.client = new OpenAI({
-                    baseURL: baseUrl,
+                this.client = new window.OpenAI({
+                    baseURL: this.baseURL,
                     apiKey: 'any-key',
                     dangerouslyAllowBrowser: true,
                 });
+                this.sdkAvailable = true;
+                console.log('OpenAI SDK initialized successfully');
             } catch (error) {
-                console.warn('Failed to initialize OpenAI SDK, using fetch fallback:', error);
+                console.warn('Failed to initialize OpenAI SDK, will use fetch fallback:', error);
                 this.client = null;
+                this.sdkAvailable = false;
             }
+        } else {
+            console.log('OpenAI SDK not available, using fetch fallback');
+            this.sdkAvailable = false;
         }
     }
 

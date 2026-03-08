@@ -1,5 +1,6 @@
 /**
  * Storage Module - LocalStorage persistence for Notion-style notes
+ * Enhanced with error handling for Tracking Prevention and quota limits
  */
 
 const Storage = (function() {
@@ -7,6 +8,11 @@ const Storage = (function() {
     const CURRENT_PAGE_KEY = 'notes_notion_current_page';
     const THEME_KEY = 'notes_notion_theme';
     const GLOBAL_MODEL_KEY = 'notes_notion_global_model';
+    
+    // Storage state
+    let storageAvailable = true;
+    let storageError = null;
+    let memoryFallback = null; // In-memory fallback when localStorage fails
     
     // Default data structure
     const defaultData = {
@@ -76,7 +82,7 @@ const Storage = (function() {
                     {
                         id: 'block-7',
                         type: 'bulleted_list',
-                        content: 'Generate images with "/image" AI Image block',
+                        content: 'Generate images with "/ai_image" AI Image block',
                         children: [],
                         formatting: {},
                         color: null,
@@ -84,6 +90,15 @@ const Storage = (function() {
                     },
                     {
                         id: 'block-8',
+                        type: 'bulleted_list',
+                        content: 'Use "/math" for LaTeX equation support',
+                        children: [],
+                        formatting: {},
+                        color: null,
+                        createdAt: Date.now()
+                    },
+                    {
+                        id: 'block-9',
                         type: 'divider',
                         content: '',
                         children: [],
@@ -92,7 +107,7 @@ const Storage = (function() {
                         createdAt: Date.now()
                     },
                     {
-                        id: 'block-9',
+                        id: 'block-10',
                         type: 'callout',
                         content: '💡 Tip: Select text and use the AI toolbar to transform it with different models. Each page can have its own default AI model!',
                         children: [],
@@ -107,6 +122,25 @@ const Storage = (function() {
         ],
         trash: []
     };
+    
+    /**
+     * Check if localStorage is available and working
+     */
+    function checkStorageAvailability() {
+        try {
+            const test = '__storage_test__';
+            localStorage.setItem(test, test);
+            localStorage.removeItem(test);
+            storageAvailable = true;
+            storageError = null;
+            return true;
+        } catch (e) {
+            storageAvailable = false;
+            storageError = e;
+            console.warn('localStorage is not available:', e.message);
+            return false;
+        }
+    }
     
     /**
      * Generate a unique ID
@@ -126,6 +160,17 @@ const Storage = (function() {
      * Load all data from localStorage
      */
     function loadAll() {
+        // First check if storage is available
+        if (!storageAvailable && !checkStorageAvailability()) {
+            // Use memory fallback
+            if (memoryFallback) {
+                return memoryFallback;
+            }
+            // Initialize with default data in memory
+            memoryFallback = JSON.parse(JSON.stringify(defaultData));
+            return memoryFallback;
+        }
+        
         try {
             const data = localStorage.getItem(STORAGE_KEY);
             if (data) {
@@ -138,6 +183,10 @@ const Storage = (function() {
                         }
                     });
                 }
+                // Ensure trash exists
+                if (!parsed.trash) {
+                    parsed.trash = [];
+                }
                 return parsed;
             }
             // Initialize with default data
@@ -145,35 +194,151 @@ const Storage = (function() {
             return defaultData;
         } catch (e) {
             console.error('Error loading from localStorage:', e);
-            return defaultData;
+            storageAvailable = false;
+            storageError = e;
+            
+            // Use memory fallback
+            if (memoryFallback) {
+                return memoryFallback;
+            }
+            memoryFallback = JSON.parse(JSON.stringify(defaultData));
+            return memoryFallback;
         }
     }
     
     /**
-     * Save all data to localStorage
+     * Save all data to localStorage with error handling
      */
     function saveAll(data) {
+        // Always update memory fallback
+        memoryFallback = JSON.parse(JSON.stringify(data));
+        
+        if (!storageAvailable) {
+            console.warn('Saving to memory only - localStorage unavailable');
+            return { success: false, memoryOnly: true, error: storageError };
+        }
+        
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            return true;
+            const serialized = JSON.stringify(data);
+            
+            // Check size before saving (localStorage limit is typically 5-10MB)
+            const sizeInMB = serialized.length / 1024 / 1024;
+            if (sizeInMB > 4.5) {
+                console.warn('Data size is approaching localStorage limit:', sizeInMB.toFixed(2), 'MB');
+            }
+            
+            localStorage.setItem(STORAGE_KEY, serialized);
+            return { success: true, memoryOnly: false };
         } catch (e) {
             console.error('Error saving to localStorage:', e);
-            return false;
+            
+            // Determine error type
+            let errorType = 'unknown';
+            if (e.name === 'QuotaExceededError') {
+                errorType = 'quota_exceeded';
+            } else if (e.message && e.message.includes('denied')) {
+                errorType = 'permission_denied';
+            }
+            
+            storageError = e;
+            
+            // Try to handle quota exceeded
+            if (errorType === 'quota_exceeded') {
+                console.warn('Storage quota exceeded. Consider cleaning up old data.');
+            }
+            
+            return { success: false, memoryOnly: true, error: e, errorType };
         }
+    }
+    
+    /**
+     * Get storage status for diagnostics
+     */
+    function getStorageStatus() {
+        let usage = null;
+        let quota = null;
+        
+        // Try to get storage estimate (Chrome only)
+        if (navigator.storage && navigator.storage.estimate) {
+            navigator.storage.estimate().then(estimate => {
+                usage = estimate.usage;
+                quota = estimate.quota;
+            }).catch(() => {});
+        }
+        
+        return {
+            available: storageAvailable,
+            error: storageError,
+            memoryOnly: !storageAvailable,
+            memoryFallback: !!memoryFallback,
+            usage,
+            quota
+        };
+    }
+    
+    /**
+     * Export data to JSON file (for backup when storage fails)
+     */
+    function exportToFile() {
+        const data = loadAll();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `notes-backup-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+    
+    /**
+     * Import data from JSON file
+     */
+    function importFromFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.pages && Array.isArray(data.pages)) {
+                        saveAll(data);
+                        resolve(data);
+                    } else {
+                        reject(new Error('Invalid backup file format'));
+                    }
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsText(file);
+        });
     }
     
     /**
      * Get global default model
      */
     function getGlobalDefaultModel() {
-        return localStorage.getItem(GLOBAL_MODEL_KEY) || 'gpt-4o';
+        if (!storageAvailable) return 'gpt-4o';
+        try {
+            return localStorage.getItem(GLOBAL_MODEL_KEY) || 'gpt-4o';
+        } catch (e) {
+            return 'gpt-4o';
+        }
     }
     
     /**
      * Set global default model
      */
     function setGlobalDefaultModel(model) {
-        localStorage.setItem(GLOBAL_MODEL_KEY, model);
+        if (!storageAvailable) return false;
+        try {
+            localStorage.setItem(GLOBAL_MODEL_KEY, model);
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
     
     /**
@@ -305,29 +470,51 @@ const Storage = (function() {
      * Get current page ID
      */
     function getCurrentPageId() {
-        return localStorage.getItem(CURRENT_PAGE_KEY) || null;
+        if (!storageAvailable) return null;
+        try {
+            return localStorage.getItem(CURRENT_PAGE_KEY) || null;
+        } catch (e) {
+            return null;
+        }
     }
     
     /**
      * Set current page ID
      */
     function setCurrentPageId(pageId) {
-        localStorage.setItem(CURRENT_PAGE_KEY, pageId);
+        if (!storageAvailable) return false;
+        try {
+            localStorage.setItem(CURRENT_PAGE_KEY, pageId);
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
     
     /**
      * Get theme preference
      */
     function getTheme() {
-        return localStorage.getItem(THEME_KEY) || 'light';
+        if (!storageAvailable) return 'light';
+        try {
+            return localStorage.getItem(THEME_KEY) || 'light';
+        } catch (e) {
+            return 'light';
+        }
     }
     
     /**
      * Set theme preference
      */
     function setTheme(theme) {
-        localStorage.setItem(THEME_KEY, theme);
         document.documentElement.setAttribute('data-theme', theme);
+        if (!storageAvailable) return false;
+        try {
+            localStorage.setItem(THEME_KEY, theme);
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
     
     /**
@@ -380,6 +567,9 @@ const Storage = (function() {
                     case 'code':
                         md += `${indent}\`\`\`${block.content.language || ''}\n${block.content.text || block.content}\n\`\`\`\n\n`;
                         break;
+                    case 'math':
+                        md += `${indent}$$\n${block.content.text || ''}\n$$\n\n`;
+                        break;
                     case 'divider':
                         md += `${indent}---\n\n`;
                         break;
@@ -388,6 +578,14 @@ const Storage = (function() {
                         break;
                     case 'ai_image':
                         md += `${indent}![AI Image: ${block.content.prompt || ''}](${block.content.imageUrl || ''})\n\n`;
+                        break;
+                    case 'database':
+                        md += `${indent}| ${block.content.columns.join(' | ')} |\n`;
+                        md += `${indent}| ${block.content.columns.map(() => '---').join(' | ')} |\n`;
+                        block.content.rows.forEach(row => {
+                            md += `${indent}| ${row.join(' | ')} |\n`;
+                        });
+                        md += '\n';
                         break;
                 }
                 
@@ -408,20 +606,32 @@ const Storage = (function() {
      * Clear all data (use with caution)
      */
     function clearAll() {
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(CURRENT_PAGE_KEY);
-        localStorage.removeItem(GLOBAL_MODEL_KEY);
+        memoryFallback = null;
+        if (!storageAvailable) return;
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(CURRENT_PAGE_KEY);
+            localStorage.removeItem(GLOBAL_MODEL_KEY);
+        } catch (e) {
+            console.error('Error clearing storage:', e);
+        }
     }
     
     // Initialize theme on load
     const savedTheme = getTheme();
     document.documentElement.setAttribute('data-theme', savedTheme);
     
+    // Check storage availability on load
+    checkStorageAvailability();
+    
     return {
         generateId,
         generateBlockId,
         loadAll,
         saveAll,
+        getStorageStatus,
+        exportToFile,
+        importFromFile,
         getPages,
         getPage,
         createPage,

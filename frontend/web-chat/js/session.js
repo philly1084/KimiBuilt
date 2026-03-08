@@ -16,9 +16,78 @@ class SessionManager extends EventTarget {
         this.storageKey = 'kimibuilt_sessions_v3';
         this.currentSessionKey = 'kimibuilt_current_session';
         this.version = '3.0';
+        this.storageAvailable = this.checkStorageAvailability();
         
         this.loadFromStorage();
         this.migrateIfNeeded();
+    }
+
+    /**
+     * Check if localStorage is available and not blocked by Tracking Prevention
+     */
+    checkStorageAvailability() {
+        try {
+            const test = '__storage_test__';
+            localStorage.setItem(test, test);
+            localStorage.removeItem(test);
+            return true;
+        } catch (e) {
+            console.warn('localStorage not available (Tracking Prevention or private mode):', e);
+            return false;
+        }
+    }
+
+    /**
+     * Safely get item from localStorage
+     */
+    safeStorageGet(key) {
+        if (!this.storageAvailable) return null;
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            console.warn(`Failed to get ${key} from localStorage:`, e);
+            return null;
+        }
+    }
+
+    /**
+     * Safely set item in localStorage
+     */
+    safeStorageSet(key, value) {
+        if (!this.storageAvailable) return false;
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError') {
+                console.warn('Storage quota exceeded, cleaning up old sessions');
+                this.cleanupOldSessions();
+                // Try again after cleanup
+                try {
+                    localStorage.setItem(key, value);
+                    return true;
+                } catch (e2) {
+                    console.error('Still failed after cleanup:', e2);
+                }
+            } else {
+                console.warn(`Failed to set ${key} in localStorage:`, e);
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Safely remove item from localStorage
+     */
+    safeStorageRemove(key) {
+        if (!this.storageAvailable) return false;
+        try {
+            localStorage.removeItem(key);
+            return true;
+        } catch (e) {
+            console.warn(`Failed to remove ${key} from localStorage:`, e);
+            return false;
+        }
     }
 
     // ============================================
@@ -34,10 +103,19 @@ class SessionManager extends EventTarget {
 
                 this.sessions = (data.sessions || []).map((session) => {
                     const stored = storedSessions.get(session.id);
+                    let model;
+                    
+                    // Safely get default model
+                    try {
+                        model = stored?.model || this.safeStorageGet('kimibuilt_default_model') || 'gpt-4o';
+                    } catch (e) {
+                        model = stored?.model || 'gpt-4o';
+                    }
+                    
                     return {
                         id: session.id,
                         mode: session.metadata?.mode || stored?.mode || 'chat',
-                        model: stored?.model || localStorage.getItem('kimibuilt_default_model') || 'gpt-4o',
+                        model: model,
                         title: stored?.title || 'New Chat',
                         createdAt: session.createdAt,
                         updatedAt: session.updatedAt,
@@ -69,7 +147,13 @@ class SessionManager extends EventTarget {
     }
 
     async createSession(mode = 'chat', options = {}) {
-        const defaultModel = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
+        let defaultModel;
+        try {
+            defaultModel = this.safeStorageGet('kimibuilt_default_model') || 'gpt-4o';
+        } catch (e) {
+            defaultModel = 'gpt-4o';
+        }
+        
         let sessionId = this.generateLocalId();
         let createdAt = new Date().toISOString();
         let updatedAt = createdAt;
@@ -162,7 +246,7 @@ class SessionManager extends EventTarget {
         }
         
         this.currentSessionId = sessionId;
-        localStorage.setItem(this.currentSessionKey, sessionId);
+        this.safeStorageSet(this.currentSessionKey, sessionId);
         
         const messages = this.sessionMessages.get(sessionId) || [];
         this.dispatchEvent(new CustomEvent('sessionSwitched', { 
@@ -320,8 +404,8 @@ class SessionManager extends EventTarget {
                 // Could implement LRU cleanup here
             }
             
-            localStorage.setItem(this.storageKey, serialized);
-            localStorage.setItem(this.currentSessionKey, this.currentSessionId || '');
+            this.safeStorageSet(this.storageKey, serialized);
+            this.safeStorageSet(this.currentSessionKey, this.currentSessionId || '');
         } catch (error) {
             if (error.name === 'QuotaExceededError') {
                 console.error('Storage quota exceeded, cleaning up old sessions');
@@ -334,7 +418,7 @@ class SessionManager extends EventTarget {
 
     loadFromStorage() {
         try {
-            const data = localStorage.getItem(this.storageKey);
+            const data = this.safeStorageGet(this.storageKey);
             if (data) {
                 const parsed = JSON.parse(data);
                 
@@ -349,7 +433,7 @@ class SessionManager extends EventTarget {
                 }
             }
             
-            const currentId = localStorage.getItem(this.currentSessionKey);
+            const currentId = this.safeStorageGet(this.currentSessionKey);
             if (currentId && this.sessions.find(s => s.id === currentId)) {
                 this.currentSessionId = currentId;
             } else if (this.sessions.length > 0) {
@@ -377,8 +461,8 @@ class SessionManager extends EventTarget {
     }
 
     clearStorage() {
-        localStorage.removeItem(this.storageKey);
-        localStorage.removeItem(this.currentSessionKey);
+        this.safeStorageRemove(this.storageKey);
+        this.safeStorageRemove(this.currentSessionKey);
         this.sessions = [];
         this.sessionMessages.clear();
         this.currentSessionId = null;
@@ -389,8 +473,10 @@ class SessionManager extends EventTarget {
         const oldKeys = ['kimibuilt_sessions_v2', 'kimibuilt_sessions'];
         
         for (const oldKey of oldKeys) {
-            const oldData = localStorage.getItem(oldKey);
-            if (oldData && !localStorage.getItem(this.storageKey)) {
+            const oldData = this.safeStorageGet(oldKey);
+            const currentData = this.safeStorageGet(this.storageKey);
+            
+            if (oldData && !currentData) {
                 try {
                     const parsed = JSON.parse(oldData);
                     this.sessions = parsed.sessions || [];
@@ -399,7 +485,11 @@ class SessionManager extends EventTarget {
                     // Add model field to sessions that don't have it
                     this.sessions.forEach(s => {
                         if (!s.model) {
-                            s.model = localStorage.getItem('kimibuilt_default_model') || 'gpt-4o';
+                            try {
+                                s.model = this.safeStorageGet('kimibuilt_default_model') || 'gpt-4o';
+                            } catch (e) {
+                                s.model = 'gpt-4o';
+                            }
                         }
                         if (!s.version) {
                             s.version = this.version;
@@ -407,13 +497,122 @@ class SessionManager extends EventTarget {
                     });
                     
                     this.saveToStorage();
-                    localStorage.removeItem(oldKey);
+                    this.safeStorageRemove(oldKey);
                     console.log(`Migrated sessions from ${oldKey} to v3`);
                     return;
                 } catch (e) {
                     console.error('Migration failed:', e);
                 }
             }
+        }
+    }
+
+    // ============================================
+    // Import/Export
+    // ============================================
+
+    /**
+     * Export all sessions and messages
+     */
+    exportAll() {
+        const data = {
+            version: this.version,
+            exportedAt: new Date().toISOString(),
+            sessions: this.sessions,
+            messages: Array.from(this.sessionMessages.entries())
+        };
+        return JSON.stringify(data, null, 2);
+    }
+
+    /**
+     * Import sessions and messages from JSON
+     */
+    importAll(jsonString) {
+        try {
+            const data = JSON.parse(jsonString);
+            
+            // Validate structure
+            if (!data.sessions || !Array.isArray(data.sessions)) {
+                throw new Error('Invalid import data: sessions array missing');
+            }
+            if (!data.messages || !Array.isArray(data.messages)) {
+                throw new Error('Invalid import data: messages array missing');
+            }
+            
+            // Merge with existing sessions (avoid duplicates by ID)
+            const existingIds = new Set(this.sessions.map(s => s.id));
+            
+            let importedCount = 0;
+            data.sessions.forEach(session => {
+                // Generate new ID if duplicate
+                if (existingIds.has(session.id)) {
+                    const oldId = session.id;
+                    session.id = this.generateLocalId();
+                    session.isLocal = true; // Mark as local since it's a copy
+                    
+                    // Update messages to point to new ID
+                    const sessionMessages = data.messages.find(([id]) => id === oldId);
+                    if (sessionMessages) {
+                        sessionMessages[0] = session.id;
+                    }
+                }
+                
+                // Ensure version
+                if (!session.version) {
+                    session.version = this.version;
+                }
+                
+                this.sessions.push(session);
+                existingIds.add(session.id);
+                importedCount++;
+            });
+            
+            // Import messages
+            data.messages.forEach(([sessionId, messages]) => {
+                if (!this.sessionMessages.has(sessionId)) {
+                    this.sessionMessages.set(sessionId, messages);
+                }
+            });
+            
+            this.saveToStorage();
+            
+            this.dispatchEvent(new CustomEvent('sessionsChanged', { 
+                detail: { sessions: this.sessions } 
+            }));
+            
+            return { success: true, importedCount };
+        } catch (error) {
+            console.error('Import failed:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Validate import data without importing
+     */
+    validateImport(jsonString) {
+        try {
+            const data = JSON.parse(jsonString);
+            
+            if (!data.sessions || !Array.isArray(data.sessions)) {
+                return { valid: false, error: 'Missing sessions array' };
+            }
+            if (!data.messages || !Array.isArray(data.messages)) {
+                return { valid: false, error: 'Missing messages array' };
+            }
+            
+            const sessionCount = data.sessions.length;
+            const messageCount = data.messages.reduce((acc, [, msgs]) => acc + (msgs?.length || 0), 0);
+            
+            return { 
+                valid: true, 
+                sessionCount, 
+                messageCount,
+                version: data.version || 'unknown',
+                exportedAt: data.exportedAt || 'unknown'
+            };
+        } catch (error) {
+            return { valid: false, error: error.message };
         }
     }
 
@@ -516,13 +715,26 @@ class SessionManager extends EventTarget {
 
     getStorageStats() {
         try {
-            const data = localStorage.getItem(this.storageKey);
+            if (!this.storageAvailable) {
+                return { 
+                    available: false,
+                    size: 0, 
+                    sizeFormatted: 'N/A',
+                    sessionCount: this.sessions.length,
+                    messageCount: Array.from(this.sessionMessages.values())
+                        .reduce((acc, msgs) => acc + msgs.length, 0),
+                    percentUsed: 0
+                };
+            }
+            
+            const data = this.safeStorageGet(this.storageKey);
             const size = data ? new Blob([data]).size : 0;
             const sessionCount = this.sessions.length;
             const messageCount = Array.from(this.sessionMessages.values())
                 .reduce((acc, msgs) => acc + msgs.length, 0);
             
             return {
+                available: true,
                 size,
                 sizeFormatted: this.formatBytes(size),
                 sessionCount,
@@ -530,7 +742,7 @@ class SessionManager extends EventTarget {
                 percentUsed: (size / (5 * 1024 * 1024)) * 100
             };
         } catch (e) {
-            return { error: 'Failed to get stats' };
+            return { available: false, error: 'Failed to get stats' };
         }
     }
 

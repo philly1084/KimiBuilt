@@ -249,22 +249,18 @@ class InfiniteCanvas {
             }
         }
         
-        // Zoom shortcuts
+        // Zoom shortcuts (Ctrl/Cmd + 0/-/=)
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
-            switch (e.key) {
-                case '=':
-                case '+':
-                    e.preventDefault();
-                    this.zoomIn();
-                    break;
-                case '-':
-                    e.preventDefault();
-                    this.zoomOut();
-                    break;
-                case '0':
-                    e.preventDefault();
-                    this.resetZoom();
-                    break;
+            const key = e.key;
+            if (key === '=' || key === '+' || key === 'NumpadAdd') {
+                e.preventDefault();
+                this.zoomIn();
+            } else if (key === '-' || key === 'NumpadSubtract' || key === '_') {
+                e.preventDefault();
+                this.zoomOut();
+            } else if (key === '0' || key === 'Numpad0') {
+                e.preventDefault();
+                this.resetZoom();
             }
         }
     }
@@ -552,6 +548,63 @@ class InfiniteCanvas {
         
         // Restore context
         this.ctx.restore();
+        
+        // Update DOM selection box (must be done after restore since it uses screen coords)
+        this.updateDomSelectionBox();
+    }
+    
+    // Update the DOM-based selection box for HTML-based resize handles
+    updateDomSelectionBox() {
+        const selectionBox = document.getElementById('selectionBox');
+        if (!selectionBox) return;
+        
+        // Only show for single selection with valid element
+        if (this.selectedElements.length !== 1) {
+            selectionBox.style.display = 'none';
+            return;
+        }
+        
+        const el = this.selectedElements[0];
+        const padding = 4;
+        
+        let x, y, w, h;
+        
+        if (el.type === 'line' || el.type === 'arrow') {
+            if (!el.points || el.points.length < 2) return;
+            const p1 = el.points[0];
+            const p2 = el.points[1];
+            x = Math.min(p1.x, p2.x) - padding;
+            y = Math.min(p1.y, p2.y) - padding;
+            w = Math.abs(p2.x - p1.x) + padding * 2;
+            h = Math.abs(p2.y - p1.y) + padding * 2;
+        } else if (el.type === 'freedraw') {
+            if (!el.points || el.points.length === 0) return;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const p of el.points) {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+            }
+            x = minX - padding;
+            y = minY - padding;
+            w = maxX - minX + padding * 2;
+            h = maxY - minY + padding * 2;
+        } else {
+            x = el.x - el.width / 2 - padding;
+            y = el.y - el.height / 2 - padding;
+            w = el.width + padding * 2;
+            h = el.height + padding * 2;
+        }
+        
+        // Convert to screen coordinates
+        const screenPos = this.worldToScreen(x, y);
+        
+        selectionBox.style.display = 'block';
+        selectionBox.style.left = screenPos.x + 'px';
+        selectionBox.style.top = screenPos.y + 'px';
+        selectionBox.style.width = (w * this.scale) + 'px';
+        selectionBox.style.height = (h * this.scale) + 'px';
     }
     
     drawGrid() {
@@ -625,7 +678,7 @@ class InfiniteCanvas {
     }
     
     // Export canvas as data URL
-    exportToDataURL(type = 'image/png') {
+    exportToDataURL(type = 'image/png', options = {}) {
         // Create a temporary canvas for export
         const exportCanvas = document.createElement('canvas');
         
@@ -657,7 +710,7 @@ class InfiniteCanvas {
         }
         
         // Add padding
-        const padding = 20;
+        const padding = options.padding !== undefined ? options.padding : 20;
         minX -= padding;
         minY -= padding;
         maxX += padding;
@@ -668,10 +721,13 @@ class InfiniteCanvas {
         
         const ctx = exportCanvas.getContext('2d');
         
-        // Fill background
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        ctx.fillStyle = isDark ? '#1e1e1e' : '#ffffff';
-        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        // Fill background (unless transparent)
+        if (!options.transparent) {
+            const bgColor = options.backgroundColor || 
+                (document.documentElement.getAttribute('data-theme') === 'dark' ? '#1e1e1e' : '#ffffff');
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        }
         
         // Render elements
         ctx.translate(-minX, -minY);

@@ -14,7 +14,7 @@ const SlashMenu = (function() {
     const BLOCK_ORDER = [
         'text', 'heading_1', 'heading_2', 'heading_3',
         'todo', 'bulleted_list', 'numbered_list', 'toggle', 'quote',
-        'divider', 'callout', 'code', 'image', 'ai_image', 'bookmark', 'database', 'ai'
+        'divider', 'callout', 'code', 'math', 'image', 'ai_image', 'bookmark', 'database', 'ai'
     ];
     
     /**

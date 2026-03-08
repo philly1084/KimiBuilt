@@ -134,6 +134,14 @@ const Sidebar = (function() {
             });
         }
         
+        // Search functionality - Ctrl/Cmd + Shift + F
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'F') {
+                e.preventDefault();
+                showSearchModal();
+            }
+        });
+        
         // Sidebar toggle
         const toggleBtn = document.getElementById('sidebar-toggle');
         if (toggleBtn) {
@@ -883,43 +891,260 @@ const Sidebar = (function() {
      * Open settings
      */
     function openSettings() {
-        const actions = [
-            'Export current page as Markdown',
-            'Export all pages',
-            'Import from Markdown',
-            'Clear all data'
-        ];
+        const modal = document.createElement('div');
+        modal.className = 'ai-modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="ai-modal-content" style="max-width: 400px;">
+                <div class="ai-modal-header">
+                    <span>⚙️</span>
+                    <span>Settings</span>
+                    <button class="settings-close" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer; font-size: 18px;">✕</button>
+                </div>
+                <div style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+                    <button class="settings-btn" data-action="export-md">
+                        <span>📝</span> Export current page as Markdown
+                    </button>
+                    <button class="settings-btn" data-action="export-all-md">
+                        <span>📚</span> Export all pages as Markdown
+                    </button>
+                    <button class="settings-btn" data-action="export-pdf">
+                        <span>📄</span> Export current page as PDF
+                    </button>
+                    <button class="settings-btn" data-action="import-md">
+                        <span>📥</span> Import from Markdown
+                    </button>
+                    <button class="settings-btn" data-action="backup">
+                        <span>💾</span> Backup all data
+                    </button>
+                    <div style="border-top: 1px solid var(--border-color); margin: 8px 0;"></div>
+                    <button class="settings-btn" data-action="storage-info">
+                        <span>💿</span> Storage info
+                    </button>
+                    <button class="settings-btn danger" data-action="clear-all" style="color: #ef4444;">
+                        <span>🗑️</span> Clear all data
+                    </button>
+                </div>
+            </div>
+        `;
         
-        const choice = prompt(`Settings:\n1. ${actions[0]}\n2. ${actions[1]}\n3. ${actions[2]}\n4. ${actions[3]}\n\nEnter number (1-4):`);
+        // Style the buttons
+        modal.querySelectorAll('.settings-btn').forEach(btn => {
+            btn.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 16px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                font-size: 14px;
+                color: var(--text-primary);
+                cursor: pointer;
+                transition: all 0.15s;
+                text-align: left;
+            `;
+            btn.addEventListener('mouseenter', () => {
+                btn.style.background = 'var(--bg-hover)';
+            });
+            btn.addEventListener('mouseleave', () => {
+                btn.style.background = 'var(--bg-secondary)';
+            });
+        });
         
-        switch (choice) {
-            case '1':
+        // Handle actions
+        modal.querySelector('.settings-close').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+        
+        modal.querySelectorAll('.settings-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.action;
+                handleSettingsAction(action);
+                modal.remove();
+            });
+        });
+        
+        document.body.appendChild(modal);
+    }
+    
+    /**
+     * Handle settings actions
+     */
+    function handleSettingsAction(action) {
+        switch (action) {
+            case 'export-md':
                 const markdown = window.Editor?.exportToMarkdown?.();
                 if (markdown) {
                     downloadFile(markdown, `${window.Editor.getCurrentPage()?.title || 'page'}.md`, 'text/markdown');
                     showToast('Exported to Markdown', 'success');
                 }
                 break;
-            case '2':
+                
+            case 'export-all-md':
                 const allPages = Storage.getPages();
                 let allMarkdown = '';
-                allPages.forEach(page => {
+                allPages.forEach((page, index) => {
                     allMarkdown += Storage.exportToMarkdown(page.id);
-                    allMarkdown += '\n\n---\n\n';
+                    if (index < allPages.length - 1) {
+                        allMarkdown += '\n\n---\n\n';
+                    }
                 });
                 downloadFile(allMarkdown, 'all-pages.md', 'text/markdown');
                 showToast('Exported all pages', 'success');
                 break;
-            case '3':
+                
+            case 'export-pdf':
+                exportToPDF();
+                break;
+                
+            case 'import-md':
                 importFromMarkdown();
                 break;
-            case '4':
+                
+            case 'backup':
+                Storage.exportToFile();
+                showToast('Backup downloaded', 'success');
+                break;
+                
+            case 'storage-info':
+                showStorageInfo();
+                break;
+                
+            case 'clear-all':
                 if (confirm('Clear ALL data? This cannot be undone!')) {
                     Storage.clearAll();
                     location.reload();
                 }
                 break;
         }
+    }
+    
+    /**
+     * Export current page to PDF
+     */
+    function exportToPDF() {
+        const page = window.Editor?.getCurrentPage?.();
+        if (!page) return;
+        
+        // Create a print-friendly version
+        const printWindow = window.open('', '_blank');
+        const markdown = window.Editor.exportToMarkdown();
+        
+        // Simple HTML conversion (could be enhanced with marked.js)
+        const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>${page.title || 'Untitled'}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3 { margin-top: 1.5em; }
+        pre {
+            background: #f5f5f5;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: "SFMono-Regular", Consolas, monospace;
+            font-size: 0.9em;
+        }
+        blockquote {
+            border-left: 4px solid #2383e2;
+            margin: 0;
+            padding-left: 16px;
+            color: #666;
+        }
+        ul, ol { padding-left: 24px; }
+        @media print {
+            body { margin: 0; }
+        }
+    </style>
+</head>
+<body>
+    <pre style="background: none; padding: 0; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(markdown)}</pre>
+    <hr>
+    <p style="color: #999; font-size: 12px;">Exported from Notes - ${new Date().toLocaleString()}</p>
+    <script>
+        // Auto-print
+        setTimeout(() => print(), 500);
+    <\/script>
+</body>
+</html>`;
+        
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        
+        showToast('PDF export window opened', 'success');
+    }
+    
+    /**
+     * Show storage information
+     */
+    function showStorageInfo() {
+        const status = Storage.getStorageStatus();
+        
+        const modal = document.createElement('div');
+        modal.className = 'ai-modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="ai-modal-content" style="max-width: 400px;">
+                <div class="ai-modal-header">
+                    <span>💿</span>
+                    <span>Storage Information</span>
+                    <button class="close-btn" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer; font-size: 18px;">✕</button>
+                </div>
+                <div style="padding: 20px;">
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Storage Status</div>
+                        <div style="font-size: 16px; color: ${status.available ? '#22c55e' : '#ef4444'};">
+                            ${status.available ? '✅ Available' : '⚠️ Using Memory Fallback'}
+                        </div>
+                    </div>
+                    ${status.error ? `
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Error</div>
+                        <div style="font-size: 13px; color: #ef4444;">${status.error.message}</div>
+                    </div>
+                    ` : ''}
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Memory Fallback</div>
+                        <div style="font-size: 14px;">${status.memoryFallback ? 'Active' : 'Not needed'}</div>
+                    </div>
+                    ${status.usage ? `
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Storage Usage</div>
+                        <div style="font-size: 14px;">${(status.usage / 1024 / 1024).toFixed(2)} MB</div>
+                    </div>
+                    ` : ''}
+                    ${status.quota ? `
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">Storage Quota</div>
+                        <div style="font-size: 14px;">${(status.quota / 1024 / 1024).toFixed(2)} MB</div>
+                    </div>
+                    ` : ''}
+                    <div style="font-size: 13px; color: var(--text-muted); margin-top: 20px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md);">
+                        💡 Tip: If localStorage is unavailable (due to Tracking Prevention), your data is saved in memory. Use "Backup all data" to save your work.
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        modal.querySelector('.close-btn').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+        
+        document.body.appendChild(modal);
     }
     
     /**
@@ -1059,6 +1284,215 @@ const Sidebar = (function() {
     }
     
     /**
+     * Show search modal for finding content across pages
+     */
+    function showSearchModal() {
+        const pages = Storage.getPages();
+        
+        const modal = document.createElement('div');
+        modal.className = 'ai-modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="ai-modal-content" style="max-width: 500px; max-height: 70vh; display: flex; flex-direction: column;">
+                <div class="ai-modal-header">
+                    <span>🔍</span>
+                    <span>Search Pages</span>
+                    <button class="search-close" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer; font-size: 18px;">✕</button>
+                </div>
+                <div style="padding: 16px; border-bottom: 1px solid var(--border-color);">
+                    <input type="text" id="search-input" placeholder="Search page titles and content..." 
+                        style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 14px; outline: none;"
+                        autocomplete="off">
+                </div>
+                <div id="search-results" style="overflow-y: auto; flex: 1; padding: 8px 0;">
+                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+                        Type to search across all pages...
+                    </div>
+                </div>
+                <div style="padding: 12px 16px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted);">
+                    Press Enter to open selected page • Esc to close
+                </div>
+            </div>
+        `;
+        
+        const searchInput = modal.querySelector('#search-input');
+        const searchResults = modal.querySelector('#search-results');
+        
+        // Close handlers
+        modal.querySelector('.search-close').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+        
+        // Search functionality
+        let selectedIndex = -1;
+        let currentResults = [];
+        
+        const performSearch = (query) => {
+            if (!query.trim()) {
+                searchResults.innerHTML = `
+                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+                        Type to search across all pages...
+                    </div>
+                `;
+                currentResults = [];
+                selectedIndex = -1;
+                return;
+            }
+            
+            const lowerQuery = query.toLowerCase();
+            const results = [];
+            
+            pages.forEach(page => {
+                // Search in title
+                if (page.title?.toLowerCase().includes(lowerQuery)) {
+                    results.push({
+                        page,
+                        type: 'title',
+                        preview: page.title
+                    });
+                }
+                
+                // Search in blocks
+                if (page.blocks) {
+                    page.blocks.forEach((block, index) => {
+                        const content = typeof block.content === 'object' 
+                            ? block.content.text || block.content.prompt || JSON.stringify(block.content)
+                            : block.content;
+                        
+                        if (content?.toLowerCase().includes(lowerQuery)) {
+                            const preview = content.substring(0, 100) + (content.length > 100 ? '...' : '');
+                            results.push({
+                                page,
+                                type: 'content',
+                                blockIndex: index,
+                                preview,
+                                blockType: block.type
+                            });
+                        }
+                    });
+                }
+            });
+            
+            currentResults = results;
+            selectedIndex = results.length > 0 ? 0 : -1;
+            
+            if (results.length === 0) {
+                searchResults.innerHTML = `
+                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+                        No results found for "${escapeHtml(query)}"
+                    </div>
+                `;
+            } else {
+                renderResults();
+            }
+        };
+        
+        const renderResults = () => {
+            searchResults.innerHTML = currentResults.map((result, index) => `
+                <div class="search-result-item ${index === selectedIndex ? 'selected' : ''}" data-index="${index}" style="
+                    padding: 12px 16px;
+                    cursor: pointer;
+                    border-bottom: 1px solid var(--border-color);
+                    background: ${index === selectedIndex ? 'var(--bg-hover)' : 'transparent'};
+                    transition: background 0.15s;
+                ">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                        <span style="font-size: 16px;">${result.page.icon || '📄'}</span>
+                        <span style="font-weight: 500; color: var(--text-primary);">${escapeHtml(result.page.title || 'Untitled')}</span>
+                        ${result.type === 'content' ? `<span style="font-size: 12px; color: var(--text-muted); text-transform: capitalize;">${result.blockType}</span>` : ''}
+                    </div>
+                    <div style="font-size: 13px; color: var(--text-secondary); margin-left: 26px;">
+                        ${escapeHtml(result.preview)}
+                    </div>
+                </div>
+            `).join('');
+            
+            // Add click handlers
+            searchResults.querySelectorAll('.search-result-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const index = parseInt(item.dataset.index);
+                    openResult(currentResults[index]);
+                    modal.remove();
+                });
+                
+                item.addEventListener('mouseenter', () => {
+                    selectedIndex = parseInt(item.dataset.index);
+                    renderResults();
+                });
+            });
+            
+            // Scroll selected into view
+            const selected = searchResults.querySelector('.search-result-item.selected');
+            if (selected) {
+                selected.scrollIntoView({ block: 'nearest' });
+            }
+        };
+        
+        const openResult = (result) => {
+            loadPage(result.page.id);
+            showToast(`Opened: ${result.page.title || 'Untitled'}`, 'success');
+        };
+        
+        // Input handler with debounce
+        let debounceTimer;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => performSearch(searchInput.value), 200);
+        });
+        
+        // Keyboard navigation
+        searchInput.addEventListener('keydown', (e) => {
+            switch (e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    if (currentResults.length > 0) {
+                        selectedIndex = (selectedIndex + 1) % currentResults.length;
+                        renderResults();
+                    }
+                    break;
+                    
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (currentResults.length > 0) {
+                        selectedIndex = (selectedIndex - 1 + currentResults.length) % currentResults.length;
+                        renderResults();
+                    }
+                    break;
+                    
+                case 'Enter':
+                    e.preventDefault();
+                    if (selectedIndex >= 0 && currentResults[selectedIndex]) {
+                        openResult(currentResults[selectedIndex]);
+                        modal.remove();
+                    }
+                    break;
+                    
+                case 'Escape':
+                    e.preventDefault();
+                    modal.remove();
+                    break;
+            }
+        });
+        
+        document.body.appendChild(modal);
+        searchInput.focus();
+    }
+    
+    /**
+     * Escape HTML special characters
+     */
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+    
+    /**
      * Debounce utility
      */
     function debounce(fn, delay) {
@@ -1076,7 +1510,8 @@ const Sidebar = (function() {
         loadPage,
         createNewPage,
         showTemplateModal,
-        showToast
+        showToast,
+        showSearchModal
     };
     
     return window.Sidebar;

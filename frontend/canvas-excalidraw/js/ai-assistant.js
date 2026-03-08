@@ -411,19 +411,35 @@ class AIAssistant {
         
         // Parse the response content
         let elements = [];
+        let content = response.content || '';
+        
+        // Try to extract JSON from markdown code blocks
+        const jsonBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (jsonBlockMatch) {
+            content = jsonBlockMatch[1].trim();
+        }
         
         try {
-            // Try to parse as JSON if it's Excalidraw format
-            const parsed = JSON.parse(response.content);
+            // Try to parse as JSON
+            const parsed = JSON.parse(content);
             if (Array.isArray(parsed)) {
                 elements = parsed;
-            } else if (parsed.elements) {
+            } else if (parsed.elements && Array.isArray(parsed.elements)) {
                 elements = parsed.elements;
+            } else if (parsed.type && parsed.x !== undefined) {
+                // Single element object
+                elements = [parsed];
+            } else {
+                // Unknown format, treat as description
+                elements = this.parseDiagramDescription(response.content);
             }
         } catch (e) {
-            // Not JSON, treat as diagram description
+            // Not valid JSON, treat as diagram description
             elements = this.parseDiagramDescription(response.content);
         }
+        
+        // Validate and filter elements
+        elements = elements.filter(el => el && typeof el === 'object' && el.type);
         
         // Add elements to canvas
         if (elements.length > 0) {
@@ -438,28 +454,48 @@ class AIAssistant {
             
             // Calculate bounding box of new elements
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            let hasValidCoords = false;
+            
             for (const el of elements) {
-                const hw = (el.width || 0) / 2;
-                const hh = (el.height || 0) / 2;
-                minX = Math.min(minX, (el.x || 0) - hw);
-                minY = Math.min(minY, (el.y || 0) - hh);
-                maxX = Math.max(maxX, (el.x || 0) + hw);
-                maxY = Math.max(maxY, (el.y || 0) + hh);
+                if (el.x === undefined || el.y === undefined) continue;
+                hasValidCoords = true;
+                const hw = (el.width || 100) / 2;
+                const hh = (el.height || 100) / 2;
+                minX = Math.min(minX, el.x - hw);
+                minY = Math.min(minY, el.y - hh);
+                maxX = Math.max(maxX, el.x + hw);
+                maxY = Math.max(maxY, el.y + hh);
             }
             
-            const elementsCenterX = (minX + maxX) / 2;
-            const elementsCenterY = (minY + maxY) / 2;
-            
-            const offsetX = center.x - elementsCenterX;
-            const offsetY = center.y - elementsCenterY;
+            let offsetX = 0, offsetY = 0;
+            if (hasValidCoords) {
+                const elementsCenterX = (minX + maxX) / 2;
+                const elementsCenterY = (minY + maxY) / 2;
+                offsetX = center.x - elementsCenterX;
+                offsetY = center.y - elementsCenterY;
+            } else {
+                // Elements without coordinates, arrange them
+                offsetX = center.x - 200;
+                offsetY = center.y - (elements.length * 60);
+            }
             
             // Add elements with offset
-            for (const el of elements) {
+            let addedCount = 0;
+            for (let i = 0; i < elements.length; i++) {
+                const el = elements[i];
+                
+                // Skip invalid elements
+                if (!el.type) continue;
+                
+                // Set default coordinates if missing
+                if (el.x === undefined) el.x = 200;
+                if (el.y === undefined) el.y = 100 + i * 120;
+                
                 const newElement = {
                     ...el,
                     id: window.toolManager.generateId(),
-                    x: (el.x || 0) + offsetX,
-                    y: (el.y || 0) + offsetY,
+                    x: el.x + offsetX,
+                    y: el.y + offsetY,
                     // Apply default properties if not specified
                     strokeColor: el.strokeColor || window.toolManager.defaultProperties.strokeColor,
                     backgroundColor: el.backgroundColor || window.toolManager.defaultProperties.backgroundColor,
@@ -470,94 +506,280 @@ class AIAssistant {
                 };
                 
                 // Offset points for lines/arrows
-                if (el.points) {
+                if (el.points && Array.isArray(el.points)) {
                     newElement.points = el.points.map(p => ({
-                        x: p.x + offsetX,
-                        y: p.y + offsetY
+                        x: (p.x || 0) + offsetX,
+                        y: (p.y || 0) + offsetY
                     }));
                 }
                 
+                // Ensure valid dimensions
+                if (!newElement.width) newElement.width = 100;
+                if (!newElement.height) newElement.height = 100;
+                
                 canvas.addElement(newElement);
                 canvas.selectElement(newElement, true);
+                addedCount++;
             }
             
-            window.historyManager?.pushState(canvas.elements);
+            if (addedCount > 0) {
+                window.historyManager?.pushState(canvas.elements);
+                this.showStatus(`Added ${addedCount} elements to canvas`, 'success');
+            }
+        } else {
+            console.warn('No valid elements found in AI response');
         }
     }
     
     parseDiagramDescription(description) {
-        // Parse a text description and create basic elements
-        // This is a simple parser - in production, you'd want more sophisticated parsing
-        
+        // Enhanced parser for diagram descriptions and markdown-like formats
         const elements = [];
         const lines = description.split('\n').filter(l => l.trim());
         
         let y = 100;
-        const x = 400;
+        let x = 400;
+        const rowHeight = 120;
+        const colWidth = 250;
+        let currentCol = 0;
+        let maxCols = 3;
+        
+        // Track nodes for connection
+        const nodes = [];
+        let lastNode = null;
         
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             
-            // Check for different diagram elements based on keywords
-            if (line.toLowerCase().includes('box') || line.toLowerCase().includes('rect')) {
-                elements.push({
-                    type: 'rectangle',
-                    x: x,
-                    y: y,
-                    width: 200,
-                    height: 80,
-                    text: this.extractText(line)
-                });
-            } else if (line.toLowerCase().includes('diamond') || line.toLowerCase().includes('decision')) {
-                elements.push({
-                    type: 'diamond',
-                    x: x,
-                    y: y,
-                    width: 160,
-                    height: 120,
-                    text: this.extractText(line)
-                });
-            } else if (line.toLowerCase().includes('circle') || line.toLowerCase().includes('oval')) {
-                elements.push({
-                    type: 'ellipse',
-                    x: x,
-                    y: y,
-                    width: 140,
-                    height: 100,
-                    text: this.extractText(line)
-                });
-            } else if (line.toLowerCase().includes('arrow') || line.toLowerCase().includes('connect')) {
-                if (i > 0) {
-                    elements.push({
-                        type: 'arrow',
-                        points: [
-                            { x: x, y: y - 60 },
-                            { x: x, y: y + 20 }
-                        ]
-                    });
+            // Skip empty lines and markdown separators
+            if (!line || line.match(/^[-=]{3,}$/)) continue;
+            
+            // Detect flowchart syntax (like "A --> B" or "A -> B")
+            const flowMatch = line.match(/(.+?)\s*(?:-->?|→|=>)\s*(.+)/);
+            if (flowMatch) {
+                const fromText = flowMatch[1].trim();
+                const toText = flowMatch[2].trim();
+                
+                // Find or create source node
+                let fromNode = nodes.find(n => n.text === fromText);
+                if (!fromNode) {
+                    fromNode = this.createNode(fromText, x + currentCol * colWidth, y, elements);
+                    nodes.push(fromNode);
+                    currentCol = (currentCol + 1) % maxCols;
+                    if (currentCol === 0) y += rowHeight;
                 }
-            } else {
-                // Default to text
+                
+                // Find or create target node
+                let toNode = nodes.find(n => n.text === toText);
+                if (!toNode) {
+                    toNode = this.createNode(toText, x + currentCol * colWidth, y, elements);
+                    nodes.push(toNode);
+                    currentCol = (currentCol + 1) % maxCols;
+                    if (currentCol === 0) y += rowHeight;
+                }
+                
+                // Create arrow between nodes
+                elements.push({
+                    type: 'arrow',
+                    points: [
+                        { x: fromNode.x, y: fromNode.y + 40 },
+                        { x: toNode.x, y: toNode.y - 40 }
+                    ],
+                    strokeColor: '#666666',
+                    strokeWidth: 2
+                });
+                
+                lastNode = toNode;
+                continue;
+            }
+            
+            // Parse markdown headers as sections
+            const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
+            if (headerMatch) {
                 elements.push({
                     type: 'text',
                     x: x,
                     y: y,
-                    text: line,
-                    width: 200,
-                    height: 40
+                    text: headerMatch[2],
+                    width: 300,
+                    height: 40,
+                    fontSize: headerMatch[1].length === 1 ? 28 : headerMatch[1].length === 2 ? 24 : 20,
+                    strokeColor: '#1971c2'
                 });
+                y += rowHeight;
+                currentCol = 0;
+                continue;
             }
             
-            y += 120;
+            // Parse list items
+            const listMatch = line.match(/^[\s]*[-*•]\s+(.+)/);
+            if (listMatch) {
+                elements.push({
+                    type: 'text',
+                    x: x + 20,
+                    y: y,
+                    text: '• ' + listMatch[1],
+                    width: 250,
+                    height: 30,
+                    fontSize: 16
+                });
+                y += 50;
+                continue;
+            }
+            
+            // Check for different diagram elements based on keywords
+            const lowerLine = line.toLowerCase();
+            let element = null;
+            
+            if (lowerLine.includes('start') || lowerLine.includes('begin') || lowerLine.includes('end')) {
+                element = {
+                    type: 'ellipse',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 140,
+                    height: 80,
+                    text: this.extractText(line),
+                    backgroundColor: '#e7f5ff',
+                    strokeColor: '#1971c2'
+                };
+            } else if (lowerLine.includes('decision') || lowerLine.includes('if ') || lowerLine.includes('?')) {
+                element = {
+                    type: 'diamond',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 160,
+                    height: 120,
+                    text: this.extractText(line),
+                    backgroundColor: '#fff9db',
+                    strokeColor: '#f08c00'
+                };
+            } else if (lowerLine.includes('process') || lowerLine.includes('action') || lowerLine.includes('step')) {
+                element = {
+                    type: 'rectangle',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 180,
+                    height: 100,
+                    text: this.extractText(line),
+                    backgroundColor: '#e6fcf5',
+                    strokeColor: '#2f9e44'
+                };
+            } else if (lowerLine.includes('box') || lowerLine.includes('rect')) {
+                element = {
+                    type: 'rectangle',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 180,
+                    height: 100,
+                    text: this.extractText(line),
+                    backgroundColor: '#f3f0ff',
+                    strokeColor: '#7048e8'
+                };
+            } else if (lowerLine.includes('database') || lowerLine.includes('db') || lowerLine.includes('store')) {
+                element = {
+                    type: 'rectangle',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 180,
+                    height: 100,
+                    text: this.extractText(line),
+                    backgroundColor: '#fff5f5',
+                    strokeColor: '#e03131',
+                    edgeType: 'round'
+                };
+            } else if (lowerLine.includes('input') || lowerLine.includes('output')) {
+                element = {
+                    type: 'diamond',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 160,
+                    height: 100,
+                    text: this.extractText(line),
+                    backgroundColor: '#e7f5ff',
+                    strokeColor: '#1971c2'
+                };
+            } else if (lowerLine.includes('circle') || lowerLine.includes('oval')) {
+                element = {
+                    type: 'ellipse',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 140,
+                    height: 100,
+                    text: this.extractText(line)
+                };
+            } else if (lowerLine.includes('note') || lowerLine.includes('sticky')) {
+                element = {
+                    type: 'sticky',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    width: 200,
+                    height: 150,
+                    text: this.extractText(line),
+                    backgroundColor: '#ffec99',
+                    strokeColor: '#e6b800'
+                };
+            } else if (lowerLine.includes('arrow') || lowerLine.includes('connect') || lowerLine.includes('→')) {
+                if (lastNode) {
+                    elements.push({
+                        type: 'arrow',
+                        points: [
+                            { x: lastNode.x, y: lastNode.y + 40 },
+                            { x: lastNode.x, y: y - 20 }
+                        ],
+                        strokeColor: '#666666',
+                        strokeWidth: 2
+                    });
+                }
+                continue;
+            } else {
+                // Default to text
+                element = {
+                    type: 'text',
+                    x: x + currentCol * colWidth,
+                    y: y,
+                    text: this.extractText(line),
+                    width: 200,
+                    height: 40
+                };
+            }
+            
+            if (element) {
+                elements.push(element);
+                lastNode = { x: element.x, y: element.y, text: element.text };
+                
+                currentCol++;
+                if (currentCol >= maxCols) {
+                    currentCol = 0;
+                    y += rowHeight;
+                }
+            }
         }
         
         return elements;
     }
     
+    createNode(text, x, y, elements) {
+        const element = {
+            type: 'rectangle',
+            x: x,
+            y: y,
+            width: 180,
+            height: 80,
+            text: text,
+            backgroundColor: '#f8f9fa',
+            strokeColor: '#495057'
+        };
+        elements.push(element);
+        return { x, y, text };
+    }
+    
     extractText(line) {
-        // Extract text between quotes or after colons
-        const match = line.match(/["'](.+?)["']|:\s*(.+)/);
-        return match ? (match[1] || match[2] || line) : line;
+        // Extract text between quotes, after colons, or clean up keywords
+        let cleaned = line
+            .replace(/^(box|rect|rectangle|diamond|circle|oval|ellipse|arrow|connect|text|note|sticky|process|action|step|decision|start|end|input|output|database|db)\s*[:\-]?\s*/i, '')
+            .trim();
+        
+        const match = cleaned.match(/["'](.+?)["']|:\s*(.+)/);
+        return match ? (match[1] || match[2] || cleaned) : cleaned;
     }
     
     showStatus(message, type) {

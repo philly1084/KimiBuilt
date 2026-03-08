@@ -78,6 +78,11 @@ class ToolManager {
     }
     
     setTool(toolName) {
+        // Cancel any active operations
+        if (this.isDrawing) {
+            this.cancelDrawing();
+        }
+        
         this.currentTool = toolName;
         
         // Update UI
@@ -90,6 +95,7 @@ class ToolManager {
         // Update cursor
         const container = document.getElementById('canvasContainer');
         container.className = 'canvas-container';
+        container.style.cursor = ''; // Reset cursor
         
         switch (toolName) {
             case 'selection':
@@ -97,10 +103,15 @@ class ToolManager {
                 break;
             case 'text':
                 container.classList.add('texting');
+                container.style.cursor = 'text';
                 break;
             case 'freedraw':
+                container.classList.add('drawing');
+                container.style.cursor = 'crosshair';
+                break;
             case 'eraser':
                 container.classList.add('drawing');
+                container.style.cursor = 'cell';
                 break;
             case 'ai-image':
                 container.style.cursor = 'crosshair';
@@ -110,6 +121,7 @@ class ToolManager {
                 break;
             default:
                 container.classList.add('drawing');
+                container.style.cursor = 'crosshair';
                 break;
         }
         
@@ -123,6 +135,25 @@ class ToolManager {
         if (toolName !== 'selection') {
             window.infiniteCanvas.deselectAll();
         }
+        
+        // Close any open text editors
+        const textEditor = document.getElementById('textEditor');
+        if (textEditor && textEditor.style.display === 'block') {
+            textEditor.blur();
+        }
+    }
+    
+    cancelDrawing() {
+        const canvas = window.infiniteCanvas;
+        if (this.currentElement) {
+            // Remove incomplete element
+            canvas.elements = canvas.elements.filter(
+                el => el.id !== this.currentElement.id
+            );
+        }
+        this.isDrawing = false;
+        this.currentElement = null;
+        canvas.render();
     }
     
     generateId() {
@@ -235,17 +266,44 @@ class ToolManager {
             // Finalize element
             const el = this.currentElement;
             const minSize = 5;
+            const minPoints = 3; // Minimum points for freedraw
             
-            const tooSmall = (el.type !== 'freedraw' && el.type !== 'line' && el.type !== 'arrow' && 
-                             el.width < minSize && el.height < minSize) ||
-                            (el.type === 'freedraw' && (!el.points || el.points.length < 2));
+            let tooSmall = false;
+            
+            if (el.type === 'freedraw') {
+                // For freedraw, check number of points
+                tooSmall = !el.points || el.points.length < minPoints;
+            } else if (el.type === 'line' || el.type === 'arrow') {
+                // For lines, check if there's actual length
+                tooSmall = !el.points || el.points.length < 2 || 
+                          (Math.abs(el.points[1].x - el.points[0].x) < minSize && 
+                           Math.abs(el.points[1].y - el.points[0].y) < minSize);
+            } else {
+                // For shapes, check dimensions
+                tooSmall = el.width < minSize && el.height < minSize;
+            }
             
             if (tooSmall) {
                 // Too small, remove it
                 canvas.elements = canvas.elements.filter(
-                    el => el.id !== this.currentElement.id
+                    existingEl => existingEl.id !== this.currentElement.id
                 );
             } else {
+                // Ensure freedraw has valid bounding box
+                if (el.type === 'freedraw' && el.points && el.points.length > 0) {
+                    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                    for (const p of el.points) {
+                        minX = Math.min(minX, p.x);
+                        minY = Math.min(minY, p.y);
+                        maxX = Math.max(maxX, p.x);
+                        maxY = Math.max(maxY, p.y);
+                    }
+                    el.x = (minX + maxX) / 2;
+                    el.y = (minY + maxY) / 2;
+                    el.width = Math.max(1, maxX - minX);
+                    el.height = Math.max(1, maxY - minY);
+                }
+                
                 // Save to history
                 window.historyManager?.pushState(canvas.elements);
             }
@@ -724,6 +782,16 @@ class ToolManager {
         const canvas = window.infiniteCanvas;
         const screenPos = canvas.worldToScreen(pos.x, pos.y);
         
+        // Clean up any existing handlers
+        if (this._textEditorBlurHandler) {
+            textEditor.removeEventListener('blur', this._textEditorBlurHandler);
+            this._textEditorBlurHandler = null;
+        }
+        if (this._textEditorKeyHandler) {
+            textEditor.removeEventListener('keydown', this._textEditorKeyHandler);
+            this._textEditorKeyHandler = null;
+        }
+        
         // Position text editor
         textEditor.style.display = 'block';
         textEditor.style.left = screenPos.x + 'px';
@@ -739,7 +807,7 @@ class ToolManager {
         textEditor.dataset.posY = pos.y;
         
         // Handle text completion
-        const finishEditing = () => {
+        this._textEditorBlurHandler = () => {
             const text = textEditor.value.trim();
             if (text) {
                 const element = {
@@ -756,10 +824,21 @@ class ToolManager {
                 window.historyManager?.pushState(canvas.elements);
             }
             textEditor.style.display = 'none';
-            textEditor.removeEventListener('blur', finishEditing);
+            textEditor.style.background = '';
+            textEditor.removeEventListener('blur', this._textEditorBlurHandler);
+            this._textEditorBlurHandler = null;
         };
         
-        textEditor.addEventListener('blur', finishEditing);
+        // Handle Enter key to finish (Shift+Enter for new line)
+        this._textEditorKeyHandler = (e) => {
+            if (e.key === 'Escape') {
+                textEditor.value = ''; // Cancel
+                textEditor.blur();
+            }
+        };
+        
+        textEditor.addEventListener('blur', this._textEditorBlurHandler);
+        textEditor.addEventListener('keydown', this._textEditorKeyHandler);
     }
     
     createSticky(pos) {
@@ -796,27 +875,37 @@ class ToolManager {
             height: element.height * canvas.scale
         };
         
+        // Clean up any existing handlers
+        if (this._editStickyBlurHandler) {
+            textEditor.removeEventListener('blur', this._editStickyBlurHandler);
+            this._editStickyBlurHandler = null;
+        }
+        
         textEditor.style.display = 'block';
         textEditor.style.left = screenPos.x + 'px';
         textEditor.style.top = screenPos.y + 'px';
-        textEditor.style.width = (screenSize.width - 20) + 'px';
-        textEditor.style.height = (screenSize.height - 20) + 'px';
+        textEditor.style.width = (screenSize.width - 24) + 'px';
+        textEditor.style.height = (screenSize.height - 24) + 'px';
         textEditor.style.transform = 'translate(-50%, -50%)';
         textEditor.style.background = 'transparent';
+        textEditor.style.border = 'none';
+        textEditor.style.resize = 'none';
         textEditor.value = element.text || '';
         textEditor.focus();
         
-        const finishEditing = () => {
-            const text = textEditor.value.trim();
-            element.text = text;
+        this._editStickyBlurHandler = () => {
+            element.text = textEditor.value.trim();
             canvas.render();
             window.historyManager?.pushState(canvas.elements);
             textEditor.style.display = 'none';
-            textEditor.style.background = 'transparent';
-            textEditor.removeEventListener('blur', finishEditing);
+            textEditor.style.background = '';
+            textEditor.style.border = '';
+            textEditor.style.resize = '';
+            textEditor.removeEventListener('blur', this._editStickyBlurHandler);
+            this._editStickyBlurHandler = null;
         };
         
-        textEditor.addEventListener('blur', finishEditing);
+        textEditor.addEventListener('blur', this._editStickyBlurHandler);
     }
     
     eraseAt(pos) {
@@ -872,27 +961,41 @@ class ToolManager {
         const canvas = window.infiniteCanvas;
         const screenPos = canvas.worldToScreen(element.x, element.y);
         
+        // Clean up any existing handlers
+        if (this._editTextBlurHandler) {
+            textEditor.removeEventListener('blur', this._editTextBlurHandler);
+            this._editTextBlurHandler = null;
+        }
+        
         textEditor.style.display = 'block';
         textEditor.style.left = screenPos.x + 'px';
         textEditor.style.top = (screenPos.y - 40) + 'px';
         textEditor.style.width = '200px';
         textEditor.style.height = '80px';
         textEditor.style.transform = 'translate(-50%, 0)';
-        textEditor.value = element.text;
+        textEditor.value = element.text || '';
         textEditor.focus();
         
-        const finishEditing = () => {
+        this._editTextBlurHandler = () => {
             const text = textEditor.value.trim();
             if (text) {
                 element.text = text;
                 canvas.render();
                 window.historyManager?.pushState(canvas.elements);
+            } else {
+                // Delete empty text elements
+                canvas.removeElement(element.id);
+                canvas.deselectAll();
+                canvas.render();
+                window.historyManager?.pushState(canvas.elements);
             }
             textEditor.style.display = 'none';
-            textEditor.removeEventListener('blur', finishEditing);
+            textEditor.style.background = '';
+            textEditor.removeEventListener('blur', this._editTextBlurHandler);
+            this._editTextBlurHandler = null;
         };
         
-        textEditor.addEventListener('blur', finishEditing);
+        textEditor.addEventListener('blur', this._editTextBlurHandler);
     }
     
     // Copy selected elements
@@ -962,13 +1065,22 @@ class ToolManager {
     }
     
     handlePaste(e) {
-        // Handle external paste (images)
+        // First try internal clipboard
+        if (this.clipboard.length > 0 && !e.clipboardData?.items?.length) {
+            e.preventDefault();
+            this.paste();
+            return;
+        }
+        
+        // Handle external paste (images from clipboard)
         if (e.clipboardData && e.clipboardData.items) {
             const items = e.clipboardData.items;
             for (let i = 0; i < items.length; i++) {
                 if (items[i].type.indexOf('image') !== -1) {
                     const blob = items[i].getAsFile();
-                    this.loadImageFromFile(blob);
+                    if (blob) {
+                        this.loadImageFromFile(blob);
+                    }
                     e.preventDefault();
                     return;
                 }
@@ -976,17 +1088,25 @@ class ToolManager {
         }
     }
     
-    loadImageFromFile(file) {
+    loadImageFromFile(file, pos = null) {
         const canvas = window.infiniteCanvas;
         const reader = new FileReader();
         reader.onload = (event) => {
             const img = new Image();
             img.onload = () => {
-                // Get center of current view
-                const center = canvas.screenToWorld(
-                    canvas.canvas.width / 2,
-                    canvas.canvas.height / 2
-                );
+                // Get position - use provided pos or center of view
+                let x, y;
+                if (pos) {
+                    x = pos.x;
+                    y = pos.y;
+                } else {
+                    const center = canvas.screenToWorld(
+                        canvas.canvas.width / 2,
+                        canvas.canvas.height / 2
+                    );
+                    x = center.x;
+                    y = center.y;
+                }
                 
                 // Calculate size while maintaining aspect ratio
                 const maxWidth = 400;
@@ -1006,8 +1126,8 @@ class ToolManager {
                 const element = {
                     id: this.generateId(),
                     type: 'image',
-                    x: center.x,
-                    y: center.y,
+                    x: x,
+                    y: y,
                     width: width,
                     height: height,
                     imageElement: img,
@@ -1017,7 +1137,13 @@ class ToolManager {
                 canvas.addElement(element);
                 window.historyManager?.pushState(canvas.elements);
             };
+            img.onerror = () => {
+                console.error('Failed to load pasted image');
+            };
             img.src = event.target.result;
+        };
+        reader.onerror = () => {
+            console.error('Failed to read file');
         };
         reader.readAsDataURL(file);
     }
@@ -1031,24 +1157,11 @@ class ToolManager {
             }
         }
         
-        // Copy/Paste shortcuts
-        if ((e.ctrlKey || e.metaKey)) {
-            if (e.key.toLowerCase() === 'c') {
-                e.preventDefault();
-                this.copySelection();
-            } else if (e.key.toLowerCase() === 'x') {
-                e.preventDefault();
-                this.cutSelection();
-            } else if (e.key.toLowerCase() === 'v') {
-                e.preventDefault();
-                this.paste();
-            }
-        }
+        // Tool shortcuts (only when not in text input and not using modifiers)
+        const isInputActive = document.activeElement.tagName === 'TEXTAREA' || 
+                              document.activeElement.tagName === 'INPUT';
         
-        // Tool shortcuts (only when not in text input)
-        if (!e.ctrlKey && !e.metaKey && !e.altKey && 
-            document.activeElement.tagName !== 'TEXTAREA' && 
-            document.activeElement.tagName !== 'INPUT') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && !isInputActive) {
             switch (e.key.toLowerCase()) {
                 case 'v':
                 case '1':
@@ -1102,10 +1215,8 @@ class ToolManager {
             }
         }
         
-        // Delete key
-        if ((e.key === 'Delete' || e.key === 'Backspace') && 
-            document.activeElement.tagName !== 'TEXTAREA' && 
-            document.activeElement.tagName !== 'INPUT') {
+        // Delete key (only when not in input)
+        if ((e.key === 'Delete' || e.key === 'Backspace') && !isInputActive) {
             const canvas = window.infiniteCanvas;
             if (canvas.selectedElements.length > 0) {
                 for (const el of canvas.selectedElements) {

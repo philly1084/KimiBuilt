@@ -102,6 +102,12 @@ const Blocks = (function() {
             placeholder: '',
             render: renderDatabaseBlock
         },
+        math: {
+            name: 'Math Equation',
+            icon: '∑',
+            placeholder: 'Type LaTeX equation...',
+            render: renderMathBlock
+        },
         ai: {
             name: 'AI Assistant',
             icon: '✨',
@@ -156,6 +162,85 @@ const Blocks = (function() {
      */
     function getDefaultImageModel() {
         return DEFAULT_IMAGE_MODEL;
+    }
+    
+    /**
+     * Helper: Safely extract text from API response
+     * This fixes the [object Object] display issue
+     */
+    function extractResponseText(result) {
+        if (result === null || result === undefined) {
+            return '';
+        }
+        
+        if (typeof result === 'string') {
+            return result;
+        }
+        
+        if (typeof result === 'object') {
+            // Try common response formats
+            if (result.response && typeof result.response === 'string') {
+                return result.response;
+            }
+            if (result.text && typeof result.text === 'string') {
+                return result.text;
+            }
+            if (result.content && typeof result.content === 'string') {
+                return result.content;
+            }
+            if (result.message && typeof result.message === 'string') {
+                return result.message;
+            }
+            if (result.output && typeof result.output === 'string') {
+                return result.output;
+            }
+            // Deep extraction for nested objects
+            const text = findTextInObject(result);
+            if (text) return text;
+        }
+        
+        // Fallback: convert to string but avoid [object Object]
+        try {
+            const str = JSON.stringify(result);
+            if (str !== '{}' && str !== '[]') {
+                return str;
+            }
+        } catch (e) {
+            // Ignore JSON stringify errors
+        }
+        
+        return '';
+    }
+    
+    /**
+     * Recursively search for text content in an object
+     */
+    function findTextInObject(obj, depth = 0) {
+        if (depth > 5) return null; // Prevent infinite recursion
+        
+        if (typeof obj === 'string' && obj.length > 0) {
+            return obj;
+        }
+        
+        if (typeof obj === 'object' && obj !== null) {
+            // Check common text keys first
+            const textKeys = ['text', 'content', 'response', 'message', 'output', 'value', 'data'];
+            for (const key of textKeys) {
+                if (obj[key] && typeof obj[key] === 'string' && obj[key].length > 0) {
+                    return obj[key];
+                }
+            }
+            
+            // Deep search in nested objects
+            for (const key in obj) {
+                if (obj.hasOwnProperty(key)) {
+                    const found = findTextInObject(obj[key], depth + 1);
+                    if (found) return found;
+                }
+            }
+        }
+        
+        return null;
     }
     
     /**
@@ -380,7 +465,7 @@ const Blocks = (function() {
         
         const langSelect = document.createElement('select');
         langSelect.className = 'code-language';
-        const languages = ['plain', 'javascript', 'typescript', 'python', 'html', 'css', 'json', 'sql', 'bash', 'markdown', 'java', 'cpp', 'rust', 'go'];
+        const languages = ['plain', 'javascript', 'typescript', 'python', 'html', 'css', 'json', 'sql', 'bash', 'markdown', 'java', 'cpp', 'rust', 'go', 'ruby', 'php', 'swift', 'kotlin'];
         languages.forEach(lang => {
             const option = document.createElement('option');
             option.value = lang;
@@ -397,6 +482,7 @@ const Blocks = (function() {
             const codeEl = wrapper.querySelector('code');
             if (codeEl && window.hljs) {
                 codeEl.className = `language-${langSelect.value}`;
+                codeEl.textContent = content.text || '';
                 window.hljs.highlightElement(codeEl);
             }
         });
@@ -439,6 +525,80 @@ const Blocks = (function() {
                 window.hljs.highlightElement(code);
             }
         }, 0);
+        
+        return wrapper;
+    }
+    
+    /**
+     * Render a math block (KaTeX)
+     */
+    function renderMathBlock(block, isEditable = true) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'block-content';
+        
+        const content = typeof block.content === 'object' ? block.content : { text: block.content || '', displayMode: true };
+        
+        if (isEditable && (!content.text || content.text.trim() === '')) {
+            // Show input form for new equation
+            const input = document.createElement('textarea');
+            input.className = 'math-input';
+            input.placeholder = 'Type LaTeX equation... (e.g., E = mc^2)';
+            input.value = content.text || '';
+            input.style.cssText = 'width: 100%; min-height: 60px; padding: 12px; font-family: monospace; font-size: 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md); resize: vertical;';
+            
+            const renderBtn = document.createElement('button');
+            renderBtn.className = 'ai-image-btn primary';
+            renderBtn.textContent = 'Render Equation';
+            renderBtn.style.marginTop = '8px';
+            
+            renderBtn.addEventListener('click', () => {
+                const latex = input.value.trim();
+                if (latex) {
+                    block.content = { text: latex, displayMode: true };
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderMathBlock(block, isEditable));
+                    if (window.Editor) window.Editor.savePage();
+                }
+            });
+            
+            wrapper.appendChild(input);
+            wrapper.appendChild(renderBtn);
+            setTimeout(() => input.focus(), 0);
+        } else {
+            // Render the equation
+            const mathContainer = document.createElement('div');
+            mathContainer.className = 'math-container';
+            
+            // Check if KaTeX is available
+            if (typeof katex !== 'undefined') {
+                try {
+                    katex.render(content.text || '', mathContainer, {
+                        displayMode: content.displayMode !== false,
+                        throwOnError: false
+                    });
+                } catch (err) {
+                    mathContainer.innerHTML = `<span style="color: red;">Error: ${err.message}</span>`;
+                }
+            } else {
+                // Fallback: show LaTeX code
+                mathContainer.innerHTML = `<code style="font-family: monospace; background: var(--bg-secondary); padding: 8px; border-radius: 4px;">${escapeHtml(content.text || '')}</code>`;
+            }
+            
+            wrapper.appendChild(mathContainer);
+            
+            if (isEditable) {
+                const editBtn = document.createElement('button');
+                editBtn.className = 'ai-image-btn';
+                editBtn.textContent = 'Edit';
+                editBtn.style.marginTop = '8px';
+                editBtn.addEventListener('click', () => {
+                    block.content = { ...content, text: '' };
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderMathBlock(block, isEditable));
+                });
+                wrapper.appendChild(editBtn);
+            }
+        }
         
         return wrapper;
     }
@@ -499,13 +659,39 @@ const Blocks = (function() {
             `;
             
             placeholder.addEventListener('click', () => {
-                const url = prompt('Enter image URL:');
-                if (url) {
-                    block.content = { url, caption: '' };
-                    // Re-render
-                    wrapper.innerHTML = '';
-                    const newContent = renderImageBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                // Show options: URL input or file upload
+                const option = confirm('Click OK to enter URL, Cancel to upload file');
+                if (option) {
+                    const url = prompt('Enter image URL:');
+                    if (url) {
+                        block.content = { url, caption: '' };
+                        // Re-render
+                        wrapper.innerHTML = '';
+                        const newContent = renderImageBlock(block, isEditable);
+                        wrapper.appendChild(newContent);
+                    }
+                } else {
+                    // Create hidden file input
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'image/*';
+                    fileInput.style.display = 'none';
+                    fileInput.addEventListener('change', (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                block.content = { url: event.target.result, caption: '' };
+                                wrapper.innerHTML = '';
+                                const newContent = renderImageBlock(block, isEditable);
+                                wrapper.appendChild(newContent);
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    });
+                    document.body.appendChild(fileInput);
+                    fileInput.click();
+                    document.body.removeChild(fileInput);
                 }
             });
             
@@ -914,7 +1100,9 @@ const Blocks = (function() {
             
             const result = document.createElement('div');
             result.className = 'ai-block-result';
-            result.textContent = content.result;
+            // FIX: Use safe text extraction to avoid [object Object]
+            const resultText = extractResponseText(content.result);
+            result.textContent = resultText;
             resultContainer.appendChild(result);
             
             const actions = document.createElement('div');
@@ -939,12 +1127,9 @@ const Blocks = (function() {
                     const model = content.model || page?.defaultModel || DEFAULT_MODEL;
                     
                     const result = await API.generate(content.prompt, model);
-                    // Extract string response - handle various response formats
-                    let responseText = result;
-                    if (result && typeof result === 'object') {
-                        responseText = result.response || result.text || result.content || JSON.stringify(result);
-                    }
-                    content.result = String(responseText || '');
+                    // FIX: Use safe text extraction
+                    const responseText = extractResponseText(result);
+                    content.result = responseText;
                     content.model = model;
                     
                     // Re-render with result
@@ -966,7 +1151,8 @@ const Blocks = (function() {
             insertBtn.textContent = 'Insert below';
             insertBtn.addEventListener('click', () => {
                 if (window.Editor && window.Editor.insertBlockAfter) {
-                    window.Editor.insertBlockAfter(block.id, 'text', content.result);
+                    const resultText = extractResponseText(content.result);
+                    window.Editor.insertBlockAfter(block.id, 'text', resultText);
                 }
             });
             
@@ -1045,12 +1231,9 @@ const Blocks = (function() {
                 
                 try {
                     const result = await API.generate(prompt, selectedModel);
-                    // Extract string response - handle various response formats
-                    let responseText = result;
-                    if (result && typeof result === 'object') {
-                        responseText = result.response || result.text || result.content || JSON.stringify(result);
-                    }
-                    block.content.result = String(responseText || '');
+                    // FIX: Use safe text extraction to avoid [object Object]
+                    const responseText = extractResponseText(result);
+                    block.content.result = responseText;
                     block.content.model = selectedModel;
                     
                     // Re-render with result
@@ -1089,34 +1272,111 @@ const Blocks = (function() {
         const wrapper = document.createElement('div');
         wrapper.className = 'block-content';
         
-        const data = block.content || { columns: ['Name'], rows: [] };
+        const data = block.content || { columns: ['Name'], rows: [], sortColumn: null, sortDirection: 'asc' };
         
         const table = document.createElement('div');
         table.className = 'database-table';
         
-        // Header
+        // Header with sorting
         const header = document.createElement('div');
         header.className = 'database-header';
-        data.columns.forEach(col => {
+        data.columns.forEach((col, index) => {
             const cell = document.createElement('div');
-            cell.className = 'database-cell';
-            cell.textContent = col;
+            cell.className = 'database-cell database-header-cell';
+            cell.style.cursor = 'pointer';
+            
+            // Add sort indicator
+            let sortIndicator = '';
+            if (data.sortColumn === index) {
+                sortIndicator = data.sortDirection === 'asc' ? ' ▲' : ' ▼';
+                cell.style.fontWeight = '700';
+            }
+            cell.textContent = col + sortIndicator;
+            
+            cell.addEventListener('click', () => {
+                // Toggle sort
+                if (data.sortColumn === index) {
+                    data.sortDirection = data.sortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    data.sortColumn = index;
+                    data.sortDirection = 'asc';
+                }
+                
+                // Sort rows
+                if (data.rows && data.rows.length > 0) {
+                    data.rows.sort((a, b) => {
+                        const aVal = String(a[index] || '').toLowerCase();
+                        const bVal = String(b[index] || '').toLowerCase();
+                        if (aVal < bVal) return data.sortDirection === 'asc' ? -1 : 1;
+                        if (aVal > bVal) return data.sortDirection === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                }
+                
+                block.content = data;
+                // Re-render
+                wrapper.innerHTML = '';
+                const newContent = renderDatabaseBlock(block, isEditable);
+                wrapper.appendChild(newContent);
+                if (window.Editor) window.Editor.savePage();
+            });
+            
             header.appendChild(cell);
         });
         table.appendChild(header);
         
-        // Rows
-        data.rows.forEach(row => {
+        // Rows (editable)
+        const rowsContainer = document.createElement('div');
+        rowsContainer.className = 'database-rows';
+        
+        data.rows.forEach((row, rowIndex) => {
             const rowEl = document.createElement('div');
             rowEl.className = 'database-row';
-            row.forEach(cell => {
+            
+            row.forEach((cellData, colIndex) => {
                 const cellEl = document.createElement('div');
                 cellEl.className = 'database-cell';
-                cellEl.textContent = cell;
+                
+                if (isEditable) {
+                    cellEl.contentEditable = true;
+                    cellEl.textContent = cellData;
+                    cellEl.addEventListener('blur', () => {
+                        data.rows[rowIndex][colIndex] = cellEl.textContent;
+                        block.content = data;
+                        if (window.Editor) window.Editor.savePage();
+                    });
+                } else {
+                    cellEl.textContent = cellData;
+                }
+                
                 rowEl.appendChild(cellEl);
             });
-            table.appendChild(rowEl);
+            
+            // Delete row button
+            if (isEditable) {
+                const deleteCell = document.createElement('div');
+                deleteCell.className = 'database-cell database-action-cell';
+                deleteCell.innerHTML = '×';
+                deleteCell.style.cursor = 'pointer';
+                deleteCell.style.color = 'var(--text-muted)';
+                deleteCell.style.width = '30px';
+                deleteCell.style.textAlign = 'center';
+                deleteCell.title = 'Delete row';
+                deleteCell.addEventListener('click', () => {
+                    data.rows.splice(rowIndex, 1);
+                    block.content = data;
+                    wrapper.innerHTML = '';
+                    const newContent = renderDatabaseBlock(block, isEditable);
+                    wrapper.appendChild(newContent);
+                    if (window.Editor) window.Editor.savePage();
+                });
+                rowEl.appendChild(deleteCell);
+            }
+            
+            rowsContainer.appendChild(rowEl);
         });
+        
+        table.appendChild(rowsContainer);
         
         // Add row button
         if (isEditable) {
@@ -1130,8 +1390,29 @@ const Blocks = (function() {
                 wrapper.innerHTML = '';
                 const newContent = renderDatabaseBlock(block, isEditable);
                 wrapper.appendChild(newContent);
+                if (window.Editor) window.Editor.savePage();
             });
             table.appendChild(addRow);
+            
+            // Add column button
+            const addCol = document.createElement('div');
+            addCol.className = 'database-add-column';
+            addCol.textContent = '+ Add Column';
+            addCol.style.cssText = 'padding: 8px 12px; text-align: left; color: var(--text-muted); font-size: 13px; cursor: pointer; border-top: 1px solid var(--border-color);';
+            addCol.addEventListener('click', () => {
+                const colName = prompt('Column name:');
+                if (colName) {
+                    data.columns.push(colName);
+                    // Add empty cell to each row
+                    data.rows.forEach(row => row.push(''));
+                    block.content = data;
+                    wrapper.innerHTML = '';
+                    const newContent = renderDatabaseBlock(block, isEditable);
+                    wrapper.appendChild(newContent);
+                    if (window.Editor) window.Editor.savePage();
+                }
+            });
+            table.appendChild(addCol);
         }
         
         wrapper.appendChild(table);
@@ -1227,7 +1508,8 @@ const Blocks = (function() {
             { pattern: /^\[([ x])\]\s*(.*)$/i, type: 'todo', parse: (m) => ({ text: m[2], checked: m[1].toLowerCase() === 'x' }) },
             { pattern: /^>\s+(.+)$/, type: 'quote' },
             { pattern: /^---+/, type: 'divider' },
-            { pattern: /^```(.*)/, type: 'code', parse: (m) => ({ text: '', language: m[1] || 'plain' }) }
+            { pattern: /^```(.*)/, type: 'code', parse: (m) => ({ text: '', language: m[1] || 'plain' }) },
+            { pattern: /^\$\$\s*$/, type: 'math', parse: () => ({ text: '', displayMode: true }) }
         ];
         
         for (const shortcut of shortcuts) {
@@ -1252,6 +1534,7 @@ const Blocks = (function() {
         formatContent,
         getDefaultModel,
         getDefaultImageModel,
+        extractResponseText,
         // Expose render functions for direct use
         render: {
             text: renderTextBlock,
@@ -1266,6 +1549,7 @@ const Blocks = (function() {
             divider: renderDividerBlock,
             callout: renderCalloutBlock,
             code: renderCodeBlock,
+            math: renderMathBlock,
             image: renderImageBlock,
             ai_image: renderAIImageBlock,
             bookmark: renderBookmarkBlock,

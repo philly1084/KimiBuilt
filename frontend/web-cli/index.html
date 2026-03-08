@@ -2,188 +2,710 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>KimiBuilt Web CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
-        
+        /* ===== CSS Variables for Theming ===== */
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --prompt-color: #58a6ff;
+            --ai-color: #7ee787;
+            --error-color: #f85149;
+            --success-color: #238636;
+            --warning-color: #d29922;
+            --accent-color: #58a6ff;
+        }
+
+        /* Light Theme */
+        [data-theme="light"] {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f6f8fa;
+            --bg-tertiary: #eaeef2;
+            --border-color: #d0d7de;
+            --text-primary: #24292f;
+            --text-secondary: #57606a;
+            --text-muted: #8c959f;
+            --prompt-color: #0969da;
+            --ai-color: #1a7f37;
+            --error-color: #cf222e;
+            --success-color: #1a7f37;
+            --warning-color: #9a6700;
+            --accent-color: #0969da;
+        }
+
+        /* High Contrast Theme */
+        [data-theme="high-contrast"] {
+            --bg-primary: #000000;
+            --bg-secondary: #000000;
+            --bg-tertiary: #1a1a1a;
+            --border-color: #ffffff;
+            --text-primary: #ffffff;
+            --text-secondary: #ffffff;
+            --text-muted: #cccccc;
+            --prompt-color: #00ff00;
+            --ai-color: #00ffff;
+            --error-color: #ff0000;
+            --success-color: #00ff00;
+            --warning-color: #ffff00;
+            --accent-color: #00ff00;
+        }
+
+        /* ===== Base Styles ===== */
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: 'JetBrains Mono', monospace;
-            background: #0d1117;
-            color: #c9d1d9;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
         }
-        
+
+        /* ===== Typography ===== */
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+        /* ===== Terminal Components ===== */
         .terminal {
-            background: #161b22;
-            border: 1px solid #30363d;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
         }
+
+        .prompt { color: var(--prompt-color); }
+        .user-input { color: var(--text-primary); }
+        .ai-response { color: var(--ai-color); }
+        .error { color: var(--error-color); }
+        .system { color: var(--text-secondary); }
+        .timestamp { color: var(--text-muted); font-size: 0.75rem; }
         
-        .prompt { color: #58a6ff; }
-        .user-input { color: #c9d1d9; }
-        .ai-response { color: #7ee787; }
-        .error { color: #f85149; }
-        .system { color: #8b949e; }
-        .timestamp { color: #6e7681; font-size: 0.75rem; }
-        
+        /* ===== Connection Status ===== */
+        .status-connected { color: var(--success-color); }
+        .status-disconnected { color: var(--text-muted); }
+        .status-error { color: var(--error-color); }
+
+        /* ===== Layout ===== */
         .command-line {
             display: flex;
             align-items: flex-start;
             gap: 8px;
             padding: 4px 0;
+            word-break: break-word;
         }
-        
+
         .input-area {
             display: flex;
             align-items: center;
             gap: 8px;
             padding: 12px;
-            background: #0d1117;
-            border-top: 1px solid #30363d;
+            background: var(--bg-primary);
+            border-top: 1px solid var(--border-color);
+            flex-shrink: 0;
         }
-        
+
         #commandInput {
             background: transparent;
             border: none;
             outline: none;
-            color: #c9d1d9;
+            color: var(--text-primary);
             font-family: inherit;
             font-size: 14px;
             flex: 1;
+            min-width: 0;
         }
-        
+
         #commandInput::placeholder {
-            color: #6e7681;
+            color: var(--text-muted);
         }
-        
+
         .output-area {
             height: calc(100vh - 180px);
             overflow-y: auto;
             padding: 16px;
+            scroll-behavior: smooth;
         }
-        
+
         .output-area::-webkit-scrollbar {
             width: 8px;
+            height: 8px;
         }
-        
+
         .output-area::-webkit-scrollbar-track {
-            background: #0d1117;
+            background: var(--bg-primary);
         }
-        
+
         .output-area::-webkit-scrollbar-thumb {
-            background: #30363d;
+            background: var(--border-color);
             border-radius: 4px;
         }
-        
+
+        .output-area::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* ===== Mode Badge & Select ===== */
         .mode-badge {
-            background: #238636;
+            background: var(--success-color);
             color: white;
             padding: 2px 8px;
             border-radius: 12px;
             font-size: 0.75rem;
+            font-weight: 600;
         }
-        
+
         .model-select {
-            background: #21262d;
-            border: 1px solid #30363d;
-            color: #c9d1d9;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
             padding: 4px 12px;
             border-radius: 6px;
             font-size: 0.875rem;
+            font-family: inherit;
+            cursor: pointer;
         }
-        
+
+        .model-select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        /* ===== Buttons ===== */
         .toolbar-btn {
-            background: #21262d;
-            border: 1px solid #30363d;
-            color: #c9d1d9;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
             padding: 6px 12px;
             border-radius: 6px;
             font-size: 0.875rem;
+            font-family: inherit;
             cursor: pointer;
             transition: all 0.2s;
+            white-space: nowrap;
         }
-        
+
         .toolbar-btn:hover {
-            background: #30363d;
+            background: var(--border-color);
+            border-color: var(--text-muted);
         }
-        
+
+        .toolbar-btn:active {
+            transform: translateY(1px);
+        }
+
+        /* ===== Loading Spinner ===== */
         .spinner {
             display: inline-block;
             width: 12px;
             height: 12px;
-            border: 2px solid #30363d;
-            border-top-color: #58a6ff;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-color);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
-        
+
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        
+
+        /* ===== Streaming Cursor ===== */
         .streaming-cursor::after {
             content: '▋';
             animation: blink 1s infinite;
+            color: var(--accent-color);
         }
-        
+
         @keyframes blink {
             0%, 50% { opacity: 1; }
             51%, 100% { opacity: 0; }
         }
+
+        /* ===== Autocomplete ===== */
+        .autocomplete {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .autocomplete-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .autocomplete-item:hover,
+        .autocomplete-item.selected {
+            background: var(--bg-tertiary);
+            color: var(--accent-color);
+        }
+
+        /* ===== Code Blocks ===== */
+        .code-block {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+
+        .code-header {
+            background: var(--border-color);
+            color: var(--text-secondary);
+            padding: 4px 12px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .code-block pre {
+            margin: 0;
+            padding: 12px;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
+        .inline-code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.875em;
+        }
+
+        /* Syntax Highlighting */
+        .keyword { color: #ff7b72; }
+        .string { color: #a5d6ff; }
+        .comment { color: #8b949e; font-style: italic; }
+        .number { color: #79c0ff; }
+
+        [data-theme="light"] .keyword { color: #d1242f; }
+        [data-theme="light"] .string { color: #0a3069; }
+        [data-theme="light"] .comment { color: #6e7781; }
+        [data-theme="light"] .number { color: #0550ae; }
+
+        [data-theme="high-contrast"] .keyword { color: #ffff00; }
+        [data-theme="high-contrast"] .string { color: #00ffff; }
+        [data-theme="high-contrast"] .comment { color: #888888; }
+        [data-theme="high-contrast"] .number { color: #ff00ff; }
+
+        /* ===== Loading Indicator ===== */
+        .loading-indicator {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            z-index: 1000;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .loading-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        /* ===== Modal ===== */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+        }
+
+        .modal-close:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 60vh;
+        }
+
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .shortcut-item:last-child {
+            border-bottom: none;
+        }
+
+        .shortcut-key {
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            color: var(--accent-color);
+            font-family: inherit;
+        }
+
+        .shortcut-desc {
+            color: var(--text-secondary);
+        }
+
+        /* ===== Canvas Panel (Split View) ===== */
+        .canvas-panel {
+            height: 200px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .canvas-header {
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .canvas-preview {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+            font-size: 0.875rem;
+        }
+
+        /* ===== Image Display ===== */
+        .image-output {
+            margin: 8px 0;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .image-output img {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 8px;
+            display: block;
+        }
+
+        /* ===== Drag & Drop ===== */
+        body.drag-over::after {
+            content: 'Drop file to upload';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-color);
+            font-size: 1.5rem;
+            z-index: 10000;
+            pointer-events: none;
+        }
+
+        /* ===== Mobile Optimizations ===== */
+        @media (max-width: 768px) {
+            .output-area {
+                height: calc(100vh - 160px);
+                padding: 12px;
+            }
+
+            .toolbar-btn {
+                padding: 8px;
+                font-size: 0.75rem;
+            }
+
+            .toolbar-btn span {
+                display: none;
+            }
+
+            .model-select {
+                max-width: 120px;
+                font-size: 0.75rem;
+            }
+
+            .mode-badge {
+                display: none;
+            }
+
+            header .flex.items-center.gap-4 {
+                gap: 8px;
+            }
+
+            header h1 {
+                font-size: 0.875rem;
+            }
+
+            .modal {
+                width: 95%;
+                max-height: 90vh;
+            }
+
+            .modal-body {
+                max-height: 70vh;
+            }
+
+            .command-line {
+                font-size: 0.875rem;
+            }
+
+            .canvas-panel {
+                height: 150px;
+            }
+        }
+
+        /* ===== Utility Classes ===== */
+        .hidden {
+            display: none !important;
+        }
+
+        .text-gray-400 { color: var(--text-secondary); }
+        .text-gray-500 { color: var(--text-muted); }
+        .text-gray-600 { color: var(--text-muted); }
+        .text-green-400 { color: var(--success-color); }
+        .text-green-500 { color: var(--success-color); }
+        .text-red-500 { color: var(--error-color); }
+        .text-blue-400 { color: var(--accent-color); }
+        .border-gray-700 { border-color: var(--border-color); }
+        .border-blue-500 { border-color: var(--accent-color); }
+        .hover\\:bg-gray-800:hover { background: var(--bg-tertiary); }
+        .bg-gray-800 { background: var(--bg-tertiary); }
+
+        /* ===== Print Styles ===== */
+        @media print {
+            .input-area,
+            header,
+            .terminal:last-child,
+            .loading-indicator,
+            .modal-overlay {
+                display: none !important;
+            }
+
+            .output-area {
+                height: auto;
+                overflow: visible;
+            }
+
+            body {
+                background: white;
+                color: black;
+            }
+        }
     </style>
 </head>
-<body class="h-screen flex flex-col">
+<body class="h-screen flex flex-col" data-theme="dark">
     <!-- Header -->
-    <header class="terminal p-4 flex items-center justify-between">
+    <header class="terminal p-4 flex items-center justify-between flex-wrap gap-2">
         <div class="flex items-center gap-4">
-            <h1 class="text-lg font-semibold text-white">🚀 KimiBuilt Web CLI</h1>
+            <h1 class="text-lg font-semibold" style="color: var(--text-primary);">🚀 KimiBuilt Web CLI</h1>
             <span id="modeBadge" class="mode-badge">chat</span>
-            <span id="connectionStatus" class="text-xs text-gray-500">● Connecting...</span>
+            <span id="connectionStatus" class="text-xs" style="color: var(--text-muted);">● Connecting...</span>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
             <select id="modelSelect" class="model-select">
                 <option value="">Loading models...</option>
             </select>
-            <button onclick="app.clearOutput()" class="toolbar-btn" title="Clear (Ctrl+L)">Clear</button>
-            <button onclick="app.exportSession()" class="toolbar-btn" title="Export">Export</button>
-            <a href="/" class="toolbar-btn no-underline">🏠 Home</a>
+            <button onclick="app.cycleTheme()" id="themeBtn" class="toolbar-btn" title="Toggle Theme">🌙</button>
+            <button onclick="app.clearOutput()" class="toolbar-btn" title="Clear (Ctrl+L)">
+                <span>Clear</span>
+            </button>
+            <button onclick="app.exportSession()" class="toolbar-btn" title="Export">
+                <span>Export</span>
+            </button>
+            <button onclick="app.showShortcuts()" class="toolbar-btn" title="Shortcuts (F1)">?</button>
+            <a href="/" class="toolbar-btn no-underline" style="text-decoration: none;">🏠</a>
         </div>
     </header>
 
     <!-- Mode Tabs -->
-    <div class="flex border-b border-gray-700">
-        <button onclick="app.setMode('chat')" id="tab-chat" class="flex-1 py-2 text-sm hover:bg-gray-800 border-b-2 border-blue-500">Chat</button>
-        <button onclick="app.setMode('canvas')" id="tab-canvas" class="flex-1 py-2 text-sm hover:bg-gray-800 border-b-2 border-transparent">Canvas</button>
-        <button onclick="app.setMode('notation')" id="tab-notation" class="flex-1 py-2 text-sm hover:bg-gray-800 border-b-2 border-transparent">Notation</button>
+    <div class="flex border-b" style="border-color: var(--border-color);">
+        <button onclick="app.setMode('chat')" id="tab-chat" class="flex-1 py-2 text-sm hover:bg-gray-800 border-b-2 border-blue-500" style="color: var(--text-primary);">Chat</button>
+        <button onclick="app.setMode('canvas')" id="tab-canvas" class="flex-1 py-2 text-sm hover:bg-gray-800 border-b-2 border-transparent" style="color: var(--text-primary);">Canvas</button>
+        <button onclick="app.setMode('notation')" id="tab-notation" class="flex-1 py-2 text-sm hover:bg-gray-800 border-b-2 border-transparent" style="color: var(--text-primary);">Notation</button>
     </div>
 
     <!-- Output Area -->
     <div id="outputArea" class="output-area">
         <div class="system">
             <div class="timestamp">${new Date().toLocaleTimeString()}</div>
-            <div>Welcome to KimiBuilt Web CLI v1.0</div>
+            <div>Welcome to KimiBuilt Web CLI v2.0</div>
             <div>Type <span class="prompt">/help</span> for available commands</div>
             <div>Current mode: <span class="prompt">chat</span></div>
         </div>
     </div>
 
+    <!-- Canvas Panel (Split View) - Hidden by default -->
+    <div id="canvasPanel" class="canvas-panel hidden">
+        <div class="canvas-header">
+            <span>Canvas Preview</span>
+            <button onclick="app.canvasContent=''; document.getElementById('canvasPreview').innerHTML='';" class="toolbar-btn" style="padding: 2px 8px; font-size: 0.75rem;">Clear</button>
+        </div>
+        <div id="canvasPreview" class="canvas-preview"></div>
+    </div>
+
     <!-- Input Area -->
-    <div class="input-area">
+    <div class="input-area" style="position: relative;">
         <span id="promptSymbol" class="prompt">❯</span>
         <input 
             type="text" 
             id="commandInput" 
             placeholder="Type a message or /help for commands..."
             autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
             autofocus
         >
         <button onclick="app.sendCommand()" class="toolbar-btn">Send</button>
+        
+        <!-- Autocomplete Dropdown -->
+        <div id="autocomplete" class="autocomplete hidden"></div>
     </div>
 
     <!-- Session Info -->
-    <div class="terminal px-4 py-2 text-xs flex justify-between">
-        <span id="sessionInfo">Session: <span class="text-gray-500">none</span></span>
-        <span class="text-gray-600">Shortcuts: Ctrl+L=Clear | Ctrl+C=Copy | ↑↓=History</span>
+    <div class="terminal px-4 py-2 text-xs flex justify-between flex-wrap gap-2">
+        <span id="sessionInfo">Session: <span style="color: var(--text-muted);">none</span></span>
+        <span style="color: var(--text-muted);">Shortcuts: Ctrl+L=Clear | Ctrl+C=Copy | ↑↓=History | F1=Help</span>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="loading-indicator hidden">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Processing...</div>
+    </div>
+
+    <!-- Shortcuts Modal -->
+    <div id="shortcutsModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Keyboard Shortcuts</span>
+                <button onclick="app.closeShortcuts()" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Send message</span>
+                    <span class="shortcut-key">Enter</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Navigate command history</span>
+                    <span class="shortcut-key">↑ / ↓</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Command autocomplete</span>
+                    <span class="shortcut-key">Tab</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Search command history</span>
+                    <span class="shortcut-key">Ctrl + R</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Clear screen</span>
+                    <span class="shortcut-key">Ctrl + L</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Copy last response</span>
+                    <span class="shortcut-key">Ctrl + C</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Show this help</span>
+                    <span class="shortcut-key">F1</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="shortcut-desc">Cancel / Close</span>
+                    <span class="shortcut-key">Esc</span>
+                </div>
+                <div class="mt-4 text-sm" style="color: var(--text-secondary);">
+                    <strong>Commands:</strong> Type <code class="inline-code">/help</code> for a full list of available commands.
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="js/api.js"></script>

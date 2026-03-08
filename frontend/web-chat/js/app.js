@@ -23,6 +23,13 @@ class ChatApp {
         this.isGeneratingImage = false;
         this.currentImageMessageId = null;
         
+        // Track retry state
+        this.retryAttempt = 0;
+        this.maxRetries = 3;
+        
+        // Abort controller for current stream
+        this.currentAbortController = null;
+        
         this.init();
     }
 
@@ -60,12 +67,15 @@ class ChatApp {
         uiHelpers.reinitializeIcons();
         
         // Focus input
-        this.messageInput.focus();
+        this.messageInput?.focus();
         
         // Remove preload class after a short delay
         setTimeout(() => {
             document.body.classList.remove('preload');
         }, 100);
+        
+        // Setup online/offline listeners
+        this.setupConnectivityListeners();
     }
 
     // ============================================
@@ -74,10 +84,10 @@ class ChatApp {
 
     setupEventListeners() {
         // Send button
-        this.sendBtn.addEventListener('click', () => this.sendMessage());
+        this.sendBtn?.addEventListener('click', () => this.sendMessage());
         
         // Input handling
-        this.messageInput.addEventListener('keydown', (e) => {
+        this.messageInput?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
@@ -85,7 +95,7 @@ class ChatApp {
         });
         
         // Handle slash commands in input
-        this.messageInput.addEventListener('input', () => {
+        this.messageInput?.addEventListener('input', () => {
             this.updateSendButton();
             uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
             
@@ -97,26 +107,26 @@ class ChatApp {
         });
         
         // New chat button
-        document.getElementById('new-chat-btn').addEventListener('click', () => {
+        document.getElementById('new-chat-btn')?.addEventListener('click', () => {
             this.createNewSession();
         });
         
         // Clear chat button
-        document.getElementById('clear-chat-btn').addEventListener('click', () => {
+        document.getElementById('clear-chat-btn')?.addEventListener('click', () => {
             this.clearCurrentSession();
         });
         
         // Theme toggle
-        document.getElementById('theme-toggle').addEventListener('click', () => {
+        document.getElementById('theme-toggle')?.addEventListener('click', () => {
             uiHelpers.toggleTheme();
         });
         
         // Mobile sidebar toggle
-        document.getElementById('sidebar-toggle').addEventListener('click', () => {
+        document.getElementById('sidebar-toggle')?.addEventListener('click', () => {
             uiHelpers.toggleSidebar();
         });
         
-        document.getElementById('sidebar-overlay').addEventListener('click', () => {
+        document.getElementById('sidebar-overlay')?.addEventListener('click', () => {
             uiHelpers.closeSidebar();
         });
         
@@ -135,6 +145,13 @@ class ChatApp {
         // Handle model change event
         window.addEventListener('modelChanged', (e) => {
             console.log('Model changed to:', e.detail.modelId);
+        });
+        
+        // Handle visibility change for resuming
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                this.checkConnection();
+            }
         });
     }
 
@@ -223,7 +240,24 @@ class ChatApp {
                 if (!document.getElementById('search-bar').classList.contains('hidden')) {
                     this.closeSearch();
                 }
+                // Cancel current streaming if active
+                if (this.isProcessing && this.currentAbortController) {
+                    this.cancelCurrentRequest();
+                }
             }
+        });
+    }
+
+    setupConnectivityListeners() {
+        window.addEventListener('online', () => {
+            console.log('Browser went online');
+            this.checkConnection();
+        });
+        
+        window.addEventListener('offline', () => {
+            console.log('Browser went offline');
+            this.updateConnectionStatus('disconnected');
+            uiHelpers.showToast('You are offline', 'warning');
         });
     }
 
@@ -253,7 +287,7 @@ class ChatApp {
             await sessionManager.createSession('chat');
             uiHelpers.hideWelcomeMessage();
             uiHelpers.clearMessages();
-            this.messageInput.focus();
+            this.messageInput?.focus();
             uiHelpers.showToast('New conversation started', 'success');
         } catch (error) {
             uiHelpers.showToast('Failed to create new session', 'error');
@@ -333,7 +367,7 @@ class ChatApp {
         if (content.startsWith('/')) {
             this.executeSlashCommand(content);
             this.messageInput.value = '';
-            this.autoResize.reset?.();
+            this.autoResize?.reset?.();
             this.updateSendButton();
             return;
         }
@@ -363,7 +397,7 @@ class ChatApp {
         
         // Clear input
         this.messageInput.value = '';
-        this.autoResize.reset?.();
+        this.autoResize?.reset?.();
         this.updateSendButton();
         uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
         
@@ -400,22 +434,63 @@ class ChatApp {
         // Build message history for OpenAI API format
         const messages = this.buildMessageHistory(sessionId);
         
+        // Create abort controller for this request
+        this.currentAbortController = new AbortController();
+        
         // Send to API using OpenAI SDK
         try {
             // Update API client session ID
             apiClient.setSessionId(sessionId);
             
+            let hasReceivedContent = false;
+            let retryCount = 0;
+            
             // Stream the chat
-            for await (const chunk of apiClient.streamChat(messages, model)) {
-                if (chunk.type === 'delta') {
-                    this.handleDelta(chunk.content);
-                } else if (chunk.type === 'done') {
-                    this.handleDone();
+            for await (const chunk of apiClient.streamChat(messages, model, this.currentAbortController.signal)) {
+                switch (chunk.type) {
+                    case 'delta':
+                        hasReceivedContent = true;
+                        this.retryAttempt = 0; // Reset retry count on successful content
+                        this.handleDelta(chunk.content);
+                        break;
+                    case 'done':
+                        this.handleDone();
+                        break;
+                    case 'error':
+                        if (chunk.cancelled) {
+                            this.handleCancelled();
+                        } else {
+                            // Show retry notification if retries were attempted
+                            if (chunk.retriesExhausted) {
+                                uiHelpers.showToast('Failed after multiple retries. Please try again.', 'error');
+                            }
+                            this.handleError(chunk.error, chunk.status);
+                        }
+                        break;
+                    case 'retry':
+                        retryCount = chunk.attempt;
+                        if (retryCount > 1) {
+                            uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
+                        }
+                        break;
                 }
             }
         } catch (error) {
             console.error('Chat error:', error);
             this.handleError(error.message || 'Failed to get response');
+        } finally {
+            this.currentAbortController = null;
+        }
+    }
+
+    /**
+     * Cancel the current streaming request
+     */
+    cancelCurrentRequest() {
+        if (this.currentAbortController) {
+            this.currentAbortController.abort();
+            this.currentAbortController = null;
+            uiHelpers.showToast('Request cancelled', 'info');
         }
     }
 
@@ -454,18 +529,28 @@ class ChatApp {
                 break;
             case 'image':
                 if (args) {
-                    document.getElementById('image-prompt-input').value = args;
+                    const input = document.getElementById('image-prompt-input');
+                    if (input) input.value = args;
                 }
                 uiHelpers.openImageModal();
                 break;
+            case 'clear':
+                this.clearCurrentSession();
+                break;
+            case 'new':
+                this.createNewSession();
+                break;
+            case 'help':
+                uiHelpers.openShortcutsModal();
+                break;
             default:
-                uiHelpers.showToast(`Unknown command: /${cmd}`, 'warning');
+                uiHelpers.showToast(`Unknown command: /${cmd}. Try /help for available commands.`, 'warning');
         }
     }
 
     setInput(text) {
         this.messageInput.value = text;
-        this.autoResize.resize?.();
+        this.autoResize?.resize?.();
         this.updateSendButton();
         this.messageInput.focus();
     }
@@ -518,7 +603,7 @@ class ChatApp {
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
     }
 
-    handleError(message) {
+    handleError(message, status = null) {
         console.error('Chat error:', message);
         
         // Hide typing indicator
@@ -544,7 +629,39 @@ class ChatApp {
         this.currentStreamingMessageId = null;
         this.updateSendButton();
         
-        uiHelpers.showToast(message || 'An error occurred', 'error', 'Error');
+        // Show appropriate error message
+        let errorTitle = 'Error';
+        if (status === 400) errorTitle = 'Bad Request';
+        else if (status === 401) errorTitle = 'Unauthorized';
+        else if (status === 429) errorTitle = 'Rate Limited';
+        else if (status >= 500) errorTitle = 'Server Error';
+        
+        uiHelpers.showToast(message || 'An error occurred', 'error', errorTitle);
+    }
+
+    handleCancelled() {
+        // Hide typing indicator
+        uiHelpers.hideTypingIndicator();
+        
+        // Remove the streaming message placeholder
+        if (this.currentStreamingMessageId) {
+            const el = document.getElementById(this.currentStreamingMessageId);
+            if (el) {
+                el.remove();
+            }
+            
+            // Remove from session
+            const sessionId = sessionManager.currentSessionId;
+            const messages = sessionManager.getMessages(sessionId);
+            if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+                messages.pop();
+                sessionManager.saveToStorage();
+            }
+        }
+        
+        this.isProcessing = false;
+        this.currentStreamingMessageId = null;
+        this.updateSendButton();
     }
 
     async regenerateResponse(messageId) {
@@ -610,20 +727,39 @@ class ChatApp {
         const model = uiHelpers.getCurrentModel();
         
         // Build message history and stream
+        this.currentAbortController = new AbortController();
+        
         try {
             apiClient.setSessionId(sessionId);
             const history = this.buildMessageHistory(sessionId);
             
-            for await (const chunk of apiClient.streamChat(history, model)) {
-                if (chunk.type === 'delta') {
-                    this.handleDelta(chunk.content);
-                } else if (chunk.type === 'done') {
-                    this.handleDone();
+            for await (const chunk of apiClient.streamChat(history, model, this.currentAbortController.signal)) {
+                switch (chunk.type) {
+                    case 'delta':
+                        this.handleDelta(chunk.content);
+                        break;
+                    case 'done':
+                        this.handleDone();
+                        break;
+                    case 'error':
+                        if (chunk.cancelled) {
+                            this.handleCancelled();
+                        } else {
+                            this.handleError(chunk.error, chunk.status);
+                        }
+                        break;
+                    case 'retry':
+                        if (chunk.attempt > 1) {
+                            uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
+                        }
+                        break;
                 }
             }
         } catch (error) {
             console.error('Regenerate error:', error);
             this.handleError(error.message || 'Failed to regenerate response');
+        } finally {
+            this.currentAbortController = null;
         }
     }
 
@@ -816,6 +952,26 @@ class ChatApp {
         }
         
         // Download the file
+        this.downloadFile(content, filename, mimeType);
+        
+        uiHelpers.closeExportModal();
+        uiHelpers.showToast(`Conversation exported as ${format.toUpperCase()}`, 'success');
+    }
+
+    /**
+     * Export all conversations
+     */
+    exportAllConversations() {
+        const content = sessionManager.exportAll();
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `kimibuilt_all_conversations_${timestamp}.json`;
+        
+        this.downloadFile(content, filename, 'application/json');
+        uiHelpers.closeExportModal();
+        uiHelpers.showToast(`All conversations exported`, 'success');
+    }
+
+    downloadFile(content, filename, mimeType) {
         const blob = new Blob([content], { type: mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -825,9 +981,6 @@ class ChatApp {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        uiHelpers.closeExportModal();
-        uiHelpers.showToast(`Conversation exported as ${format.toUpperCase()}`, 'success');
     }
 
     exportAsMarkdown(messages, session) {
@@ -936,16 +1089,20 @@ class ChatApp {
     // ============================================
 
     updateSendButton() {
-        const hasContent = this.messageInput.value.trim().length > 0;
+        const hasContent = this.messageInput?.value?.trim()?.length > 0;
         const canSend = hasContent && !this.isProcessing && !this.isGeneratingImage;
         
-        this.sendBtn.disabled = !canSend;
-        
-        if (this.isProcessing) {
-            this.sendBtn.innerHTML = `<div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>`;
-        } else {
-            this.sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5"></i>`;
-            uiHelpers.reinitializeIcons(this.sendBtn);
+        if (this.sendBtn) {
+            this.sendBtn.disabled = !canSend;
+            
+            if (this.isProcessing) {
+                this.sendBtn.innerHTML = `<div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true"></div>`;
+                this.sendBtn.setAttribute('aria-label', 'Sending...');
+            } else {
+                this.sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>`;
+                this.sendBtn.setAttribute('aria-label', 'Send message');
+                uiHelpers.reinitializeIcons(this.sendBtn);
+            }
         }
     }
     
@@ -976,6 +1133,12 @@ class ChatApp {
                 text.textContent = 'Connecting...';
                 break;
         }
+    }
+    
+    async checkConnection() {
+        const health = await apiClient.checkHealth();
+        this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
+        return health;
     }
     
     startHealthCheckInterval() {
