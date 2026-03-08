@@ -292,7 +292,8 @@ const NotationAPI = {
                         sessionId: data.sessionId,
                         responseId: data.responseId,
                         helperMode: data.helperMode,
-                        content: content
+                        content: content,
+                        artifacts: data.artifacts || []
                     });
                 }
                 break;
@@ -362,6 +363,10 @@ const NotationAPI = {
 };
 
 // Export for module systems or make available globally
+window.NotationAPI = NotationAPI;
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = NotationAPI;
 }
+
+

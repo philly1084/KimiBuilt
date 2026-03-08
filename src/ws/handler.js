@@ -1,27 +1,8 @@
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
-const { buildSessionInstructions } = require('../session-instructions');
+const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 
-/**
- * WebSocket handler for real-time bidirectional streaming.
- * Supports all modes: chat, canvas, notation.
- *
- * Message format (client → server):
- * {
- *   "type": "chat" | "canvas" | "notation",
- *   "sessionId": "optional-session-id",
- *   "payload": { ... mode-specific fields ... }
- * }
- *
- * Response format (server → client):
- * {
- *   "type": "delta" | "done" | "error" | "session_created",
- *   "content": "...",
- *   "sessionId": "...",
- *   ...
- * }
- */
 function setupWebSocket(wss) {
     wss.on('connection', (ws) => {
         console.log('[WS] Client connected');
@@ -32,7 +13,6 @@ function setupWebSocket(wss) {
                 const { type, payload } = msg;
                 let { sessionId } = msg;
 
-                // Auto-create session
                 let session;
                 if (!sessionId) {
                     session = await sessionStore.create({ mode: type, transport: 'ws' });
@@ -75,26 +55,25 @@ function setupWebSocket(wss) {
     });
 }
 
-/**
- * Handle chat messages over WebSocket with streaming.
- */
-async function handleChat(ws, session, payload) {
-    const { message, model = null } = payload;
+async function handleChat(ws, session, payload = {}) {
+    const { message, model = null, artifactIds = [], outputFormat = null } = payload;
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
     }
 
     const contextMessages = await memoryService.process(session.id, message);
+    const instructions = await buildInstructionsWithArtifacts(
+        session,
+        'You are a helpful AI assistant. Be concise and informative.',
+        artifactIds,
+    );
 
     const response = await createResponse({
         input: message,
         previousResponseId: session.previousResponseId,
         contextMessages,
-        instructions: buildSessionInstructions(
-            session,
-            'You are a helpful AI assistant. Be concise and informative.',
-        ),
+        instructions,
         stream: true,
         model,
     });
@@ -110,31 +89,45 @@ async function handleChat(ws, session, payload) {
         if (event.type === 'response.completed') {
             await sessionStore.recordResponse(session.id, event.response.id);
             memoryService.rememberResponse(session.id, fullText);
+            const artifacts = await maybeGenerateOutputArtifact({
+                sessionId: session.id,
+                mode: 'chat',
+                outputFormat,
+                content: fullText,
+                title: 'chat-output',
+                responseId: event.response.id,
+                artifactIds,
+            });
             ws.send(JSON.stringify({
                 type: 'done',
                 sessionId: session.id,
                 responseId: event.response.id,
+                artifacts,
             }));
         }
     }
 }
 
-/**
- * Handle canvas messages over WebSocket (non-streaming).
- */
-async function handleCanvas(ws, session, payload) {
-    const { message, canvasType = 'document', existingContent = '', model = null } = payload;
+async function handleCanvas(ws, session, payload = {}) {
+    const {
+        message,
+        canvasType = 'document',
+        existingContent = '',
+        model = null,
+        artifactIds = [],
+        outputFormat = null,
+    } = payload;
+
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
     }
 
     const contextMessages = await memoryService.process(session.id, message);
-
-    const instructions = buildSessionInstructions(
+    const instructions = await buildInstructionsWithArtifacts(
         session,
-        `You are an AI canvas assistant generating ${canvasType} content.
-Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }`,
+        `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
+        artifactIds,
     );
 
     const response = await createResponse({
@@ -149,11 +142,20 @@ Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [
     await sessionStore.recordResponse(session.id, response.id);
 
     const outputText = response.output
-        .filter((o) => o.type === 'message')
-        .map((o) => o.content.map((c) => c.text).join(''))
+        .filter((item) => item.type === 'message')
+        .map((item) => item.content.map((content) => content.text).join(''))
         .join('\n');
 
     memoryService.rememberResponse(session.id, outputText);
+    const artifacts = await maybeGenerateOutputArtifact({
+        sessionId: session.id,
+        mode: 'canvas',
+        outputFormat,
+        content: outputText,
+        title: `canvas-${canvasType}`,
+        responseId: response.id,
+        artifactIds,
+    });
 
     ws.send(JSON.stringify({
         type: 'done',
@@ -161,26 +163,30 @@ Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [
         responseId: response.id,
         canvasType,
         content: outputText,
+        artifacts,
     }));
 }
 
-/**
- * Handle notation messages over WebSocket (non-streaming).
- */
-async function handleNotation(ws, session, payload) {
-    const { notation, helperMode = 'expand', context = '', model = null } = payload;
+async function handleNotation(ws, session, payload = {}) {
+    const {
+        notation,
+        helperMode = 'expand',
+        context = '',
+        model = null,
+        artifactIds = [],
+        outputFormat = null,
+    } = payload;
+
     if (!notation) {
         ws.send(JSON.stringify({ type: 'error', message: "'notation' is required" }));
         return;
     }
 
     const contextMessages = await memoryService.process(session.id, notation);
-
-    const instructions = buildSessionInstructions(
+    const instructions = await buildInstructionsWithArtifacts(
         session,
-        `You are an AI notation helper in ${helperMode} mode.
-Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }
-${context ? `Context: ${context}` : ''}`,
+        `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
+        artifactIds,
     );
 
     const response = await createResponse({
@@ -195,11 +201,20 @@ ${context ? `Context: ${context}` : ''}`,
     await sessionStore.recordResponse(session.id, response.id);
 
     const outputText = response.output
-        .filter((o) => o.type === 'message')
-        .map((o) => o.content.map((c) => c.text).join(''))
+        .filter((item) => item.type === 'message')
+        .map((item) => item.content.map((content) => content.text).join(''))
         .join('\n');
 
     memoryService.rememberResponse(session.id, outputText);
+    const artifacts = await maybeGenerateOutputArtifact({
+        sessionId: session.id,
+        mode: 'notation',
+        outputFormat,
+        content: outputText,
+        title: `notation-${helperMode}`,
+        responseId: response.id,
+        artifactIds,
+    });
 
     ws.send(JSON.stringify({
         type: 'done',
@@ -207,6 +222,7 @@ ${context ? `Context: ${context}` : ''}`,
         responseId: response.id,
         helperMode,
         content: outputText,
+        artifacts,
     }));
 }
 

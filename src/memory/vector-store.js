@@ -15,17 +15,12 @@ class VectorStore {
         this.initialized = false;
     }
 
-    /**
-     * Ensure the collection exists. Called once on startup.
-     */
     async initialize() {
         if (this.initialized) return;
 
         try {
             const collections = await this.client.getCollections();
-            const exists = collections.collections.some(
-                (c) => c.name === this.collection
-            );
+            const exists = collections.collections.some((collection) => collection.name === this.collection);
 
             if (!exists) {
                 await this.client.createCollection(this.collection, {
@@ -46,13 +41,6 @@ class VectorStore {
         }
     }
 
-    /**
-     * Embed text and store in Qdrant.
-     * @param {string} sessionId - Session identifier
-     * @param {string} text - Text to store
-     * @param {Object} [metadata] - Additional metadata
-     * @returns {Promise<string>} The point ID
-     */
     async store(sessionId, text, metadata = {}) {
         const vector = await embedder.embed(text);
         const pointId = uuidv4();
@@ -76,15 +64,6 @@ class VectorStore {
         return pointId;
     }
 
-    /**
-     * Search for similar texts.
-     * @param {string} query - Query text to search for
-     * @param {Object} [options]
-     * @param {string} [options.sessionId] - Filter by session
-     * @param {number} [options.topK=5] - Number of results
-     * @param {number} [options.scoreThreshold=0.7] - Minimum similarity score
-     * @returns {Promise<Object[]>} Matching results with text and score
-     */
     async search(query, { sessionId = null, topK = 5, scoreThreshold = 0.7 } = {}) {
         const vector = await embedder.embed(query);
 
@@ -100,20 +79,16 @@ class VectorStore {
             with_payload: true,
         });
 
-        return results.map((r) => ({
-            id: r.id,
-            score: r.score,
-            text: r.payload.text,
-            sessionId: r.payload.sessionId,
-            timestamp: r.payload.timestamp,
-            metadata: r.payload,
+        return results.map((result) => ({
+            id: result.id,
+            score: result.score,
+            text: result.payload.text,
+            sessionId: result.payload.sessionId,
+            timestamp: result.payload.timestamp,
+            metadata: result.payload,
         }));
     }
 
-    /**
-     * Delete all vectors for a session.
-     * @param {string} sessionId
-     */
     async deleteSession(sessionId) {
         await this.client.delete(this.collection, {
             wait: true,
@@ -123,10 +98,15 @@ class VectorStore {
         });
     }
 
-    /**
-     * Check connectivity to Qdrant.
-     * @returns {Promise<boolean>}
-     */
+    async deleteArtifact(artifactId) {
+        await this.client.delete(this.collection, {
+            wait: true,
+            filter: {
+                must: [{ key: 'artifactId', match: { value: artifactId } }],
+            },
+        });
+    }
+
     async healthCheck() {
         try {
             await this.client.getCollections();
@@ -137,7 +117,6 @@ class VectorStore {
     }
 }
 
-// Singleton
 const vectorStore = new VectorStore();
 
 module.exports = { vectorStore, VectorStore };

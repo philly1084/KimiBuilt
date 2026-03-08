@@ -65,6 +65,33 @@ class PostgresManager {
             )
         `);
 
+        await this.query(`
+            CREATE TABLE IF NOT EXISTS artifacts (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                parent_artifact_id TEXT NULL REFERENCES artifacts(id) ON DELETE SET NULL,
+                direction TEXT NOT NULL,
+                source_mode TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                extension TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                content_bytea BYTEA NOT NULL,
+                extracted_text TEXT NOT NULL DEFAULT '',
+                preview_html TEXT NOT NULL DEFAULT '',
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                vectorized_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+
+        await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_session_id ON artifacts(session_id)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_direction ON artifacts(direction)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_mime_type ON artifacts(mime_type)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_artifacts_created_at ON artifacts(created_at DESC)');
+
         return true;
     }
 

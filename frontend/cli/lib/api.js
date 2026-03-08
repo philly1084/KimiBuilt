@@ -471,6 +471,106 @@ class OpenAIClient {
 // Create singleton instance
 const client = new OpenAIClient();
 
+function uploadArtifact(filePath, sessionId, mode = 'chat') {
+  const fs = require('fs');
+  const path = require('path');
+  const http = require('http');
+  const https = require('https');
+
+  return new Promise((resolve, reject) => {
+    const fileBuffer = fs.readFileSync(filePath);
+    const filename = path.basename(filePath);
+    const boundary = `----KimiBuilt${Date.now().toString(16)}`;
+    const head = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="sessionId"\r\n\r\n${sessionId}\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="mode"\r\n\r\n${mode}\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+    );
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([head, fileBuffer, tail]);
+
+    const baseUrlStr = client.baseURL.replace('/v1', '');
+    const baseUrl = new URL(baseUrlStr);
+    const httpModule = baseUrlStr.startsWith('https:') ? https : http;
+
+    const req = httpModule.request({
+      hostname: baseUrl.hostname,
+      port: baseUrl.port || (baseUrl.protocol === 'https:' ? 443 : 80),
+      path: '/api/artifacts/upload',
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length,
+        'Accept': 'application/json',
+        'User-Agent': 'KimiBuilt-CLI/2.2.0',
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(text ? JSON.parse(text) : {});
+        } else {
+          reject(new APIError(`HTTP ${res.statusCode}: ${text}`, res.statusCode));
+        }
+      });
+    });
+
+    req.on('error', (err) => reject(new APIError(`Request failed: ${err.message}`)));
+    req.write(body);
+    req.end();
+  });
+}
+
+function listArtifacts(sessionId) {
+  return client._legacyRequest(`/api/sessions/${sessionId}/artifacts`, { method: 'GET' });
+}
+
+function generateArtifact(options) {
+  return client._legacyRequest('/api/artifacts/generate', { method: 'POST', body: options });
+}
+
+function downloadArtifact(artifactId, outputPath) {
+  const fs = require('fs');
+  const http = require('http');
+  const https = require('https');
+
+  return new Promise((resolve, reject) => {
+    const baseUrlStr = client.baseURL.replace('/v1', '');
+    const baseUrl = new URL(baseUrlStr);
+    const httpModule = baseUrlStr.startsWith('https:') ? https : http;
+
+    const req = httpModule.request({
+      hostname: baseUrl.hostname,
+      port: baseUrl.port || (baseUrl.protocol === 'https:' ? 443 : 80),
+      path: `/api/artifacts/${artifactId}/download`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'KimiBuilt-CLI/2.2.0',
+      },
+    }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => reject(new APIError(`HTTP ${res.statusCode}: ${Buffer.concat(chunks).toString('utf8')}`, res.statusCode)));
+        return;
+      }
+
+      const file = fs.createWriteStream(outputPath);
+      res.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve(outputPath);
+      });
+      file.on('error', (err) => reject(new APIError(`Write failed: ${err.message}`)));
+    });
+
+    req.on('error', (err) => reject(new APIError(`Request failed: ${err.message}`)));
+    req.end();
+  });
+}
+
 // Export functions that use the OpenAI client
 module.exports = {
   APIError,
@@ -489,6 +589,10 @@ module.exports = {
   getModels: () => client.getModels(),
   getImageModels: () => client.getImageModels(),
   generateImage: (prompt, options) => client.generateImage(prompt, options),
+  uploadArtifact,
+  listArtifacts,
+  generateArtifact,
+  downloadArtifact,
   parseSSE: (chunk) => [], // Deprecated: OpenAI SDK handles streaming internally
   OpenAIClient,
 };

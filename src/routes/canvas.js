@@ -3,7 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
-const { buildSessionInstructions } = require('../session-instructions');
+const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 
 const router = Router();
 
@@ -13,19 +13,22 @@ const canvasSchema = {
     canvasType: { required: false, type: 'string', enum: ['code', 'document', 'diagram'] },
     existingContent: { required: false, type: 'string' },
     model: { required: false, type: 'string' },
+    artifactIds: { required: false, type: 'array' },
+    outputFormat: { required: false, type: 'string' },
 };
 
-/**
- * POST /api/canvas
- * Canvas-mode interaction for structured content generation.
- * Returns structured JSON with content, metadata, and suggestions.
- */
 router.post('/', validate(canvasSchema), async (req, res, next) => {
     try {
-        const { message, canvasType = 'document', existingContent = '', model = null } = req.body;
+        const {
+            message,
+            canvasType = 'document',
+            existingContent = '',
+            model = null,
+            artifactIds = [],
+            outputFormat = null,
+        } = req.body;
         let { sessionId } = req.body;
 
-        // Auto-create session
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'canvas', canvasType });
@@ -41,13 +44,11 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        // Retrieve relevant memories
         const contextMessages = await memoryService.process(sessionId, message);
-
-        // Build canvas-specific instructions
-        const instructions = buildSessionInstructions(
+        const instructions = await buildInstructionsWithArtifacts(
             session,
             buildCanvasInstructions(canvasType, existingContent),
+            artifactIds,
         );
 
         const response = await createResponse({
@@ -62,20 +63,27 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         await sessionStore.recordResponse(sessionId, response.id);
 
         const outputText = response.output
-            .filter((o) => o.type === 'message')
-            .map((o) => o.content.map((c) => c.text).join(''))
+            .filter((item) => item.type === 'message')
+            .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
 
-        // Store in memory
         memoryService.rememberResponse(sessionId, outputText);
-
-        // Parse the structured response
         const structured = parseCanvasResponse(outputText, canvasType);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId,
+            mode: 'canvas',
+            outputFormat,
+            content: structured.content,
+            title: structured.metadata?.title || 'canvas-output',
+            responseId: response.id,
+            artifactIds,
+        });
 
         res.json({
             sessionId,
             responseId: response.id,
             canvasType,
+            artifacts,
             ...structured,
         });
     } catch (err) {
@@ -83,9 +91,6 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
     }
 });
 
-/**
- * Build canvas-specific system instructions.
- */
 function buildCanvasInstructions(canvasType, existingContent) {
     const base = `You are an AI assistant working in canvas mode. You generate structured content that can be displayed in an editable canvas interface.
 
@@ -97,9 +102,9 @@ Always respond with valid JSON in this format:
 }`;
 
     const typeInstructions = {
-        code: `\n\nYou are generating CODE. Include the programming language in metadata.language. Provide working, well-commented code. Suggestions should be improvements or alternative approaches.`,
-        document: `\n\nYou are generating a DOCUMENT. Use markdown formatting. Include a title in metadata.title. Suggestions should be ways to expand or improve the document.`,
-        diagram: `\n\nYou are generating a DIAGRAM using Mermaid syntax. Include the diagram type in metadata.type (flowchart, sequence, etc). Suggestions should be ways to enhance the diagram.`,
+        code: '\n\nYou are generating CODE. Include the programming language in metadata.language. Provide working, well-commented code. Suggestions should be improvements or alternative approaches.',
+        document: '\n\nYou are generating a DOCUMENT. Use markdown formatting. Include a title in metadata.title. Suggestions should be ways to expand or improve the document.',
+        diagram: '\n\nYou are generating a DIAGRAM using Mermaid syntax. Include the diagram type in metadata.type (flowchart, sequence, etc). Suggestions should be ways to enhance the diagram.',
     };
 
     let instructions = base + (typeInstructions[canvasType] || typeInstructions.document);
@@ -111,12 +116,8 @@ Always respond with valid JSON in this format:
     return instructions;
 }
 
-/**
- * Parse the AI response into structured canvas format.
- */
 function parseCanvasResponse(text, canvasType) {
     try {
-        // Try to parse as JSON first
         const parsed = JSON.parse(text);
         return {
             content: parsed.content || text,
@@ -124,7 +125,6 @@ function parseCanvasResponse(text, canvasType) {
             suggestions: parsed.suggestions || [],
         };
     } catch {
-        // If not valid JSON, wrap in structure
         return {
             content: text,
             metadata: { type: canvasType },

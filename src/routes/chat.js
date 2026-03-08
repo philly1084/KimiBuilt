@@ -3,7 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
-const { buildSessionInstructions } = require('../session-instructions');
+const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 
 const router = Router();
 
@@ -12,19 +12,15 @@ const chatSchema = {
     sessionId: { required: false, type: 'string' },
     stream: { required: false, type: 'boolean' },
     model: { required: false, type: 'string' },
+    artifactIds: { required: false, type: 'array' },
+    outputFormat: { required: false, type: 'string' },
 };
 
-/**
- * POST /api/chat
- * Send a message and receive a response.
- * Supports streaming (SSE) when stream=true.
- */
 router.post('/', validate(chatSchema), async (req, res, next) => {
     try {
-        const { message, stream = true, model = null } = req.body;
+        const { message, stream = true, model = null, artifactIds = [], outputFormat = null } = req.body;
         let { sessionId } = req.body;
 
-        // Auto-create session if not provided
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'chat' });
@@ -40,11 +36,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        // Retrieve relevant memories
         const contextMessages = await memoryService.process(sessionId, message);
+        const instructions = await buildInstructionsWithArtifacts(
+            session,
+            'You are a helpful AI assistant. Be concise and informative.',
+            artifactIds,
+        );
 
         if (stream) {
-            // SSE streaming
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
@@ -54,10 +53,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 input: message,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions: buildSessionInstructions(
-                    session,
-                    'You are a helpful AI assistant. Be concise and informative.',
-                ),
+                instructions,
                 stream: true,
                 model,
             });
@@ -72,43 +68,57 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
                 if (event.type === 'response.completed') {
                     await sessionStore.recordResponse(sessionId, event.response.id);
-                    // Store the assistant response in memory
                     memoryService.rememberResponse(sessionId, fullText);
-                    res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id })}\n\n`);
+                    const artifacts = await maybeGenerateOutputArtifact({
+                        sessionId,
+                        mode: 'chat',
+                        outputFormat,
+                        content: fullText,
+                        title: 'chat-output',
+                        responseId: event.response.id,
+                        artifactIds,
+                    });
+                    res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts })}\n\n`);
                 }
             }
 
             res.end();
-        } else {
-            // Non-streaming
-            const response = await createResponse({
-                input: message,
-                previousResponseId: session.previousResponseId,
-                contextMessages,
-                instructions: buildSessionInstructions(
-                    session,
-                    'You are a helpful AI assistant. Be concise and informative.',
-                ),
-                stream: false,
-                model,
-            });
-
-            await sessionStore.recordResponse(sessionId, response.id);
-
-            const outputText = response.output
-                .filter((o) => o.type === 'message')
-                .map((o) => o.content.map((c) => c.text).join(''))
-                .join('\n');
-
-            // Store in memory
-            memoryService.rememberResponse(sessionId, outputText);
-
-            res.json({
-                sessionId,
-                responseId: response.id,
-                message: outputText,
-            });
+            return;
         }
+
+        const response = await createResponse({
+            input: message,
+            previousResponseId: session.previousResponseId,
+            contextMessages,
+            instructions,
+            stream: false,
+            model,
+        });
+
+        await sessionStore.recordResponse(sessionId, response.id);
+
+        const outputText = response.output
+            .filter((item) => item.type === 'message')
+            .map((item) => item.content.map((content) => content.text).join(''))
+            .join('\n');
+
+        memoryService.rememberResponse(sessionId, outputText);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId,
+            mode: 'chat',
+            outputFormat,
+            content: outputText,
+            title: 'chat-output',
+            responseId: response.id,
+            artifactIds,
+        });
+
+        res.json({
+            sessionId,
+            responseId: response.id,
+            message: outputText,
+            artifacts,
+        });
     } catch (err) {
         next(err);
     }

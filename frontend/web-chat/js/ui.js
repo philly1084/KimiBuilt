@@ -2085,3 +2085,6 @@ class UIHelpers {
 
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
+window.uiHelpers = uiHelpers;
+
+

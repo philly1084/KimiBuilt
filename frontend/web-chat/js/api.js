@@ -690,3 +690,6 @@ class OpenAIAPIClient extends EventTarget {
 
 // Create global API client instance
 const apiClient = new OpenAIAPIClient();
+window.apiClient = apiClient;
+
+

@@ -341,6 +341,10 @@ class CanvasAPI {
 }
 
 // Export for use in other modules
+window.CanvasAPI = CanvasAPI;
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CanvasAPI;
 }
+
+

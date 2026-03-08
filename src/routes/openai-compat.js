@@ -2,26 +2,17 @@ const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse, generateImage, listModels } = require('../openai-client');
-const { buildSessionInstructions } = require('../session-instructions');
+const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const { extractResponseText } = require('../artifacts/artifact-service');
 
 const router = Router();
 
 function isChatCapableModel(modelId = '') {
     const normalizedId = String(modelId).toLowerCase();
-
     if (!normalizedId) return false;
 
     const looksLikeChatModel = [
-        'gpt',
-        'claude',
-        'gemini',
-        'kimi',
-        'llama',
-        'mistral',
-        'qwen',
-        'phi',
-        'ollama',
-        'antigravity',
+        'gpt', 'claude', 'gemini', 'kimi', 'llama', 'mistral', 'qwen', 'phi', 'ollama', 'antigravity',
     ].some((token) => normalizedId.includes(token));
 
     const imageOnly = normalizedId.includes('image') && !normalizedId.includes('vision');
@@ -30,10 +21,6 @@ function isChatCapableModel(modelId = '') {
     return looksLikeChatModel && !imageOnly && !audioOnly;
 }
 
-/**
- * GET /v1/models
- * OpenAI-compatible models endpoint
- */
 router.get('/models', async (_req, res, next) => {
     try {
         const models = await listModels();
@@ -41,11 +28,11 @@ router.get('/models', async (_req, res, next) => {
             object: 'list',
             data: models
                 .filter((model) => isChatCapableModel(model.id))
-                .map(m => ({
-                id: m.id,
-                object: 'model',
-                created: m.created || Math.floor(Date.now() / 1000),
-                owned_by: m.owned_by || 'openai',
+                .map((model) => ({
+                    id: model.id,
+                    object: 'model',
+                    created: model.created || Math.floor(Date.now() / 1000),
+                    owned_by: model.owned_by || 'openai',
                 })),
         });
     } catch (err) {
@@ -53,29 +40,18 @@ router.get('/models', async (_req, res, next) => {
     }
 });
 
-/**
- * POST /v1/chat/completions
- * OpenAI-compatible chat completions endpoint
- * Adds session management and memory on top
- */
 router.post('/chat/completions', async (req, res, next) => {
     try {
-        const { 
-            model, 
-            messages, 
-            stream = false, 
-            temperature, 
-            max_tokens,
-            top_p,
-            frequency_penalty,
-            presence_penalty,
-            session_id, // KimiBuilt extension
+        const {
+            model,
+            messages,
+            stream = false,
+            session_id,
+            artifact_ids = [],
+            output_format = null,
         } = req.body;
 
-        console.log(`[Chat] Request: model=${model}, stream=${stream}, messages=${messages?.length}`);
-
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
-            console.log('[Chat] Error: No messages provided');
             return res.status(400).json({
                 error: {
                     message: 'messages is required and must be an array',
@@ -84,7 +60,6 @@ router.post('/chat/completions', async (req, res, next) => {
             });
         }
 
-        // Get or create session
         let sessionId = session_id;
         let session;
         if (!sessionId) {
@@ -106,20 +81,15 @@ router.post('/chat/completions', async (req, res, next) => {
             });
         }
 
-        // Get the last user message for memory retrieval
-        const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-        const contextMessages = lastUserMessage 
+        const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
+        const contextMessages = lastUserMessage
             ? await memoryService.process(sessionId, lastUserMessage.content)
             : [];
 
-        // Build input from messages
-        const input = messages.map(m => ({
-            role: m.role,
-            content: m.content,
-        }));
+        const instructions = await buildInstructionsWithArtifacts(session, '', artifact_ids);
+        const input = messages.map((message) => ({ role: message.role, content: message.content }));
 
         if (stream) {
-            // SSE streaming
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
@@ -129,7 +99,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions: buildSessionInstructions(session),
+                instructions,
                 stream: true,
                 model,
             });
@@ -140,109 +110,106 @@ router.post('/chat/completions', async (req, res, next) => {
             for await (const event of response) {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
-                    
-                    // Send OpenAI-compatible chunk
-                    const chunk = {
+                    res.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
                         model: model || 'gpt-4o',
-                        choices: [{
-                            index: 0,
-                            delta: { content: event.delta },
-                            finish_reason: null,
-                        }],
-                    };
-                    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-                    chunkIndex++;
+                        choices: [{ index: 0, delta: { content: event.delta }, finish_reason: null }],
+                    })}\n\n`);
+                    chunkIndex += 1;
                 }
 
                 if (event.type === 'response.completed') {
                     await sessionStore.recordResponse(sessionId, event.response.id);
                     memoryService.rememberResponse(sessionId, fullText);
-                    
-                    // Send final chunk
-                    const finalChunk = {
+                    const artifacts = await maybeGenerateOutputArtifact({
+                        sessionId,
+                        mode: 'chat',
+                        outputFormat: output_format,
+                        content: fullText,
+                        title: 'chat-output',
+                        responseId: event.response.id,
+                        artifactIds: artifact_ids,
+                    });
+                    res.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
                         model: model || 'gpt-4o',
-                        choices: [{
-                            index: 0,
-                            delta: {},
-                            finish_reason: 'stop',
-                        }],
-                    };
-                    res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+                        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                        session_id: sessionId,
+                        artifacts,
+                    })}\n\n`);
                     res.write('data: [DONE]\n\n');
                 }
             }
 
             res.end();
-        } else {
-            // Non-streaming
-            const response = await createResponse({
-                input,
-                previousResponseId: session.previousResponseId,
-                contextMessages,
-                instructions: buildSessionInstructions(session),
-                stream: false,
-                model,
-            });
-
-            await sessionStore.recordResponse(sessionId, response.id);
-
-            const outputText = response.output
-                .filter((o) => o.type === 'message')
-                .map((o) => o.content.map((c) => c.text).join(''))
-                .join('\n');
-
-            memoryService.rememberResponse(sessionId, outputText);
-
-            // OpenAI-compatible response
-            res.json({
-                id: `chatcmpl-${response.id}`,
-                object: 'chat.completion',
-                created: Math.floor(Date.now() / 1000),
-                model: model || 'gpt-4o',
-                choices: [{
-                    index: 0,
-                    message: {
-                        role: 'assistant',
-                        content: outputText,
-                    },
-                    finish_reason: 'stop',
-                }],
-                usage: {
-                    prompt_tokens: -1, // Not tracked
-                    completion_tokens: -1,
-                    total_tokens: -1,
-                },
-                session_id: sessionId, // KimiBuilt extension
-            });
+            return;
         }
+
+        const response = await createResponse({
+            input,
+            previousResponseId: session.previousResponseId,
+            contextMessages,
+            instructions,
+            stream: false,
+            model,
+        });
+
+        await sessionStore.recordResponse(sessionId, response.id);
+        const outputText = extractResponseText(response);
+        memoryService.rememberResponse(sessionId, outputText);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId,
+            mode: 'chat',
+            outputFormat: output_format,
+            content: outputText,
+            title: 'chat-output',
+            responseId: response.id,
+            artifactIds: artifact_ids,
+        });
+
+        res.json({
+            id: `chatcmpl-${response.id}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: model || 'gpt-4o',
+            choices: [{
+                index: 0,
+                message: {
+                    role: 'assistant',
+                    content: outputText,
+                    artifacts,
+                },
+                finish_reason: 'stop',
+            }],
+            usage: {
+                prompt_tokens: -1,
+                completion_tokens: -1,
+                total_tokens: -1,
+            },
+            session_id: sessionId,
+            artifacts,
+        });
     } catch (err) {
-        console.error('[Chat] Error:', err.message);
-        console.error('[Chat] Stack:', err.stack);
         next(err);
     }
 });
 
-/**
- * POST /v1/responses
- * OpenAI-compatible responses endpoint (new API)
- */
 router.post('/responses', async (req, res, next) => {
     try {
-        const { 
-            model, 
-            input, 
+        const {
+            model,
+            input,
             instructions,
             stream = false,
-            session_id, // KimiBuilt extension
+            session_id,
+            artifact_ids = [],
+            output_format = null,
         } = req.body;
 
-        // Get or create session
         let sessionId = session_id;
         let session;
         if (!sessionId) {
@@ -264,10 +231,11 @@ router.post('/responses', async (req, res, next) => {
             });
         }
 
-        // Get the user input for memory retrieval
-        const userInput = typeof input === 'string' ? input : 
-            input.filter(i => i.role === 'user').pop()?.content || '';
+        const userInput = typeof input === 'string'
+            ? input
+            : input.filter((item) => item.role === 'user').pop()?.content || '';
         const contextMessages = await memoryService.process(sessionId, userInput);
+        const fullInstructions = await buildInstructionsWithArtifacts(session, instructions || '', artifact_ids);
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -279,66 +247,70 @@ router.post('/responses', async (req, res, next) => {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
-                instructions: buildSessionInstructions(session, instructions),
+                instructions: fullInstructions,
                 stream: true,
                 model,
             });
 
             let fullText = '';
-
             for await (const event of response) {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
-                    res.write(`data: ${JSON.stringify({
-                        type: 'response.output_text.delta',
-                        delta: event.delta,
-                    })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: event.delta })}\n\n`);
                 }
 
                 if (event.type === 'response.completed') {
                     await sessionStore.recordResponse(sessionId, event.response.id);
                     memoryService.rememberResponse(sessionId, fullText);
-                    res.write(`data: ${JSON.stringify({
-                        type: 'response.completed',
-                        response: event.response,
-                    })}\n\n`);
+                    const artifacts = await maybeGenerateOutputArtifact({
+                        sessionId,
+                        mode: 'chat',
+                        outputFormat: output_format,
+                        content: fullText,
+                        title: 'response-output',
+                        responseId: event.response.id,
+                        artifactIds: artifact_ids,
+                    });
+                    res.write(`data: ${JSON.stringify({ type: 'response.completed', response: event.response, session_id: sessionId, artifacts })}\n\n`);
                 }
             }
 
             res.end();
-        } else {
-            const response = await createResponse({
-                input,
-                previousResponseId: session.previousResponseId,
-                contextMessages,
-                instructions: buildSessionInstructions(session, instructions),
-                stream: false,
-                model,
-            });
-
-            await sessionStore.recordResponse(sessionId, response.id);
-
-            const outputText = response.output
-                .filter((o) => o.type === 'message')
-                .map((o) => o.content.map((c) => c.text).join(''))
-                .join('\n');
-
-            memoryService.rememberResponse(sessionId, outputText);
-
-            res.json({
-                ...response,
-                session_id: sessionId, // KimiBuilt extension
-            });
+            return;
         }
+
+        const response = await createResponse({
+            input,
+            previousResponseId: session.previousResponseId,
+            contextMessages,
+            instructions: fullInstructions,
+            stream: false,
+            model,
+        });
+
+        await sessionStore.recordResponse(sessionId, response.id);
+        const outputText = extractResponseText(response);
+        memoryService.rememberResponse(sessionId, outputText);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId,
+            mode: 'chat',
+            outputFormat: output_format,
+            content: outputText,
+            title: 'response-output',
+            responseId: response.id,
+            artifactIds: artifact_ids,
+        });
+
+        res.json({
+            ...response,
+            session_id: sessionId,
+            artifacts,
+        });
     } catch (err) {
         next(err);
     }
 });
 
-/**
- * POST /v1/images/generations
- * OpenAI-compatible image generation endpoint
- */
 router.post('/images/generations', async (req, res, next) => {
     try {
         const {
@@ -348,10 +320,9 @@ router.post('/images/generations', async (req, res, next) => {
             size = '1024x1024',
             quality = 'standard',
             style = 'vivid',
-            session_id, // KimiBuilt extension
+            session_id,
         } = req.body;
 
-        // Get or create session
         let sessionId = session_id;
         let session;
         if (!sessionId) {
@@ -386,7 +357,7 @@ router.post('/images/generations', async (req, res, next) => {
 
         res.json({
             ...response,
-            session_id: sessionId, // KimiBuilt extension
+            session_id: sessionId,
         });
     } catch (err) {
         next(err);

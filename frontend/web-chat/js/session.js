@@ -757,3 +757,6 @@ class SessionManager extends EventTarget {
 
 // Create global session manager instance
 const sessionManager = new SessionManager();
+window.sessionManager = sessionManager;
+
+

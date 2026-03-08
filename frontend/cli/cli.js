@@ -118,6 +118,10 @@ function printHelp() {
     ['/model <id>', 'Set default model'],
     ['/image <prompt>', 'Generate an image'],
     ['/imgmodels', 'List image generation models'],
+    ['/upload <file>', 'Upload an artifact to the current session'],
+    ['/artifacts', 'List session artifacts'],
+    ['/download-artifact <id> [file]', 'Download an artifact by ID'],
+    ['/makefile <format> <prompt>', 'Generate a file artifact from a prompt'],
     ['/history', 'Show current session ID'],
     ['/sessions', 'List all sessions'],
     ['/clear', 'Clear the screen'],
@@ -1234,8 +1238,122 @@ async function main() {
   startREPL();
 }
 
+COMMANDS.push('/upload', '/artifacts', '/download-artifact', '/makefile');
+
+async function handleArtifactUploadCommand(filePath) {
+  if (!filePath) {
+    console.log(chalk.yellow('Usage: /upload <file-path>'));
+    return true;
+  }
+  if (!currentSessionId) {
+    await handleNew();
+  }
+  const spinner = createSpinner('Uploading artifact...');
+  spinner.start();
+  try {
+    const artifact = await api.uploadArtifact(filePath, currentSessionId, currentMode);
+    spinner.succeed(chalk.green(`Uploaded: ${artifact.filename}`));
+  } catch (err) {
+    spinner.fail(chalk.red(`Upload failed: ${err.message}`));
+  }
+  return true;
+}
+
+async function handleArtifactListCommand() {
+  if (!currentSessionId) {
+    console.log(chalk.yellow('No active session'));
+    return true;
+  }
+  const spinner = createSpinner('Loading artifacts...');
+  spinner.start();
+  try {
+    const result = await api.listArtifacts(currentSessionId);
+    spinner.stop();
+    const artifacts = result.artifacts || [];
+    if (artifacts.length === 0) {
+      console.log(chalk.yellow('\nNo artifacts for this session\n'));
+      return true;
+    }
+    console.log(chalk.cyan.bold('\nArtifacts:'));
+    artifacts.forEach((artifact) => {
+      console.log(chalk.gray(`  ${artifact.id.slice(0, 8)}  ${artifact.filename}  [${artifact.format}]`));
+    });
+    console.log('');
+  } catch (err) {
+    spinner.fail(chalk.red(`Failed to list artifacts: ${err.message}`));
+  }
+  return true;
+}
+
+async function handleArtifactDownloadCommand(args) {
+  const [artifactId, outputPath] = args.split(' ').filter(Boolean);
+  if (!artifactId) {
+    console.log(chalk.yellow('Usage: /download-artifact <artifact-id> [output-file]'));
+    return true;
+  }
+  const spinner = createSpinner('Downloading artifact...');
+  spinner.start();
+  try {
+    const target = outputPath || `artifact-${artifactId.slice(0, 8)}`;
+    await api.downloadArtifact(artifactId, target);
+    spinner.succeed(chalk.green(`Saved to ${target}`));
+  } catch (err) {
+    spinner.fail(chalk.red(`Download failed: ${err.message}`));
+  }
+  return true;
+}
+
+async function handleMakeFileCommand(args) {
+  const [format, ...promptParts] = args.split(' ');
+  const prompt = promptParts.join(' ').trim();
+  if (!format || !prompt) {
+    console.log(chalk.yellow('Usage: /makefile <format> <prompt>'));
+    return true;
+  }
+  if (!currentSessionId) {
+    await handleNew();
+  }
+  const spinner = createSpinner(`Generating ${format} artifact...`);
+  spinner.start();
+  try {
+    const result = await api.generateArtifact({
+      sessionId: currentSessionId,
+      mode: currentMode,
+      prompt,
+      format,
+    });
+    spinner.succeed(chalk.green(`Generated: ${result.artifact.filename}`));
+    console.log(chalk.gray(`Download: ${result.artifact.downloadUrl}`));
+  } catch (err) {
+    spinner.fail(chalk.red(`Artifact generation failed: ${err.message}`));
+  }
+  return true;
+}
+
+const originalProcessInput = processInput;
+processInput = async function(input) {
+  const trimmed = input.trim();
+  if (trimmed.startsWith('/upload')) {
+    return handleArtifactUploadCommand(trimmed.replace('/upload', '').trim());
+  }
+  if (trimmed === '/artifacts') {
+    return handleArtifactListCommand();
+  }
+  if (trimmed.startsWith('/download-artifact')) {
+    return handleArtifactDownloadCommand(trimmed.replace('/download-artifact', '').trim());
+  }
+  if (trimmed.startsWith('/makefile')) {
+    return handleMakeFileCommand(trimmed.replace('/makefile', '').trim());
+  }
+  return originalProcessInput(input);
+};
+
 // Run main
 main().catch((err) => {
   console.error(chalk.red(`❌ Fatal error: ${err.message}`));
   process.exit(1);
 });
+
+
+
+

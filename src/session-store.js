@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { postgres } = require('./postgres');
+const { getBusinessAgentProfile } = require('./business-agent');
 
 class SessionStore {
     constructor() {
@@ -9,16 +10,18 @@ class SessionStore {
     }
 
     normalizeMetadata(metadata = {}) {
+        const agent = metadata.agent
+            ? {
+                id: metadata.agent.id || null,
+                name: metadata.agent.name || null,
+                instructions: metadata.agent.instructions || '',
+                tools: Array.isArray(metadata.agent.tools) ? metadata.agent.tools : [],
+            }
+            : getBusinessAgentProfile();
+
         return {
             ...metadata,
-            agent: metadata.agent
-                ? {
-                    id: metadata.agent.id || null,
-                    name: metadata.agent.name || null,
-                    instructions: metadata.agent.instructions || '',
-                    tools: Array.isArray(metadata.agent.tools) ? metadata.agent.tools : [],
-                }
-                : undefined,
+            agent,
         };
     }
 

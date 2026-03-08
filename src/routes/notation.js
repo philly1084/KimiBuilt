@@ -3,7 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
-const { buildSessionInstructions } = require('../session-instructions');
+const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 
 const router = Router();
 
@@ -13,19 +13,22 @@ const notationSchema = {
     context: { required: false, type: 'string' },
     helperMode: { required: false, type: 'string', enum: ['expand', 'explain', 'validate'] },
     model: { required: false, type: 'string' },
+    artifactIds: { required: false, type: 'array' },
+    outputFormat: { required: false, type: 'string' },
 };
 
-/**
- * POST /api/notation
- * Notation-style structured helper.
- * Accepts shorthand notation and returns expanded/explained/validated results.
- */
 router.post('/', validate(notationSchema), async (req, res, next) => {
     try {
-        const { notation, context = '', helperMode = 'expand', model = null } = req.body;
+        const {
+            notation,
+            context = '',
+            helperMode = 'expand',
+            model = null,
+            artifactIds = [],
+            outputFormat = null,
+        } = req.body;
         let { sessionId } = req.body;
 
-        // Auto-create session
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'notation', helperMode });
@@ -41,13 +44,11 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        // Retrieve relevant memories
         const contextMessages = await memoryService.process(sessionId, notation);
-
-        // Build notation-specific instructions
-        const instructions = buildSessionInstructions(
+        const instructions = await buildInstructionsWithArtifacts(
             session,
             buildNotationInstructions(helperMode, context),
+            artifactIds,
         );
 
         const response = await createResponse({
@@ -62,20 +63,27 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         await sessionStore.recordResponse(sessionId, response.id);
 
         const outputText = response.output
-            .filter((o) => o.type === 'message')
-            .map((o) => o.content.map((c) => c.text).join(''))
+            .filter((item) => item.type === 'message')
+            .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
 
-        // Store in memory
         memoryService.rememberResponse(sessionId, outputText);
-
-        // Parse the structured response
         const structured = parseNotationResponse(outputText);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId,
+            mode: 'notation',
+            outputFormat,
+            content: structured.result,
+            title: `notation-${helperMode}`,
+            responseId: response.id,
+            artifactIds,
+        });
 
         res.json({
             sessionId,
             responseId: response.id,
             helperMode,
+            artifacts,
             ...structured,
         });
     } catch (err) {
@@ -83,9 +91,6 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
     }
 });
 
-/**
- * Build notation-specific system instructions.
- */
 function buildNotationInstructions(helperMode, context) {
     const base = `You are an AI notation helper. Users write in shorthand notation and you process it according to the specified mode.
 
@@ -97,13 +102,12 @@ Always respond with valid JSON in this format:
 }`;
 
     const modeInstructions = {
-        expand: `\n\nMODE: EXPAND — Take the shorthand notation and expand it into full, detailed content. Preserve the intent and structure while making it comprehensive and production-ready.`,
-        explain: `\n\nMODE: EXPLAIN — Analyze the notation and provide detailed explanations for each part. Break down what each element means and how it connects to the whole.`,
-        validate: `\n\nMODE: VALIDATE — Check the notation for correctness, completeness, and best practices. Flag any issues, missing elements, or improvements. Provide a corrected version if needed.`,
+        expand: '\n\nMODE: EXPAND - Take the shorthand notation and expand it into full, detailed content. Preserve the intent and structure while making it comprehensive and production-ready.',
+        explain: '\n\nMODE: EXPLAIN - Analyze the notation and provide detailed explanations for each part. Break down what each element means and how it connects to the whole.',
+        validate: '\n\nMODE: VALIDATE - Check the notation for correctness, completeness, and best practices. Flag any issues, missing elements, or improvements. Provide a corrected version if needed.',
     };
 
     let instructions = base + (modeInstructions[helperMode] || modeInstructions.expand);
-
     if (context) {
         instructions += `\n\nAdditional context provided by the user:\n${context}`;
     }
@@ -111,9 +115,6 @@ Always respond with valid JSON in this format:
     return instructions;
 }
 
-/**
- * Parse the AI response into structured notation format.
- */
 function parseNotationResponse(text) {
     try {
         const parsed = JSON.parse(text);
