@@ -1,9 +1,6 @@
 version: "3.8"
 
 services:
-  # ================================
-  # Backend API
-  # ================================
   backend:
     build: .
     container_name: kimibuilt-backend
@@ -14,7 +11,14 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - QDRANT_URL=http://qdrant:6333
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-kimibuilt}
+      - POSTGRES_USER=${POSTGRES_USER:-kimibuilt}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-kimibuilt}
     depends_on:
+      postgres:
+        condition: service_healthy
       qdrant:
         condition: service_healthy
       ollama:
@@ -25,9 +29,24 @@ services:
       timeout: 5s
       retries: 3
 
-  # ================================
-  # Qdrant — Vector Database
-  # ================================
+  postgres:
+    image: postgres:16
+    container_name: kimibuilt-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-kimibuilt}
+      - POSTGRES_USER=${POSTGRES_USER:-kimibuilt}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-kimibuilt}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kimibuilt} -d ${POSTGRES_DB:-kimibuilt}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: kimibuilt-qdrant
@@ -43,9 +62,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ================================
-  # Ollama — Embedding Model
-  # ================================
   ollama:
     image: ollama/ollama:latest
     container_name: kimibuilt-ollama
@@ -54,7 +70,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Pull embedding model on startup
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -64,5 +79,6 @@ services:
         wait
 
 volumes:
+  postgres_data:
   qdrant_data:
   ollama_data:

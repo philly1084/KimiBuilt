@@ -1,11 +1,28 @@
 /**
  * API Client - Canvas API (HTTP + WebSocket)
- * Backend URL: http://localhost:3000
  */
 
+function resolveCanvasApiBaseURL() {
+    if (typeof window === 'undefined' || !window.location) {
+        return 'http://localhost:3000';
+    }
+
+    const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
+    const origin = `${window.location.protocol}//${window.location.host}`;
+    return localHostnames.has(window.location.hostname)
+        ? 'http://localhost:3000'
+        : origin;
+}
+
+function resolveCanvasWsURL(baseURL) {
+    const normalizedBase = String(baseURL || resolveCanvasApiBaseURL()).replace(/\/$/, '');
+    return `${normalizedBase.replace(/^http/i, 'ws')}/ws`;
+}
+
 class CanvasAPI {
-    constructor(baseURL = 'http://localhost:3000') {
+    constructor(baseURL = resolveCanvasApiBaseURL()) {
         this.baseURL = baseURL;
+        this.wsURL = resolveCanvasWsURL(baseURL);
         this.ws = null;
         this.wsCallbacks = {};
         this.reconnectAttempts = 0;
@@ -14,30 +31,16 @@ class CanvasAPI {
         this.sessionId = null;
     }
 
-    /**
-     * Get full API URL
-     * @param {string} path 
-     * @returns {string}
-     */
     _getURL(path) {
         return `${this.baseURL}${path}`;
     }
 
-    /**
-     * Send canvas request via HTTP POST
-     * @param {Object} params 
-     * @param {string} params.message - The prompt message
-     * @param {string} [params.sessionId] - Optional session ID
-     * @param {string} [params.canvasType] - 'code' | 'document' | 'diagram'
-     * @param {string} [params.existingContent] - Optional existing content
-     * @returns {Promise<Object>}
-     */
     async sendCanvasRequest({ message, sessionId, canvasType = 'code', existingContent }) {
         const payload = {
             message,
             sessionId: sessionId || this.sessionId,
             canvasType,
-            existingContent
+            existingContent,
         };
 
         try {
@@ -45,19 +48,17 @@ class CanvasAPI {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json'
+                    Accept: 'application/json',
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+                throw new Error(errorData.error?.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`);
             }
 
             const data = await response.json();
-            
-            // Update session ID
             if (data.sessionId) {
                 this.sessionId = data.sessionId;
             }
@@ -69,16 +70,10 @@ class CanvasAPI {
         }
     }
 
-    /**
-     * Connect to WebSocket
-     * @returns {Promise<WebSocket>}
-     */
     connectWebSocket() {
         return new Promise((resolve, reject) => {
-            const wsURL = this.baseURL.replace(/^http/, 'ws');
-            
             try {
-                this.ws = new WebSocket(wsURL);
+                this.ws = new WebSocket(this.wsURL);
 
                 this.ws.onopen = () => {
                     console.log('WebSocket connected');
@@ -113,19 +108,13 @@ class CanvasAPI {
         });
     }
 
-    /**
-     * Handle incoming WebSocket messages
-     * @param {Object} data 
-     */
     _handleWebSocketMessage(data) {
-        // Update session ID if provided
         if (data.sessionId) {
             this.sessionId = data.sessionId;
         }
 
-        // Trigger type-specific callback
         if (data.type && this.wsCallbacks[data.type]) {
-            this.wsCallbacks[data.type].forEach(callback => {
+            this.wsCallbacks[data.type].forEach((callback) => {
                 try {
                     callback(data);
                 } catch (error) {
@@ -134,35 +123,22 @@ class CanvasAPI {
             });
         }
 
-        // Trigger general message callback
         this._triggerCallback('message', data);
     }
 
-    /**
-     * Attempt to reconnect WebSocket
-     */
     _attemptReconnect() {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
+            this.reconnectAttempts += 1;
             console.log(`WebSocket reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-            
+
             setTimeout(() => {
-                this.connectWebSocket().catch(error => {
+                this.connectWebSocket().catch((error) => {
                     console.error('WebSocket reconnect failed:', error);
                 });
             }, this.reconnectDelay * this.reconnectAttempts);
         }
     }
 
-    /**
-     * Send message via WebSocket
-     * @param {Object} params 
-     * @param {string} params.message - The prompt message
-     * @param {string} [params.sessionId] - Optional session ID
-     * @param {string} [params.canvasType] - 'code' | 'document' | 'diagram'
-     * @param {string} [params.existingContent] - Optional existing content
-     * @returns {boolean}
-     */
     sendWebSocketMessage({ message, sessionId, canvasType = 'code', existingContent }) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.error('WebSocket is not connected');
@@ -175,8 +151,8 @@ class CanvasAPI {
             payload: {
                 message,
                 canvasType,
-                existingContent
-            }
+                existingContent,
+            },
         };
 
         try {
@@ -188,12 +164,6 @@ class CanvasAPI {
         }
     }
 
-    /**
-     * Register WebSocket event callback
-     * @param {string} event - Event type: 'open', 'close', 'error', 'message', 'done'
-     * @param {Function} callback 
-     * @returns {Function} Unsubscribe function
-     */
     on(event, callback) {
         if (!this.wsCallbacks[event]) {
             this.wsCallbacks[event] = [];
@@ -208,14 +178,9 @@ class CanvasAPI {
         };
     }
 
-    /**
-     * Trigger callbacks for an event
-     * @param {string} event 
-     * @param {*} data 
-     */
     _triggerCallback(event, data) {
         if (this.wsCallbacks[event]) {
-            this.wsCallbacks[event].forEach(callback => {
+            this.wsCallbacks[event].forEach((callback) => {
                 try {
                     callback(data);
                 } catch (error) {
@@ -225,9 +190,6 @@ class CanvasAPI {
         }
     }
 
-    /**
-     * Disconnect WebSocket
-     */
     disconnect() {
         if (this.ws) {
             this.ws.close();
@@ -235,46 +197,27 @@ class CanvasAPI {
         }
     }
 
-    /**
-     * Check if WebSocket is connected
-     * @returns {boolean}
-     */
     isConnected() {
         return this.ws && this.ws.readyState === WebSocket.OPEN;
     }
 
-    /**
-     * Get current session ID
-     * @returns {string|null}
-     */
     getSessionId() {
         return this.sessionId;
     }
 
-    /**
-     * Set session ID
-     * @param {string} sessionId 
-     */
     setSessionId(sessionId) {
         this.sessionId = sessionId;
     }
 
-    /**
-     * Clear session
-     */
     clearSession() {
         this.sessionId = null;
     }
 
-    /**
-     * Health check - verify API is accessible
-     * @returns {Promise<boolean>}
-     */
     async healthCheck() {
         try {
-            const response = await fetch(this._getURL('/api/health'), {
+            const response = await fetch(this._getURL('/health'), {
                 method: 'GET',
-                headers: { 'Accept': 'application/json' }
+                headers: { Accept: 'application/json' },
             });
             return response.ok;
         } catch (error) {
@@ -283,25 +226,18 @@ class CanvasAPI {
         }
     }
 
-    /**
-     * Stream canvas request (Server-Sent Events)
-     * @param {Object} params 
-     * @param {Function} onChunk - Callback for each chunk
-     * @param {Function} onComplete - Callback when complete
-     * @param {Function} onError - Callback on error
-     */
     async streamCanvasRequest(params, onChunk, onComplete, onError) {
         try {
             const response = await fetch(this._getURL('/api/canvas/stream'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream'
+                    Accept: 'text/event-stream',
                 },
                 body: JSON.stringify({
                     ...params,
-                    sessionId: params.sessionId || this.sessionId
-                })
+                    sessionId: params.sessionId || this.sessionId,
+                }),
             });
 
             if (!response.ok) {
@@ -313,7 +249,7 @@ class CanvasAPI {
 
             while (true) {
                 const { done, value } = await reader.read();
-                
+
                 if (done) {
                     onComplete?.();
                     break;
@@ -327,8 +263,7 @@ class CanvasAPI {
                         try {
                             const data = JSON.parse(line.slice(6));
                             onChunk?.(data);
-                        } catch (e) {
-                            // Handle non-JSON data (raw content)
+                        } catch {
                             onChunk?.({ type: 'content', data: line.slice(6) });
                         }
                     }
@@ -340,11 +275,8 @@ class CanvasAPI {
     }
 }
 
-// Export for use in other modules
 window.CanvasAPI = CanvasAPI;
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CanvasAPI;
 }
-
-

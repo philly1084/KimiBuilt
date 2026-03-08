@@ -10,7 +10,7 @@ class CanvasApp {
         this.typeManager = new CanvasTypeManager();
         this.history = new HistoryManager(50);
         this.exportManager = new ExportManager();
-        this.api = new CanvasAPI('http://localhost:3000');
+        this.api = new CanvasAPI();
 
         // State
         this.state = {

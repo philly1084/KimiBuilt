@@ -311,13 +311,13 @@ class ArtifactService {
         const title = `${normalizedFormat}-${new Date().toISOString().slice(0, 10)}`;
 
         const rendered = normalizedFormat === 'xlsx'
-            ? renderArtifact({
+            ? await renderArtifact({
                 format: normalizedFormat,
                 title,
                 content: unwrapped,
                 workbookSpec: tryParseJson(unwrapped, title),
             })
-            : renderArtifact({
+            : await renderArtifact({
                 format: normalizedFormat,
                 title,
                 content: unwrapped,
@@ -361,7 +361,7 @@ class ArtifactService {
         workbookSpec = null,
     }) {
         const normalizedFormat = normalizeFormat(format);
-        const rendered = renderArtifact({
+        const rendered = await renderArtifact({
             format: normalizedFormat,
             title,
             content,

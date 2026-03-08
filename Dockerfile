@@ -15,6 +15,10 @@ FROM --platform=$TARGETPLATFORM node:20-bookworm-slim
 
 WORKDIR /app
 
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates && \
+  rm -rf /var/lib/apt/lists/*
+
 # Security: run as non-root
 RUN groupadd --gid 1001 kimibuilt && \
   useradd --uid 1001 --gid 1001 --create-home --shell /usr/sbin/nologin kimibuilt
@@ -26,6 +30,7 @@ COPY package.json ./
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV ARTIFACT_BROWSER_PATH=/usr/bin/chromium
 
 EXPOSE 3000
 

@@ -16,5 +16,7 @@ data:
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "kimibuilt"
   POSTGRES_USER: "kimibuilt"
+  ARTIFACT_BROWSER_PATH: "/usr/bin/chromium"
+  ARTIFACT_PDF_TIMEOUT_MS: "15000"
   PORT: "3000"
   NODE_ENV: "production"

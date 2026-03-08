@@ -135,10 +135,7 @@
 
             // Initialize API
             if (window.NotationAPI) {
-                NotationAPI.init({
-                    baseUrl: 'http://localhost:3000',
-                    wsUrl: 'ws://localhost:3000'
-                }, {
+                NotationAPI.init({}, {
                     onConnect: () => this._updateConnectionStatus('connected'),
                     onDisconnect: () => this._updateConnectionStatus('disconnected'),
                     onError: (err) => this._handleError(err),

@@ -3,11 +3,28 @@
  * Handles HTTP and WebSocket communication with the backend
  */
 
+function resolveNotationBaseUrl() {
+    if (typeof window === 'undefined' || !window.location) {
+        return 'http://localhost:3000';
+    }
+
+    const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
+    const origin = `${window.location.protocol}//${window.location.host}`;
+    return localHostnames.has(window.location.hostname)
+        ? 'http://localhost:3000'
+        : origin;
+}
+
+function resolveNotationWsUrl(baseUrl) {
+    const normalizedBase = String(baseUrl || resolveNotationBaseUrl()).replace(/\/$/, '');
+    return `${normalizedBase.replace(/^http/i, 'ws')}/ws`;
+}
+
 const NotationAPI = {
     // Configuration
     config: {
-        baseUrl: 'http://localhost:3000',
-        wsUrl: 'ws://localhost:3000',
+        baseUrl: resolveNotationBaseUrl(),
+        wsUrl: resolveNotationWsUrl(resolveNotationBaseUrl()),
         timeout: 30000,
         retries: 3,
         retryDelay: 1000
@@ -38,11 +55,14 @@ const NotationAPI = {
      * @param {Object} callbacks - Event callbacks
      */
     init(options = {}, callbacks = {}) {
-        // Merge config
-        this.config = { ...this.config, ...options };
+        const nextConfig = { ...this.config, ...options };
+        if (options.baseUrl && !options.wsUrl) {
+            nextConfig.wsUrl = resolveNotationWsUrl(options.baseUrl);
+        }
+
+        this.config = nextConfig;
         this.callbacks = { ...this.callbacks, ...callbacks };
 
-        // Initialize WebSocket
         this.connectWebSocket();
 
         return this;

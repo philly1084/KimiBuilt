@@ -1,6 +1,27 @@
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const { pathToFileURL } = require('url');
 const { createZip } = require('../utils/zip');
-const { escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
+const { escapeHtml, escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
 const { FORMAT_EXTENSIONS, FORMAT_MIME_TYPES, normalizeFormat } = require('./constants');
+const { config } = require('../config');
+
+const execFileAsync = promisify(execFile);
+const DEFAULT_BROWSER_CANDIDATES = [
+    config.artifacts.browserPath,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/snap/bin/chromium',
+    'chromium',
+    'chromium-browser',
+    'google-chrome',
+    'google-chrome-stable',
+];
 
 function ensureHtmlDocument(bodyHtml, title = 'Document') {
     const content = String(bodyHtml || '').trim();
@@ -276,7 +297,75 @@ function buildWorkbookSpecFromText(text, title = 'Workbook') {
     };
 }
 
-function renderArtifact({ format, content, title = 'artifact', workbookSpec = null }) {
+async function fileExists(filePath) {
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function resolveBrowserPath() {
+    for (const candidate of DEFAULT_BROWSER_CANDIDATES) {
+        if (!candidate) continue;
+        if (candidate.includes(path.sep)) {
+            if (await fileExists(candidate)) {
+                return candidate;
+            }
+            continue;
+        }
+        return candidate;
+    }
+    return null;
+}
+
+function getBrowserArgs(outputPath, inputPath) {
+    const configuredArgs = String(config.artifacts.browserArgs || '').trim();
+    const extraArgs = configuredArgs ? configuredArgs.split(/\s+/).filter(Boolean) : [];
+    return [
+        '--headless',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--allow-file-access-from-files',
+        '--disable-dev-shm-usage',
+        '--run-all-compositor-stages-before-draw',
+        '--virtual-time-budget=5000',
+        '--no-pdf-header-footer',
+        `--print-to-pdf=${outputPath}`,
+        ...extraArgs,
+        pathToFileURL(inputPath).href,
+    ];
+}
+
+async function renderPdfViaBrowser(html, title) {
+    const browserPath = await resolveBrowserPath();
+    if (!browserPath) {
+        return null;
+    }
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-pdf-'));
+    const baseName = slugifyFilename(title || 'document');
+    const htmlPath = path.join(tempDir, `${baseName}.html`);
+    const pdfPath = path.join(tempDir, `${baseName}.pdf`);
+
+    try {
+        await fs.writeFile(htmlPath, html, 'utf8');
+        await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath), {
+            timeout: config.artifacts.pdfTimeoutMs,
+            windowsHide: true,
+        });
+        const buffer = await fs.readFile(pdfPath);
+        return buffer;
+    } catch (error) {
+        console.warn('[Artifacts] Browser PDF rendering failed:', error.message);
+        return null;
+    } finally {
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
+async function renderArtifact({ format, content, title = 'artifact', workbookSpec = null }) {
     const normalizedFormat = normalizeFormat(format);
     const extension = FORMAT_EXTENSIONS[normalizedFormat] || '.txt';
     const mimeType = FORMAT_MIME_TYPES[normalizedFormat] || 'application/octet-stream';
@@ -298,14 +387,19 @@ function renderArtifact({ format, content, title = 'artifact', workbookSpec = nu
     if (normalizedFormat === 'pdf') {
         const html = ensureHtmlDocument(content, title);
         const text = stripHtml(html);
+        const browserBuffer = await renderPdfViaBrowser(html, title);
         return {
             filename,
             format: 'pdf',
             mimeType,
-            buffer: buildPdfBufferFromText(text, title),
+            buffer: browserBuffer || buildPdfBufferFromText(text, title),
             previewHtml: html,
             extractedText: text,
-            metadata: { title, sourceHtml: html },
+            metadata: {
+                title,
+                sourceHtml: html,
+                renderEngine: browserBuffer ? 'browser' : 'basic',
+            },
         };
     }
 
@@ -330,7 +424,7 @@ function renderArtifact({ format, content, title = 'artifact', workbookSpec = nu
             format: 'xlsx',
             mimeType,
             buffer: buildXlsxBufferFromWorkbookSpec(spec),
-            previewHtml: `<pre>${escapeXml(text)}</pre>`,
+            previewHtml: `<pre>${escapeHtml(text)}</pre>`,
             extractedText: text,
             metadata: { title: spec.title || title, sheets: (spec.sheets || []).map((sheet) => sheet.name) },
         };
@@ -343,7 +437,7 @@ function renderArtifact({ format, content, title = 'artifact', workbookSpec = nu
         mimeType,
         buffer: Buffer.from(textContent, 'utf8'),
         previewHtml: normalizedFormat === 'xml' || normalizedFormat === 'mermaid' || normalizedFormat === 'power-query'
-            ? `<pre>${escapeXml(textContent)}</pre>`
+            ? `<pre>${escapeHtml(textContent)}</pre>`
             : '',
         extractedText: textContent,
         metadata: { title },

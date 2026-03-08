@@ -12,14 +12,16 @@ npm install
 cp .env.example .env
 # Edit .env with your OPENAI_API_KEY
 
-# 3. Start dependencies (Qdrant + Ollama)
-docker compose up -d qdrant ollama
+# 3. Start dependencies (Postgres + Qdrant + Ollama)
+docker compose up -d postgres qdrant ollama
 
 # 4. Run the backend
 npm run dev
 ```
 
 The server will be available at `http://localhost:3000`. Check health at `/health`.
+
+Artifacts, uploads, generated files, and session persistence require Postgres. PDF rendering uses headless Chromium in the production image.
 
 ## Deploy to k3s
 
@@ -36,11 +38,14 @@ kubectl apply -f k8s/
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check (server + Qdrant + Ollama) |
+| `/health` | GET | Health check (server + Postgres + Qdrant + Ollama) |
 | `/api/chat` | POST | Chat with SSE streaming |
 | `/api/canvas` | POST | Structured content generation |
 | `/api/notation` | POST | Notation helper (expand/explain/validate) |
+| `/api/artifacts/upload` | POST | Multipart artifact upload |
+| `/api/artifacts/generate` | POST | Business artifact generation |
 | `/api/sessions` | CRUD | Session management |
+| `/api/sessions/:id/artifacts` | GET | List artifacts for a session |
 | `/ws` | WS | WebSocket for all modes |
 
 See [agents.md](agents.md) for full documentation.

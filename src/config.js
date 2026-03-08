@@ -5,24 +5,24 @@ const config = {
     port: parseInt(process.env.PORT, 10) || 3000,
     nodeEnv: process.env.NODE_ENV || 'development',
 
-    // OpenAI — Generation
+    // OpenAI - Generation
     openai: {
         apiKey: process.env.OPENAI_API_KEY,
         baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
         model: process.env.OPENAI_MODEL || 'gpt-4o',
     },
 
-    // Ollama — Embeddings
+    // Ollama - Embeddings
     ollama: {
         baseURL: process.env.OLLAMA_BASE_URL || 'http://ollama:11434',
         embedModel: process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text:latest',
     },
 
-    // Qdrant — Vector Store
+    // Qdrant - Vector Store
     qdrant: {
         url: process.env.QDRANT_URL || 'http://qdrant:6333',
         collection: process.env.QDRANT_COLLECTION || 'conversations',
-        vectorSize: 768, // nomic-embed-text output dimensions
+        vectorSize: 768,
     },
 
     postgres: {
@@ -34,9 +34,14 @@ const config = {
         password: process.env.POSTGRES_PASSWORD || null,
         ssl: process.env.POSTGRES_SSL === 'true',
     },
+
+    artifacts: {
+        browserPath: process.env.ARTIFACT_BROWSER_PATH || process.env.PUPPETEER_EXECUTABLE_PATH || '',
+        browserArgs: process.env.ARTIFACT_BROWSER_ARGS || '',
+        pdfTimeoutMs: parseInt(process.env.ARTIFACT_PDF_TIMEOUT_MS, 10) || 15000,
+    },
 };
 
-// Validate required config
 function validate() {
     const errors = [];
     if (!config.openai.apiKey) {
