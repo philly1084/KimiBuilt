@@ -10,6 +10,7 @@ metadata:
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "100"
     traefik.ingress.kubernetes.io/router.middlewares: kimibuilt-cors@kubernetescrd
     traefik.ingress.kubernetes.io/proxy-read-timeout: "300"
     traefik.ingress.kubernetes.io/proxy-send-timeout: "300"
