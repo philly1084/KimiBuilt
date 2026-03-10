@@ -211,6 +211,111 @@ class DocumentService {
   }
 
   /**
+   * Generate a presentation with optional AI images
+   * @param {string|Object} content - Presentation content or outline
+   * @param {Object} options - Generation options
+   * @returns {Promise<Object>} Generated presentation
+   */
+  async generatePresentation(content, options = {}) {
+    const generator = this.generators.pptx;
+    if (!generator) {
+      throw new Error('PPTX generator not available');
+    }
+
+    // Build presentation structure
+    let presentationContent;
+    if (typeof content === 'string') {
+      // Parse from text outline
+      presentationContent = this.parsePresentationOutline(content, options);
+    } else if (content.slides) {
+      // Already structured
+      presentationContent = content;
+    } else {
+      throw new Error('Invalid presentation content format');
+    }
+
+    // Generate the presentation (generator handles image generation)
+    const document = await generator.generateFromContent(presentationContent, options);
+
+    return {
+      id: this.generateId(),
+      content: document.buffer,
+      filename: this.generateFilename(presentationContent.title || 'presentation', 'pptx'),
+      mimeType: generator.mimeType,
+      size: document.buffer?.length,
+      metadata: {
+        format: 'pptx',
+        generatedAt: new Date().toISOString(),
+        aiGenerated: !!options.generateImages,
+        slideCount: presentationContent.slides?.length,
+        ...document.metadata
+      }
+    };
+  }
+
+  /**
+   * Parse presentation outline into structured content
+   * @param {string} outline - Text outline
+   * @param {Object} options - Parsing options
+   * @returns {Object} Structured presentation content
+   */
+  parsePresentationOutline(outline, options = {}) {
+    const lines = outline.split('\n').map(l => l.trim()).filter(Boolean);
+    const slides = [];
+    let currentSlide = null;
+    let title = options.title || 'Presentation';
+
+    for (const line of lines) {
+      // Main title (first level)
+      if (line.startsWith('# ')) {
+        title = line.substring(2).trim();
+        slides.push({
+          layout: 'title',
+          title: title,
+          subtitle: options.subtitle || ''
+        });
+      }
+      // Section/Slide title
+      else if (line.startsWith('## ')) {
+        if (currentSlide) slides.push(currentSlide);
+        currentSlide = {
+          layout: 'content',
+          title: line.substring(3).trim(),
+          bullets: []
+        };
+      }
+      // Bullet points
+      else if (line.startsWith('- ') || line.startsWith('* ')) {
+        if (currentSlide) {
+          currentSlide.bullets.push(line.substring(2).trim());
+        }
+      }
+      // Image marker
+      else if (line.startsWith('![image]')) {
+        const imageDesc = line.substring(8).trim();
+        if (currentSlide) {
+          currentSlide.layout = 'image';
+          currentSlide.imagePrompt = imageDesc;
+          currentSlide.generateImage = options.generateImages !== false;
+        }
+      }
+    }
+
+    if (currentSlide) slides.push(currentSlide);
+
+    // Ensure we have at least a title slide
+    if (slides.length === 0) {
+      slides.push({
+        layout: 'title',
+        title: title,
+        subtitle: options.subtitle || ''
+      });
+    }
+
+    return { title, slides };
+  }
+
+  /**
    * Get available templates
    * @param {string} category - Optional category filter
    * @returns {Promise<Array>} List of templates

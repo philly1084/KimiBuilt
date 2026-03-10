@@ -349,6 +349,52 @@ router.post('/convert', validate(convertSchema), async (req, res, next) => {
 });
 
 /**
+ * POST /api/documents/presentation
+ * Generate a presentation with optional AI images
+ */
+router.post('/presentation', async (req, res, next) => {
+  try {
+    const {
+      content,
+      outline,
+      title,
+      subtitle,
+      generateImages = true,
+      theme = 'default',
+      model
+    } = req.body;
+    
+    const documentService = req.app.locals.documentService;
+    
+    // Use outline or content
+    const presentationContent = outline || content;
+    
+    if (!presentationContent) {
+      return res.status(400).json({
+        error: { message: 'Either content or outline is required' }
+      });
+    }
+    
+    const document = await documentService.generatePresentation(presentationContent, {
+      title,
+      subtitle,
+      generateImages,
+      theme,
+      model
+    });
+    
+    res.setHeader('Content-Type', document.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
+    res.setHeader('X-Document-Id', document.id);
+    res.setHeader('X-Slide-Count', document.metadata.slideCount);
+    
+    res.send(document.content);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/documents/preview
  * Generate document preview (metadata and first page)
  */

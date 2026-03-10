@@ -1475,6 +1475,7 @@ class UIHelpers {
         return [
             { category: 'Actions', icon: 'plus', title: 'New Chat', description: 'Start a new conversation', action: 'new-chat', shortcut: 'Ctrl+N' },
             { category: 'Actions', icon: 'image', title: 'Generate Image', description: 'Open image generation panel', action: 'open-image-modal', shortcut: 'Ctrl+I' },
+            { category: 'Actions', icon: 'folder-open', title: 'Open File Manager', description: 'View and manage session files', action: 'open-file-manager', shortcut: 'Ctrl+Shift+F' },
             { category: 'Actions', icon: 'search', title: 'Search Messages', description: 'Search in current conversation', action: 'search', shortcut: 'Ctrl+F' },
             { category: 'Actions', icon: 'keyboard', title: 'Keyboard Shortcuts', description: 'View all keyboard shortcuts', action: 'show-shortcuts' },
             { category: 'Model', icon: 'cpu', title: 'Change Model', description: 'Select a different AI model', action: 'open-model-selector' },
@@ -1547,6 +1548,11 @@ class UIHelpers {
                 break;
             case 'open-image-modal':
                 this.openImageModal();
+                break;
+            case 'open-file-manager':
+                if (window.fileManager) {
+                    window.fileManager.open();
+                }
                 break;
             case 'open-model-selector':
                 this.openModelSelector();

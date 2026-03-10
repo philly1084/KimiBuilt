@@ -325,6 +325,88 @@ GUIDELINES:
   }
 
   /**
+   * Generate presentation content from a topic or outline
+   * @param {string} topic - Presentation topic
+   * @param {Object} options - Generation options
+   * @returns {Promise<Object>} Presentation content structure
+   */
+  async generatePresentationContent(topic, options = {}) {
+    const slideCount = options.slideCount || 6;
+    const tone = options.tone || 'professional';
+    const includeImages = options.includeImages !== false;
+
+    const prompt = `Create a presentation about: ${topic}
+
+Requirements:
+- Create exactly ${slideCount} slides
+- Tone: ${tone}
+- Include a compelling title slide
+- Structure content logically with clear progression
+- Each slide should have a clear title and key bullet points (3-5 bullets)
+${includeImages ? '- For key slides, suggest an image description that would enhance the visual impact' : ''}
+
+Return JSON with this structure:
+{
+  "title": "Presentation Title",
+  "subtitle": "Subtitle or tagline",
+  "slides": [
+    {
+      "layout": "title|content|section|image|two-column|chart",
+      "title": "Slide Title",
+      "content": "Main content text (for content slides)",
+      "bullets": ["Point 1", "Point 2", "Point 3"],
+      "imagePrompt": "Description for AI image generation (optional, for visual slides)"
+    }
+  ]
+}
+
+Guidelines:
+- First slide should always have "title" layout
+- Use "section" layout for major topic dividers
+- Use "image" layout for slides that benefit from visuals
+- Use "content" or "bullets" layout for information slides
+- Keep bullet points concise (10-15 words max)
+- Image prompts should be detailed and descriptive for DALL-E generation`;
+
+    try {
+      const response = await this.openai.responses.create({
+        model: options.model || 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(response.choices[0].message.content);
+      
+      // Ensure proper structure
+      return {
+        title: result.title || topic,
+        subtitle: result.subtitle || '',
+        slides: (result.slides || []).map((slide, index) => ({
+          layout: slide.layout || (index === 0 ? 'title' : 'content'),
+          title: slide.title || `Slide ${index + 1}`,
+          content: slide.content || '',
+          bullets: slide.bullets || [],
+          imagePrompt: slide.imagePrompt,
+          generateImage: !!slide.imagePrompt && includeImages
+        }))
+      };
+    } catch (error) {
+      console.error('[AIDocumentGenerator] Presentation generation failed:', error);
+      // Return a basic structure on failure
+      return {
+        title: topic,
+        subtitle: '',
+        slides: [
+          { layout: 'title', title: topic, subtitle: '' },
+          { layout: 'content', title: 'Introduction', bullets: ['Overview of the topic'] }
+        ]
+      };
+    }
+  }
+
+  /**
    * Generate suggestions for document improvement
    * @param {Object} document - Document structure
    * @returns {Promise<Array>} Suggestions

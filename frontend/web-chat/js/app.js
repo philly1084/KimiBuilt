@@ -578,6 +578,9 @@ class ChatApp {
     handleDone() {
         if (!this.currentStreamingMessageId) return;
         
+        // Reset retry counter on success
+        this.retryAttempt = 0;
+        
         const sessionId = sessionManager.currentSessionId;
         
         // Finalize message
@@ -604,7 +607,52 @@ class ChatApp {
     }
 
     handleError(message, status = null) {
-        console.error('Chat error:', message);
+        console.error('Chat error:', message, 'status:', status);
+        
+        // Check if this is a network/connection error that we should handle gracefully
+        const isNetworkError = !status || status === 0 || status === 408 ||
+            message?.includes('fetch') || 
+            message?.includes('network') ||
+            message?.includes('Failed to fetch') ||
+            message?.includes('abort') ||
+            message?.includes('timeout') ||
+            message?.includes('disconnected');
+        
+        // For network errors, try to retry instead of immediately failing
+        if (isNetworkError && this.retryAttempt < this.maxRetries) {
+            this.retryAttempt++;
+            console.log(`[ChatApp] Retrying after network error (attempt ${this.retryAttempt}/${this.maxRetries})...`);
+            
+            // Show a gentle warning instead of error
+            uiHelpers.showToast(
+                `Connection interrupted. Retrying (${this.retryAttempt}/${this.maxRetries})...`, 
+                'warning',
+                'Reconnecting'
+            );
+            
+            // Wait a bit and retry the last request
+            setTimeout(() => {
+                // If we have a current streaming message, keep it in "thinking" state
+                if (this.currentStreamingMessageId) {
+                    const el = document.getElementById(this.currentStreamingMessageId);
+                    if (el) {
+                        // Update the message to show we're retrying
+                        const contentEl = el.querySelector('.message-content');
+                        if (contentEl) {
+                            contentEl.innerHTML = '<p class="text-text-secondary italic">Reconnecting...</p>';
+                        }
+                    }
+                }
+                
+                // Retry the request
+                this.retryLastRequest();
+            }, 1000 * this.retryAttempt); // Exponential backoff
+            
+            return;
+        }
+        
+        // Max retries exceeded or non-network error - show the error
+        this.retryAttempt = 0;
         
         // Hide typing indicator
         uiHelpers.hideTypingIndicator();
@@ -635,8 +683,36 @@ class ChatApp {
         else if (status === 401) errorTitle = 'Unauthorized';
         else if (status === 429) errorTitle = 'Rate Limited';
         else if (status >= 500) errorTitle = 'Server Error';
+        else if (isNetworkError) errorTitle = 'Connection Failed';
         
-        uiHelpers.showToast(message || 'An error occurred', 'error', errorTitle);
+        // Provide more helpful message for network errors
+        let displayMessage = message || 'An error occurred';
+        if (isNetworkError && this.retryAttempt >= this.maxRetries) {
+            displayMessage = 'Unable to connect after multiple attempts. Please check your connection and try again.';
+        }
+        
+        uiHelpers.showToast(displayMessage, 'error', errorTitle);
+    }
+    
+    retryLastRequest() {
+        // This is called to retry the last message
+        // For now, we'll just try to regenerate the last user message
+        const sessionId = sessionManager.currentSessionId;
+        const messages = sessionManager.getMessages(sessionId);
+        const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+        
+        if (lastUserMessage) {
+            // Remove the incomplete assistant message if exists
+            if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+                messages.pop();
+            }
+            
+            // Retry sending
+            this.sendMessage();
+        } else {
+            // Can't retry - show error
+            this.handleError('Could not retry request', null);
+        }
     }
 
     handleCancelled() {
