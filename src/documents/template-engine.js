@@ -6,24 +6,28 @@ const fs = require('fs').promises;
 const path = require('path');
 const { glob } = require('glob');
 
-// Built-in templates
-const BUILT_IN_TEMPLATES = [
-  require('./templates/business/business-letter.json'),
-  require('./templates/business/meeting-notes.json'),
-  require('./templates/business/project-proposal.json'),
-  require('./templates/business/invoice.json'),
-  require('./templates/business/executive-summary.json'),
-  require('./templates/business/memo.json'),
-  require('./templates/business/job-description.json'),
-  require('./templates/personal/resume-modern.json'),
-  require('./templates/personal/cover-letter.json'),
-  require('./templates/personal/recommendation-letter.json'),
-  require('./templates/creative/blog-post.json'),
-  require('./templates/creative/newsletter.json'),
-  require('./templates/technical/api-documentation.json'),
-  require('./templates/technical/technical-spec.json'),
-  require('./templates/technical/user-manual.json')
-];
+// Load built-in templates dynamically (only existing ones)
+function loadBuiltInTemplates() {
+  const templates = [];
+  const templateFiles = [
+    './templates/business/business-letter.json',
+    './templates/business/meeting-notes.json',
+    './templates/personal/resume-modern.json'
+  ];
+  
+  for (const file of templateFiles) {
+    try {
+      const template = require(file);
+      templates.push(template);
+    } catch (err) {
+      console.warn(`[TemplateEngine] Could not load template: ${file}`);
+    }
+  }
+  
+  return templates;
+}
+
+const BUILT_IN_TEMPLATES = loadBuiltInTemplates();
 
 class TemplateEngine {
   constructor() {
