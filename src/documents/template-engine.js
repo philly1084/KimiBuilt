@@ -12,6 +12,8 @@ function loadBuiltInTemplates() {
   const templateFiles = [
     './templates/business/business-letter.json',
     './templates/business/meeting-notes.json',
+    './templates/business/presentation.json',
+    './templates/creative/presentation-visual.json',
     './templates/personal/resume-modern.json'
   ];
   
