@@ -1,0 +1,108 @@
+{
+  "id": "meeting-notes",
+  "name": "Meeting Notes",
+  "category": "business",
+  "description": "Structured template for documenting meetings and action items",
+  "icon": "📋",
+  "tags": ["meeting", "notes", "minutes", "documentation"],
+  
+  "variables": [
+    {
+      "id": "meeting_title",
+      "label": "Meeting Title",
+      "type": "text",
+      "required": true,
+      "placeholder": "Q1 Planning Session"
+    },
+    {
+      "id": "meeting_date",
+      "label": "Date",
+      "type": "date",
+      "required": true,
+      "default": "{{today}}"
+    },
+    {
+      "id": "meeting_time",
+      "label": "Time",
+      "type": "text",
+      "required": false,
+      "placeholder": "10:00 AM - 11:30 AM"
+    },
+    {
+      "id": "location",
+      "label": "Location",
+      "type": "text",
+      "required": false,
+      "placeholder": "Conference Room A / Zoom"
+    },
+    {
+      "id": "facilitator",
+      "label": "Facilitator",
+      "type": "text",
+      "required": false,
+      "placeholder": "John Smith"
+    },
+    {
+      "id": "attendees",
+      "label": "Attendees",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "Jane Doe - Product Manager\nBob Johnson - Developer\nAlice Chen - Designer",
+      "rows": 4,
+      "hint": "List each attendee on a new line"
+    },
+    {
+      "id": "agenda",
+      "label": "Agenda",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "1. Review Q4 results\n2. Discuss Q1 goals\n3. Resource planning\n4. Next steps",
+      "rows": 4
+    },
+    {
+      "id": "notes",
+      "label": "Meeting Notes",
+      "type": "richtext",
+      "required": true,
+      "placeholder": "Document key discussion points, decisions, and important information...",
+      "rows": 10,
+      "hint": "Use bullet points for key points and separate topics with headings"
+    },
+    {
+      "id": "decisions",
+      "label": "Decisions Made",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "• Decision 1\n• Decision 2",
+      "rows": 4,
+      "hint": "List key decisions reached during the meeting"
+    },
+    {
+      "id": "action_items",
+      "label": "Action Items",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "John - Prepare Q1 budget proposal - Due Jan 15\nJane - Schedule follow-up with design team - Due Jan 10",
+      "rows": 5,
+      "hint": "Include who, what, and when for each action item"
+    },
+    {
+      "id": "next_meeting",
+      "label": "Next Meeting",
+      "type": "text",
+      "required": false,
+      "placeholder": "January 20, 2024 - 10:00 AM"
+    }
+  ],
+  
+  "formats": ["docx", "pdf", "html", "md"],
+  
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "summarize",
+      "extract-action-items",
+      "grammar-check"
+    ]
+  }
+}

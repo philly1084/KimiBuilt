@@ -87,6 +87,36 @@ class FileHandler {
     }
 
     /**
+     * Dynamically load a script
+     */
+    async loadScript(src) {
+        return new Promise((resolve, reject) => {
+            // Check if already loaded
+            if (document.querySelector(`script[src="${src}"]`)) {
+                resolve();
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = () => {
+                // Update library status after loading
+                if (src.includes('mammoth')) {
+                    this.librariesLoaded.mammoth = true;
+                } else if (src.includes('pdf.js')) {
+                    this.librariesLoaded.pdfjs = true;
+                } else if (src.includes('highlight.js')) {
+                    this.librariesLoaded.hljs = true;
+                }
+                resolve();
+            };
+            script.onerror = () => reject(new Error(`Failed to load ${src}`));
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
      * Check if a file type is supported for import
      */
     isSupported(file) {
@@ -180,8 +210,13 @@ class FileHandler {
      */
     async importDocx(file) {
         if (!this.librariesLoaded.mammoth) {
-            this.app.printError('DOCX support not loaded. Please refresh the page.');
-            return null;
+            this.app.printSystem('📦 Loading DOCX library...');
+            try {
+                await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+            } catch (error) {
+                this.app.printError('Failed to load DOCX library: ' + error.message);
+                return null;
+            }
         }
         
         try {
@@ -204,8 +239,18 @@ class FileHandler {
      */
     async importPdf(file) {
         if (!this.librariesLoaded.pdfjs) {
-            this.app.printError('PDF support not loaded. Please refresh the page.');
-            return null;
+            this.app.printSystem('📦 Loading PDF library...');
+            try {
+                await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+                // Configure PDF.js worker
+                if (typeof pdfjsLib !== 'undefined') {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                    this.librariesLoaded.pdfjs = true;
+                }
+            } catch (error) {
+                this.app.printError('Failed to load PDF library: ' + error.message);
+                return null;
+            }
         }
         
         try {

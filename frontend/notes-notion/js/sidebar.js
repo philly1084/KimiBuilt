@@ -1288,11 +1288,19 @@ const Sidebar = (function() {
     }
     
     /**
-     * Handle file import
+     * Handle file import with enhanced PDF support
      */
     async function handleFileImport(file, modal) {
-        // Show progress
         const body = modal.querySelector('.import-modal-body');
+        const isPDF = file.name.toLowerCase().endsWith('.pdf');
+        
+        // For PDFs, show enhanced import UI with preview and options
+        if (isPDF && typeof PDFImport !== 'undefined') {
+            await handlePDFImport(file, modal);
+            return;
+        }
+        
+        // Standard import for other formats
         body.innerHTML = `
             <div class="import-progress">
                 <div class="import-progress-spinner"></div>
@@ -1320,19 +1328,469 @@ const Sidebar = (function() {
             showToast(`Imported "${newPage.title}" successfully!`, 'success');
         } catch (error) {
             console.error('Import error:', error);
+            showImportError(body, error, modal);
+        }
+    }
+    
+    /**
+     * Handle PDF import with preview and options
+     */
+    async function handlePDFImport(file, modal) {
+        const body = modal.querySelector('.import-modal-body');
+        
+        // Show loading state
+        body.innerHTML = `
+            <div class="import-progress">
+                <div class="import-progress-spinner"></div>
+                <div class="import-progress-text">Analyzing PDF...</div>
+            </div>
+        `;
+        
+        try {
+            // Read file
+            const arrayBuffer = await file.arrayBuffer();
+            
+            // Initialize PDF.js
+            if (!PDFImport.initialize || !PDFImport.initialize()) {
+                await PDFImport.loadPDFJS();
+            }
+            
+            // Get preview
+            const preview = await PDFImport.previewPDF(arrayBuffer, { maxPages: 3 });
+            
+            // Check if scanned
+            const scanInfo = await PDFImport.detectScannedPDF(arrayBuffer);
+            
+            // Show PDF import options UI
             body.innerHTML = `
-                <div class="import-message error">
-                    <span>❌</span>
-                    <span>Import failed: ${error.message}</span>
+                <div class="pdf-import-options">
+                    <div class="pdf-preview-section">
+                        <div class="pdf-preview-header">
+                            <span class="pdf-preview-title">📄 ${file.name}</span>
+                            <span class="pdf-preview-pages">${preview.totalPages} pages</span>
+                        </div>
+                        ${scanInfo.isScanned ? `
+                        <div class="pdf-scanned-warning">
+                            <span>⚠️</span>
+                            <span>This appears to be a scanned/image-based PDF. Import may include page images.</span>
+                        </div>
+                        ` : ''}
+                        <div class="pdf-preview-thumbnails">
+                            ${preview.previews.map(p => `
+                                <div class="pdf-preview-thumb">
+                                    <img src="${p.thumbnail}" alt="Page ${p.pageNum}">
+                                    <span class="pdf-preview-page-num">${p.pageNum}</span>
+                                    ${!p.hasText ? '<span class="pdf-preview-no-text">Image</span>' : ''}
+                                </div>
+                            `).join('')}
+                            ${preview.hasMore ? '<div class="pdf-preview-more">...</div>' : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="pdf-import-settings">
+                        <div class="pdf-setting-row">
+                            <label class="pdf-setting-label">
+                                <span>Pages to import</span>
+                                <span class="pdf-setting-hint">Leave empty for all pages</span>
+                            </label>
+                            <input type="text" id="pdf-page-range" class="pdf-setting-input" 
+                                placeholder="e.g., 1-5, 8, 10-12" 
+                                title="Enter page numbers or ranges separated by commas">
+                        </div>
+                        
+                        <div class="pdf-setting-row">
+                            <label class="pdf-setting-label">
+                                <span>Image quality</span>
+                                <span class="pdf-setting-hint">For scanned pages</span>
+                            </label>
+                            <select id="pdf-image-quality" class="pdf-setting-select">
+                                <option value="0.7">Standard (faster)</option>
+                                <option value="0.92" selected>High (recommended)</option>
+                                <option value="1.0">Maximum (slower)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="pdf-setting-row checkbox">
+                            <label class="pdf-setting-checkbox">
+                                <input type="checkbox" id="pdf-extract-images" checked>
+                                <span>Extract images from PDF</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="pdf-import-actions">
+                        <button class="ai-btn cancel" id="pdf-cancel">Cancel</button>
+                        <button class="ai-btn primary" id="pdf-import">
+                            <span>Import PDF</span>
+                            <span class="pdf-import-hint">${preview.totalPages} pages</span>
+                        </button>
+                    </div>
                 </div>
-                <button class="ai-btn" id="import-retry">Try Again</button>
             `;
             
-            body.querySelector('#import-retry').addEventListener('click', () => {
-                showImportModal();
-                modal.remove();
+            // Add styles for PDF import UI
+            addPDFImportStyles();
+            
+            // Event handlers
+            body.querySelector('#pdf-cancel').addEventListener('click', () => modal.remove());
+            
+            body.querySelector('#pdf-import').addEventListener('click', async () => {
+                const pageRange = body.querySelector('#pdf-page-range').value.trim();
+                const imageQuality = parseFloat(body.querySelector('#pdf-image-quality').value);
+                const extractImages = body.querySelector('#pdf-extract-images').checked;
+                
+                // Show progress
+                body.innerHTML = `
+                    <div class="pdf-import-progress-container">
+                        <div class="pdf-import-progress-header">Importing PDF...</div>
+                        <div class="pdf-import-progress-bar">
+                            <div class="pdf-import-progress-fill" id="pdf-progress-fill"></div>
+                        </div>
+                        <div class="pdf-import-progress-status" id="pdf-progress-status">Preparing...</div>
+                        <div class="pdf-import-progress-detail" id="pdf-progress-detail"></div>
+                    </div>
+                `;
+                
+                const updateProgress = (progress) => {
+                    const fill = document.getElementById('pdf-progress-fill');
+                    const status = document.getElementById('pdf-progress-status');
+                    const detail = document.getElementById('pdf-progress-detail');
+                    
+                    if (fill) {
+                        fill.style.width = `${(progress.progress * 100).toFixed(0)}%`;
+                    }
+                    if (status) {
+                        status.textContent = progress.message;
+                    }
+                    if (detail && progress.currentPage) {
+                        detail.textContent = `Page ${progress.currentPage} of ${progress.totalPages}`;
+                    }
+                };
+                
+                try {
+                    const options = {
+                        title: file.name.replace(/\.pdf$/i, ''),
+                        pageRange: pageRange || null,
+                        imageQuality,
+                        extractImages,
+                        showProgress: true
+                    };
+                    
+                    const page = await ImportExport.importFromPDF(arrayBuffer, options, updateProgress);
+                    
+                    // Save the imported page
+                    const newPage = Storage.createPage(page.title || 'Imported PDF');
+                    newPage.icon = '📄';
+                    newPage.blocks = page.blocks.map(b => ({
+                        ...b,
+                        id: Storage.generateBlockId(),
+                        createdAt: Date.now()
+                    }));
+                    
+                    Storage.updatePage(newPage.id, newPage);
+                    refreshPageTree();
+                    loadPage(newPage.id);
+                    
+                    modal.remove();
+                    showToast(`Imported "${newPage.title}" successfully!`, 'success');
+                } catch (error) {
+                    console.error('PDF import error:', error);
+                    showImportError(body, error, modal);
+                }
             });
+            
+        } catch (error) {
+            console.error('PDF preview error:', error);
+            showImportError(body, error, modal);
         }
+    }
+    
+    /**
+     * Show import error with fallback option
+     */
+    function showImportError(body, error, modal) {
+        body.innerHTML = `
+            <div class="import-message error">
+                <span>❌</span>
+                <span>Import failed: ${error.message}</span>
+            </div>
+            <div class="import-error-actions">
+                <button class="ai-btn" id="import-retry">Try Again</button>
+                <button class="ai-btn secondary" id="import-help">Get Help</button>
+            </div>
+            <div class="import-error-hint" style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-md); font-size: 13px; color: var(--text-muted);">
+                <strong>Tips:</strong>
+                <ul style="margin: 8px 0 0 16px; padding: 0;">
+                    <li>For scanned PDFs, consider using OCR tools first</li>
+                    <li>Try converting to a different format (e.g., DOCX)</li>
+                    <li>Check that the file isn't corrupted or password-protected</li>
+                </ul>
+            </div>
+        `;
+        
+        body.querySelector('#import-retry').addEventListener('click', () => {
+            showImportModal();
+            modal.remove();
+        });
+        
+        body.querySelector('#import-help').addEventListener('click', () => {
+            alert('PDF Import Help:\n\n' +
+                '• Text-based PDFs: Content is extracted as editable text\n' +
+                '• Scanned PDFs: Pages are imported as images\n' +
+                '• Mixed PDFs: Text and images are both extracted\n\n' +
+                'For best results with scanned documents, use OCR software ' +
+                '(like Adobe Acrobat, online OCR tools) before importing.');
+        });
+    }
+    
+    /**
+     * Add PDF import UI styles
+     */
+    function addPDFImportStyles() {
+        if (document.getElementById('pdf-import-styles')) return;
+        
+        const style = document.createElement('style');
+        style.id = 'pdf-import-styles';
+        style.textContent = `
+            .pdf-import-options {
+                padding: 16px;
+            }
+            
+            .pdf-preview-section {
+                margin-bottom: 20px;
+            }
+            
+            .pdf-preview-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 12px;
+            }
+            
+            .pdf-preview-title {
+                font-weight: 500;
+                font-size: 14px;
+                color: var(--text-primary);
+            }
+            
+            .pdf-preview-pages {
+                font-size: 12px;
+                color: var(--text-muted);
+                background: var(--bg-secondary);
+                padding: 4px 8px;
+                border-radius: var(--radius-sm);
+            }
+            
+            .pdf-scanned-warning {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 12px;
+                background: #fff8e1;
+                border: 1px solid #ffe082;
+                border-radius: var(--radius-md);
+                margin-bottom: 12px;
+                font-size: 13px;
+                color: #f57c00;
+            }
+            
+            .pdf-preview-thumbnails {
+                display: flex;
+                gap: 8px;
+                overflow-x: auto;
+                padding: 8px 0;
+            }
+            
+            .pdf-preview-thumb {
+                position: relative;
+                flex-shrink: 0;
+                width: 80px;
+                height: 100px;
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-sm);
+                overflow: hidden;
+                background: var(--bg-secondary);
+            }
+            
+            .pdf-preview-thumb img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+            
+            .pdf-preview-page-num {
+                position: absolute;
+                bottom: 4px;
+                right: 4px;
+                font-size: 10px;
+                background: rgba(0,0,0,0.7);
+                color: white;
+                padding: 2px 4px;
+                border-radius: 2px;
+            }
+            
+            .pdf-preview-no-text {
+                position: absolute;
+                top: 4px;
+                left: 4px;
+                font-size: 9px;
+                background: #ff9800;
+                color: white;
+                padding: 2px 4px;
+                border-radius: 2px;
+            }
+            
+            .pdf-preview-more {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                width: 40px;
+                height: 100px;
+                font-size: 20px;
+                color: var(--text-muted);
+            }
+            
+            .pdf-import-settings {
+                background: var(--bg-secondary);
+                border-radius: var(--radius-md);
+                padding: 16px;
+                margin-bottom: 16px;
+            }
+            
+            .pdf-setting-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 12px;
+            }
+            
+            .pdf-setting-row:last-child {
+                margin-bottom: 0;
+            }
+            
+            .pdf-setting-row.checkbox {
+                justify-content: flex-start;
+                gap: 8px;
+            }
+            
+            .pdf-setting-label {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            
+            .pdf-setting-label span:first-child {
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--text-primary);
+            }
+            
+            .pdf-setting-hint {
+                font-size: 11px;
+                color: var(--text-muted);
+            }
+            
+            .pdf-setting-input,
+            .pdf-setting-select {
+                padding: 6px 10px;
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-sm);
+                font-size: 13px;
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                min-width: 140px;
+            }
+            
+            .pdf-setting-checkbox {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 13px;
+                cursor: pointer;
+            }
+            
+            .pdf-setting-checkbox input[type="checkbox"] {
+                width: 16px;
+                height: 16px;
+            }
+            
+            .pdf-import-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+            }
+            
+            .pdf-import-hint {
+                font-size: 11px;
+                opacity: 0.8;
+                margin-left: 6px;
+            }
+            
+            .pdf-import-progress-container {
+                padding: 32px;
+                text-align: center;
+            }
+            
+            .pdf-import-progress-header {
+                font-size: 16px;
+                font-weight: 500;
+                margin-bottom: 20px;
+                color: var(--text-primary);
+            }
+            
+            .pdf-import-progress-bar {
+                width: 100%;
+                height: 8px;
+                background: var(--bg-secondary);
+                border-radius: 4px;
+                overflow: hidden;
+                margin-bottom: 16px;
+            }
+            
+            .pdf-import-progress-fill {
+                height: 100%;
+                background: linear-gradient(90deg, #2383e2, #4facfe);
+                border-radius: 4px;
+                transition: width 0.3s ease;
+                width: 0%;
+            }
+            
+            .pdf-import-progress-status {
+                font-size: 14px;
+                color: var(--text-primary);
+                margin-bottom: 4px;
+            }
+            
+            .pdf-import-progress-detail {
+                font-size: 12px;
+                color: var(--text-muted);
+            }
+            
+            .import-error-actions {
+                display: flex;
+                gap: 10px;
+                margin-top: 12px;
+            }
+            
+            .ai-btn.secondary {
+                background: var(--bg-secondary);
+                color: var(--text-primary);
+            }
+            
+            @keyframes pdf-pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+            }
+            
+            .pdf-import-progress-fill.indeterminate {
+                animation: pdf-pulse 1.5s ease-in-out infinite;
+                background: linear-gradient(90deg, #2383e2, #4facfe, #2383e2);
+                background-size: 200% 100%;
+            }
+        `;
+        
+        document.head.appendChild(style);
     }
     
     /**
@@ -1937,6 +2395,14 @@ const Sidebar = (function() {
             timeout = setTimeout(() => fn(...args), delay);
         };
     }
+    
+    /**
+     * Global PDF import progress callback
+     */
+    window.showPDFImportProgress = function(progress) {
+        // This is handled within the modal, but can be customized here
+        console.log('PDF Import Progress:', progress);
+    };
     
     // Expose to window
     window.Sidebar = {

@@ -1104,7 +1104,11 @@ class ImportExportManager {
     markdownToHtml(markdown) {
         if (!markdown) return '';
         // Simple markdown to HTML conversion
-        return marked.parse(markdown);
+        if (typeof marked !== 'undefined') {
+            return marked.parse(markdown);
+        }
+        // Fallback: basic HTML escape if marked is not available
+        return this.escapeHtml(markdown).replace(/\n/g, '<br>');
     }
 
     downloadFile(content, filename, mimeType) {

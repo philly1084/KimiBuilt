@@ -1,0 +1,121 @@
+{
+  "id": "resume-modern",
+  "name": "Modern Resume",
+  "category": "personal",
+  "description": "Clean, professional resume template with modern formatting",
+  "icon": "👤",
+  "tags": ["resume", "cv", "job", "professional"],
+  
+  "variables": [
+    {
+      "id": "full_name",
+      "label": "Full Name",
+      "type": "text",
+      "required": true,
+      "placeholder": "John Smith"
+    },
+    {
+      "id": "email",
+      "label": "Email",
+      "type": "email",
+      "required": true,
+      "placeholder": "john.smith@email.com"
+    },
+    {
+      "id": "phone",
+      "label": "Phone",
+      "type": "tel",
+      "required": false,
+      "placeholder": "(555) 123-4567"
+    },
+    {
+      "id": "location",
+      "label": "Location",
+      "type": "text",
+      "required": false,
+      "placeholder": "New York, NY"
+    },
+    {
+      "id": "linkedin",
+      "label": "LinkedIn",
+      "type": "url",
+      "required": false,
+      "placeholder": "linkedin.com/in/johnsmith"
+    },
+    {
+      "id": "website",
+      "label": "Portfolio/Website",
+      "type": "url",
+      "required": false,
+      "placeholder": "johnsmith.com"
+    },
+    {
+      "id": "summary",
+      "label": "Professional Summary",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "Brief overview of your professional background and key strengths...",
+      "rows": 4,
+      "hint": "2-4 sentences highlighting your experience and value proposition"
+    },
+    {
+      "id": "experience",
+      "label": "Work Experience",
+      "type": "richtext",
+      "required": true,
+      "placeholder": "Job Title - Company Name\nDates\n• Key achievement or responsibility\n• Key achievement or responsibility\n\nJob Title - Company Name...",
+      "rows": 12,
+      "hint": "Start with most recent position. Use bullet points for achievements."
+    },
+    {
+      "id": "education",
+      "label": "Education",
+      "type": "textarea",
+      "required": true,
+      "placeholder": "Degree - University Name\nGraduation Year\n• Honors or relevant details\n\nDegree - University Name...",
+      "rows": 6
+    },
+    {
+      "id": "skills",
+      "label": "Skills",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "Technical: Python, JavaScript, SQL, AWS\nSoft Skills: Leadership, Communication, Problem-solving",
+      "rows": 4,
+      "hint": "Separate skills with commas or list by category"
+    },
+    {
+      "id": "certifications",
+      "label": "Certifications",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "AWS Certified Solutions Architect - 2023\nPMP Certification - 2022",
+      "rows": 3
+    },
+    {
+      "id": "languages",
+      "label": "Languages",
+      "type": "text",
+      "required": false,
+      "placeholder": "English (Native), Spanish (Fluent), French (Conversational)"
+    }
+  ],
+  
+  "formats": ["docx", "pdf", "html"],
+  
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "improve-writing",
+      "professional-tone",
+      "keyword-optimization",
+      "grammar-check"
+    ]
+  },
+  
+  "variants": [
+    { "id": "modern", "name": "Modern", "default": true },
+    { "id": "classic", "name": "Classic" },
+    { "id": "minimal", "name": "Minimal" }
+  ]
+}

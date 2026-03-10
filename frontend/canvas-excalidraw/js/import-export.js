@@ -682,7 +682,7 @@ class ImportExportManager {
                             y: canvas.offsetY + yOffset
                         });
                         elements.push(element);
-                        yOffset += viewport.height + 50;
+                        yOffset += viewport.height + 10;
                     }
                     
                     this.addImportedElements(elements);

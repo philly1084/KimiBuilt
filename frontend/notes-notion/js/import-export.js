@@ -974,14 +974,62 @@ const ImportExport = (function() {
     }
 
     /**
-     * Import from PDF (text extraction)
+     * Import from PDF with enhanced support for mixed content
+     * Uses PDFImport module for better text and image extraction
      */
-    async function importFromPDF(arrayBuffer) {
-        if (typeof pdfjsLib === 'undefined') {
-            // Fallback: try to extract text if it's a text-based PDF
-            // This is a simplified approach
+    async function importFromPDF(arrayBuffer, options = {}) {
+        // Try to use the enhanced PDFImport module if available
+        if (typeof PDFImport !== 'undefined') {
+            try {
+                // Initialize PDFImport if needed
+                if (!PDFImport.initialize || !PDFImport.initialize()) {
+                    await PDFImport.loadPDFJS();
+                }
+
+                // Show progress UI if available
+                const showProgress = options.showProgress !== false;
+                let progressCallback = null;
+
+                if (showProgress && typeof showPDFImportProgress === 'function') {
+                    progressCallback = showPDFImportProgress;
+                }
+
+                // Import with enhanced functionality
+                const page = await PDFImport.importPDF(arrayBuffer, options, progressCallback);
+                
+                // Store metadata for UI feedback
+                if (page.metadata) {
+                    window.lastPDFImportMetadata = page.metadata;
+                }
+
+                return page;
+            } catch (error) {
+                console.warn('Enhanced PDF import failed, falling back to basic:', error);
+                // Fall through to basic implementation
+            }
+        }
+
+        // Fallback to basic PDF.js implementation
+        return importFromPDFBasic(arrayBuffer, options);
+    }
+
+    /**
+     * Basic PDF import fallback using PDF.js directly
+     */
+    async function importFromPDFBasic(arrayBuffer, options = {}) {
+        // Check for PDF.js
+        let pdfjsLib = window.pdfjsLib;
+        
+        if (!pdfjsLib) {
+            // Last resort: try simple byte extraction
             const text = extractTextFromPDFBytes(arrayBuffer);
             return importFromTXT(text);
+        }
+
+        // Set worker source if needed
+        if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 
+                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
 
         try {
@@ -993,18 +1041,60 @@ const ImportExport = (function() {
                 const textContent = await page.getTextContent();
                 const pageText = textContent.items.map(item => item.str).join(' ');
                 fullText += pageText + '\n\n';
+                page.cleanup();
             }
 
             return importFromTXT(fullText);
         } catch (error) {
-            console.warn('PDF.js failed, using fallback:', error);
+            console.warn('PDF.js basic import failed:', error);
             const text = extractTextFromPDFBytes(arrayBuffer);
             return importFromTXT(text);
         }
     }
 
     /**
-     * Simple PDF text extraction fallback
+     * Preview PDF before import
+     * @param {ArrayBuffer} arrayBuffer - PDF file data
+     * @param {Object} options - Preview options
+     * @returns {Promise<Object>} - Preview data
+     */
+    async function previewPDF(arrayBuffer, options = {}) {
+        if (typeof PDFImport !== 'undefined') {
+            try {
+                if (!PDFImport.initialize || !PDFImport.initialize()) {
+                    await PDFImport.loadPDFJS();
+                }
+                return await PDFImport.previewPDF(arrayBuffer, options.maxPages || 5);
+            } catch (error) {
+                console.error('PDF preview failed:', error);
+                throw error;
+            }
+        }
+        throw new Error('PDF import module not available');
+    }
+
+    /**
+     * Detect if PDF is scanned/image-based
+     * @param {ArrayBuffer} arrayBuffer - PDF file data
+     * @returns {Promise<Object>} - Detection result
+     */
+    async function detectScannedPDF(arrayBuffer) {
+        if (typeof PDFImport !== 'undefined') {
+            try {
+                if (!PDFImport.initialize || !PDFImport.initialize()) {
+                    await PDFImport.loadPDFJS();
+                }
+                return await PDFImport.detectScannedPDF(arrayBuffer);
+            } catch (error) {
+                console.error('PDF scan detection failed:', error);
+                return { isScanned: false, hasText: true, confidence: 0 };
+            }
+        }
+        return { isScanned: false, hasText: true, confidence: 0 };
+    }
+
+    /**
+     * Simple PDF text extraction fallback (last resort)
      */
     function extractTextFromPDFBytes(arrayBuffer) {
         // This is a very basic PDF text extractor
@@ -1707,7 +1797,10 @@ const ImportExport = (function() {
         importFromHTML,
         importFromMarkdown,
         importFromJSON,
-        importFromTXT
+        importFromTXT,
+        // Enhanced PDF functions
+        previewPDF,
+        detectScannedPDF
     };
 })();
 

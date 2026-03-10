@@ -93,10 +93,13 @@ Powered by your KimiBuilt backend (`http://localhost:3000`):
 - Empty trash permanently
 
 ### Import/Export
-- Export any page to Markdown
-- Export all pages at once
-- Import from Markdown
+**Comprehensive file format support:**
+- **Export**: Word (.docx), PDF (.pdf), HTML (.html), Markdown (.md), Notion JSON (.json), Plain Text (.txt)
+- **Import**: Word (.docx), PDF (.pdf), HTML (.html), Markdown (.md), Notion JSON (.json), Plain Text (.txt)
+- Drag & drop file import with visual feedback
 - Preserves formatting and structure
+- Frontmatter support in Markdown
+- Notion-compatible JSON format
 
 ### Themes
 - Light and Dark mode toggle
@@ -165,7 +168,7 @@ python -m http.server 8081
 |----------|--------|
 | `Cmd/Ctrl + P` | New page (with template picker) |
 | `Cmd/Ctrl + S` | Save page |
-| `Cmd/Ctrl + E` | Export to Markdown |
+| `Cmd/Ctrl + E` | Quick Export to Markdown |
 | `Cmd/Ctrl + B` | Toggle sidebar |
 | `Cmd/Ctrl + K` | AI Assistant |
 | `Cmd/Ctrl + /` | Help |
@@ -215,12 +218,14 @@ notes-notion/
 │   ├── app.js              # App controller & initialization
 │   ├── editor.js           # Block editor core with inline toolbar & mentions
 │   ├── blocks.js           # Block type definitions & rendering (18 types)
+│   ├── import-export.js    # Comprehensive file format import/export
 │   ├── slash-menu.js       # / command menu with improved positioning
 │   ├── selection.js        # Block selection, drag & drop with visual feedback
-│   ├── sidebar.js          # Page tree, navigation, templates, model selector
+│   ├── sidebar.js          # Page tree, navigation, templates, import UI
 │   ├── ai-integration.js   # AI blocks, Ask AI features, model selection
 │   ├── api.js              # Backend API client (models, chat, images)
 │   └── storage.js          # LocalStorage persistence
+├── IMPORT_EXPORT.md        # Detailed import/export documentation
 └── README.md               # This file
 ```
 
@@ -397,6 +402,28 @@ const client = new OpenAI({
 5. **✅ Model Badges** - Shows which model generated content
 6. **✅ API Updates** - New endpoints for models and image generation
 
+### v4.0 Upgrade - Comprehensive Import/Export
+1. **✅ DOCX Export** - Word document generation with docx.js
+2. **✅ DOCX Import** - Word document parsing with mammoth.js
+3. **✅ PDF Export** - Print-ready PDF generation
+4. **✅ PDF Import** - Text extraction from PDF files
+5. **✅ HTML Export** - Styled HTML document export
+6. **✅ HTML Import** - HTML to blocks conversion
+7. **✅ Markdown Enhancements** - Frontmatter support, all block types
+8. **✅ Notion JSON** - Import/export Notion-compatible format
+9. **✅ Plain Text** - TXT import/export with structure detection
+10. **✅ Drag & Drop Import** - Visual file drop zone
+11. **✅ Export Dropdown** - Quick export from page header
+12. **✅ Import Modal** - Full-featured import dialog
+
+### v3.0 Upgrade - Model Selection & Image Generation
+1. **✅ Model Selection** - Page-level and per-block AI model selection
+2. **✅ AI Image Block** - Generate images with DALL-E 3 and DALL-E 2
+3. **✅ Image Options** - Customizable size, quality, and style settings
+4. **✅ Model Selector UI** - Dropdown in page header and AI toolbar
+5. **✅ Model Badges** - Shows which model generated content
+6. **✅ API Updates** - New endpoints for models and image generation
+
 ### v2.0 Upgrade
 1. **✅ Header being cut off** - Fixed `.page-header` padding and negative margin issues
 2. **✅ Placeholder text** - Improved placeholder behavior with CSS `::before` pseudo-element
@@ -469,6 +496,8 @@ MIT License - Feel free to use, modify, and distribute!
 Built with inspiration from Notion's excellent UX design and powered by the KimiBuilt AI backend.
 
 ---
+
+**Version 4.0** - Comprehensive Import/Export with business file format support
 
 **Version 3.0** - AI Model Selection & Image Generation
 

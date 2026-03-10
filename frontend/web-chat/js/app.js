@@ -928,15 +928,7 @@ class ChatApp {
         const showProgress = format === 'docx' || format === 'pdf';
         
         try {
-            if (showProgress) {
-                uiHelpers.showExportProgress(0, `Preparing ${format.toUpperCase()} export...`);
-            }
-            
             const result = await window.importExportManager.exportConversation(format, messages, session);
-            
-            if (showProgress) {
-                uiHelpers.showExportProgress(50, 'Generating file...');
-            }
             
             // Download the file
             if (result.blob) {
@@ -947,16 +939,10 @@ class ChatApp {
                 this.downloadFile(result.content, result.filename, result.mimeType);
             }
             
-            if (showProgress) {
-                uiHelpers.showExportProgress(100, 'Complete!');
-                setTimeout(() => uiHelpers.hideExportProgress(), 500);
-            }
-            
             uiHelpers.closeExportModal();
             uiHelpers.showToast(`Conversation exported as ${format.toUpperCase()}`, 'success');
         } catch (error) {
             console.error('Export failed:', error);
-            uiHelpers.hideExportProgress();
             uiHelpers.showToast(`Export failed: ${error.message}`, 'error');
         }
     }

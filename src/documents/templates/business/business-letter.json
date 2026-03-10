@@ -1,0 +1,132 @@
+{
+  "id": "business-letter",
+  "name": "Business Letter",
+  "category": "business",
+  "description": "Professional formal correspondence for business communication",
+  "icon": "📄",
+  "tags": ["formal", "correspondence", "professional"],
+  
+  "variables": [
+    {
+      "id": "sender_name",
+      "label": "Your Name",
+      "type": "text",
+      "required": true,
+      "placeholder": "John Smith"
+    },
+    {
+      "id": "sender_title",
+      "label": "Your Title",
+      "type": "text",
+      "required": false,
+      "placeholder": "Senior Manager"
+    },
+    {
+      "id": "sender_address",
+      "label": "Your Address",
+      "type": "textarea",
+      "required": false,
+      "placeholder": "123 Business St\nCity, State 12345",
+      "rows": 2
+    },
+    {
+      "id": "date",
+      "label": "Date",
+      "type": "date",
+      "required": true,
+      "default": "{{today}}"
+    },
+    {
+      "id": "recipient_name",
+      "label": "Recipient Name",
+      "type": "text",
+      "required": true,
+      "placeholder": "Jane Doe"
+    },
+    {
+      "id": "recipient_title",
+      "label": "Recipient Title",
+      "type": "text",
+      "required": false,
+      "placeholder": "Director of Operations"
+    },
+    {
+      "id": "company_name",
+      "label": "Company Name",
+      "type": "text",
+      "required": false,
+      "placeholder": "Acme Corporation"
+    },
+    {
+      "id": "salutation",
+      "label": "Salutation",
+      "type": "select",
+      "required": false,
+      "options": [
+        { "value": "Dear {{recipient_name}},", "label": "Dear [Name]," },
+        { "value": "To Whom It May Concern:", "label": "To Whom It May Concern:" },
+        { "value": "Dear Sir or Madam:", "label": "Dear Sir or Madam:" },
+        { "value": "Hello {{recipient_name}},", "label": "Hello [Name]," }
+      ],
+      "default": "Dear {{recipient_name}},"
+    },
+    {
+      "id": "subject",
+      "label": "Subject Line",
+      "type": "text",
+      "required": false,
+      "placeholder": "Regarding our upcoming partnership"
+    },
+    {
+      "id": "body",
+      "label": "Letter Body",
+      "type": "richtext",
+      "required": true,
+      "placeholder": "Write your letter content here...",
+      "rows": 10,
+      "hint": "Use paragraphs to separate different points. Be clear and concise."
+    },
+    {
+      "id": "closing",
+      "label": "Closing",
+      "type": "select",
+      "required": false,
+      "options": [
+        "Sincerely,",
+        "Best regards,",
+        "Yours truly,",
+        "Respectfully,",
+        "Thank you,",
+        "Kind regards,"
+      ],
+      "default": "Sincerely,"
+    },
+    {
+      "id": "signature",
+      "label": "Signature",
+      "type": "text",
+      "required": false,
+      "placeholder": "John Smith"
+    }
+  ],
+  
+  "formats": ["docx", "pdf", "html"],
+  
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "improve-writing",
+      "professional-tone",
+      "grammar-check",
+      "make-shorter",
+      "make-longer"
+    ]
+  },
+  
+  "layout": {
+    "marginTop": 1,
+    "marginBottom": 1,
+    "marginLeft": 1,
+    "marginRight": 1
+  }
+}
