@@ -140,6 +140,8 @@
             .artifact-generated-card .file-icon.html { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
             .artifact-generated-card .file-icon.image { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
             .artifact-generated-card .file-icon.code { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+            .artifact-generated-card .file-icon.mermaid { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+            .artifact-generated-card .file-icon.svg { background: rgba(0, 188, 212, 0.15); color: #00bcd4; }
             
             .artifact-generated-card h4 {
                 font-weight: 600;
@@ -247,7 +249,8 @@
             ['pdf', /\bpdf\b/],
             ['docx', /\b(docx|word document)\b/],
             ['xml', /\bxml\b/],
-            ['mermaid', /\bmermaid\b/],
+            ['mermaid', /\b(mermaid|diagram|flowchart|sequence diagram)\b/],
+            ['mermaid', /\b(erd|entity relationship|class diagram|state diagram)\b/],
             ['html', /\bhtml\b/],
         ];
 
@@ -322,11 +325,13 @@
         const pdfExts = ['pdf'];
         const htmlExts = ['html', 'htm'];
         const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
+        const diagramExts = ['mmd', 'mermaid'];
         
         if (docExts.includes(ext)) return 'docx';
         if (pdfExts.includes(ext)) return 'pdf';
         if (htmlExts.includes(ext)) return 'html';
         if (imageExts.includes(ext)) return 'image';
+        if (diagramExts.includes(ext)) return 'mermaid';
         return 'code';
     }
 
@@ -620,6 +625,109 @@
         });
     }
 
+    /**
+     * Generate a diagram file (Mermaid)
+     */
+    async function generateDiagram(description, type = 'flowchart') {
+        const sessionId = await ensureSession();
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/documents/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    templateId: 'mermaid-diagram',
+                    variables: {
+                        description: description,
+                        diagramType: type
+                    },
+                    format: 'mmd',
+                    options: {
+                        includePageNumbers: false
+                    }
+                })
+            });
+            
+            if (!response.ok) {
+                // Fallback: create a simple diagram
+                const diagramCode = generateMermaidCode(description, type);
+                downloadFile(diagramCode, `diagram-${Date.now()}.mmd`, 'text/plain');
+                return;
+            }
+            
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `diagram-${Date.now()}.mmd`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            if (window.uiHelpers?.showToast) {
+                uiHelpers.showToast('Diagram generated successfully', 'success');
+            }
+        } catch (error) {
+            console.error('[Artifacts] Diagram generation failed:', error);
+            // Fallback: generate locally
+            const diagramCode = generateMermaidCode(description, type);
+            downloadFile(diagramCode, `diagram-${Date.now()}.mmd`, 'text/plain');
+        }
+    }
+    
+    /**
+     * Generate Mermaid code locally as fallback
+     */
+    function generateMermaidCode(description, type) {
+        const templates = {
+            flowchart: `graph TD
+    A[Start] --> B{${description}}
+    B -->|Yes| C[Process]
+    B -->|No| D[End]
+    C --> D`,
+            sequence: `sequenceDiagram
+    participant User
+    participant System
+    User->>System: ${description}
+    System-->>User: Response`,
+            class: `classDiagram
+    class Subject {
+        +String name
+        +action()
+    }
+    note for Subject "${description}"`,
+            er: `erDiagram
+    ENTITY ||--o{ RELATED : has
+    ENTITY {
+        string name
+        string description
+    }`,
+            mindmap: `mindmap
+  root((${description}))
+    Topic 1
+    Topic 2
+    Topic 3`
+        };
+        
+        return templates[type] || templates.flowchart;
+    }
+    
+    /**
+     * Download file helper
+     */
+    function downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+    
     // Create global artifact manager for external access
     window.artifactManager = {
         deselectArtifact: (id) => {

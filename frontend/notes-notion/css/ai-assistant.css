@@ -394,36 +394,6 @@
 }
 
 /* ===== Add Block Hint ===== */
-.add-block-hint {
-    max-width: var(--content-max-width);
-    width: 100%;
-    margin: 0 auto;
-    padding: 16px var(--content-padding);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.add-block-hint-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 20px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-}
-
-.add-block-hint-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent-color);
-    color: var(--accent-color);
-}
-
 /* ===== Block Selection for Context ===== */
 .block-select-checkbox {
     position: absolute;

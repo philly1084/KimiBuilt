@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="css/ai-assistant.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
     <!-- App Container -->
@@ -85,6 +86,13 @@
                 </button>
             </div>
         </aside>
+
+        <!-- Sidebar Handle (visible when collapsed) -->
+        <div class="sidebar-handle" onclick="Sidebar.toggle()" title="Show sidebar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
+            </svg>
+        </div>
 
         <!-- Main Content -->
         <main id="main-content" class="main-content">
@@ -341,6 +349,13 @@
                 <div class="slash-item-info">
                     <div class="slash-item-name">Math Equation</div>
                     <div class="slash-item-hint">Type LaTeX math equations</div>
+                </div>
+            </div>
+            <div class="slash-item" data-type="mermaid">
+                <div class="slash-item-icon">📊</div>
+                <div class="slash-item-info">
+                    <div class="slash-item-name">Mermaid Diagram</div>
+                    <div class="slash-item-hint">Create flowcharts, sequence diagrams, and more</div>
                 </div>
             </div>
             <div class="slash-item" data-type="image">

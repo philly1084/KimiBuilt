@@ -25,9 +25,9 @@ class CodeCLIApp {
         
         // Available commands for autocomplete
         this.commands = [
-            '/help', '/clear', '/models', '/model', '/theme', 
-            '/export', '/save', '/load', '/copy', '/image',
-            '/upload', '/session', '/stats', '/shortcuts'
+            '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
+            '/export', '/save', '/load', '/copy', '/image', '/diagram',
+            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health'
         ];
         
         this.init();
@@ -222,6 +222,13 @@ class CodeCLIApp {
                 break;
             case 'image':
                 await this.generateImage(args.join(' '));
+                break;
+            case 'diagram':
+                if (!args[0] || args[0] === 'help' || args[0] === '?') {
+                    this.printDiagramHelp();
+                } else {
+                    await this.generateDiagram(args[0], args.slice(1).join(' '));
+                }
                 break;
             case 'upload':
                 this.triggerFileUpload();
@@ -475,6 +482,7 @@ Session Statistics:
   /models            List available AI models
   /model <name>      Change AI model
   /image <prompt>    Generate an image
+  /diagram <type>    Generate Mermaid diagram
   /upload            Upload a file for context
 
 **Session:**
@@ -489,6 +497,36 @@ Session Statistics:
   /health            Check API connection health
 
 Type any message to chat with the AI.
+        `.trim());
+    }
+    
+    printDiagramHelp() {
+        this.printAI(`
+## Diagram Command
+
+Generate Mermaid diagrams using the AI or templates.
+
+**Usage:**
+  /diagram <type> [description]
+
+**Diagram Types:**
+  flowchart   - Flowchart diagram (default)
+  sequence    - Sequence diagram
+  class       - Class diagram
+  er          - Entity relationship diagram
+  mindmap     - Mind map
+  gantt       - Gantt chart
+  pie         - Pie chart
+  state       - State diagram
+  gitgraph    - Git graph
+
+**Examples:**
+  /diagram flowchart login process
+  /diagram sequence user authentication
+  /diagram class user management system
+  /diagram mindmap project planning
+
+The AI will generate appropriate Mermaid syntax. If AI is unavailable, a template will be used.
         `.trim());
     }
     
@@ -669,6 +707,170 @@ Type any message to chat with the AI.
             this.isProcessing = false;
             this.hideProgress();
         }
+    }
+    
+    /**
+     * Generate a Mermaid diagram file
+     */
+    async generateDiagram(type = 'flowchart', description = '') {
+        this.isProcessing = true;
+        this.setActivity('processing', 'Generating diagram...', 'AI working');
+        this.showProgress('Generating diagram', true);
+        
+        try {
+            // Try to get AI-generated diagram code
+            const diagramPrompt = `Create a ${type} diagram for: ${description || 'a simple process'}
+            
+Return ONLY valid Mermaid syntax code, no explanations, no markdown code blocks.`;
+            
+            const response = await api.sendMessage(diagramPrompt);
+            let diagramCode = response.content || '';
+            
+            // Clean up the code - remove markdown code blocks if present
+            diagramCode = diagramCode.replace(/^```mermaid\n?/i, '');
+            diagramCode = diagramCode.replace(/```\s*$/i, '');
+            diagramCode = diagramCode.trim();
+            
+            // If no valid code returned, use template
+            if (!diagramCode || diagramCode.length < 10) {
+                diagramCode = this.getMermaidTemplate(type, description);
+            }
+            
+            // Create and download file
+            const filename = `diagram-${type}-${Date.now()}.mmd`;
+            this.downloadFile(diagramCode, filename, 'text/plain');
+            
+            // Show preview in terminal
+            this.printAI(`## Generated ${type} diagram
+
+\`\`\`mermaid
+${diagramCode}
+\`\`\`
+
+**Downloaded:** ${filename}`);
+            
+            this.setActivity('success', 'Diagram generated', 'Complete');
+        } catch (error) {
+            // Fallback: generate template
+            const diagramCode = this.getMermaidTemplate(type, description);
+            const filename = `diagram-${type}-${Date.now()}.mmd`;
+            this.downloadFile(diagramCode, filename, 'text/plain');
+            
+            this.printAI(`## Generated ${type} diagram (template)
+
+\`\`\`mermaid
+${diagramCode}
+\`\`\`
+
+**Downloaded:** ${filename}`);
+            
+            this.setActivity('success', 'Diagram generated', 'Complete');
+        } finally {
+            this.isProcessing = false;
+            this.hideProgress();
+        }
+    }
+    
+    /**
+     * Get Mermaid template
+     */
+    getMermaidTemplate(type, description) {
+        const desc = description || 'Process';
+        const templates = {
+            flowchart: `graph TD
+    A[Start] --> B{${desc}?}
+    B -->|Yes| C[Action 1]
+    B -->|No| D[Action 2]
+    C --> E[Result]
+    D --> E
+    E --> F[End]`,
+            sequence: `sequenceDiagram
+    participant U as User
+    participant S as System
+    participant D as Database
+    
+    U->>S: ${desc}
+    S->>D: Query data
+    D-->>S: Return results
+    S-->>U: Display response`,
+            class: `classDiagram
+    class User {
+        +String name
+        +String email
+        +login()
+        +logout()
+    }
+    class System {
+        +process()
+    }
+    User --> System : uses
+    note for User "${desc}"`,
+            er: `erDiagram
+    USER ||--o{ ORDER : places
+    USER {
+        string name
+        string email
+    }
+    ORDER {
+        int id
+        date created
+    }`,
+            mindmap: `mindmap
+  root((${desc}))
+    Planning
+      Research
+      Design
+    Execution
+      Development
+      Testing
+    Delivery`,
+            gantt: `gantt
+    title ${desc} Timeline
+    dateFormat  YYYY-MM-DD
+    section Phase 1
+    Planning           :done, p1, 2024-01-01, 7d
+    Design             :active, p2, after p1, 7d
+    section Phase 2
+    Development        :p3, after p2, 14d
+    Testing            :p4, after p3, 7d`,
+            pie: `pie title ${desc}
+    "Category A" : 40
+    "Category B" : 30
+    "Category C" : 20
+    "Category D" : 10`,
+            state: `stateDiagram-v2
+    [*] --> Idle
+    Idle --> Processing : ${desc}
+    Processing --> Success : valid
+    Processing --> Error : invalid
+    Success --> [*]
+    Error --> Idle : retry`,
+            gitgraph: `gitGraph
+    commit id: "Initial"
+    branch feature
+    checkout feature
+    commit id: "Add feature"
+    checkout main
+    merge feature id: "Merge ${desc}"
+    commit id: "Release"`
+        };
+        
+        return templates[type] || templates.flowchart;
+    }
+    
+    /**
+     * Download file helper
+     */
+    downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
     
     // ==================== Session Management ====================

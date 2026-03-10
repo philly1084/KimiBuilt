@@ -108,6 +108,12 @@ const Blocks = (function() {
             placeholder: 'Type LaTeX equation...',
             render: renderMathBlock
         },
+        mermaid: {
+            name: 'Mermaid Diagram',
+            icon: '📊',
+            placeholder: 'graph TD;\n    A-->B;\n    A-->C;',
+            render: renderMermaidBlock
+        },
         ai: {
             name: 'AI Assistant',
             icon: '✨',
@@ -595,6 +601,143 @@ const Blocks = (function() {
                     block.content = { ...content, text: '' };
                     wrapper.innerHTML = '';
                     wrapper.appendChild(renderMathBlock(block, isEditable));
+                });
+                wrapper.appendChild(editBtn);
+            }
+        }
+        
+        return wrapper;
+    }
+    
+    /**
+     * Render a Mermaid diagram block
+     */
+    function renderMermaidBlock(block, isEditable = true) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'block-content mermaid-block';
+        
+        const content = typeof block.content === 'object' ? block.content : { text: block.content || '', diagramType: 'flowchart' };
+        
+        if (isEditable && (!content.text || content.text.trim() === '')) {
+            // Show input form for new diagram
+            const typeSelect = document.createElement('select');
+            typeSelect.className = 'mermaid-type-select';
+            typeSelect.innerHTML = `
+                <option value="flowchart">Flowchart</option>
+                <option value="sequence">Sequence Diagram</option>
+                <option value="class">Class Diagram</option>
+                <option value="state">State Diagram</option>
+                <option value="er">Entity Relationship</option>
+                <option value="gantt">Gantt Chart</option>
+                <option value="pie">Pie Chart</option>
+                <option value="mindmap">Mindmap</option>
+            `;
+            typeSelect.style.cssText = 'width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary);';
+            
+            const input = document.createElement('textarea');
+            input.className = 'mermaid-input';
+            input.placeholder = 'Type Mermaid diagram code...\n\nExample:\ngraph TD;\n    A[Start] --> B{Decision};\n    B -->|Yes| C[Action 1];\n    B -->|No| D[Action 2];';
+            input.value = content.text || '';
+            input.style.cssText = 'width: 100%; min-height: 120px; padding: 12px; font-family: monospace; font-size: 13px; border: 1px solid var(--border-color); border-radius: var(--radius-md); resize: vertical; background: var(--bg-secondary);';
+            
+            const btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display: flex; gap: 8px; margin-top: 8px;';
+            
+            const renderBtn = document.createElement('button');
+            renderBtn.className = 'ai-image-btn primary';
+            renderBtn.textContent = 'Render Diagram';
+            
+            const templatesBtn = document.createElement('button');
+            templatesBtn.className = 'ai-image-btn';
+            templatesBtn.textContent = 'Templates';
+            
+            renderBtn.addEventListener('click', () => {
+                const diagramText = input.value.trim();
+                if (diagramText) {
+                    block.content = { text: diagramText, diagramType: typeSelect.value };
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderMermaidBlock(block, isEditable));
+                    if (window.Editor) window.Editor.savePage();
+                }
+            });
+            
+            templatesBtn.addEventListener('click', () => {
+                const templates = {
+                    flowchart: `graph TD
+    A[Start] --> B{Is it?}
+    B -->|Yes| C[OK]
+    C --> D[Rethink]
+    D --> B
+    B ---->|No| E[End]`,
+                    sequence: `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello Bob, how are you?
+    B-->>A: Great!`,
+                    class: `classDiagram
+    class Animal {
+        +String name
+        +makeSound()
+    }
+    class Dog {
+        +fetch()
+    }
+    Animal <|-- Dog`,
+                    mindmap: `mindmap
+  root((mindmap))
+    Origins
+      Long history
+    Research
+      On effectiveness`
+                };
+                input.value = templates[typeSelect.value] || templates.flowchart;
+            });
+            
+            btnRow.appendChild(renderBtn);
+            btnRow.appendChild(templatesBtn);
+            
+            wrapper.appendChild(typeSelect);
+            wrapper.appendChild(input);
+            wrapper.appendChild(btnRow);
+            setTimeout(() => input.focus(), 0);
+        } else {
+            // Render the diagram
+            const diagramContainer = document.createElement('div');
+            diagramContainer.className = 'mermaid-diagram-container';
+            diagramContainer.style.cssText = 'background: var(--bg-secondary); padding: 16px; border-radius: var(--radius-md); overflow-x: auto;';
+            
+            const diagramId = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            
+            const mermaidDiv = document.createElement('div');
+            mermaidDiv.className = 'mermaid';
+            mermaidDiv.id = diagramId;
+            mermaidDiv.textContent = content.text || '';
+            
+            diagramContainer.appendChild(mermaidDiv);
+            wrapper.appendChild(diagramContainer);
+            
+            // Render using Mermaid
+            if (typeof mermaid !== 'undefined') {
+                setTimeout(() => {
+                    try {
+                        mermaid.run({ querySelector: '#' + diagramId });
+                    } catch (err) {
+                        diagramContainer.innerHTML = `<div style="color: red; padding: 16px;">Error rendering diagram: ${err.message}</div><pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(content.text || '')}</pre>`;
+                    }
+                }, 100);
+            } else {
+                diagramContainer.innerHTML = `<pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(content.text || '')}</pre><div style="color: var(--text-muted); margin-top: 8px; font-size: 12px;">Mermaid library not loaded</div>`;
+            }
+            
+            if (isEditable) {
+                const editBtn = document.createElement('button');
+                editBtn.className = 'ai-image-btn';
+                editBtn.textContent = 'Edit';
+                editBtn.style.marginTop = '8px';
+                editBtn.addEventListener('click', () => {
+                    block.content = { ...content, text: '' };
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderMermaidBlock(block, isEditable));
                 });
                 wrapper.appendChild(editBtn);
             }
@@ -1550,6 +1693,7 @@ const Blocks = (function() {
             callout: renderCalloutBlock,
             code: renderCodeBlock,
             math: renderMathBlock,
+            mermaid: renderMermaidBlock,
             image: renderImageBlock,
             ai_image: renderAIImageBlock,
             bookmark: renderBookmarkBlock,

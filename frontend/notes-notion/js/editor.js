@@ -454,6 +454,25 @@ const Editor = (function() {
             blockEl.classList.add(`color-${block.color}`);
         }
         
+        // Add block button (+) on row - Click to add below
+        const rowAddBtn = document.createElement('button');
+        rowAddBtn.className = 'block-add-btn';
+        rowAddBtn.innerHTML = '+';
+        rowAddBtn.title = 'Add block below (click) / Drag to move';
+        rowAddBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            insertBlockAfter(block.id, 'text');
+            // Focus the new block
+            setTimeout(() => {
+                const newBlockEl = editorContainer.querySelector(`[data-block-id="${block.id}"]`)?.nextElementSibling;
+                if (newBlockEl && newBlockEl.classList.contains('block')) {
+                    const input = newBlockEl.querySelector('.block-input');
+                    if (input) input.focus();
+                }
+            }, 50);
+        });
+        blockEl.appendChild(rowAddBtn);
+        
         // Drag handle
         const handle = document.createElement('div');
         handle.className = 'block-handle';
@@ -1320,15 +1339,12 @@ const Editor = (function() {
         const newBlock = Blocks.createBlock(type, content);
         currentPage.blocks.push(newBlock);
         
-        // Hide add block hint if visible
-        const addBlockHint = document.getElementById('add-block-hint');
-        if (addBlockHint) {
-            addBlockHint.style.display = 'none';
-        }
-        
         // Re-render
         const blockEl = renderBlockElement(newBlock);
         editorContainer.appendChild(blockEl);
+        
+        // Update empty state (will show hint again since we have blocks)
+        updateEmptyState();
         
         // Focus the new block
         setTimeout(() => focusBlock(newBlock.id), 0);

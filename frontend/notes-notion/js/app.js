@@ -111,6 +111,16 @@
         // Initialize blocks
         console.log('📦 Initializing blocks...');
         
+        // Initialize Mermaid
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: document.body.getAttribute('data-theme') === 'dark' ? 'dark' : 'default',
+                securityLevel: 'loose'
+            });
+            console.log('📊 Mermaid diagrams ready');
+        }
+        
         // Initialize storage
         console.log('💾 Storage ready');
         

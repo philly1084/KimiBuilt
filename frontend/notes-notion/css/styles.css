@@ -117,6 +117,51 @@ body {
 .sidebar.collapsed {
     width: var(--sidebar-collapsed-width);
     border-right: none;
+    overflow: visible; /* Allow handle to show */
+}
+
+/* Sidebar Handle - Visible when collapsed */
+.sidebar-handle {
+    position: fixed;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 60px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-left: none;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 100;
+    box-shadow: var(--shadow-md);
+    transition: all 0.2s;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.sidebar.collapsed + .sidebar-handle,
+.sidebar.collapsed ~ .sidebar-handle {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sidebar-handle:hover {
+    background: var(--bg-hover);
+    width: 28px;
+}
+
+.sidebar-handle svg {
+    color: var(--text-secondary);
+    transform: rotate(180deg);
+    transition: transform 0.2s;
+}
+
+.sidebar-handle:hover svg {
+    color: var(--accent-color);
 }
 
 .sidebar-header {
@@ -688,6 +733,42 @@ body {
     min-height: 0;
 }
 
+/* Add Block Hint - At bottom of editor */
+.add-block-hint {
+    max-width: var(--content-max-width);
+    width: 100%;
+    margin: 0 auto;
+    padding: 16px var(--content-padding);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.add-block-hint-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    opacity: 0.6;
+}
+
+.add-block-hint:hover .add-block-hint-btn {
+    opacity: 1;
+}
+
+.add-block-hint-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
 /* Block Base Styles */
 .block {
     position: relative;
@@ -714,6 +795,41 @@ body {
 .block.drag-over {
     background: var(--bg-drag-over);
     border: 2px dashed var(--accent-color);
+}
+
+/* Add Block Button (+) - Per row add button */
+.block-add-btn {
+    position: absolute;
+    left: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    transition: all 0.15s;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    user-select: none;
+}
+
+.block:hover .block-add-btn {
+    opacity: 0.6;
+}
+
+.block-add-btn:hover {
+    opacity: 1 !important;
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: white;
 }
 
 /* Block Handle (⋮⋮) - IMPROVED: Better visibility */
