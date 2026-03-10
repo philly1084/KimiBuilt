@@ -230,37 +230,29 @@ const AIIntegration = (function() {
     }
     
     /**
-     * Setup selection toolbar (Ask AI on text select)
+     * Setup selection toolbar (DISABLED - now handled by AI Assistant widget)
+     * The new AI Assistant in bottom right handles text selection automatically
      */
     function setupSelectionToolbar() {
-        document.addEventListener('selectionchange', debounce(() => {
-            handleSelectionChange();
-        }, 100));
-        
-        // Also handle mouseup for immediate response
-        document.addEventListener('mouseup', () => {
-            setTimeout(handleSelectionChange, 10);
-        });
+        // Selection toolbar removed - functionality moved to AI Assistant widget
+        // Text selection is now tracked by AIAssistant module
     }
     
     /**
-     * Handle text selection change
+     * Handle text selection change (DISABLED)
      */
     function handleSelectionChange() {
-        const selection = window.getSelection();
-        const text = selection.toString().trim();
-        
-        if (text.length > 0 && text.split(' ').length >= 2) {
-            showSelectionToolbar(selection);
-        } else {
-            hideSelectionToolbar();
-        }
+        // Disabled - AI Assistant widget now handles text selection
     }
     
     /**
      * Show selection toolbar
      */
     function showSelectionToolbar(selection) {
+        // DISABLED - Selection toolbar replaced by AI Assistant widget
+        return;
+        
+        /* Old implementation disabled
         hideSelectionToolbar();
         
         const range = selection.getRangeAt(0);
@@ -351,6 +343,7 @@ const AIIntegration = (function() {
         setTimeout(() => {
             document.addEventListener('click', closeToolbar);
         }, 0);
+        */ /* End of old implementation */
     }
     
     /**

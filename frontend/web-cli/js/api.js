@@ -233,6 +233,36 @@ class WebCLIAPI {
         }
     }
 
+    /**
+     * Simple non-streaming message send (for compatibility)
+     * Collects all streaming chunks and returns complete response
+     */
+    async sendMessage(message, onChunk = null, model = null) {
+        const chunks = [];
+        let fullContent = '';
+        let tokens = 0;
+        
+        for await (const chunk of this.streamChat(message, model)) {
+            if (chunk.type === 'delta') {
+                fullContent += chunk.content;
+                tokens += 1; // Approximate
+                if (onChunk) {
+                    onChunk(chunk);
+                }
+            } else if (chunk.type === 'error') {
+                throw new Error(chunk.error);
+            } else if (chunk.type === 'done') {
+                break;
+            }
+        }
+        
+        return {
+            content: fullContent,
+            tokens: tokens,
+            sessionId: this.sessionId
+        };
+    }
+
     async sendCanvasRequest(message, canvasType = 'document', existingContent = '') {
         const baseUrl = API_BASE_URL.replace('/v1', '');
         
@@ -342,6 +372,11 @@ class WebCLIAPI {
 
     setModel(model) {
         this.currentModel = model;
+    }
+
+    // Alias for checkHealth to match app expectations
+    healthCheck() {
+        return this.checkHealth();
     }
 
     clearSession() {

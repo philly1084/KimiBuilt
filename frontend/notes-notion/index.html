@@ -502,29 +502,59 @@
     <!-- OpenAI SDK (optional - will use fetch fallback if blocked) -->
     <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js" crossorigin="anonymous" async></script>
     <!-- Import/Export Libraries -->
-    <!-- AI Assistant Widget -->
+    <!-- AI Assistant Widget - Bottom Right -->
     <div id="ai-assistant-widget" class="ai-assistant-widget">
+        <!-- Header - Click to collapse/expand -->
         <div class="ai-assistant-header" onclick="AIAssistant.toggleCollapse()">
             <div class="ai-assistant-title">
                 <span class="sparkle">✨</span>
-                Ask AI
+                <span class="title-text">Ask AI</span>
             </div>
             <div class="ai-assistant-actions">
-                <button class="ai-assistant-btn" onclick="event.stopPropagation(); AIAssistant.toggleCollapse()" title="Minimize">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="ai-assistant-btn minimize-btn" onclick="event.stopPropagation(); AIAssistant.minimize()" title="Minimize">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M19 9l-7 7-7-7"/>
                     </svg>
                 </button>
             </div>
         </div>
         
-        <div class="ai-assistant-content">
-            <!-- Selected Context -->
-            <div class="ai-context-section">
-                <div class="ai-context-label">Selected Context</div>
-                <div id="ai-context-blocks" class="ai-context-blocks">
-                    <div class="ai-context-empty">Select blocks or text for context</div>
+        <!-- Context References Bar -->
+        <div id="ai-context-references" class="ai-context-references" style="display: none;">
+            <!-- References will appear here -->
+        </div>
+        
+        <!-- Add Context Button -->
+        <div class="ai-assistant-content" style="padding: 8px 12px;">
+            <button class="ai-add-context-btn" onclick="AIAssistant.showContextMenu()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add Context
+            </button>
+        </div>
+        
+        <!-- Context Selector Menu (hidden by default) -->
+        <div id="ai-context-menu" class="ai-context-menu" style="display: none;">
+            <div class="ai-context-menu-header">Select Context Source</div>
+            
+            <div class="ai-context-menu-section">
+                <div class="ai-context-menu-item" onclick="AIAssistant.addCurrentPageContext()">
+                    <span class="icon">📄</span>
+                    <span>Current Page</span>
+                    <span class="check">✓</span>
                 </div>
+            </div>
+            
+            <div class="ai-context-menu-section" id="ai-context-pages-section">
+                <div class="ai-context-menu-header" style="font-size: 11px; padding: 8px 16px;">Other Pages</div>
+                <!-- Pages will be listed here -->
+            </div>
+            
+            <div class="ai-context-menu-section" id="ai-context-sections-section">
+                <div class="ai-context-menu-header" style="font-size: 11px; padding: 8px 16px;">Sections</div>
+                <!-- Sections will be listed here -->
             </div>
         </div>
         
@@ -570,17 +600,10 @@
         </div>
     </div>
 
-    <!-- AI Assistant Toggle (shown when collapsed) -->
-    <button id="ai-assistant-toggle" class="ai-assistant-toggle" onclick="AIAssistant.toggleCollapse()" style="display: none;">
-        <span class="sparkle">✨</span>
-        Ask AI
+    <!-- AI Assistant Toggle Button (Floating, shown when minimized) -->
+    <button id="ai-assistant-toggle" class="ai-assistant-toggle" onclick="AIAssistant.restore()" title="Ask AI">
+        ✨
     </button>
-
-    <!-- Context Mode Indicator -->
-    <div id="context-mode-indicator" class="context-mode-indicator" style="display: none;">
-        Select blocks for context
-        <button class="close" onclick="AIAssistant.exitContextMode()">×</button>
-    </div>
 
     <script src="https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js"></script>
     <script src="https://unpkg.com/docx@8.5.0/build/index.umd.min.js"></script>

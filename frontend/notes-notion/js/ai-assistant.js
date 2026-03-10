@@ -1,26 +1,29 @@
 /**
- * AI Assistant Widget Module
- * Provides contextual AI assistance for notes
+ * AI Assistant Widget Module - Bottom Right Version
+ * Provides contextual AI assistance with smart context selection
  */
 
 // API Base URL
-const API_BASE = (function() {
+const AI_BASE_URL = (function() {
     const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
     const currentHost = window.location.hostname;
     const currentOrigin = `${window.location.protocol}//${window.location.host}`;
-    return localHostnames.has(currentHost)
-        ? 'http://localhost:3000'
-        : currentOrigin;
+    return localHostnames.has(currentHost) ? 'http://localhost:3000' : currentOrigin;
 })();
 
 const AIAssistant = (function() {
     let isCollapsed = false;
-    let isContextMode = false;
-    let selectedBlocks = [];
+    let isMinimized = false;
+    let contextMenuOpen = false;
+    let references = []; // Current context references
     let lastResponse = '';
+    let selectedText = null; // Currently highlighted text
+    
+    // DOM Elements
     let widget = null;
     let toggle = null;
-    let contextBlocks = null;
+    let contextMenu = null;
+    let contextRefs = null;
     let input = null;
     let responseArea = null;
     let processingArea = null;
@@ -31,7 +34,8 @@ const AIAssistant = (function() {
     function init() {
         widget = document.getElementById('ai-assistant-widget');
         toggle = document.getElementById('ai-assistant-toggle');
-        contextBlocks = document.getElementById('ai-context-blocks');
+        contextMenu = document.getElementById('ai-context-menu');
+        contextRefs = document.getElementById('ai-context-references');
         input = document.getElementById('ai-assistant-input');
         responseArea = document.getElementById('ai-response-area');
         processingArea = document.getElementById('ai-processing');
@@ -40,7 +44,7 @@ const AIAssistant = (function() {
         
         setupEventListeners();
         loadState();
-        updateContextDisplay();
+        updateReferencesDisplay();
     }
     
     /**
@@ -62,138 +66,361 @@ const AIAssistant = (function() {
             });
         }
         
-        // Listen for block selection from editor
-        document.addEventListener('blockSelected', (e) => {
-            if (isContextMode) {
-                toggleBlockSelection(e.detail.blockId, e.detail.blockType, e.detail.preview);
+        // Text selection tracking
+        document.addEventListener('mouseup', handleTextSelection);
+        document.addEventListener('keyup', handleTextSelection);
+        
+        // Close context menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (contextMenu && !contextMenu.contains(e.target) && !e.target.closest('.ai-add-context-btn')) {
+                hideContextMenu();
             }
         });
         
-        // Listen for text selection
-        document.addEventListener('selectionchange', () => {
-            const selection = window.getSelection();
-            if (selection.toString().trim() && !isContextMode) {
-                // Could auto-add text selection as context
+        // Keyboard shortcut to open AI assistant (Ctrl+Shift+A)
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+                e.preventDefault();
+                restore();
             }
         });
     }
     
     /**
-     * Toggle widget collapse state
+     * Handle text selection
+     */
+    function handleTextSelection() {
+        const selection = window.getSelection();
+        const text = selection.toString().trim();
+        
+        if (text && text.length > 10) {
+            selectedText = {
+                text: text,
+                preview: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+                source: getCurrentPageTitle()
+            };
+            
+            // Auto-add as a highlight reference if not already present
+            const exists = references.some(ref => 
+                ref.type === 'highlight' && ref.text === text
+            );
+            
+            if (!exists) {
+                addReference({
+                    type: 'highlight',
+                    id: 'highlight-' + Date.now(),
+                    text: text,
+                    preview: selectedText.preview,
+                    source: selectedText.source
+                });
+            }
+        }
+    }
+    
+    /**
+     * Get current page title
+     */
+    function getCurrentPageTitle() {
+        const titleInput = document.getElementById('page-title');
+        return titleInput ? titleInput.value || 'Untitled' : 'Current Page';
+    }
+    
+    /**
+     * Toggle widget collapsed state (compact view)
      */
     function toggleCollapse() {
         isCollapsed = !isCollapsed;
         
         if (isCollapsed) {
             widget.classList.add('collapsed');
-            toggle.style.display = 'flex';
         } else {
             widget.classList.remove('collapsed');
-            toggle.style.display = 'none';
         }
         
         saveState();
     }
     
     /**
-     * Enter context selection mode
+     * Minimize to just the floating button
      */
-    function enterContextMode() {
-        isContextMode = true;
-        document.body.classList.add('block-context-mode');
-        document.getElementById('context-mode-indicator').style.display = 'flex';
-        
-        // Show checkboxes on blocks
-        const blocks = document.querySelectorAll('.block');
-        blocks.forEach(block => {
-            addSelectionCheckbox(block);
-        });
+    function minimize() {
+        isMinimized = true;
+        widget.classList.add('minimized');
+        toggle.style.display = 'flex';
+        hideContextMenu();
+        saveState();
     }
     
     /**
-     * Exit context selection mode
+     * Restore from minimized state
      */
-    function exitContextMode() {
-        isContextMode = false;
-        document.body.classList.remove('block-context-mode');
-        document.getElementById('context-mode-indicator').style.display = 'none';
+    function restore() {
+        isMinimized = false;
+        widget.classList.remove('minimized');
+        widget.classList.remove('collapsed');
+        toggle.style.display = 'none';
         
-        // Remove checkboxes
-        document.querySelectorAll('.block-select-checkbox').forEach(cb => cb.remove());
+        if (input) {
+            setTimeout(() => input.focus(), 100);
+        }
+        
+        saveState();
     }
     
     /**
-     * Add selection checkbox to a block
+     * Show context selector menu
      */
-    function addSelectionCheckbox(blockEl) {
-        if (blockEl.querySelector('.block-select-checkbox')) return;
+    function showContextMenu() {
+        if (!contextMenu) return;
         
-        const checkbox = document.createElement('div');
-        checkbox.className = 'block-select-checkbox';
-        checkbox.onclick = (e) => {
-            e.stopPropagation();
-            const blockId = blockEl.dataset.blockId;
-            const blockType = blockEl.dataset.blockType;
-            const preview = blockEl.textContent.substring(0, 50) + '...';
-            toggleBlockSelection(blockId, blockType, preview);
-            blockEl.classList.toggle('selected');
-        };
+        contextMenu.style.display = 'block';
+        contextMenuOpen = true;
         
-        blockEl.appendChild(checkbox);
+        // Populate pages and sections
+        populateContextMenu();
     }
     
     /**
-     * Toggle block selection
+     * Hide context selector menu
      */
-    function toggleBlockSelection(blockId, blockType, preview) {
-        const index = selectedBlocks.findIndex(b => b.id === blockId);
+    function hideContextMenu() {
+        if (!contextMenu) return;
+        contextMenu.style.display = 'none';
+        contextMenuOpen = false;
+    }
+    
+    /**
+     * Populate context menu with available pages and sections
+     */
+    function populateContextMenu() {
+        const pagesSection = document.getElementById('ai-context-pages-section');
+        const sectionsSection = document.getElementById('ai-context-sections-section');
         
-        if (index >= 0) {
-            selectedBlocks.splice(index, 1);
-        } else {
-            selectedBlocks.push({
-                id: blockId,
-                type: blockType,
-                preview: preview || 'Block content'
+        // Get all pages from sidebar
+        const pages = getAllPages();
+        if (pagesSection && pages.length > 0) {
+            const pagesList = pages.filter(p => !p.isCurrent).map(page => {
+                const isSelected = references.some(ref => ref.type === 'page' && ref.id === page.id);
+                return `
+                    <div class="ai-context-menu-item ${isSelected ? 'selected' : ''}" 
+                         onclick="AIAssistant.togglePageReference('${page.id}', '${escapeJs(page.title)}')">
+                        <span class="icon">📄</span>
+                        <span>${escapeHtml(page.title)}</span>
+                        <span class="check">✓</span>
+                    </div>
+                `;
+            }).join('');
+            
+            pagesSection.innerHTML = pagesList ? 
+                '<div class="ai-context-menu-header" style="font-size: 11px; padding: 8px 16px;">Other Pages</div>' + pagesList : '';
+        }
+        
+        // Get sections from current page
+        const sections = getPageSections();
+        if (sectionsSection) {
+            const sectionsList = sections.map(section => {
+                const isSelected = references.some(ref => ref.type === 'section' && ref.id === section.id);
+                return `
+                    <div class="ai-context-menu-item ${isSelected ? 'selected' : ''}" 
+                         onclick="AIAssistant.toggleSectionReference('${section.id}', '${escapeJs(section.title)}', '${section.type}')">
+                        <span class="icon">${getBlockIcon(section.type)}</span>
+                        <span>${escapeHtml(section.preview)}</span>
+                        <span class="check">✓</span>
+                    </div>
+                `;
+            }).join('');
+            
+            sectionsSection.innerHTML = sectionsList ? 
+                '<div class="ai-context-menu-header" style="font-size: 11px; padding: 8px 16px;">Sections</div>' + sectionsList : '';
+        }
+    }
+    
+    /**
+     * Get all pages from the sidebar/storage
+     */
+    function getAllPages() {
+        const pages = [];
+        const currentPageId = window.Editor?.getCurrentPage?.()?.id;
+        
+        // Try to get from Storage if available
+        if (window.Storage) {
+            const allPages = window.Storage.getAllPages?.() || [];
+            allPages.forEach(page => {
+                pages.push({
+                    id: page.id,
+                    title: page.title || 'Untitled',
+                    isCurrent: page.id === currentPageId
+                });
             });
         }
         
-        updateContextDisplay();
+        // Fallback: get from sidebar page tree
+        if (pages.length === 0) {
+            const pageTree = document.getElementById('page-tree');
+            if (pageTree) {
+                pageTree.querySelectorAll('.page-tree-item').forEach(item => {
+                    const pageId = item.dataset.pageId;
+                    const titleEl = item.querySelector('.page-title-text');
+                    if (pageId && titleEl) {
+                        pages.push({
+                            id: pageId,
+                            title: titleEl.textContent || 'Untitled',
+                            isCurrent: pageId === currentPageId
+                        });
+                    }
+                });
+            }
+        }
+        
+        return pages;
     }
     
     /**
-     * Update the context display in the widget
+     * Get sections from current page
      */
-    function updateContextDisplay() {
-        if (!contextBlocks) return;
+    function getPageSections() {
+        const sections = [];
+        const editor = document.getElementById('editor');
         
-        if (selectedBlocks.length === 0) {
-            contextBlocks.innerHTML = '<div class="ai-context-empty">Select blocks or text for context</div>';
+        if (editor) {
+            editor.querySelectorAll('.block').forEach((block, index) => {
+                const type = block.dataset.blockType;
+                const blockId = block.dataset.blockId;
+                const input = block.querySelector('.block-input');
+                const content = input ? input.textContent : '';
+                
+                // Only include headings and substantial blocks
+                if (type && (type.startsWith('heading') || content.length > 20)) {
+                    sections.push({
+                        id: blockId,
+                        type: type,
+                        title: content.substring(0, 50),
+                        preview: content.substring(0, 60) + (content.length > 60 ? '...' : '')
+                    });
+                }
+            });
+        }
+        
+        return sections;
+    }
+    
+    /**
+     * Add current page as context
+     */
+    function addCurrentPageContext() {
+        const currentPage = window.Editor?.getCurrentPage?.();
+        if (currentPage) {
+            const pageRef = {
+                type: 'page',
+                id: currentPage.id,
+                title: currentPage.title || 'Untitled',
+                preview: 'Full page content'
+            };
+            
+            // Toggle
+            const existing = references.findIndex(ref => ref.type === 'page' && ref.id === currentPage.id);
+            if (existing >= 0) {
+                references.splice(existing, 1);
+            } else {
+                addReference(pageRef);
+            }
+            
+            populateContextMenu(); // Refresh
+        }
+    }
+    
+    /**
+     * Toggle page reference
+     */
+    function togglePageReference(pageId, pageTitle) {
+        const existing = references.findIndex(ref => ref.type === 'page' && ref.id === pageId);
+        
+        if (existing >= 0) {
+            references.splice(existing, 1);
+        } else {
+            addReference({
+                type: 'page',
+                id: pageId,
+                title: pageTitle,
+                preview: 'Full page'
+            });
+        }
+        
+        populateContextMenu(); // Refresh
+    }
+    
+    /**
+     * Toggle section reference
+     */
+    function toggleSectionReference(blockId, preview, blockType) {
+        const existing = references.findIndex(ref => ref.id === blockId);
+        
+        if (existing >= 0) {
+            references.splice(existing, 1);
+        } else {
+            addReference({
+                type: 'section',
+                id: blockId,
+                blockType: blockType,
+                preview: preview
+            });
+        }
+        
+        populateContextMenu(); // Refresh
+    }
+    
+    /**
+     * Add a reference to context
+     */
+    function addReference(ref) {
+        references.push(ref);
+        updateReferencesDisplay();
+        
+        // Expand widget if minimized
+        if (isMinimized) {
+            restore();
+        }
+    }
+    
+    /**
+     * Remove a reference from context
+     */
+    function removeReference(refId) {
+        references = references.filter(ref => ref.id !== refId);
+        updateReferencesDisplay();
+    }
+    
+    /**
+     * Update the references display bar
+     */
+    function updateReferencesDisplay() {
+        if (!contextRefs) return;
+        
+        if (references.length === 0) {
+            contextRefs.style.display = 'none';
             return;
         }
         
-        contextBlocks.innerHTML = selectedBlocks.map(block => `
-            <div class="ai-context-block" data-block-id="${block.id}">
-                <span class="block-type-icon">${getBlockIcon(block.type)}</span>
-                <span class="block-preview">${escapeHtml(block.preview)}</span>
-                <button class="remove-context" onclick="AIAssistant.removeFromContext('${block.id}')" title="Remove">×</button>
+        contextRefs.style.display = 'flex';
+        contextRefs.innerHTML = references.map(ref => `
+            <div class="ai-context-ref ${ref.type}">
+                <span class="ref-type">${getRefLabel(ref)}</span>
+                <span class="ref-preview">${escapeHtml(ref.preview)}</span>
+                <span class="remove" onclick="AIAssistant.removeReference('${ref.id}')">×</span>
             </div>
         `).join('');
     }
     
     /**
-     * Remove block from context
+     * Get label for reference type
      */
-    function removeFromContext(blockId) {
-        selectedBlocks = selectedBlocks.filter(b => b.id !== blockId);
-        
-        // Update block UI
-        const blockEl = document.querySelector(`.block[data-block-id="${blockId}"]`);
-        if (blockEl) {
-            blockEl.classList.remove('selected');
-        }
-        
-        updateContextDisplay();
+    function getRefLabel(ref) {
+        const labels = {
+            page: '📄',
+            section: '§',
+            highlight: '"'
+        };
+        return labels[ref.type] || '•';
     }
     
     /**
@@ -221,32 +448,41 @@ const AIAssistant = (function() {
     }
     
     /**
+     * Clear all references
+     */
+    function clearReferences() {
+        references = [];
+        selectedText = null;
+        updateReferencesDisplay();
+    }
+    
+    /**
      * Send request to AI
      */
     async function send() {
         const prompt = input.value.trim();
         if (!prompt) return;
         
-        // Get context content
+        // Build context from references
         const context = await buildContext();
         
         showProcessing('Thinking...');
         hideResponse();
+        hideContextMenu();
         
         try {
             const fullPrompt = buildPrompt(prompt, context);
             
-            const response = await fetch(`${API_BASE}/v1/chat/completions` || '/v1/chat/completions', {
+            const response = await fetch(`${AI_BASE_URL}/v1/chat/completions`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     model: window.Editor?.getCurrentModel?.() || 'gpt-4o',
                     messages: [
                         {
                             role: 'system',
-                            content: `You are an AI assistant helping edit a document. You understand note section types like headings, lists, code blocks, etc. Respond with the modified content only, no explanations unless asked.`
+                            content: `You are an AI assistant helping edit notes. You understand note section types like headings, lists, code blocks, etc. 
+Respond with the modified content only. When given context references, use them to inform your response.`
                         },
                         { role: 'user', content: fullPrompt }
                     ],
@@ -279,9 +515,7 @@ const AIAssistant = (function() {
                                 result += content;
                                 updateResponse(result, true);
                             }
-                        } catch (e) {
-                            // Ignore parse errors
-                        }
+                        } catch (e) {}
                     }
                 }
             }
@@ -297,18 +531,26 @@ const AIAssistant = (function() {
     }
     
     /**
-     * Build context from selected blocks
+     * Build context from references
      */
     async function buildContext() {
-        if (selectedBlocks.length === 0) return '';
-        
         const contextParts = [];
         
-        for (const block of selectedBlocks) {
-            const blockEl = document.querySelector(`.block[data-block-id="${block.id}"]`);
-            if (blockEl) {
-                const content = getBlockContent(blockEl);
-                contextParts.push(`[${block.type}]\n${content}`);
+        for (const ref of references) {
+            switch (ref.type) {
+                case 'page':
+                    const pageContent = await getPageContent(ref.id);
+                    contextParts.push(`[PAGE: ${ref.title}]\n${pageContent}`);
+                    break;
+                    
+                case 'section':
+                    const sectionContent = getSectionContent(ref.id);
+                    contextParts.push(`[SECTION: ${ref.blockType}]\n${sectionContent}`);
+                    break;
+                    
+                case 'highlight':
+                    contextParts.push(`[HIGHLIGHTED TEXT]\n"${ref.text}"`);
+                    break;
             }
         }
         
@@ -316,14 +558,39 @@ const AIAssistant = (function() {
     }
     
     /**
-     * Get content from a block element
+     * Get page content
      */
-    function getBlockContent(blockEl) {
-        const input = blockEl.querySelector('.block-input');
-        if (input) {
-            return input.innerText || input.textContent;
+    async function getPageContent(pageId) {
+        // Try to get from Storage
+        if (window.Storage) {
+            const page = window.Storage.getPage?.(pageId);
+            if (page && page.blocks) {
+                return page.blocks.map(b => extractBlockContent(b)).join('\n\n');
+            }
         }
-        return blockEl.textContent || '';
+        return '[Page content unavailable]';
+    }
+    
+    /**
+     * Get section content by block ID
+     */
+    function getSectionContent(blockId) {
+        const block = document.querySelector(`.block[data-block-id="${blockId}"]`);
+        if (block) {
+            const input = block.querySelector('.block-input');
+            return input ? input.textContent : '';
+        }
+        return '[Section unavailable]';
+    }
+    
+    /**
+     * Extract content from block object
+     */
+    function extractBlockContent(block) {
+        if (typeof block.content === 'object') {
+            return block.content.text || '';
+        }
+        return block.content || '';
     }
     
     /**
@@ -333,11 +600,11 @@ const AIAssistant = (function() {
         let fullPrompt = '';
         
         if (context) {
-            fullPrompt += `Context from the document:\n\n${context}\n\n`;
+            fullPrompt += `Context:\n${context}\n\n`;
         }
         
         fullPrompt += `Request: ${prompt}\n\n`;
-        fullPrompt += `Provide the response in the appropriate format for the content type.`;
+        fullPrompt += `Provide the response in appropriate format for the content type.`;
         
         return fullPrompt;
     }
@@ -347,35 +614,54 @@ const AIAssistant = (function() {
      */
     function quickAction(action) {
         const prompts = {
-            improve: 'Improve this content while keeping the same format and structure:',
-            expand: 'Expand this content with more details and examples:',
-            summarize: 'Summarize this content concisely:',
-            fix: 'Fix any grammar, spelling, or clarity issues in this content:'
+            improve: 'Improve this content while keeping the same structure:',
+            expand: 'Expand with more details and examples:',
+            summarize: 'Summarize concisely:',
+            fix: 'Fix grammar, spelling, and clarity issues:'
         };
+        
+        if (references.length === 0 && selectedText) {
+            // Use selected text if no references
+            addReference({
+                type: 'highlight',
+                id: 'highlight-' + Date.now(),
+                text: selectedText.text,
+                preview: selectedText.preview,
+                source: selectedText.source
+            });
+        }
         
         input.value = prompts[action] || '';
         input.focus();
-        
-        // Auto-resize
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 100) + 'px';
     }
     
     /**
-     * Insert response below selected blocks
+     * Insert response below current position or references
      */
     function insertBelow() {
         if (!lastResponse || !window.Editor) return;
         
-        const targetBlock = selectedBlocks[selectedBlocks.length - 1];
-        if (targetBlock) {
-            // Parse response and create appropriate blocks
-            const blocks = parseResponseToBlocks(lastResponse);
-            
-            let lastId = targetBlock.id;
+        // Find insertion point - after last referenced block or at end
+        let targetId = null;
+        const sectionRefs = references.filter(r => r.type === 'section');
+        if (sectionRefs.length > 0) {
+            targetId = sectionRefs[sectionRefs.length - 1].id;
+        }
+        
+        const blocks = parseResponseToBlocks(lastResponse);
+        
+        if (targetId) {
+            let lastId = targetId;
             blocks.forEach(block => {
-                const newBlock = window.Editor.insertBlockAfter(lastId, block.type, block.content);
+                const newBlock = window.Editor.insertBlockAfter?.(lastId, block.type, block.content);
                 if (newBlock) lastId = newBlock.id;
+            });
+        } else {
+            // Add at end
+            blocks.forEach(block => {
+                window.Editor.addBlockAtEnd?.(block.type, block.content);
             });
         }
         
@@ -383,30 +669,35 @@ const AIAssistant = (function() {
     }
     
     /**
-     * Replace selected blocks with response
+     * Replace referenced content with response
      */
     function replaceSelected() {
-        if (!lastResponse || !window.Editor || selectedBlocks.length === 0) return;
+        if (!lastResponse || !window.Editor) return;
         
-        const firstBlock = selectedBlocks[0];
-        const blocks = parseResponseToBlocks(lastResponse);
+        // Find first referenced section
+        const sectionRef = references.find(r => r.type === 'section');
+        const highlightRef = references.find(r => r.type === 'highlight');
         
-        // Replace first block
-        if (blocks.length > 0) {
-            window.Editor.updateBlockContent(firstBlock.id, blocks[0].content);
+        const targetId = sectionRef?.id;
+        
+        if (targetId) {
+            const blocks = parseResponseToBlocks(lastResponse);
             
-            // Insert remaining blocks after
-            let lastId = firstBlock.id;
-            blocks.slice(1).forEach(block => {
-                const newBlock = window.Editor.insertBlockAfter(lastId, block.type, block.content);
-                if (newBlock) lastId = newBlock.id;
-            });
+            if (blocks.length > 0) {
+                window.Editor.updateBlockContent?.(targetId, blocks[0].content);
+                
+                let lastId = targetId;
+                blocks.slice(1).forEach(block => {
+                    const newBlock = window.Editor.insertBlockAfter?.(lastId, block.type, block.content);
+                    if (newBlock) lastId = newBlock.id;
+                });
+            }
+        } else if (highlightRef) {
+            // For highlighted text, we'd need to find and replace in the block
+            // This is simplified - in practice would need more precise text replacement
+            showResponse('Replace text: Please manually replace the highlighted text with the response above.');
+            return;
         }
-        
-        // Remove other selected blocks
-        selectedBlocks.slice(1).forEach(block => {
-            window.Editor.deleteBlock(block.id);
-        });
         
         clearResponse();
     }
@@ -421,7 +712,6 @@ const AIAssistant = (function() {
         let currentText = [];
         
         for (const line of lines) {
-            // Code block detection
             if (line.startsWith('```')) {
                 if (currentCode) {
                     blocks.push({
@@ -468,7 +758,6 @@ const AIAssistant = (function() {
             }
         }
         
-        // Remaining text
         if (currentText.length) {
             blocks.push(...parseTextBlock(currentText.join('\n')));
         }
@@ -483,17 +772,12 @@ const AIAssistant = (function() {
         return blocks.length ? blocks : [{ type: 'text', content: text }];
     }
     
-    /**
-     * Parse text into paragraphs
-     */
     function parseTextBlock(text) {
         const paragraphs = text.split('\n\n').filter(p => p.trim());
         return paragraphs.map(p => ({ type: 'text', content: p.trim() }));
     }
     
-    /**
-     * Show processing state
-     */
+    // UI Helpers
     function showProcessing(text) {
         if (processingArea) {
             document.getElementById('ai-processing-text').textContent = text;
@@ -501,18 +785,10 @@ const AIAssistant = (function() {
         }
     }
     
-    /**
-     * Hide processing state
-     */
     function hideProcessing() {
-        if (processingArea) {
-            processingArea.style.display = 'none';
-        }
+        if (processingArea) processingArea.style.display = 'none';
     }
     
-    /**
-     * Update streaming response
-     */
     function updateResponse(text, streaming = false) {
         const responseEl = document.getElementById('ai-response');
         if (responseEl) {
@@ -521,78 +797,46 @@ const AIAssistant = (function() {
         }
     }
     
-    /**
-     * Show final response
-     */
     function showResponse(text) {
         updateResponse(text, false);
-        if (responseArea) {
-            responseArea.style.display = 'block';
-        }
+        if (responseArea) responseArea.style.display = 'block';
     }
     
-    /**
-     * Hide response area
-     */
     function hideResponse() {
-        if (responseArea) {
-            responseArea.style.display = 'none';
-        }
+        if (responseArea) responseArea.style.display = 'none';
     }
     
-    /**
-     * Clear response
-     */
     function clearResponse() {
         lastResponse = '';
         hideResponse();
         updateResponse('');
     }
     
-    /**
-     * Escape HTML
-     */
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
     
-    /**
-     * Save state to localStorage
-     */
+    function escapeJs(text) {
+        return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+    
     function saveState() {
+        localStorage.setItem('ai-assistant-minimized', isMinimized);
         localStorage.setItem('ai-assistant-collapsed', isCollapsed);
     }
     
-    /**
-     * Load state from localStorage
-     */
     function loadState() {
+        isMinimized = localStorage.getItem('ai-assistant-minimized') === 'true';
         isCollapsed = localStorage.getItem('ai-assistant-collapsed') === 'true';
-        if (isCollapsed) {
-            widget.classList.add('collapsed');
+        
+        if (isMinimized) {
+            widget.classList.add('minimized');
             toggle.style.display = 'flex';
+        } else if (isCollapsed) {
+            widget.classList.add('collapsed');
         }
-    }
-    
-    /**
-     * Add a block to context
-     */
-    function addToContext(blockId, blockType, preview) {
-        if (!selectedBlocks.find(b => b.id === blockId)) {
-            selectedBlocks.push({ id: blockId, type: blockType, preview });
-            updateContextDisplay();
-        }
-    }
-    
-    /**
-     * Clear all context
-     */
-    function clearContext() {
-        selectedBlocks = [];
-        document.querySelectorAll('.block.selected').forEach(el => el.classList.remove('selected'));
-        updateContextDisplay();
     }
     
     // Initialize on DOM ready
@@ -601,15 +845,19 @@ const AIAssistant = (function() {
     // Public API
     return {
         toggleCollapse,
-        enterContextMode,
-        exitContextMode,
-        toggleBlockSelection,
-        removeFromContext,
+        minimize,
+        restore,
+        showContextMenu,
+        hideContextMenu,
+        addCurrentPageContext,
+        togglePageReference,
+        toggleSectionReference,
+        addReference,
+        removeReference,
+        clearReferences,
         send,
         quickAction,
         insertBelow,
-        replaceSelected,
-        addToContext,
-        clearContext
+        replaceSelected
     };
 })();
