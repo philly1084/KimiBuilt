@@ -40,12 +40,31 @@ class UIHelpers {
 
         // Custom renderer for code blocks
         const renderer = new marked.Renderer();
+
+        const normalizeMarkedText = (value) => {
+            if (typeof value === 'string') return value;
+            if (value && typeof value === 'object') {
+                if (typeof value.text === 'string') return value.text;
+                if (typeof value.raw === 'string') return value.raw;
+            }
+            return value == null ? '' : String(value);
+        };
+
+        const normalizeMarkedLang = (value, fallback = 'text') => {
+            if (typeof value === 'string') return value || fallback;
+            if (value && typeof value === 'object') {
+                if (typeof value.lang === 'string') return value.lang || fallback;
+                if (typeof value.language === 'string') return value.language || fallback;
+            }
+            return fallback;
+        };
         
         renderer.code = (code, language) => {
-            const lang = language || 'text';
-            const escapedCode = this.escapeHtml(code);
+            const normalizedCode = normalizeMarkedText(code);
+            const lang = normalizeMarkedLang(language);
+            const escapedCode = this.escapeHtml(normalizedCode);
             const prismLang = this.getPrismLanguage(lang);
-            const lineCount = code.split('\n').length;
+            const lineCount = normalizedCode.split('\n').length;
             
             // Generate line numbers for code blocks with more than 3 lines
             let lineNumbersHtml = '';
@@ -60,7 +79,7 @@ class UIHelpers {
                     <div class="code-header">
                         <span class="code-language">${lang}</span>
                         <div class="code-actions">
-                            <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${this.escapeHtmlAttr(code)}" aria-label="Copy code to clipboard">
+                            <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${this.escapeHtmlAttr(normalizedCode)}" aria-label="Copy code to clipboard">
                                 <i data-lucide="copy" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                 <span>Copy</span>
                             </button>
@@ -73,7 +92,7 @@ class UIHelpers {
         };
 
         renderer.codespan = (code) => {
-            return `<code>${this.escapeHtml(code)}</code>`;
+            return `<code>${this.escapeHtml(normalizeMarkedText(code))}</code>`;
         };
 
         renderer.link = (href, title, text) => {
@@ -132,12 +151,12 @@ class UIHelpers {
 
     escapeHtml(text) {
         const div = document.createElement('div');
-        div.textContent = text;
+        div.textContent = text == null ? '' : String(text);
         return div.innerHTML;
     }
 
     escapeHtmlAttr(text) {
-        return text
+        return String(text == null ? '' : text)
             .replace(/&/g, '&amp;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;')
@@ -2059,6 +2078,7 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
+
 
 
 

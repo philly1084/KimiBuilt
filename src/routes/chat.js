@@ -7,6 +7,21 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require(
 
 const router = Router();
 
+function inferOutputFormatFromText(text = '') {
+    const normalized = String(text || '').toLowerCase();
+    const checks = [
+        ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
+        ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
+        ['pdf', /\bpdf\b/],
+        ['docx', /\b(docx|word document)\b/],
+        ['xml', /\bxml\b/],
+        ['mermaid', /\bmermaid\b/],
+        ['html', /\bhtml\b/],
+    ];
+
+    return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
+}
+
 const chatSchema = {
     message: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
@@ -37,9 +52,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
 
         const contextMessages = await memoryService.process(sessionId, message);
+        const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            'You are a helpful AI assistant. Be concise and informative.',
+            effectiveOutputFormat
+                ? `You are the KimiBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
+                : 'You are a helpful AI assistant. Be concise and informative.',
             artifactIds,
         );
 
@@ -71,12 +89,15 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     memoryService.rememberResponse(sessionId, fullText);
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
+                        session,
                         mode: 'chat',
-                        outputFormat,
+                        outputFormat: effectiveOutputFormat,
                         content: fullText,
+                        prompt: message,
                         title: 'chat-output',
                         responseId: event.response.id,
                         artifactIds,
+                        model,
                     });
                     res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts })}\n\n`);
                 }
@@ -105,12 +126,15 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         memoryService.rememberResponse(sessionId, outputText);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
+            session,
             mode: 'chat',
-            outputFormat,
+            outputFormat: effectiveOutputFormat,
             content: outputText,
+            prompt: message,
             title: 'chat-output',
             responseId: response.id,
             artifactIds,
+            model,
         });
 
         res.json({

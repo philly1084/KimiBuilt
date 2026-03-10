@@ -71,12 +71,16 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         const structured = parseNotationResponse(outputText);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
+            session,
             mode: 'notation',
             outputFormat,
             content: structured.result,
+            prompt: notation,
             title: `notation-${helperMode}`,
             responseId: response.id,
             artifactIds,
+            existingContent: context,
+            model,
         });
 
         res.json({

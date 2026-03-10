@@ -3,6 +3,21 @@ const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 
+function inferOutputFormatFromText(text = '') {
+    const normalized = String(text || '').toLowerCase();
+    const checks = [
+        ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
+        ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
+        ['pdf', /\bpdf\b/],
+        ['docx', /\b(docx|word document)\b/],
+        ['xml', /\bxml\b/],
+        ['mermaid', /\bmermaid\b/],
+        ['html', /\bhtml\b/],
+    ];
+
+    return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
+}
+
 function setupWebSocket(wss) {
     wss.on('connection', (ws) => {
         console.log('[WS] Client connected');
@@ -63,9 +78,12 @@ async function handleChat(ws, session, payload = {}) {
     }
 
     const contextMessages = await memoryService.process(session.id, message);
+    const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
     const instructions = await buildInstructionsWithArtifacts(
         session,
-        'You are a helpful AI assistant. Be concise and informative.',
+        effectiveOutputFormat
+            ? `You are the KimiBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
+            : 'You are a helpful AI assistant. Be concise and informative.',
         artifactIds,
     );
 
@@ -91,12 +109,15 @@ async function handleChat(ws, session, payload = {}) {
             memoryService.rememberResponse(session.id, fullText);
             const artifacts = await maybeGenerateOutputArtifact({
                 sessionId: session.id,
+                session,
                 mode: 'chat',
-                outputFormat,
+                outputFormat: effectiveOutputFormat,
                 content: fullText,
+                prompt: message,
                 title: 'chat-output',
                 responseId: event.response.id,
                 artifactIds,
+                model,
             });
             ws.send(JSON.stringify({
                 type: 'done',
@@ -149,12 +170,16 @@ async function handleCanvas(ws, session, payload = {}) {
     memoryService.rememberResponse(session.id, outputText);
     const artifacts = await maybeGenerateOutputArtifact({
         sessionId: session.id,
+        session,
         mode: 'canvas',
         outputFormat,
         content: outputText,
+        prompt: message,
         title: `canvas-${canvasType}`,
         responseId: response.id,
         artifactIds,
+        existingContent,
+        model,
     });
 
     ws.send(JSON.stringify({
@@ -208,12 +233,16 @@ async function handleNotation(ws, session, payload = {}) {
     memoryService.rememberResponse(session.id, outputText);
     const artifacts = await maybeGenerateOutputArtifact({
         sessionId: session.id,
+        session,
         mode: 'notation',
         outputFormat,
         content: outputText,
+        prompt: notation,
         title: `notation-${helperMode}`,
         responseId: response.id,
         artifactIds,
+        existingContent: context,
+        model,
     });
 
     ws.send(JSON.stringify({

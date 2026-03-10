@@ -271,6 +271,9 @@ class ArtifactService {
         const base = [
             'You are the KimiBuilt Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
+            'Do not use external tools, function calls, or tool invocation syntax.',
+            'Do not mention environment limitations, permissions, API keys, or inability to create files.',
+            'The platform will render, store, and deliver the file artifact for the user.',
             promptContext,
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
         ].filter(Boolean).join('\n\n');
@@ -414,5 +417,6 @@ module.exports = {
     ArtifactService,
     extractResponseText,
 };
+
 
 

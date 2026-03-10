@@ -71,12 +71,16 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         const structured = parseCanvasResponse(outputText, canvasType);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
+            session,
             mode: 'canvas',
             outputFormat,
             content: structured.content,
+            prompt: message,
             title: structured.metadata?.title || 'canvas-output',
             responseId: response.id,
             artifactIds,
+            existingContent,
+            model,
         });
 
         res.json({
@@ -134,3 +138,4 @@ function parseCanvasResponse(text, canvasType) {
 }
 
 module.exports = router;
+

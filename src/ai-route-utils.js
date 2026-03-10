@@ -14,14 +14,43 @@ async function buildInstructionsWithArtifacts(session, baseInstructions = '', ar
 
 async function maybeGenerateOutputArtifact({
     sessionId,
+    session = null,
     mode,
     outputFormat,
     content,
+    prompt = '',
     title,
     responseId,
     artifactIds = [],
+    existingContent = '',
+    model = null,
 }) {
-    if (!outputFormat || !content) {
+    if (!outputFormat) {
+        return [];
+    }
+
+    try {
+        if (prompt) {
+            const result = await artifactService.generateArtifact({
+                session,
+                sessionId,
+                mode,
+                prompt,
+                format: outputFormat,
+                artifactIds,
+                existingContent,
+                model,
+            });
+            return [result.artifact];
+        }
+    } catch (error) {
+        console.error('[Artifacts] Prompt-based generation failed:', error.message);
+        if (!content) {
+            throw error;
+        }
+    }
+
+    if (!content) {
         return [];
     }
 
@@ -44,3 +73,4 @@ module.exports = {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
 };
+

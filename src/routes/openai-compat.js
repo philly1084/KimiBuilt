@@ -143,12 +143,15 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryService.rememberResponse(sessionId, fullText);
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
+                        session,
                         mode: 'chat',
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
+                        prompt: lastUserMessage?.content || '',
                         title: 'chat-output',
                         responseId: event.response.id,
                         artifactIds: artifact_ids,
+                        model,
                     });
                     res.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
@@ -181,12 +184,15 @@ router.post('/chat/completions', async (req, res, next) => {
         memoryService.rememberResponse(sessionId, outputText);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
+            session,
             mode: 'chat',
             outputFormat: effectiveOutputFormat,
             content: outputText,
+            prompt: lastUserMessage?.content || '',
             title: 'chat-output',
             responseId: response.id,
             artifactIds: artifact_ids,
+            model,
         });
 
         res.json({
@@ -286,12 +292,15 @@ router.post('/responses', async (req, res, next) => {
                     memoryService.rememberResponse(sessionId, fullText);
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
+                        session,
                         mode: 'chat',
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
+                        prompt: userInput,
                         title: 'response-output',
                         responseId: event.response.id,
                         artifactIds: artifact_ids,
+                        model,
                     });
                     res.write(`data: ${JSON.stringify({ type: 'response.completed', response: event.response, session_id: sessionId, artifacts })}\n\n`);
                 }
@@ -315,12 +324,15 @@ router.post('/responses', async (req, res, next) => {
         memoryService.rememberResponse(sessionId, outputText);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
+            session,
             mode: 'chat',
             outputFormat: effectiveOutputFormat,
             content: outputText,
+            prompt: userInput,
             title: 'response-output',
             responseId: response.id,
             artifactIds: artifact_ids,
+            model,
         });
 
         res.json({
@@ -387,6 +399,8 @@ router.post('/images/generations', async (req, res, next) => {
 });
 
 module.exports = router;
+
+
 
 
 
