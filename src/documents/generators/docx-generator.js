@@ -722,6 +722,38 @@ class DocxGenerator {
       ]
     });
   }
+
+  /**
+   * Generate document from plain text
+   * @param {string} text - Plain text content
+   * @param {Object} options - Generation options
+   * @returns {Promise<Object>} Generated document
+   */
+  async generateFromText(text, options = {}) {
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: text,
+                font: this.fonts.body
+              })
+            ]
+          })
+        ]
+      }]
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+
+    return {
+      buffer,
+      filename: options.filename || 'document.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    };
+  }
 }
 
 module.exports = { DocxGenerator };

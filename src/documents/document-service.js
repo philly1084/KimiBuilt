@@ -5,27 +5,18 @@
 
 const { DocxGenerator } = require('./generators/docx-generator');
 const { PdfGenerator } = require('./generators/pdf-generator');
-const { PptxGenerator } = require('./generators/pptx-generator');
-const { HtmlGenerator } = require('./generators/html-generator');
-const { MarkdownGenerator } = require('./generators/markdown-generator');
 const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
-const { DocumentAssembler } = require('./document-assembler');
 
 class DocumentService {
   constructor(openaiClient) {
     this.generators = {
       docx: new DocxGenerator(),
-      pdf: new PdfGenerator(),
-      pptx: new PptxGenerator(),
-      html: new HtmlGenerator(),
-      md: new MarkdownGenerator(),
-      markdown: new MarkdownGenerator()
+      pdf: new PdfGenerator()
     };
 
     this.templateEngine = new TemplateEngine();
     this.aiGenerator = new AIDocumentGenerator(openaiClient);
-    this.assembler = new DocumentAssembler(this.generators);
   }
 
   /**
@@ -169,7 +160,17 @@ class DocumentService {
    * @returns {Promise<Object>} Assembled document
    */
   async assemble(sources, options = {}) {
-    return this.assembler.assemble(sources, options);
+    // TODO: Implement document assembly from multiple sources
+    // For now, combine text sources into a single document
+    const combined = sources.map(s => s.content || s.text || '').join('\n\n');
+    const format = options.format || 'docx';
+    const generator = this.generators[format];
+    
+    if (!generator) {
+      throw new Error(`Unsupported format: ${format}`);
+    }
+    
+    return generator.generateFromText(combined, options);
   }
 
   /**

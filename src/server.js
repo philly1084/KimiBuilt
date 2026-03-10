@@ -21,6 +21,11 @@ const modelsRouter = require('./routes/models');
 const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
 const openaiCompatRouter = require('./routes/openai-compat');
+const documentsRouter = require('./routes/documents');
+
+// Document Service
+const { DocumentService } = require('./documents/document-service');
+const { createResponse } = require('./openai-client');
 
 validate();
 
@@ -151,6 +156,7 @@ app.use('/api/sessions', sessionsRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/images', imagesRouter);
 app.use('/api/artifacts', artifactsRouter);
+app.use('/api/documents', documentsRouter);
 app.use('/v1', openaiCompatRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend')));
@@ -174,8 +180,19 @@ async function start() {
         console.log('[Boot] Initializing memory service...');
         await memoryService.initialize();
         console.log('[Boot] Memory service ready');
+        
+        console.log('[Boot] Initializing document service...');
+        // Create OpenAI-compatible client for document generation
+        const openaiClient = {
+            createResponse: async (params) => {
+                return createResponse(params);
+            }
+        };
+        const documentService = new DocumentService(openaiClient);
+        app.locals.documentService = documentService;
+        console.log('[Boot] Document service ready');
     } catch (err) {
-        console.warn('[Boot] Memory service init failed (will retry on first use):', err.message);
+        console.warn('[Boot] Service init failed (will retry on first use):', err.message);
     }
 
     server.listen(config.port, '0.0.0.0', () => {

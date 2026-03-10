@@ -579,6 +579,42 @@ class PdfGenerator {
 
     return elements;
   }
+
+  /**
+   * Generate document from plain text
+   * @param {string} text - Plain text content
+   * @param {Object} options - Generation options
+   * @returns {Promise<Object>} Generated document
+   */
+  async generateFromText(text, options = {}) {
+    const docDefinition = {
+      content: this.parseContent(text),
+      defaultStyle: this.styles.default,
+      styles: this.styles
+    };
+
+    return new Promise((resolve, reject) => {
+      try {
+        const PdfPrinter = require('pdfmake');
+        const printer = new PdfPrinter(this.fonts);
+        const doc = printer.createPdfKitDocument(docDefinition);
+        
+        const chunks = [];
+        doc.on('data', chunk => chunks.push(chunk));
+        doc.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          resolve({
+            buffer,
+            filename: options.filename || 'document.pdf',
+            mimeType: 'application/pdf'
+          });
+        });
+        doc.end();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
 }
 
 module.exports = { PdfGenerator };
