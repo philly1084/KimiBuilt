@@ -1361,3 +1361,266 @@ body.drag-over::after {
     margin-bottom: 4px;
     color: var(--text-primary);
 }
+
+/* Import/Export Dialog Styles */
+
+.export-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.export-btn-large {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 12px;
+    background: var(--bg-secondary);
+    border: 2px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+}
+
+.export-btn-large:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-color);
+    transform: translateY(-2px);
+}
+
+.export-btn-large svg {
+    color: var(--accent-color);
+}
+
+.export-btn-large span {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.export-btn-large small {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.export-options-panel {
+    border-top: 1px solid var(--border-color);
+    padding-top: 16px;
+}
+
+.export-options-panel h4 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.export-option-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.export-option-row label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.export-option-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.export-option-row input[type="range"] {
+    flex: 1;
+    max-width: 150px;
+}
+
+.export-option-row span {
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-width: 40px;
+}
+
+/* Drag and Drop File Import Overlay */
+.file-drop-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(168, 165, 255, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.file-drop-overlay.active {
+    display: flex;
+}
+
+.file-drop-overlay svg {
+    width: 80px;
+    height: 80px;
+    color: white;
+}
+
+.file-drop-overlay h2 {
+    color: white;
+    font-size: 28px;
+    font-weight: 600;
+}
+
+.file-drop-overlay p {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 16px;
+}
+
+.file-drop-overlay .supported-formats {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 500px;
+}
+
+.file-drop-overlay .format-tag {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+}
+
+/* Import/Export toolbar buttons */
+.top-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.top-bar-right .dropdown {
+    position: relative;
+}
+
+.top-bar-right .dropdown-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 8px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    min-width: 180px;
+    display: none;
+    overflow: hidden;
+}
+
+.top-bar-right .dropdown.active .dropdown-menu {
+    display: block;
+}
+
+.top-bar-right .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-primary);
+    transition: background 0.2s;
+}
+
+.top-bar-right .dropdown-item:hover {
+    background: var(--bg-secondary);
+}
+
+.top-bar-right .dropdown-item svg {
+    width: 18px;
+    height: 18px;
+    color: var(--text-secondary);
+}
+
+.top-bar-right .dropdown-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
+.top-bar-right .dropdown-header {
+    padding: 8px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+/* Responsive adjustments for export grid */
+@media (max-width: 600px) {
+    .export-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 400px) {
+    .export-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Batch import progress */
+.import-progress {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px 24px;
+    box-shadow: var(--shadow-lg);
+    z-index: 10000;
+    min-width: 300px;
+}
+
+.import-progress h4 {
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.import-progress-bar {
+    height: 4px;
+    background: var(--bg-secondary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.import-progress-fill {
+    height: 100%;
+    background: var(--accent-color);
+    transition: width 0.3s ease;
+}
+
+.import-progress-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+}

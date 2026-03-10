@@ -33,6 +33,14 @@
                     </svg>
                     New page
                 </button>
+                <button id="import-btn" class="new-page-btn import-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Import
+                </button>
             </div>
 
             <div class="sidebar-section">
@@ -113,6 +121,46 @@
                 <!-- Properties -->
                 <div id="properties-area" class="properties-area">
                     <!-- Properties will be added here -->
+                </div>
+
+                <!-- Page Actions -->
+                <div class="page-actions">
+                    <div class="export-dropdown">
+                        <button id="export-btn" class="export-btn" title="Export page">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Export
+                        </button>
+                        <div id="export-menu" class="export-menu" style="display: none;">
+                            <div class="export-item" data-format="docx">
+                                <span class="export-icon">📄</span>
+                                <span>Word Document (.docx)</span>
+                            </div>
+                            <div class="export-item" data-format="pdf">
+                                <span class="export-icon">📑</span>
+                                <span>PDF Document (.pdf)</span>
+                            </div>
+                            <div class="export-item" data-format="html">
+                                <span class="export-icon">🌐</span>
+                                <span>HTML Document (.html)</span>
+                            </div>
+                            <div class="export-item" data-format="md">
+                                <span class="export-icon">📝</span>
+                                <span>Markdown (.md)</span>
+                            </div>
+                            <div class="export-item" data-format="json">
+                                <span class="export-icon">📋</span>
+                                <span>Notion JSON (.json)</span>
+                            </div>
+                            <div class="export-item" data-format="txt">
+                                <span class="export-icon">📃</span>
+                                <span>Plain Text (.txt)</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Connection Status -->
@@ -441,12 +489,18 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
     <!-- OpenAI SDK (optional - will use fetch fallback if blocked) -->
     <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js" crossorigin="anonymous" async></script>
+    <!-- Import/Export Libraries -->
+    <script src="https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://unpkg.com/docx@8.5.0/build/index.umd.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/turndown@7.1.2/dist/turndown.js"></script>
     <script src="js/storage.js"></script>
     <script src="js/api.js"></script>
     <script src="js/blocks.js"></script>
     <script src="js/blocks-patches.js"></script>
     <script src="js/selection.js"></script>
     <script src="js/slash-menu.js"></script>
+    <script src="js/import-export.js"></script>
     <script src="js/editor.js"></script>
     <script src="js/sidebar.js"></script>
     <script src="js/ai-integration.js"></script>

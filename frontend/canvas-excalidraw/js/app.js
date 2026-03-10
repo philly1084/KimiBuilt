@@ -136,14 +136,42 @@ class App {
             this.toggleTheme();
         });
         
-        // Export button
-        document.getElementById('exportBtn')?.addEventListener('click', () => {
-            this.showExportModal();
+        // Export button - show new export dialog
+        const exportBtn = document.getElementById('exportBtn');
+        const exportDropdown = document.getElementById('exportDropdown');
+        
+        exportBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Toggle dropdown if present, otherwise show export dialog
+            if (exportDropdown) {
+                exportDropdown.classList.toggle('active');
+            } else {
+                window.importExportManager?.showExportDialog();
+            }
         });
         
-        // Import button
+        // Export dropdown items
+        document.querySelectorAll('[data-export]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const format = btn.dataset.export;
+                window.importExportManager?.export(format);
+                if (exportDropdown) {
+                    exportDropdown.classList.remove('active');
+                }
+            });
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', () => {
+            if (exportDropdown) {
+                exportDropdown.classList.remove('active');
+            }
+        });
+        
+        // Import button - show import dialog
         document.getElementById('importBtn')?.addEventListener('click', () => {
-            this.importJSON();
+            window.importExportManager?.showImportDialog();
         });
         
         // Help button
@@ -161,7 +189,7 @@ class App {
             this.clearCanvas();
         });
         
-        // Export modal
+        // Legacy Export modal (keep for backward compatibility)
         document.getElementById('closeExportModal')?.addEventListener('click', () => {
             this.hideExportModal();
         });
@@ -186,19 +214,40 @@ class App {
             if (e.target === e.currentTarget) this.hideHelpModal();
         });
         
-        // Drag and drop for files
-        document.addEventListener('dragover', (e) => {
+        // Drag and drop for files with overlay
+        const fileDropOverlay = document.getElementById('fileDropOverlay');
+        let dragCounter = 0;
+        
+        document.addEventListener('dragenter', (e) => {
             e.preventDefault();
+            dragCounter++;
+            if (fileDropOverlay) {
+                fileDropOverlay.classList.add('active');
+            }
             document.body.classList.add('drag-over');
         });
         
         document.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            document.body.classList.remove('drag-over');
+            dragCounter--;
+            if (dragCounter === 0) {
+                if (fileDropOverlay) {
+                    fileDropOverlay.classList.remove('active');
+                }
+                document.body.classList.remove('drag-over');
+            }
+        });
+        
+        document.addEventListener('dragover', (e) => {
+            e.preventDefault();
         });
         
         document.addEventListener('drop', (e) => {
             e.preventDefault();
+            dragCounter = 0;
+            if (fileDropOverlay) {
+                fileDropOverlay.classList.remove('active');
+            }
             document.body.classList.remove('drag-over');
             this.handleFileDrop(e);
         });
@@ -289,6 +338,10 @@ class App {
                         e.preventDefault();
                         this.importJSON();
                         break;
+                    case 'e':
+                        e.preventDefault();
+                        window.importExportManager?.showExportDialog();
+                        break;
                     case 'a':
                         e.preventDefault();
                         // Select all
@@ -366,21 +419,41 @@ class App {
         reader.readAsDataURL(file);
     }
     
-    handleFileDrop(e) {
+    async handleFileDrop(e) {
         const files = e.dataTransfer.files;
         const canvas = window.infiniteCanvas;
         const rect = canvas.container.getBoundingClientRect();
         
-        for (const file of files) {
-            if (file.type.startsWith('image/')) {
-                // Get drop position
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                const worldPos = canvas.screenToWorld(x, y);
+        // Use new import system if available
+        if (window.importExportManager) {
+            // Get drop position for positioning imported elements
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const worldPos = canvas.screenToWorld(x, y);
+            
+            // Process each file
+            for (const file of files) {
+                // Check if it's an image type
+                const isImage = file.type.startsWith('image/') || 
+                    /\.(png|jpg|jpeg|gif|svg|webp)$/i.test(file.name);
                 
-                this.loadImage(file, worldPos);
-            } else if (file.name.endsWith('.json')) {
-                this.importJSONFile(file);
+                if (isImage) {
+                    await window.importExportManager.importImage(file, worldPos);
+                } else {
+                    await window.importExportManager.importFile(file);
+                }
+            }
+        } else {
+            // Fallback to legacy import
+            for (const file of files) {
+                if (file.type.startsWith('image/')) {
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const worldPos = canvas.screenToWorld(x, y);
+                    this.loadImage(file, worldPos);
+                } else if (file.name.endsWith('.json')) {
+                    this.importJSONFile(file);
+                }
             }
         }
     }
@@ -846,6 +919,13 @@ class App {
     }
     
     importJSON() {
+        // Use new import system if available
+        if (window.importExportManager) {
+            window.importExportManager.showImportDialog();
+            return;
+        }
+        
+        // Legacy import
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.json,application/json';

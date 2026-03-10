@@ -1484,8 +1484,11 @@ class UIHelpers {
                 { category: 'Export', icon: 'download', title: 'Export as Markdown', description: 'Download conversation as .md file', action: 'export-md' },
                 { category: 'Export', icon: 'download', title: 'Export as JSON', description: 'Download conversation as .json file', action: 'export-json' },
                 { category: 'Export', icon: 'download', title: 'Export as Text', description: 'Download conversation as .txt file', action: 'export-txt' },
-                { category: 'Data', icon: 'upload', title: 'Import Conversations', description: 'Import conversations from JSON', action: 'import-conversations' },
+                { category: 'Export', icon: 'globe', title: 'Export as HTML', description: 'Download conversation as .html file', action: 'export-html' },
+                { category: 'Export', icon: 'file-type', title: 'Export as Word (DOCX)', description: 'Download conversation as .docx file', action: 'export-docx' },
+                { category: 'Export', icon: 'file-box', title: 'Export as PDF', description: 'Download conversation as .pdf file', action: 'export-pdf' },
             ] : []),
+            { category: 'Data', icon: 'upload', title: 'Import Conversation', description: 'Import from DOCX, PDF, HTML, MD, TXT, or JSON', action: 'import-conversations' },
             ...(currentSession ? [
                 { category: 'Session', icon: 'trash-2', title: 'Clear Messages', description: 'Clear all messages in current session', action: 'clear-messages' },
                 { category: 'Session', icon: 'x-circle', title: 'Delete Session', description: 'Delete current conversation', action: 'delete-session' },
@@ -1524,6 +1527,15 @@ class UIHelpers {
                 break;
             case 'export-txt':
                 window.chatApp?.exportConversation('txt');
+                break;
+            case 'export-html':
+                window.chatApp?.exportConversation('html');
+                break;
+            case 'export-docx':
+                window.chatApp?.exportConversation('docx');
+                break;
+            case 'export-pdf':
+                window.chatApp?.exportConversation('pdf');
                 break;
             case 'clear-messages':
                 window.chatApp?.clearCurrentSession();
@@ -1570,6 +1582,8 @@ class UIHelpers {
             { key: 'Enter', description: 'Send message' },
             { key: 'Esc', description: 'Close modals/panels' },
             { key: 'Ctrl + /', description: 'Show this help' },
+            { key: '', description: '' },
+            { key: 'Import/Export', description: 'Supports DOCX, PDF, HTML, Markdown, TXT, and JSON formats' },
         ];
         
         modal.innerHTML = `
@@ -1614,53 +1628,33 @@ class UIHelpers {
     }
 
     // ============================================
-    // Import Modal
+    // Import Modal - Enhanced with multiple formats
     // ============================================
 
     openImportModal() {
-        const modal = document.createElement('div');
-        modal.id = 'import-modal';
-        modal.className = 'modal';
-        modal.setAttribute('role', 'dialog');
-        modal.setAttribute('aria-modal', 'true');
-        modal.setAttribute('aria-labelledby', 'import-title');
+        // Remove any existing import modal
+        this.closeImportModal();
         
-        modal.innerHTML = `
-            <div class="modal-overlay" onclick="uiHelpers.closeImportModal()"></div>
-            <div class="modal-content" style="max-width: 480px;">
-                <div class="modal-header">
-                    <h3 id="import-title">Import Conversations</h3>
-                    <button class="btn-icon" onclick="uiHelpers.closeImportModal()" aria-label="Close">
-                        <i data-lucide="x" class="w-5 h-5"></i>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <p class="text-text-secondary mb-4">Import conversations from a previously exported JSON file.</p>
-                    <div class="import-dropzone" id="import-dropzone">
-                        <i data-lucide="upload-cloud" class="w-12 h-12 text-text-secondary mb-3"></i>
-                        <p class="text-sm text-text-secondary mb-2">Drag and drop a JSON file here</p>
-                        <p class="text-xs text-text-muted">or click to browse</p>
-                        <input type="file" id="import-file-input" accept=".json" class="hidden">
-                    </div>
-                    <div id="import-preview" class="import-preview hidden mt-4"></div>
-                    <div id="import-error" class="import-error hidden mt-4 text-error text-sm"></div>
-                </div>
-                <div class="modal-footer" style="padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.75rem;">
-                    <button class="btn-secondary px-4 py-2 rounded-lg" onclick="uiHelpers.closeImportModal()">Cancel</button>
-                    <button class="btn-primary px-4 py-2 rounded-lg" id="import-confirm-btn" disabled onclick="uiHelpers.confirmImport()">Import</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        this.reinitializeIcons(modal);
-        this.setupImportHandlers(modal);
-        this.trapFocus(modal);
+        // Show the new import modal from HTML
+        const modal = document.getElementById('import-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            this.setupImportHandlers(modal);
+            this.trapFocus(modal);
+        }
     }
 
     setupImportHandlers(modal) {
         const dropzone = modal.querySelector('#import-dropzone');
         const fileInput = modal.querySelector('#import-file-input');
+        
+        if (!dropzone || !fileInput) return;
+        
+        // Reset state
+        this.pendingImport = null;
+        this.pendingImportFormat = null;
+        this.resetImportUI(modal);
         
         dropzone.addEventListener('click', () => fileInput.click());
         
@@ -1696,56 +1690,167 @@ class UIHelpers {
         });
     }
 
-    handleImportFile(file) {
-        const reader = new FileReader();
+    resetImportUI(modal) {
+        const preview = modal.querySelector('#import-preview');
+        const error = modal.querySelector('#import-error');
+        const progress = modal.querySelector('#import-progress');
+        const confirmBtn = modal.querySelector('#import-confirm-btn');
         
-        reader.onload = (e) => {
-            const content = e.target.result;
-            const validation = sessionManager.validateImport(content);
-            
-            const preview = document.getElementById('import-preview');
-            const error = document.getElementById('import-error');
-            const confirmBtn = document.getElementById('import-confirm-btn');
-            
-            if (validation.valid) {
-                this.pendingImport = content;
-                preview.innerHTML = `
-                    <div class="import-stats bg-bg-tertiary p-3 rounded-lg">
-                        <div class="flex justify-between mb-1">
-                            <span class="text-sm text-text-secondary">Sessions:</span>
-                            <span class="text-sm font-medium">${validation.sessionCount}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-sm text-text-secondary">Messages:</span>
-                            <span class="text-sm font-medium">${validation.messageCount}</span>
-                        </div>
-                    </div>
-                `;
-                preview.classList.remove('hidden');
-                error.classList.add('hidden');
-                confirmBtn.disabled = false;
-            } else {
-                this.pendingImport = null;
-                preview.classList.add('hidden');
-                error.textContent = `Error: ${validation.error}`;
-                error.classList.remove('hidden');
-                confirmBtn.disabled = true;
-            }
-        };
-        
-        reader.readAsText(file);
+        preview?.classList.add('hidden');
+        error?.classList.add('hidden');
+        progress?.classList.add('hidden');
+        if (confirmBtn) confirmBtn.disabled = true;
     }
 
-    confirmImport() {
-        if (this.pendingImport) {
-            const result = sessionManager.importAll(this.pendingImport);
-            if (result.success) {
-                this.showToast(`Imported ${result.importedCount} conversations`, 'success');
-                this.closeImportModal();
-            } else {
-                const error = document.getElementById('import-error');
-                error.textContent = `Import failed: ${result.error}`;
-                error.classList.remove('hidden');
+    async handleImportFile(file) {
+        const modal = document.getElementById('import-modal');
+        const progress = modal?.querySelector('#import-progress');
+        const progressText = modal?.querySelector('#import-progress-text');
+        const errorDiv = modal?.querySelector('#import-error');
+        const errorText = modal?.querySelector('#import-error-text');
+        
+        // Show progress
+        progress?.classList.remove('hidden');
+        errorDiv?.classList.add('hidden');
+        
+        try {
+            const result = await window.importExportManager.importFile(file, (percent, message) => {
+                if (progressText) {
+                    progressText.textContent = message || `Processing... ${percent}%`;
+                }
+            });
+            
+            this.pendingImport = result;
+            this.showImportPreview(result, file.name);
+        } catch (error) {
+            progress?.classList.add('hidden');
+            if (errorText) errorText.textContent = error.message;
+            errorDiv?.classList.remove('hidden');
+        }
+    }
+
+    showImportPreview(result, filename) {
+        const modal = document.getElementById('import-modal');
+        const preview = modal?.querySelector('#import-preview');
+        const filenameEl = modal?.querySelector('#import-filename');
+        const statsEl = modal?.querySelector('#import-stats');
+        const messagesPreviewEl = modal?.querySelector('#import-messages-preview');
+        const confirmBtn = modal?.querySelector('#import-confirm-btn');
+        const progress = modal?.querySelector('#import-progress');
+        
+        if (!preview) return;
+        
+        progress?.classList.add('hidden');
+        
+        // Update filename
+        if (filenameEl) filenameEl.textContent = filename;
+        
+        // Update stats
+        if (statsEl) {
+            const formatLabels = {
+                docx: 'Word Document',
+                pdf: 'PDF Document',
+                html: 'HTML Page',
+                markdown: 'Markdown',
+                txt: 'Text File',
+                json: 'JSON Export'
+            };
+            
+            statsEl.innerHTML = `
+                <div class="import-stat">
+                    <span class="import-stat-value">${result.messages.length}</span>
+                    <span class="import-stat-label">Messages</span>
+                </div>
+                <div class="import-stat">
+                    <span class="import-stat-value">${formatLabels[result.format] || result.format.toUpperCase()}</span>
+                    <span class="import-stat-label">Format</span>
+                </div>
+                ${result.pageCount ? `
+                <div class="import-stat">
+                    <span class="import-stat-value">${result.pageCount}</span>
+                    <span class="import-stat-label">Pages</span>
+                </div>
+                ` : ''}
+            `;
+        }
+        
+        // Show message preview (first 5 messages)
+        if (messagesPreviewEl) {
+            const previewMessages = result.messages.slice(0, 5);
+            messagesPreviewEl.innerHTML = previewMessages.map(msg => `
+                <div class="import-preview-message ${msg.role}">
+                    <span class="import-preview-message-role">${msg.role}</span>
+                    <span class="import-preview-message-content">${this.escapeHtml(msg.content.substring(0, 100))}${msg.content.length > 100 ? '...' : ''}</span>
+                </div>
+            `).join('');
+            
+            if (result.messages.length > 5) {
+                messagesPreviewEl.innerHTML += `
+                    <div style="text-align: center; padding: 0.5rem; color: var(--text-secondary); font-size: 0.75rem;">
+                        + ${result.messages.length - 5} more messages
+                    </div>
+                `;
+            }
+        }
+        
+        preview.classList.remove('hidden');
+        if (confirmBtn) confirmBtn.disabled = false;
+    }
+
+    async confirmImport() {
+        if (!this.pendingImport || !this.pendingImport.messages.length) return;
+        
+        const modal = document.getElementById('import-modal');
+        const confirmBtn = modal?.querySelector('#import-confirm-btn');
+        
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<span class="animate-spin inline-block mr-2">⟳</span> Importing...';
+        }
+        
+        try {
+            // Create a new session for the imported conversation
+            await window.chatApp.createNewSession();
+            const sessionId = sessionManager.currentSessionId;
+            
+            if (!sessionId) {
+                throw new Error('Failed to create session');
+            }
+            
+            // Add messages to the session
+            for (const msg of this.pendingImport.messages) {
+                sessionManager.addMessage(sessionId, {
+                    role: msg.role,
+                    content: msg.content,
+                    type: msg.type || null,
+                    prompt: msg.prompt || null,
+                    imageUrl: msg.imageUrl || null,
+                    model: msg.model || null,
+                    timestamp: msg.timestamp || new Date().toISOString()
+                });
+            }
+            
+            // Update session title if available
+            if (this.pendingImport.title) {
+                const session = sessionManager.sessions.find(s => s.id === sessionId);
+                if (session) {
+                    session.title = this.pendingImport.title;
+                    sessionManager.saveToStorage();
+                }
+            }
+            
+            // Refresh the UI
+            window.chatApp.loadSessionMessages(sessionId);
+            window.chatApp.updateSessionInfo();
+            uiHelpers.renderSessionsList(sessionManager.sessions, sessionId);
+            
+            this.showToast(`Imported ${this.pendingImport.messages.length} messages`, 'success');
+            this.closeImportModal();
+        } catch (error) {
+            this.showToast(`Import failed: ${error.message}`, 'error');
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Import Conversation';
             }
         }
     }
@@ -1753,13 +1858,19 @@ class UIHelpers {
     closeImportModal() {
         const modal = document.getElementById('import-modal');
         if (modal) {
-            modal.remove();
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
         }
         this.pendingImport = null;
+        this.pendingImportFormat = null;
+        
+        // Reset file input
+        const fileInput = modal?.querySelector('#import-file-input');
+        if (fileInput) fileInput.value = '';
     }
 
     // ============================================
-    // Export Modal
+    // Export Modal - Enhanced with progress
     // ============================================
 
     openExportModal() {
@@ -1772,9 +1883,13 @@ class UIHelpers {
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
         
-        // Add export all option if we have multiple sessions
-        if (sessionManager.sessions.length > 1) {
-            const exportOptions = modal.querySelector('.export-options');
+        // Hide progress
+        const progress = modal.querySelector('#export-progress');
+        if (progress) progress.classList.add('hidden');
+        
+        // Check if we need to add export all option
+        const exportOptions = modal.querySelector('.export-options');
+        if (exportOptions && sessionManager.sessions.length > 1) {
             if (!exportOptions.querySelector('[data-action="export-all"]')) {
                 const exportAllBtn = document.createElement('button');
                 exportAllBtn.className = 'export-option';
@@ -1789,12 +1904,34 @@ class UIHelpers {
                 this.reinitializeIcons(exportAllBtn);
             }
         }
+        
+        this.trapFocus(modal);
+    }
+
+    showExportProgress(percent, message) {
+        const modal = document.getElementById('export-modal');
+        const progress = modal?.querySelector('#export-progress');
+        const progressText = modal?.querySelector('#export-progress-text');
+        const progressPercent = modal?.querySelector('#export-progress-percent');
+        const progressFill = modal?.querySelector('#export-progress-fill');
+        
+        if (progress) progress.classList.remove('hidden');
+        if (progressText) progressText.textContent = message || 'Exporting...';
+        if (progressPercent) progressPercent.textContent = `${percent}%`;
+        if (progressFill) progressFill.style.width = `${percent}%`;
+    }
+
+    hideExportProgress() {
+        const modal = document.getElementById('export-modal');
+        const progress = modal?.querySelector('#export-progress');
+        if (progress) progress.classList.add('hidden');
     }
 
     closeExportModal() {
         const modal = document.getElementById('export-modal');
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
+        this.hideExportProgress();
     }
 
     // ============================================

@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>KimiBuilt Web CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- File Processing Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
     <style>
         /* ===== CSS Variables for Theming ===== */
         :root {
@@ -474,20 +489,142 @@
 
         /* ===== Drag & Drop ===== */
         body.drag-over::after {
-            content: 'Drop file to upload';
+            content: 'Drop files to import';
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(13, 17, 23, 0.95);
             display: flex;
             align-items: center;
             justify-content: center;
             color: var(--accent-color);
-            font-size: 1.5rem;
+            font-size: 2rem;
+            font-weight: bold;
             z-index: 10000;
             pointer-events: none;
+            border: 4px dashed var(--accent-color);
+            margin: 20px;
+            border-radius: 20px;
+        }
+
+        /* ===== File Import Styles ===== */
+        .imported-file {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin: 12px 0;
+            overflow: hidden;
+        }
+
+        .file-import-header {
+            background: var(--bg-tertiary);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+
+        .file-icon {
+            font-size: 1.25rem;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-type {
+            background: var(--accent-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .file-meta {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        .file-import-content {
+            padding: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .file-import-content pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .file-import-actions {
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 8px;
+        }
+
+        .file-import-actions .toolbar-btn {
+            padding: 4px 12px;
+            font-size: 0.75rem;
+        }
+
+        .file-text-content {
+            font-family: inherit;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            background: transparent;
+        }
+
+        /* Drag overlay */
+        .drag-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(13, 17, 23, 0.95);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            border: 4px dashed var(--accent-color);
+            margin: 20px;
+            border-radius: 20px;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .drag-overlay.active {
+            display: flex;
+        }
+
+        .drag-overlay-icon {
+            font-size: 4rem;
+        }
+
+        .drag-overlay-text {
+            color: var(--accent-color);
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .drag-overlay-hint {
+            color: var(--text-secondary);
+            font-size: 1rem;
         }
 
         /* ===== Mobile Optimizations ===== */
@@ -654,6 +791,13 @@
         <span style="color: var(--text-muted);">Shortcuts: Ctrl+L=Clear | Ctrl+C=Copy | Up/Down=History | F1=Help</span>
     </div>
 
+    <!-- Drag & Drop Overlay -->
+    <div id="dragOverlay" class="drag-overlay">
+        <div class="drag-overlay-icon">📁</div>
+        <div class="drag-overlay-text">Drop files to import</div>
+        <div class="drag-overlay-hint">Supports: DOCX, PDF, HTML, MD, TXT, JSON, and code files</div>
+    </div>
+
     <!-- Loading Indicator -->
     <div id="loadingIndicator" class="loading-indicator hidden">
         <div class="loading-spinner"></div>
@@ -708,6 +852,7 @@
     </div>
 
     <script src="js/api.js"></script>
+    <script src="js/file-handler.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

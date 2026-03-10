@@ -44,6 +44,12 @@
     <!-- Lucide icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
+    <!-- Import/Export Libraries (lazy loaded when needed) -->
+    <!-- mammoth.js for DOCX parsing -->
+    <!-- pdf.js for PDF parsing -->
+    <!-- docx.js for DOCX generation -->
+    <!-- html2pdf.js for PDF generation -->
+    
 
     
     <!-- Custom styles -->
@@ -90,19 +96,117 @@
                     <button class="export-option" onclick="app.exportConversation('markdown')">
                         <i data-lucide="file-text" class="w-8 h-8 text-blue-500" aria-hidden="true"></i>
                         <span class="export-name">Markdown</span>
-                        <span class="export-desc">.md file with formatting</span>
+                        <span class="export-desc">.md with formatting</span>
                     </button>
                     <button class="export-option" onclick="app.exportConversation('json')">
                         <i data-lucide="file-json" class="w-8 h-8 text-green-500" aria-hidden="true"></i>
                         <span class="export-name">JSON</span>
-                        <span class="export-desc">Structured data format</span>
+                        <span class="export-desc">Structured data</span>
                     </button>
                     <button class="export-option" onclick="app.exportConversation('txt')">
                         <i data-lucide="file" class="w-8 h-8 text-gray-500" aria-hidden="true"></i>
                         <span class="export-name">Plain Text</span>
-                        <span class="export-desc">Simple text format</span>
+                        <span class="export-desc">Simple text</span>
+                    </button>
+                    <button class="export-option" onclick="app.exportConversation('html')">
+                        <i data-lucide="globe" class="w-8 h-8 text-orange-500" aria-hidden="true"></i>
+                        <span class="export-name">HTML</span>
+                        <span class="export-desc">Web page format</span>
+                    </button>
+                    <button class="export-option" onclick="app.exportConversation('docx')">
+                        <i data-lucide="file-type" class="w-8 h-8 text-indigo-500" aria-hidden="true"></i>
+                        <span class="export-name">Word (DOCX)</span>
+                        <span class="export-desc">Microsoft Word</span>
+                    </button>
+                    <button class="export-option" onclick="app.exportConversation('pdf')">
+                        <i data-lucide="file-box" class="w-8 h-8 text-red-500" aria-hidden="true"></i>
+                        <span class="export-name">PDF</span>
+                        <span class="export-desc">Portable Document</span>
                     </button>
                 </div>
+                <div id="export-progress" class="export-progress hidden mt-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-text-secondary" id="export-progress-text">Generating...</span>
+                        <span class="text-sm text-accent font-medium" id="export-progress-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" id="export-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Modal -->
+    <div id="import-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <div class="modal-overlay" onclick="uiHelpers.closeImportModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="import-title">Import Conversation</h3>
+                <button class="btn-icon" onclick="uiHelpers.closeImportModal()" aria-label="Close import modal">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="text-text-secondary mb-4">Import from various file formats:</p>
+                
+                <!-- Drag & Drop Zone -->
+                <div id="import-dropzone" class="import-dropzone">
+                    <div class="import-dropzone-content">
+                        <i data-lucide="upload-cloud" class="w-12 h-12 text-text-secondary mb-3" aria-hidden="true"></i>
+                        <p class="text-sm font-medium text-text-primary mb-1">Drop your file here</p>
+                        <p class="text-xs text-text-secondary">or click to browse</p>
+                        <input type="file" id="import-file-input" class="hidden" 
+                               accept=".docx,.pdf,.html,.htm,.md,.markdown,.txt,.json">
+                    </div>
+                </div>
+
+                <!-- Supported Formats -->
+                <div class="import-formats mt-4">
+                    <p class="text-xs text-text-secondary mb-2">Supported formats:</p>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="format-badge docx">DOCX</span>
+                        <span class="format-badge pdf">PDF</span>
+                        <span class="format-badge html">HTML</span>
+                        <span class="format-badge md">Markdown</span>
+                        <span class="format-badge txt">TXT</span>
+                        <span class="format-badge json">JSON</span>
+                    </div>
+                </div>
+
+                <!-- Preview Section -->
+                <div id="import-preview" class="import-preview hidden mt-4">
+                    <div class="import-preview-header">
+                        <i data-lucide="file-check" class="w-5 h-5 text-success" aria-hidden="true"></i>
+                        <span class="text-sm font-medium text-text-primary" id="import-filename"></span>
+                    </div>
+                    <div class="import-preview-stats" id="import-stats"></div>
+                    <div class="import-preview-messages" id="import-messages-preview"></div>
+                </div>
+
+                <!-- Error Display -->
+                <div id="import-error" class="import-error hidden mt-4">
+                    <div class="flex items-start gap-2">
+                        <i data-lucide="alert-circle" class="w-5 h-5 text-error flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+                        <span class="text-sm text-error" id="import-error-text"></span>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div id="import-progress" class="import-progress hidden mt-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-text-secondary" id="import-progress-text">Processing...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill indeterminate" id="import-progress-fill"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="uiHelpers.closeImportModal()">Cancel</button>
+                <button class="btn-primary" id="import-confirm-btn" onclick="uiHelpers.confirmImport()" disabled>
+                    Import Conversation
+                </button>
             </div>
         </div>
     </div>
@@ -262,13 +366,19 @@
                 
                 <!-- Action Buttons -->
                 <div class="grid grid-cols-2 gap-2">
-                    <button id="search-toggle" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="app.openSearch()">
-                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
-                        <span>Search</span>
+                    <button id="import-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openImportModal()">
+                        <i data-lucide="upload" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Import</span>
                     </button>
                     <button id="export-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openExportModal()">
                         <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
                         <span>Export</span>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 gap-2">
+                    <button id="search-toggle" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="app.openSearch()">
+                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Search</span>
                     </button>
                 </div>
                 
@@ -452,6 +562,7 @@
     <!-- Scripts -->
     <script src="js/api.js"></script>
     <script src="js/session.js"></script>
+    <script src="js/import-export.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/app.js"></script>
     <script src="js/artifacts.js"></script>

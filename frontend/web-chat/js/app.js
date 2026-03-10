@@ -906,10 +906,10 @@ class ChatApp {
     }
 
     // ============================================
-    // Export
+    // Export - Enhanced with DOCX and PDF support
     // ============================================
 
-    exportConversation(format) {
+    async exportConversation(format) {
         const sessionId = sessionManager.currentSessionId;
         if (!sessionId) {
             uiHelpers.showToast('No conversation to export', 'warning');
@@ -924,38 +924,41 @@ class ChatApp {
             return;
         }
         
-        let content = '';
-        let filename = '';
-        let mimeType = '';
+        // Show progress for formats that need processing
+        const showProgress = format === 'docx' || format === 'pdf';
         
-        const timestamp = new Date().toISOString().split('T')[0];
-        const sessionTitle = (session?.title || 'conversation').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        
-        switch (format) {
-            case 'markdown':
-                content = this.exportAsMarkdown(messages, session);
-                filename = `${sessionTitle}_${timestamp}.md`;
-                mimeType = 'text/markdown';
-                break;
-            case 'json':
-                content = this.exportAsJSON(messages, session);
-                filename = `${sessionTitle}_${timestamp}.json`;
-                mimeType = 'application/json';
-                break;
-            case 'txt':
-                content = this.exportAsText(messages, session);
-                filename = `${sessionTitle}_${timestamp}.txt`;
-                mimeType = 'text/plain';
-                break;
-            default:
-                return;
+        try {
+            if (showProgress) {
+                uiHelpers.showExportProgress(0, `Preparing ${format.toUpperCase()} export...`);
+            }
+            
+            const result = await window.importExportManager.exportConversation(format, messages, session);
+            
+            if (showProgress) {
+                uiHelpers.showExportProgress(50, 'Generating file...');
+            }
+            
+            // Download the file
+            if (result.blob) {
+                // For blob-based exports (DOCX, PDF)
+                this.downloadBlob(result.blob, result.filename, result.mimeType);
+            } else {
+                // For text-based exports
+                this.downloadFile(result.content, result.filename, result.mimeType);
+            }
+            
+            if (showProgress) {
+                uiHelpers.showExportProgress(100, 'Complete!');
+                setTimeout(() => uiHelpers.hideExportProgress(), 500);
+            }
+            
+            uiHelpers.closeExportModal();
+            uiHelpers.showToast(`Conversation exported as ${format.toUpperCase()}`, 'success');
+        } catch (error) {
+            console.error('Export failed:', error);
+            uiHelpers.hideExportProgress();
+            uiHelpers.showToast(`Export failed: ${error.message}`, 'error');
         }
-        
-        // Download the file
-        this.downloadFile(content, filename, mimeType);
-        
-        uiHelpers.closeExportModal();
-        uiHelpers.showToast(`Conversation exported as ${format.toUpperCase()}`, 'success');
     }
 
     /**
@@ -973,6 +976,10 @@ class ChatApp {
 
     downloadFile(content, filename, mimeType) {
         const blob = new Blob([content], { type: mimeType });
+        this.downloadBlob(blob, filename, mimeType);
+    }
+
+    downloadBlob(blob, filename, mimeType) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

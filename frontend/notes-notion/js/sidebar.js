@@ -160,6 +160,15 @@ const Sidebar = (function() {
             settingsBtn.addEventListener('click', openSettings);
         }
         
+        // Import button
+        const importBtn = document.getElementById('import-btn');
+        if (importBtn) {
+            importBtn.addEventListener('click', showImportModal);
+        }
+        
+        // Export button
+        setupExportButton();
+        
         // Trash button
         const trashBtn = document.getElementById('trash-btn');
         if (trashBtn) {
@@ -895,35 +904,126 @@ const Sidebar = (function() {
         modal.className = 'ai-modal';
         modal.style.display = 'flex';
         modal.innerHTML = `
-            <div class="ai-modal-content" style="max-width: 400px;">
+            <div class="ai-modal-content" style="max-width: 450px; max-height: 80vh; overflow-y: auto;">
                 <div class="ai-modal-header">
                     <span>⚙️</span>
                     <span>Settings</span>
                     <button class="settings-close" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer; font-size: 18px;">✕</button>
                 </div>
-                <div style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
-                    <button class="settings-btn" data-action="export-md">
-                        <span>📝</span> Export current page as Markdown
-                    </button>
-                    <button class="settings-btn" data-action="export-all-md">
-                        <span>📚</span> Export all pages as Markdown
-                    </button>
-                    <button class="settings-btn" data-action="export-pdf">
-                        <span>📄</span> Export current page as PDF
-                    </button>
-                    <button class="settings-btn" data-action="import-md">
-                        <span>📥</span> Import from Markdown
-                    </button>
-                    <button class="settings-btn" data-action="backup">
-                        <span>💾</span> Backup all data
-                    </button>
-                    <div style="border-top: 1px solid var(--border-color); margin: 8px 0;"></div>
-                    <button class="settings-btn" data-action="storage-info">
-                        <span>💿</span> Storage info
-                    </button>
-                    <button class="settings-btn danger" data-action="clear-all" style="color: #ef4444;">
-                        <span>🗑️</span> Clear all data
-                    </button>
+                <div style="padding: 20px; display: flex; flex-direction: column; gap: 4px;">
+                    
+                    <!-- Export Section -->
+                    <div class="settings-section">
+                        <div class="settings-section-title">📤 Export Current Page</div>
+                        <div class="settings-btn-group">
+                            <button class="settings-btn" data-action="export-docx">
+                                <span>📄</span>
+                                <div>
+                                    <div>Word Document (.docx)</div>
+                                    <div class="settings-btn-subtitle">Microsoft Word format with formatting</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="export-pdf">
+                                <span>📑</span>
+                                <div>
+                                    <div>PDF Document (.pdf)</div>
+                                    <div class="settings-btn-subtitle">Print-ready PDF with page breaks</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="export-html">
+                                <span>🌐</span>
+                                <div>
+                                    <div>HTML Document (.html)</div>
+                                    <div class="settings-btn-subtitle">Web-ready HTML with styling</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="export-md">
+                                <span>📝</span>
+                                <div>
+                                    <div>Markdown (.md)</div>
+                                    <div class="settings-btn-subtitle">Plain text with formatting</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="export-json">
+                                <span>📋</span>
+                                <div>
+                                    <div>Notion JSON (.json)</div>
+                                    <div class="settings-btn-subtitle">Notion-compatible format</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="export-txt">
+                                <span>📃</span>
+                                <div>
+                                    <div>Plain Text (.txt)</div>
+                                    <div class="settings-btn-subtitle">Simple text without formatting</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Export All Section -->
+                    <div class="settings-section">
+                        <div class="settings-section-title">📦 Export All Pages</div>
+                        <div class="settings-btn-group">
+                            <button class="settings-btn" data-action="export-all-md">
+                                <span>📚</span>
+                                <div>
+                                    <div>Export All as Markdown</div>
+                                    <div class="settings-btn-subtitle">Single file with all pages</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="backup">
+                                <span>💾</span>
+                                <div>
+                                    <div>Full Backup (.json)</div>
+                                    <div class="settings-btn-subtitle">Complete data backup with metadata</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Import Section -->
+                    <div class="settings-section">
+                        <div class="settings-section-title">📥 Import</div>
+                        <div class="settings-btn-group">
+                            <button class="settings-btn" data-action="import-file">
+                                <span>📂</span>
+                                <div>
+                                    <div>Import from File</div>
+                                    <div class="settings-btn-subtitle">DOCX, PDF, HTML, MD, JSON, TXT</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn" data-action="import-md">
+                                <span>📝</span>
+                                <div>
+                                    <div>Paste Markdown</div>
+                                    <div class="settings-btn-subtitle">Copy & paste Markdown text</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Data Management Section -->
+                    <div class="settings-section">
+                        <div class="settings-section-title">💿 Data Management</div>
+                        <div class="settings-btn-group">
+                            <button class="settings-btn" data-action="storage-info">
+                                <span>💿</span>
+                                <div>
+                                    <div>Storage Information</div>
+                                    <div class="settings-btn-subtitle">Check storage usage and status</div>
+                                </div>
+                            </button>
+                            <button class="settings-btn danger" data-action="clear-all" style="color: #ef4444;">
+                                <span>🗑️</span>
+                                <div>
+                                    <div>Clear All Data</div>
+                                    <div class="settings-btn-subtitle">⚠️ This cannot be undone!</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                    
                 </div>
             </div>
         `;
@@ -932,7 +1032,7 @@ const Sidebar = (function() {
         modal.querySelectorAll('.settings-btn').forEach(btn => {
             btn.style.cssText = `
                 display: flex;
-                align-items: center;
+                align-items: flex-start;
                 gap: 12px;
                 padding: 12px 16px;
                 background: var(--bg-secondary);
@@ -943,12 +1043,15 @@ const Sidebar = (function() {
                 cursor: pointer;
                 transition: all 0.15s;
                 text-align: left;
+                width: 100%;
             `;
             btn.addEventListener('mouseenter', () => {
                 btn.style.background = 'var(--bg-hover)';
+                btn.style.borderColor = 'var(--border-hover)';
             });
             btn.addEventListener('mouseleave', () => {
                 btn.style.background = 'var(--bg-secondary)';
+                btn.style.borderColor = 'var(--border-color)';
             });
         });
         
@@ -974,40 +1077,46 @@ const Sidebar = (function() {
      */
     function handleSettingsAction(action) {
         switch (action) {
-            case 'export-md':
-                const markdown = window.Editor?.exportToMarkdown?.();
-                if (markdown) {
-                    downloadFile(markdown, `${window.Editor.getCurrentPage()?.title || 'page'}.md`, 'text/markdown');
-                    showToast('Exported to Markdown', 'success');
-                }
+            // Export current page - various formats
+            case 'export-docx':
+                exportCurrentPage('docx');
                 break;
-                
-            case 'export-all-md':
-                const allPages = Storage.getPages();
-                let allMarkdown = '';
-                allPages.forEach((page, index) => {
-                    allMarkdown += Storage.exportToMarkdown(page.id);
-                    if (index < allPages.length - 1) {
-                        allMarkdown += '\n\n---\n\n';
-                    }
-                });
-                downloadFile(allMarkdown, 'all-pages.md', 'text/markdown');
-                showToast('Exported all pages', 'success');
-                break;
-                
             case 'export-pdf':
-                exportToPDF();
+                exportCurrentPage('pdf');
+                break;
+            case 'export-html':
+                exportCurrentPage('html');
+                break;
+            case 'export-md':
+                exportCurrentPage('md');
+                break;
+            case 'export-json':
+                exportCurrentPage('json');
+                break;
+            case 'export-txt':
+                exportCurrentPage('txt');
                 break;
                 
+            // Export all pages
+            case 'export-all-md':
+                showExportAllModal();
+                break;
+                
+            // Import
+            case 'import-file':
+                showImportModal();
+                break;
             case 'import-md':
                 importFromMarkdown();
                 break;
                 
+            // Backup
             case 'backup':
                 Storage.exportToFile();
                 showToast('Backup downloaded', 'success');
                 break;
                 
+            // Data management
             case 'storage-info':
                 showStorageInfo();
                 break;
@@ -1018,6 +1127,332 @@ const Sidebar = (function() {
                     location.reload();
                 }
                 break;
+        }
+    }
+    
+    /**
+     * Export current page to specific format
+     */
+    async function exportCurrentPage(format) {
+        const page = window.Editor?.getCurrentPage?.();
+        if (!page) {
+            showToast('No page to export', 'error');
+            return;
+        }
+        
+        try {
+            showToast(`Exporting to ${format.toUpperCase()}...`, 'info');
+            const result = await ImportExport.exportPage(page, format);
+            const formats = ImportExport.getFormats().export;
+            const formatInfo = formats[format];
+            const filename = `${page.title || 'page'}.${formatInfo.ext}`;
+            
+            ImportExport.download(result, filename, formatInfo.mime);
+            showToast(`Exported as ${formatInfo.name}`, 'success');
+        } catch (error) {
+            console.error('Export error:', error);
+            showToast(`Export failed: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * Setup export button dropdown
+     */
+    function setupExportButton() {
+        const exportBtn = document.getElementById('export-btn');
+        const exportMenu = document.getElementById('export-menu');
+        
+        if (!exportBtn || !exportMenu) return;
+        
+        exportBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = exportMenu.style.display === 'block';
+            exportMenu.style.display = isVisible ? 'none' : 'block';
+        });
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', () => {
+            exportMenu.style.display = 'none';
+        });
+        
+        // Handle export format selection
+        exportMenu.querySelectorAll('.export-item').forEach(item => {
+            item.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const format = item.dataset.format;
+                exportMenu.style.display = 'none';
+                await exportCurrentPage(format);
+            });
+        });
+    }
+    
+    /**
+     * Show import modal
+     */
+    function showImportModal() {
+        const formats = ImportExport.getFormats().import;
+        
+        const modal = document.createElement('div');
+        modal.className = 'import-modal';
+        modal.innerHTML = `
+            <div class="import-modal-content">
+                <div class="import-modal-header">
+                    <span class="import-modal-title">📥 Import Page</span>
+                    <button class="import-modal-close">&times;</button>
+                </div>
+                <div class="import-modal-body">
+                    <div class="file-drop-zone" id="file-drop-zone">
+                        <div class="file-drop-zone-icon">📁</div>
+                        <div class="file-drop-zone-text">Drop a file here or click to browse</div>
+                        <div class="file-drop-zone-hint">Supports DOCX, PDF, HTML, Markdown, Notion JSON, and TXT</div>
+                        <input type="file" class="file-input" id="file-input" accept=".docx,.pdf,.html,.md,.json,.txt">
+                    </div>
+                    
+                    <div class="import-formats">
+                        <div class="import-formats-title">Supported Formats</div>
+                        <div class="import-format-grid">
+                            <div class="import-format-item" data-format="docx">
+                                <span class="import-format-icon">📄</span>
+                                <span class="import-format-name">Word</span>
+                            </div>
+                            <div class="import-format-item" data-format="pdf">
+                                <span class="import-format-icon">📑</span>
+                                <span class="import-format-name">PDF</span>
+                            </div>
+                            <div class="import-format-item" data-format="html">
+                                <span class="import-format-icon">🌐</span>
+                                <span class="import-format-name">HTML</span>
+                            </div>
+                            <div class="import-format-item" data-format="md">
+                                <span class="import-format-icon">📝</span>
+                                <span class="import-format-name">Markdown</span>
+                            </div>
+                            <div class="import-format-item" data-format="json">
+                                <span class="import-format-icon">📋</span>
+                                <span class="import-format-name">Notion</span>
+                            </div>
+                            <div class="import-format-item" data-format="txt">
+                                <span class="import-format-icon">📃</span>
+                                <span class="import-format-name">Text</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Close handlers
+        modal.querySelector('.import-modal-close').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+        
+        // File drop zone handlers
+        const dropZone = modal.querySelector('#file-drop-zone');
+        const fileInput = modal.querySelector('#file-input');
+        
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileImport(e.target.files[0], modal);
+            }
+        });
+        
+        // Drag and drop handlers
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length > 0) {
+                handleFileImport(e.dataTransfer.files[0], modal);
+            }
+        });
+        
+        // Format item click handlers
+        modal.querySelectorAll('.import-format-item').forEach(item => {
+            item.addEventListener('click', () => {
+                fileInput.click();
+            });
+        });
+        
+        document.body.appendChild(modal);
+    }
+    
+    /**
+     * Handle file import
+     */
+    async function handleFileImport(file, modal) {
+        // Show progress
+        const body = modal.querySelector('.import-modal-body');
+        body.innerHTML = `
+            <div class="import-progress">
+                <div class="import-progress-spinner"></div>
+                <div class="import-progress-text">Importing ${file.name}...</div>
+            </div>
+        `;
+        
+        try {
+            const page = await ImportExport.importFile(file);
+            
+            // Save the imported page
+            const newPage = Storage.createPage(page.title || 'Imported Page');
+            newPage.icon = page.icon || '📄';
+            newPage.blocks = page.blocks.map(b => ({
+                ...b,
+                id: Storage.generateBlockId(),
+                createdAt: Date.now()
+            }));
+            
+            Storage.updatePage(newPage.id, newPage);
+            refreshPageTree();
+            loadPage(newPage.id);
+            
+            modal.remove();
+            showToast(`Imported "${newPage.title}" successfully!`, 'success');
+        } catch (error) {
+            console.error('Import error:', error);
+            body.innerHTML = `
+                <div class="import-message error">
+                    <span>❌</span>
+                    <span>Import failed: ${error.message}</span>
+                </div>
+                <button class="ai-btn" id="import-retry">Try Again</button>
+            `;
+            
+            body.querySelector('#import-retry').addEventListener('click', () => {
+                showImportModal();
+                modal.remove();
+            });
+        }
+    }
+    
+    /**
+     * Show export all modal
+     */
+    function showExportAllModal() {
+        const modal = document.createElement('div');
+        modal.className = 'export-all-modal';
+        modal.innerHTML = `
+            <div class="export-all-content">
+                <div class="export-all-header">
+                    <h3 style="margin: 0; font-size: 18px;">📤 Export All Pages</h3>
+                </div>
+                <div class="export-all-body">
+                    <div class="export-all-options">
+                        <div class="export-all-option" data-format="md">
+                            <span class="export-all-option-icon">📝</span>
+                            <div class="export-all-option-info">
+                                <div class="export-all-option-title">Markdown</div>
+                                <div class="export-all-option-desc">Export all pages as a single Markdown file</div>
+                            </div>
+                        </div>
+                        <div class="export-all-option" data-format="json">
+                            <span class="export-all-option-icon">📋</span>
+                            <div class="export-all-option-info">
+                                <div class="export-all-option-title">JSON Backup</div>
+                                <div class="export-all-option-desc">Export all data as JSON (includes metadata)</div>
+                            </div>
+                        </div>
+                        <div class="export-all-option" data-format="html">
+                            <span class="export-all-option-icon">🌐</span>
+                            <div class="export-all-option-info">
+                                <div class="export-all-option-title">HTML</div>
+                                <div class="export-all-option-desc">Export all pages as a single HTML document</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="export-all-footer">
+                    <button class="ai-btn" id="export-all-cancel">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        modal.querySelector('#export-all-cancel').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+        
+        modal.querySelectorAll('.export-all-option').forEach(option => {
+            option.addEventListener('click', async () => {
+                const format = option.dataset.format;
+                await exportAllPages(format);
+                modal.remove();
+            });
+        });
+        
+        document.body.appendChild(modal);
+    }
+    
+    /**
+     * Export all pages in a format
+     */
+    async function exportAllPages(format) {
+        const allPages = Storage.getPages();
+        
+        try {
+            showToast(`Exporting ${allPages.length} pages...`, 'info');
+            
+            if (format === 'json') {
+                // Use storage backup
+                Storage.exportToFile();
+                showToast('Exported all pages as JSON', 'success');
+                return;
+            }
+            
+            if (format === 'md') {
+                let allMarkdown = '';
+                allPages.forEach((page, index) => {
+                    allMarkdown += ImportExport.exportToMarkdown(page);
+                    if (index < allPages.length - 1) {
+                        allMarkdown += '\n\n---\n\n';
+                    }
+                });
+                downloadFile(allMarkdown, 'all-pages.md', 'text/markdown');
+                showToast('Exported all pages as Markdown', 'success');
+                return;
+            }
+            
+            if (format === 'html') {
+                let allHTML = `<!DOCTYPE html>
+<html>
+<head>
+    <title>All Pages Export</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        .page { margin-bottom: 60px; padding-bottom: 40px; border-bottom: 2px solid #eee; }
+        h1 { font-size: 32px; margin-bottom: 8px; }
+        .page-icon { font-size: 48px; }
+    </style>
+</head>
+<body>`;
+                
+                for (const page of allPages) {
+                    allHTML += `
+    <div class="page">
+        ${page.icon ? `<div class="page-icon">${page.icon}</div>` : ''}
+        <h1>${escapeHtml(page.title || 'Untitled')}</h1>
+        ${page.blocks.map(b => ImportExport.exportToHTML ? '' : `<p>${escapeHtml(typeof b.content === 'string' ? b.content : '')}</p>`).join('')}
+    </div>`;
+                }
+                
+                allHTML += '</body></html>';
+                downloadFile(allHTML, 'all-pages.html', 'text/html');
+                showToast('Exported all pages as HTML', 'success');
+            }
+        } catch (error) {
+            console.error('Export all error:', error);
+            showToast(`Export failed: ${error.message}`, 'error');
         }
     }
     
@@ -1511,7 +1946,10 @@ const Sidebar = (function() {
         createNewPage,
         showTemplateModal,
         showToast,
-        showSearchModal
+        showSearchModal,
+        showImportModal,
+        exportCurrentPage,
+        showExportAllModal
     };
     
     return window.Sidebar;

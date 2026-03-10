@@ -19,6 +19,7 @@ class WebCLIApp {
         this.conversations = JSON.parse(localStorage.getItem('webcli-conversations') || '{}');
         this.canvasContent = '';
         this.connectionCheckInterval = null;
+        this.api = api;
         this.searchMode = false;
         this.searchQuery = '';
         this.searchResults = [];
@@ -28,7 +29,8 @@ class WebCLIApp {
         this.commands = [
             '/help', '/mode', '/model', '/models', '/clear', '/session', '/new',
             '/health', '/copy', '/save', '/load', '/image', '/edit', '/upload',
-            '/shortcuts', '/theme', '/export', '/search', '/history'
+            '/shortcuts', '/theme', '/export', '/import', '/search', '/history',
+            '/formats'
         ];
         
         this.init();
@@ -131,23 +133,58 @@ class WebCLIApp {
         });
 
         // File drop handling
-        document.addEventListener('dragover', (e) => {
+        this.dragOverlay = document.getElementById('dragOverlay');
+        
+        document.addEventListener('dragenter', (e) => {
             e.preventDefault();
+            if (this.dragOverlay) {
+                this.dragOverlay.classList.add('active');
+            }
             document.body.classList.add('drag-over');
         });
 
-        document.addEventListener('dragleave', () => {
-            document.body.classList.remove('drag-over');
+        document.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+
+        document.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            // Only remove if leaving the document, not entering a child
+            if (e.relatedTarget === null) {
+                if (this.dragOverlay) {
+                    this.dragOverlay.classList.remove('active');
+                }
+                document.body.classList.remove('drag-over');
+            }
         });
 
         document.addEventListener('drop', (e) => {
             e.preventDefault();
+            if (this.dragOverlay) {
+                this.dragOverlay.classList.remove('active');
+            }
             document.body.classList.remove('drag-over');
+            
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                this.handleFileUpload(files[0]);
+                // Initialize file handler if needed
+                if (!fileHandler) {
+                    fileHandler = new FileHandler(this);
+                }
+                
+                // Handle multiple files
+                if (files.length === 1) {
+                    fileHandler.importFile(files[0]);
+                } else {
+                    fileHandler.importBatch(files);
+                }
             }
         });
+        
+        // Initialize file handler
+        if (typeof FileHandler !== 'undefined') {
+            fileHandler = new FileHandler(this);
+        }
     }
 
     // ==================== Connection Monitoring ====================
@@ -443,7 +480,17 @@ class WebCLIApp {
                 }
                 break;
             case 'export':
-                this.exportSession();
+                if (args[0]) {
+                    this.exportSession(args[0]);
+                } else {
+                    this.exportSession('txt');
+                }
+                break;
+            case 'import':
+                this.triggerImport(args[0]);
+                break;
+            case 'formats':
+                this.showSupportedFormats();
                 break;
             case 'history':
                 this.showCommandHistory();
@@ -907,7 +954,9 @@ class WebCLIApp {
                 <div><span class="prompt">/upload</span> - Upload file</div>
                 <div><span class="prompt">/edit &lt;filename&gt;</span> - Open editor</div>
                 <div><span class="prompt">/theme [dark|light|high-contrast]</span> - Change theme</div>
-                <div><span class="prompt">/export</span> - Export session</div>
+                <div><span class="prompt">/export [txt|json|md|html|doc|pdf]</span> - Export session</div>
+                <div><span class="prompt">/import [path]</span> - Import file(s)</div>
+                <div><span class="prompt">/formats</span> - Show supported formats</div>
                 <div><span class="prompt">/history</span> - Show command history</div>
                 <div><span class="prompt">/search &lt;query&gt;</span> - Search in conversation</div>
             </div>
@@ -915,6 +964,10 @@ class WebCLIApp {
                 <div class="font-bold">Keyboard Shortcuts:</div>
                 <div>Ctrl+L = Clear | Ctrl+C = Copy | ↑↓ = History | Tab = Autocomplete</div>
                 <div>Ctrl+R = Search history | F1 = Shortcuts help</div>
+            </div>
+            <div class="mt-2 text-gray-500">
+                <div class="font-bold">Drag & Drop:</div>
+                <div>Drop files directly onto the terminal to import them</div>
             </div>
         `;
         this.outputArea.appendChild(help);
@@ -950,16 +1003,65 @@ class WebCLIApp {
         this.printWelcome();
     }
 
-    exportSession() {
-        const output = this.outputArea.innerText;
-        const blob = new Blob([output], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `kimibuilt-session-${new Date().toISOString().slice(0, 10)}.txt`;
-        a.click();
-        URL.revokeObjectURL(url);
-        this.printSystem('✓ Session exported');
+    async exportSession(format = 'txt') {
+        if (!fileHandler) {
+            fileHandler = new FileHandler(this);
+        }
+        
+        const validFormats = ['txt', 'json', 'md', 'html', 'docx', 'doc', 'pdf', 'markdown', 'text'];
+        const normalizedFormat = format.toLowerCase().replace('.', '');
+        
+        if (!validFormats.includes(normalizedFormat)) {
+            this.printError(`Invalid format: ${format}`);
+            this.printSystem('Valid formats: txt, json, md, html, docx, pdf');
+            return;
+        }
+        
+        this.showLoading('Exporting session...');
+        
+        try {
+            const success = await fileHandler.exportSession(normalizedFormat);
+            if (success && normalizedFormat !== 'pdf') {
+                this.printSystem(`✓ Session exported as ${normalizedFormat.toUpperCase()}`);
+            }
+        } catch (error) {
+            this.printError(`Export failed: ${error.message}`);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    triggerImport(path) {
+        if (!fileHandler) {
+            fileHandler = new FileHandler(this);
+        }
+        
+        // Create file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.docx,.doc,.pdf,.html,.htm,.md,.markdown,.txt,.json,.js,.jsx,.ts,.tsx,.py,.sh,.bash,.css,.scss,.xml,.yaml,.yml,.sql,.php,.rb,.go,.rs,.java,.c,.cpp,.h,.cs,.swift,.kt,.r,.pl,.lua';
+        
+        input.onchange = async (e) => {
+            const files = e.target.files;
+            if (files.length === 0) return;
+            
+            if (files.length === 1) {
+                await fileHandler.importFile(files[0]);
+            } else {
+                await fileHandler.importBatch(files);
+            }
+        };
+        
+        input.click();
+    }
+
+    showSupportedFormats() {
+        if (!fileHandler) {
+            fileHandler = new FileHandler(this);
+        }
+        const formats = fileHandler.showSupportedFormats();
+        this.printSystem(formats);
     }
 
     navigateHistory(direction) {

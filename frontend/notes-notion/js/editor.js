@@ -1240,7 +1240,49 @@ const Editor = (function() {
      */
     function exportToMarkdown() {
         if (!currentPage) return '';
-        return Storage.exportToMarkdown(currentPage.id);
+        return ImportExport.exportToMarkdown(currentPage);
+    }
+    
+    /**
+     * Export current page as HTML
+     */
+    function exportToHTML() {
+        if (!currentPage) return '';
+        return ImportExport.exportToHTML(currentPage);
+    }
+    
+    /**
+     * Export current page as JSON
+     */
+    function exportToJSON() {
+        if (!currentPage) return '';
+        return ImportExport.exportToJSON(currentPage);
+    }
+    
+    /**
+     * Import blocks to current page
+     */
+    function importBlocks(blocks, options = {}) {
+        if (!currentPage) return;
+        
+        saveToHistory();
+        
+        if (options.replace) {
+            currentPage.blocks = blocks.map(b => ({
+                ...b,
+                id: Storage.generateBlockId(),
+                createdAt: Date.now()
+            }));
+        } else {
+            currentPage.blocks.push(...blocks.map(b => ({
+                ...b,
+                id: Storage.generateBlockId(),
+                createdAt: Date.now()
+            })));
+        }
+        
+        refreshEditor();
+        autoSave();
     }
     
     /**

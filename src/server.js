@@ -69,14 +69,11 @@ app.get('/health', async (_req, res) => {
 });
 
 const frontendPath = process.env.FRONTEND_PATH || path.join(__dirname, '../frontend');
-app.use('/cli', express.static(path.join(frontendPath, 'cli')));
-app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli')));
+// Serve only the 4 active frontends
 app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat')));
-app.use('/canvas', express.static(path.join(frontendPath, 'canvas')));
-app.use('/notation', express.static(path.join(frontendPath, 'notation')));
-app.use('/notes', express.static(path.join(frontendPath, 'notation')));
-app.use('/canvas-excalidraw', express.static(path.join(frontendPath, 'canvas-excalidraw')));
-app.use('/notes-notion', express.static(path.join(frontendPath, 'notes-notion')));
+app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli')));
+app.use('/notes', express.static(path.join(frontendPath, 'notes-notion')));
+app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw')));
 
 app.get('/', (_req, res) => {
     res.send(`
@@ -118,25 +115,7 @@ app.get('/', (_req, res) => {
             margin-top: 0;
             color: #3b82f6;
         }
-        .cli-info {
-            background: #1f1f1f;
-            border: 1px solid #333;
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-        .cli-info code {
-            background: #333;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-        .cli-info pre {
-            background: #333;
-            padding: 15px;
-            border-radius: 8px;
-            overflow-x: auto;
-        }
+
     </style>
 </head>
 <body>
@@ -151,22 +130,14 @@ app.get('/', (_req, res) => {
             <h3>Web CLI</h3>
             <p>Terminal-style AI interface</p>
         </a>
+        <a href="/notes/" class="card">
+            <h3>Notes</h3>
+            <p>Notion-style note taking with AI</p>
+        </a>
         <a href="/canvas/" class="card">
             <h3>Canvas</h3>
-            <p>Structured editor with artifact outputs</p>
+            <p>Visual canvas with Excalidraw integration</p>
         </a>
-        <a href="/notation/" class="card">
-            <h3>Notation Helper</h3>
-            <p>Shorthand-to-structured output with artifacts</p>
-        </a>
-    </div>
-    <div class="cli-info">
-        <h3>CLI (Command Line Interface)</h3>
-        <p>The CLI is a Node.js application that runs in your terminal:</p>
-        <pre><code>cd /mnt/c/Users/phill/KimiBuilt/frontend/cli
-npm install
-node cli.js</code></pre>
-        <p>Or <a href="/cli/README.md" style="color: #3b82f6;">view CLI documentation</a></p>
     </div>
 </body>
 </html>
