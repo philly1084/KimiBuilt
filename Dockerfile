@@ -27,6 +27,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY src/ ./src/
 COPY frontend/ ./frontend/
 COPY package.json ./
+COPY package-lock.json* ./
 
 ENV NODE_ENV=production
 ENV PORT=3000
