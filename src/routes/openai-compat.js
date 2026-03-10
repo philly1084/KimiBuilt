@@ -7,6 +7,20 @@ const { artifactService, extractResponseText } = require('../artifacts/artifact-
 
 const router = Router();
 
+function inferOutputFormatFromText(text = '') {
+    const normalized = String(text || '').toLowerCase();
+    const checks = [
+        ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
+        ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
+        ['pdf', /\bpdf\b/],
+        ['docx', /\b(docx|word document)\b/],
+        ['xml', /\bxml\b/],
+        ['mermaid', /\bmermaid\b/],
+        ['html', /\bhtml\b/],
+    ];
+
+    return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
+}
 function isChatCapableModel(modelId = '') {
     const normalizedId = String(modelId).toLowerCase();
     if (!normalizedId) return false;
@@ -82,12 +96,13 @@ router.post('/chat/completions', async (req, res, next) => {
         }
 
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
+        const effectiveOutputFormat = output_format || inferOutputFormatFromText(lastUserMessage?.content || '');
         const contextMessages = lastUserMessage
             ? await memoryService.process(sessionId, lastUserMessage.content)
             : [];
 
-        const artifactInstructions = output_format
-            ? artifactService.getGenerationInstructions(output_format)
+        const artifactInstructions = effectiveOutputFormat
+            ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
         const instructions = await buildInstructionsWithArtifacts(session, artifactInstructions, artifact_ids);
         const input = messages.map((message) => ({ role: message.role, content: message.content }));
@@ -129,7 +144,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         mode: 'chat',
-                        outputFormat: output_format,
+                        outputFormat: effectiveOutputFormat,
                         content: fullText,
                         title: 'chat-output',
                         responseId: event.response.id,
@@ -167,7 +182,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             mode: 'chat',
-            outputFormat: output_format,
+            outputFormat: effectiveOutputFormat,
             content: outputText,
             title: 'chat-output',
             responseId: response.id,
@@ -237,9 +252,10 @@ router.post('/responses', async (req, res, next) => {
         const userInput = typeof input === 'string'
             ? input
             : input.filter((item) => item.role === 'user').pop()?.content || '';
+        const effectiveOutputFormat = output_format || inferOutputFormatFromText(userInput);
         const contextMessages = await memoryService.process(sessionId, userInput);
-        const artifactInstructions = output_format
-            ? artifactService.getGenerationInstructions(output_format)
+        const artifactInstructions = effectiveOutputFormat
+            ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
         const fullInstructions = await buildInstructionsWithArtifacts(session, [instructions || '', artifactInstructions].filter(Boolean).join('\n\n'), artifact_ids);
 
@@ -271,7 +287,7 @@ router.post('/responses', async (req, res, next) => {
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         mode: 'chat',
-                        outputFormat: output_format,
+                        outputFormat: effectiveOutputFormat,
                         content: fullText,
                         title: 'response-output',
                         responseId: event.response.id,
@@ -300,7 +316,7 @@ router.post('/responses', async (req, res, next) => {
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             mode: 'chat',
-            outputFormat: output_format,
+            outputFormat: effectiveOutputFormat,
             content: outputText,
             title: 'response-output',
             responseId: response.id,
@@ -371,4 +387,7 @@ router.post('/images/generations', async (req, res, next) => {
 });
 
 module.exports = router;
+
+
+
 
