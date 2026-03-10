@@ -20,12 +20,7 @@ class UIHelpers {
         
         // Model selector state
         this.availableModels = [];
-        let savedModel;
-        try {
-            savedModel = localStorage.getItem('kimibuilt_default_model');
-        } catch (e) {
-            savedModel = null;
-        }
+        const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         this.currentModel = savedModel || 'gpt-4o';
         this.updateModelUI();
     }
@@ -815,11 +810,7 @@ class UIHelpers {
 
     selectModel(modelId) {
         this.currentModel = modelId;
-        try {
-            localStorage.setItem('kimibuilt_default_model', modelId);
-        } catch (e) {
-            console.warn('Failed to save model preference:', e);
-        }
+        window.sessionManager?.safeStorageSet?.('kimibuilt_default_model', modelId);
         this.updateModelUI();
         this.closeModelSelector();
         this.showToast(`Model changed to ${this.getModelDisplayName({ id: modelId })}`, 'success');
@@ -843,11 +834,7 @@ class UIHelpers {
 
     setCurrentModel(modelId) {
         this.currentModel = modelId;
-        try {
-            localStorage.setItem('kimibuilt_default_model', modelId);
-        } catch (e) {
-            console.warn('Failed to save model preference:', e);
-        }
+        window.sessionManager?.safeStorageSet?.('kimibuilt_default_model', modelId);
         this.updateModelUI();
     }
 
@@ -1023,12 +1010,7 @@ class UIHelpers {
 
     initTheme() {
         // Check for saved theme or system preference
-        let savedTheme;
-        try {
-            savedTheme = localStorage.getItem('kimibuilt_theme');
-        } catch (e) {
-            savedTheme = null;
-        }
+        const savedTheme = window.sessionManager?.safeStorageGet?.('kimibuilt_theme');
         
         const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         
@@ -1037,12 +1019,7 @@ class UIHelpers {
         
         // Listen for system theme changes
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            let hasSavedTheme;
-            try {
-                hasSavedTheme = localStorage.getItem('kimibuilt_theme');
-            } catch (e) {
-                hasSavedTheme = null;
-            }
+            const hasSavedTheme = window.sessionManager?.safeStorageGet?.('kimibuilt_theme');
             if (!hasSavedTheme) {
                 this.setTheme(e.matches ? 'dark' : 'light');
             }
@@ -1051,11 +1028,7 @@ class UIHelpers {
 
     setTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        try {
-            localStorage.setItem('kimibuilt_theme', theme);
-        } catch (e) {
-            console.warn('Failed to save theme preference:', e);
-        }
+        window.sessionManager?.safeStorageSet?.('kimibuilt_theme', theme);
 
         // Update theme toggle UI
         const lightIcon = document.getElementById('theme-icon-light');
@@ -2086,5 +2059,7 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
+
+
 
 

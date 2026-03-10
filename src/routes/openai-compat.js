@@ -3,7 +3,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse, generateImage, listModels } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
-const { extractResponseText } = require('../artifacts/artifact-service');
+const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 
 const router = Router();
 
@@ -86,7 +86,10 @@ router.post('/chat/completions', async (req, res, next) => {
             ? await memoryService.process(sessionId, lastUserMessage.content)
             : [];
 
-        const instructions = await buildInstructionsWithArtifacts(session, '', artifact_ids);
+        const artifactInstructions = output_format
+            ? artifactService.getGenerationInstructions(output_format)
+            : '';
+        const instructions = await buildInstructionsWithArtifacts(session, artifactInstructions, artifact_ids);
         const input = messages.map((message) => ({ role: message.role, content: message.content }));
 
         if (stream) {
@@ -235,7 +238,10 @@ router.post('/responses', async (req, res, next) => {
             ? input
             : input.filter((item) => item.role === 'user').pop()?.content || '';
         const contextMessages = await memoryService.process(sessionId, userInput);
-        const fullInstructions = await buildInstructionsWithArtifacts(session, instructions || '', artifact_ids);
+        const artifactInstructions = output_format
+            ? artifactService.getGenerationInstructions(output_format)
+            : '';
+        const fullInstructions = await buildInstructionsWithArtifacts(session, [instructions || '', artifactInstructions].filter(Boolean).join('\n\n'), artifact_ids);
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -365,3 +371,4 @@ router.post('/images/generations', async (req, res, next) => {
 });
 
 module.exports = router;
+

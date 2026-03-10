@@ -37,23 +37,8 @@ class OpenAIAPIClient extends EventTarget {
     }
     
     initClient() {
-        try {
-            // Check if OpenAI SDK is loaded (may be blocked by Tracking Prevention)
-            if (typeof OpenAI === 'undefined') {
-                console.warn('OpenAI SDK not loaded (possibly blocked by CORS/Tracking Prevention). Using fetch fallback.');
-                return;
-            }
-            
-            this.client = new OpenAI({
-                baseURL: API_BASE_URL,
-                apiKey: API_KEY,
-                dangerouslyAllowBrowser: true,
-            });
-            
-            console.log('OpenAI SDK client initialized');
-        } catch (error) {
-            console.error('Failed to initialize OpenAI client:', error);
-        }
+        // Use fetch-only in the browser to avoid third-party SDK/CORS/tracking issues.
+        this.client = null;
     }
 
     /**
@@ -691,5 +676,6 @@ class OpenAIAPIClient extends EventTarget {
 // Create global API client instance
 const apiClient = new OpenAIAPIClient();
 window.apiClient = apiClient;
+
 
 

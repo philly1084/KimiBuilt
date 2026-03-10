@@ -50,7 +50,7 @@ class OpenAIClient {
    * @param {string|null} model - Optional model ID
    * @returns {Promise<Object>} Final response data
    */
-  async chat(message, sessionId, onDelta, onDone, model = null) {
+  async chat(message, sessionId, onDelta, onDone, model = null, outputFormat = null) {
     this.refreshClient();
     
     const messages = [{ role: 'user', content: message }];
@@ -60,9 +60,11 @@ class OpenAIClient {
       stream: true,
     };
     
-    // Add KimiBuilt extension if sessionId provided
     if (sessionId) {
       params.session_id = sessionId;
+    }
+    if (outputFormat) {
+      params.output_format = outputFormat;
     }
 
     try {
@@ -70,6 +72,7 @@ class OpenAIClient {
       
       let finalSessionId = sessionId;
       let finalResponseId = null;
+      let finalArtifacts = [];
       
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content || '';
@@ -77,21 +80,22 @@ class OpenAIClient {
           onDelta(delta);
         }
         
-        // Extract session ID from response if provided
         if (chunk.session_id) {
           finalSessionId = chunk.session_id;
         }
-        
         if (chunk.id) {
           finalResponseId = chunk.id;
+        }
+        if (Array.isArray(chunk.artifacts) && chunk.artifacts.length > 0) {
+          finalArtifacts = chunk.artifacts;
         }
       }
       
       if (onDone) {
-        onDone({ sessionId: finalSessionId, responseId: finalResponseId });
+        onDone({ sessionId: finalSessionId, responseId: finalResponseId, artifacts: finalArtifacts });
       }
       
-      return { sessionId: finalSessionId, responseId: finalResponseId };
+      return { sessionId: finalSessionId, responseId: finalResponseId, artifacts: finalArtifacts };
     } catch (err) {
       throw this._handleError(err);
     }
@@ -575,7 +579,7 @@ function downloadArtifact(artifactId, outputPath) {
 module.exports = {
   APIError,
   request: (path, options) => client._legacyRequest(path, options),
-  chat: (message, sessionId, onDelta, onDone, model) => client.chat(message, sessionId, onDelta, onDone, model),
+  chat: (message, sessionId, onDelta, onDone, model, outputFormat) => client.chat(message, sessionId, onDelta, onDone, model, outputFormat),
   chatNonStreaming: (message, sessionId, model) => client.chatNonStreaming(message, sessionId, model),
   canvas: (message, sessionId, canvasType, existingContent, model) => 
     client.canvas(message, sessionId, canvasType, existingContent, model),
@@ -596,3 +600,6 @@ module.exports = {
   parseSSE: (chunk) => [], // Deprecated: OpenAI SDK handles streaming internally
   OpenAIClient,
 };
+
+
+

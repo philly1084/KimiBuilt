@@ -52,6 +52,24 @@
         renderArtifacts();
     }
 
+
+    function inferRequestedOutputFormat(messages = []) {
+        const lastUserMessage = [...messages].reverse().find((message) => message?.role === 'user' && message?.content);
+        const text = String(lastUserMessage?.content || '').toLowerCase();
+        if (!text) return '';
+
+        const checks = [
+            ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
+            ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
+            ['pdf', /\bpdf\b/],
+            ['docx', /\b(docx|word document)\b/],
+            ['xml', /\bxml\b/],
+            ['mermaid', /\bmermaid\b/],
+            ['html', /\bhtml\b/],
+        ];
+
+        return checks.find(([, pattern]) => pattern.test(text))?.[0] || '';
+    }
     async function uploadArtifact(file) {
         const sessionId = await ensureSession();
         const formData = new FormData();
@@ -173,8 +191,9 @@
             if (state.selectedArtifactIds.length > 0) {
                 params.artifact_ids = state.selectedArtifactIds;
             }
-            if (state.outputFormat) {
-                params.output_format = state.outputFormat;
+            const inferredOutputFormat = state.outputFormat || inferRequestedOutputFormat(messages);
+            if (inferredOutputFormat) {
+                params.output_format = inferredOutputFormat;
             }
 
             const response = await fetch(`${V1_BASE}/chat/completions`, {
@@ -276,3 +295,5 @@
         }, 50);
     });
 })();
+
+

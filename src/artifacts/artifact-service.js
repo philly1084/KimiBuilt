@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { artifactStore } = require('./artifact-store');
 const { extractArtifact } = require('./artifact-extractor');
 const { renderArtifact } = require('./artifact-renderer');
-const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMATS, normalizeFormat } = require('./constants');
+const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMATS, inferFormat, normalizeFormat } = require('./constants');
 const { chunkText, stripHtml } = require('../utils/text');
 const { vectorStore } = require('../memory/vector-store');
 const { createResponse } = require('../openai-client');
@@ -154,20 +154,40 @@ class ArtifactService {
         this.ensureEnabled();
 
         if (!file || !file.buffer || !file.filename) {
-            throw new Error('A file upload is required');
+            const error = new Error('A file upload is required');
+            error.statusCode = 400;
+            throw error;
         }
 
-        const extraction = await extractArtifact({
-            filename: file.filename,
-            mimeType: file.mimeType,
-            buffer: file.buffer,
-        });
-
-        const format = normalizeFormat(extraction.format);
-        if (!SUPPORTED_UPLOAD_FORMATS.has(format) && format !== 'power-query') {
-            throw new Error(`Unsupported upload format: ${format || file.filename}`);
+        const requestedFormat = normalizeFormat(inferFormat(file.filename, file.mimeType));
+        if (!SUPPORTED_UPLOAD_FORMATS.has(requestedFormat) && requestedFormat !== 'power-query') {
+            const error = new Error(`Unsupported upload format: ${requestedFormat || file.filename}`);
+            error.statusCode = 400;
+            throw error;
         }
 
+        let extraction = {
+            format: requestedFormat,
+            extractedText: '',
+            previewHtml: '',
+            metadata: {},
+            vectorizable: false,
+        };
+
+        try {
+            extraction = await extractArtifact({
+                filename: file.filename,
+                mimeType: file.mimeType,
+                buffer: file.buffer,
+            });
+        } catch (error) {
+            console.warn('[Artifacts] Extraction failed, storing raw file only:', error.message);
+            extraction.metadata = {
+                extractionError: error.message,
+            };
+        }
+
+        const format = normalizeFormat(extraction.format || requestedFormat);
         const artifact = await this.createStoredArtifact({
             sessionId,
             direction: 'uploaded',
@@ -394,3 +414,5 @@ module.exports = {
     ArtifactService,
     extractResponseText,
 };
+
+

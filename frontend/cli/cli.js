@@ -713,6 +713,20 @@ async function handleDelete(sessionId) {
  * Send a message in chat mode.
  * @param {string} message - Message to send
  */
+function inferRequestedOutputFormat(message) {
+  const text = String(message || '').toLowerCase();
+  const checks = [
+    ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
+    ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
+    ['pdf', /\bpdf\b/],
+    ['docx', /\b(docx|word document)\b/],
+    ['xml', /\bxml\b/],
+    ['mermaid', /\bmermaid\b/],
+    ['html', /\bhtml\b/],
+  ];
+
+  return checks.find(([, pattern]) => pattern.test(text))?.[0] || null;
+}
 async function sendChatMessage(message) {
   if (isProcessing) {
     console.log(chalk.yellow('⚠ Please wait for the current response...'));
@@ -732,6 +746,7 @@ async function sendChatMessage(message) {
     let hasStarted = false;
     const startTime = Date.now();
     
+    const outputFormat = inferRequestedOutputFormat(message);
     const result = await api.chat(
       message,
       currentSessionId,
@@ -747,8 +762,15 @@ async function sendChatMessage(message) {
           currentSessionId = done.sessionId;
           session.setCurrent(currentSessionId);
         }
+        if (Array.isArray(done.artifacts) && done.artifacts.length > 0) {
+          done.artifacts.forEach((artifact) => {
+            console.log(chalk.cyan(`\n   File: ${artifact.filename}`));
+            console.log(chalk.gray(`   Download: ${artifact.downloadUrl}`));
+          });
+        }
       },
-      currentModel
+      currentModel,
+      outputFormat
     );
     
     if (result.sessionId && result.sessionId !== currentSessionId) {
@@ -1353,6 +1375,9 @@ main().catch((err) => {
   console.error(chalk.red(`❌ Fatal error: ${err.message}`));
   process.exit(1);
 });
+
+
+
 
 
 

@@ -32,7 +32,7 @@ class SessionManager extends EventTarget {
             localStorage.removeItem(test);
             return true;
         } catch (e) {
-            console.warn('localStorage not available (Tracking Prevention or private mode):', e);
+            // Tracking Prevention can block storage in some browsers; continue without persistence.
             return false;
         }
     }
@@ -45,7 +45,7 @@ class SessionManager extends EventTarget {
         try {
             return localStorage.getItem(key);
         } catch (e) {
-            console.warn(`Failed to get ${key} from localStorage:`, e);
+            this.storageAvailable = false;
             return null;
         }
     }
@@ -60,17 +60,15 @@ class SessionManager extends EventTarget {
             return true;
         } catch (e) {
             if (e.name === 'QuotaExceededError') {
-                console.warn('Storage quota exceeded, cleaning up old sessions');
                 this.cleanupOldSessions();
-                // Try again after cleanup
                 try {
                     localStorage.setItem(key, value);
                     return true;
                 } catch (e2) {
-                    console.error('Still failed after cleanup:', e2);
+                    this.storageAvailable = false;
                 }
             } else {
-                console.warn(`Failed to set ${key} in localStorage:`, e);
+                this.storageAvailable = false;
             }
             return false;
         }
@@ -758,5 +756,8 @@ class SessionManager extends EventTarget {
 // Create global session manager instance
 const sessionManager = new SessionManager();
 window.sessionManager = sessionManager;
+
+
+
 
 
