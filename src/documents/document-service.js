@@ -5,6 +5,7 @@
 
 const { DocxGenerator } = require('./generators/docx-generator');
 const { PdfGenerator } = require('./generators/pdf-generator');
+const { PptxGenerator } = require('./generators/pptx-generator');
 const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
 
@@ -12,7 +13,8 @@ class DocumentService {
   constructor(openaiClient) {
     this.generators = {
       docx: new DocxGenerator(),
-      pdf: new PdfGenerator()
+      pdf: new PdfGenerator(),
+      pptx: new PptxGenerator()
     };
 
     this.templateEngine = new TemplateEngine();

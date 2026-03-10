@@ -1,0 +1,68 @@
+{
+  "id": "presentation-image-heavy",
+  "name": "Presentation - Visual/Images",
+  "category": "creative",
+  "description": "Image-heavy presentation with AI-generated visuals",
+  "icon": "🎨",
+  "tags": ["presentation", "slides", "visual", "images", "ai-art"],
+  "formats": ["pptx"],
+  "variables": {
+    "title": {
+      "type": "text",
+      "label": "Presentation Title",
+      "placeholder": "Enter presentation title",
+      "required": true
+    },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "description": "Add visual slides",
+      "itemFields": {
+        "title": {
+          "type": "text",
+          "label": "Slide Title",
+          "required": true
+        },
+        "imagePrompt": {
+          "type": "textarea",
+          "label": "Image Prompt",
+          "description": "Detailed description for AI image generation",
+          "required": true
+        },
+        "imageSize": {
+          "type": "select",
+          "label": "Image Orientation",
+          "options": [
+            { "value": "landscape", "label": "Landscape (16:9)" },
+            { "value": "portrait", "label": "Portrait (9:16)" },
+            { "value": "square", "label": "Square (1:1)" }
+          ],
+          "default": "landscape"
+        },
+        "layout": {
+          "type": "select",
+          "label": "Image Layout",
+          "options": [
+            { "value": "full", "label": "Full Slide" },
+            { "value": "left", "label": "Left Side" },
+            { "value": "right", "label": "Right Side" }
+          ],
+          "default": "full"
+        },
+        "caption": {
+          "type": "text",
+          "label": "Image Caption",
+          "required": false
+        }
+      }
+    },
+    "imageModel": {
+      "type": "select",
+      "label": "AI Image Model",
+      "options": [
+        { "value": "dall-e-3", "label": "DALL-E 3 (High Quality)" }
+      ],
+      "default": "dall-e-3"
+    }
+  }
+}

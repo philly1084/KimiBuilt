@@ -1,0 +1,58 @@
+{
+  "id": "presentation-bullet-points",
+  "name": "Presentation - Bullet Points",
+  "category": "business",
+  "description": "Professional presentation with bullet point slides",
+  "icon": "📊",
+  "tags": ["presentation", "slides", "business", "powerpoint"],
+  "formats": ["pptx"],
+  "variables": {
+    "title": {
+      "type": "text",
+      "label": "Presentation Title",
+      "placeholder": "Enter presentation title",
+      "required": true
+    },
+    "subtitle": {
+      "type": "text",
+      "label": "Subtitle",
+      "placeholder": "Enter subtitle (optional)",
+      "required": false
+    },
+    "author": {
+      "type": "text",
+      "label": "Presenter Name",
+      "placeholder": "Your name",
+      "required": false
+    },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "description": "Add slides with bullet points",
+      "itemFields": {
+        "title": {
+          "type": "text",
+          "label": "Slide Title",
+          "required": true
+        },
+        "bullets": {
+          "type": "textarea",
+          "label": "Bullet Points (one per line)",
+          "required": true
+        },
+        "imagePrompt": {
+          "type": "textarea",
+          "label": "AI Image Prompt (optional)",
+          "description": "Describe an image to generate for this slide",
+          "required": false
+        }
+      }
+    },
+    "generateImages": {
+      "type": "boolean",
+      "label": "Generate AI Images",
+      "description": "Automatically generate images for slides",
+      "default": false
+    }
+  }
+}
