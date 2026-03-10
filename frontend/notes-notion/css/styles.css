@@ -413,24 +413,54 @@ body {
     background: rgba(255, 0, 0, 0.6);
 }
 
-/* Page Header - FIXED: Added proper padding */
+/* Page Header - FIXED: Better spacing and overflow protection */
 .page-header {
     max-width: var(--content-max-width);
     width: 100%;
     margin: 0 auto;
-    padding: 32px var(--content-padding) 0;
+    padding: 48px var(--content-padding) 0;
     position: relative;
 }
 
-/* When cover exists, pull header up */
+/* When cover exists, pull header up but not too much */
 .cover-area + .page-header {
-    margin-top: -50px;
+    margin-top: -40px;
     padding-top: 0;
 }
 
 /* When no cover, ensure proper spacing at top */
 .page-header:first-child {
-    padding-top: 48px;
+    padding-top: 64px;
+}
+
+/* Ensure icon is never cut off */
+.page-icon-wrapper {
+    margin-bottom: 16px;
+    position: relative;
+    z-index: 5;
+}
+
+.page-icon-btn {
+    width: 78px;
+    height: 78px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    position: relative;
+    box-shadow: var(--shadow-sm);
+}
+
+.page-icon-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
 }
 
 .page-icon-wrapper {

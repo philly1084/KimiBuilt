@@ -107,9 +107,9 @@ class FileManager {
           </div>
           <div class="file-footer-actions">
             <button class="btn-secondary" onclick="fileManager.close()">Close</button>
-            <button class="btn-primary" id="file-download-selected-btn" onclick="fileManager.downloadSelected()" disabled>
+            <button class="btn-primary flex items-center gap-2" id="file-download-selected-btn" onclick="fileManager.downloadSelected()" disabled>
               <i data-lucide="download" class="w-4 h-4"></i>
-              Download Selected
+              <span>Download Selected</span>
             </button>
           </div>
         </div>
@@ -313,14 +313,21 @@ class FileManager {
       }
       
       .file-item-checkbox {
-        width: 18px;
-        height: 18px;
+        width: 20px;
+        height: 20px;
         border: 2px solid var(--border);
-        border-radius: 4px;
+        border-radius: 5px;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      
+      .file-item-checkbox:hover {
+        border-color: var(--accent);
+        background: rgba(56, 189, 248, 0.1);
       }
       
       .file-item.selected .file-item-checkbox {
@@ -329,10 +336,11 @@ class FileManager {
       }
       
       .file-item-checkbox i {
-        width: 12px;
-        height: 12px;
+        width: 14px;
+        height: 14px;
         color: white;
         display: none;
+        stroke-width: 3;
       }
       
       .file-item.selected .file-item-checkbox i {
@@ -443,6 +451,14 @@ class FileManager {
       .file-footer-actions {
         display: flex;
         gap: 8px;
+        align-items: center;
+      }
+      
+      .file-footer-actions .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
       }
       
       .file-progress-bar {
@@ -704,14 +720,28 @@ class FileManager {
     // Render files
     container.innerHTML = filtered.map(file => this.renderFileItem(file)).join('');
     
-    // Add click handlers
+    // Add click handlers to each file item
     container.querySelectorAll('.file-item').forEach(item => {
+      const fileId = item.dataset.fileId;
+      
+      // Click on checkbox specifically
+      const checkbox = item.querySelector('.file-item-checkbox');
+      if (checkbox) {
+        checkbox.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.toggleFileSelection(fileId);
+        });
+      }
+      
+      // Click on the row (but not on actions or checkbox)
       item.addEventListener('click', (e) => {
-        // Don't toggle if clicking action buttons
-        if (e.target.closest('.file-item-actions') || e.target.closest('.file-item-btn')) {
+        // Don't toggle if clicking action buttons or checkbox
+        if (e.target.closest('.file-item-actions') || 
+            e.target.closest('.file-item-btn') ||
+            e.target.closest('.file-item-checkbox')) {
           return;
         }
-        this.toggleFileSelection(file.id);
+        this.toggleFileSelection(fileId);
       });
     });
     

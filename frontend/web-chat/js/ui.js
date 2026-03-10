@@ -923,11 +923,11 @@ class UIHelpers {
             const messageCount = sessionManager.getMessages(session.id)?.length || 0;
             
             return `
-                <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}" role="button" tabindex="0" aria-label="${this.escapeHtmlAttr(session.title || 'New Chat')}">
+                <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}" role="button" tabindex="0" aria-label="${this.escapeHtmlAttr(session.title || 'New Chat')}" title="${this.escapeHtmlAttr(session.title || 'New Chat')}">
                     <div class="session-icon ${modeClass}" aria-hidden="true">
                         <i data-lucide="${modeIcon}" class="w-4 h-4 text-white"></i>
                     </div>
-                    <div class="session-info">
+                    <div class="session-info sidebar-session-info">
                         <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
                         <div class="session-meta">
                             ${timeAgo} • ${messageCount} message${messageCount !== 1 ? 's' : ''}

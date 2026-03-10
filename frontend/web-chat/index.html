@@ -342,12 +342,12 @@
 
     <div id="app" class="flex h-full">
         <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar bg-bg-secondary border-r border-border flex flex-col transition-all duration-300" aria-label="Conversation sidebar">
+        <aside id="sidebar" class="sidebar bg-bg-secondary border-r border-border flex flex-col" aria-label="Conversation sidebar">
             <!-- Sidebar Header -->
             <div class="p-4 border-b border-border">
-                <button id="new-chat-btn" class="btn-primary w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all">
+                <button id="new-chat-btn" class="btn-primary w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all" title="New Chat">
                     <i data-lucide="plus" class="w-5 h-5" aria-hidden="true"></i>
-                    <span>New Chat</span>
+                    <span class="sidebar-btn-text">New Chat</span>
                 </button>
             </div>
             
@@ -366,31 +366,31 @@
                 
                 <!-- Action Buttons -->
                 <div class="grid grid-cols-2 gap-2">
-                    <button id="import-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openImportModal()">
+                    <button id="import-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openImportModal()" title="Import">
                         <i data-lucide="upload" class="w-4 h-4" aria-hidden="true"></i>
-                        <span>Import</span>
+                        <span class="sidebar-btn-text">Import</span>
                     </button>
-                    <button id="export-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openExportModal()">
+                    <button id="export-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openExportModal()" title="Export">
                         <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
-                        <span>Export</span>
+                        <span class="sidebar-btn-text">Export</span>
                     </button>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
-                    <button id="search-toggle" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="app.openSearch()">
+                    <button id="search-toggle" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="app.openSearch()" title="Search">
                         <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
-                        <span>Search</span>
+                        <span class="sidebar-btn-text">Search</span>
                     </button>
-                    <button id="files-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="fileManager.open()">
+                    <button id="files-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="fileManager.open()" title="Files">
                         <i data-lucide="folder-open" class="w-4 h-4" aria-hidden="true"></i>
-                        <span>Files</span>
+                        <span class="sidebar-btn-text">Files</span>
                     </button>
                 </div>
                 
                 <!-- Theme Toggle -->
-                <button id="theme-toggle" class="btn-secondary w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium transition-all" aria-label="Toggle dark/light mode">
+                <button id="theme-toggle" class="btn-secondary w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium transition-all" aria-label="Toggle dark/light mode" title="Toggle Theme">
                     <i data-lucide="sun" class="w-4 h-4 hidden" id="theme-icon-light" aria-hidden="true"></i>
                     <i data-lucide="moon" class="w-4 h-4" id="theme-icon-dark" aria-hidden="true"></i>
-                    <span id="theme-text">Dark Mode</span>
+                    <span class="sidebar-btn-text" id="theme-text">Dark Mode</span>
                 </button>
             </div>
         </aside>
@@ -568,6 +568,7 @@
     <script src="js/session.js"></script>
     <script src="js/import-export.js"></script>
     <script src="js/file-manager.js"></script>
+    <script src="js/sidebar-resize.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/app.js"></script>
     <script src="js/artifacts.js"></script>

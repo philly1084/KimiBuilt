@@ -1309,6 +1309,63 @@ const Editor = (function() {
         }
     }
     
+    /**
+     * Add a block at the end of the document
+     */
+    function addBlockAtEnd(type = 'text', content = '') {
+        if (!currentPage) return null;
+        
+        saveToHistory();
+        
+        const newBlock = Blocks.createBlock(type, content);
+        currentPage.blocks.push(newBlock);
+        
+        // Hide add block hint if visible
+        const addBlockHint = document.getElementById('add-block-hint');
+        if (addBlockHint) {
+            addBlockHint.style.display = 'none';
+        }
+        
+        // Re-render
+        const blockEl = renderBlockElement(newBlock);
+        editorContainer.appendChild(blockEl);
+        
+        // Focus the new block
+        setTimeout(() => focusBlock(newBlock.id), 0);
+        
+        // Auto-save
+        savePage();
+        
+        return newBlock;
+    }
+    
+    /**
+     * Get the current model for AI operations
+     */
+    function getCurrentModel() {
+        return currentPage?.model || Blocks.getDefaultModel?.() || 'gpt-4o';
+    }
+    
+    /**
+     * Update empty state visibility and add block hint
+     */
+    function updateEmptyState() {
+        const emptyState = document.getElementById('empty-state');
+        const addBlockHint = document.getElementById('add-block-hint');
+        
+        const isEmpty = !currentPage?.blocks?.length || 
+            (currentPage.blocks.length === 1 && !currentPage.blocks[0].content);
+        
+        if (emptyState) {
+            emptyState.style.display = isEmpty ? 'block' : 'none';
+        }
+        
+        if (addBlockHint) {
+            // Show hint when there are blocks but not in empty state
+            addBlockHint.style.display = (!isEmpty && currentPage?.blocks?.length > 0) ? 'flex' : 'none';
+        }
+    }
+    
     // Expose to window for access from other modules
     window.Editor = {
         init,
@@ -1333,7 +1390,9 @@ const Editor = (function() {
         insertDatabaseBlock,
         showInlineToolbar,
         hideInlineToolbar,
-        updateBlockContent
+        updateBlockContent,
+        addBlockAtEnd,
+        getCurrentModel
     };
     
     return window.Editor;

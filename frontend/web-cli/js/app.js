@@ -1,70 +1,66 @@
 /**
- * Web CLI App
- * Terminal-style interface for KimiBuilt AI
+ * Code CLI App
+ * Terminal-style coding interface for KimiBuilt AI
  */
 
-class WebCLIApp {
+class CodeCLIApp {
     constructor() {
-        this.mode = 'chat';
         this.history = [];
         this.historyIndex = -1;
         this.currentOutput = '';
         this.isProcessing = false;
-        this.conversationHistory = [];
-        this.theme = localStorage.getItem('webcli-theme') || 'dark';
-        this.commandHistory = JSON.parse(localStorage.getItem('webcli-cmd-history') || '[]');
+        this.theme = localStorage.getItem('codecli-theme') || 'dark';
+        this.commandHistory = JSON.parse(localStorage.getItem('codecli-cmd-history') || '[]');
         this.autocompleteIndex = -1;
         this.autocompleteMatches = [];
         this.lastResponse = '';
-        this.conversations = JSON.parse(localStorage.getItem('webcli-conversations') || '{}');
-        this.canvasContent = '';
-        this.connectionCheckInterval = null;
-        this.api = api;
-        this.searchMode = false;
-        this.searchQuery = '';
-        this.searchResults = [];
-        this.searchIndex = -1;
+        this.sessionStartTime = Date.now();
+        this.messageCount = 0;
+        this.tokenCount = 0;
+        this.requestCount = 0;
+        this.activityLog = [];
+        this.currentActivity = null;
+        this.progressInterval = null;
+        this.progressStartTime = null;
         
         // Available commands for autocomplete
         this.commands = [
-            '/help', '/mode', '/model', '/models', '/clear', '/session', '/new',
-            '/health', '/copy', '/save', '/load', '/image', '/edit', '/upload',
-            '/shortcuts', '/theme', '/export', '/import', '/search', '/history',
-            '/formats'
+            '/help', '/clear', '/models', '/model', '/theme', 
+            '/export', '/save', '/load', '/copy', '/image',
+            '/upload', '/session', '/stats', '/shortcuts'
         ];
         
         this.init();
     }
-
+    
     init() {
-        this.outputArea = document.getElementById('outputArea');
+        this.terminalOutput = document.getElementById('terminalOutput');
         this.commandInput = document.getElementById('commandInput');
-        this.modeBadge = document.getElementById('modeBadge');
         this.modelSelect = document.getElementById('modelSelect');
-        this.connectionStatus = document.getElementById('connectionStatus');
+        this.statusDot = document.getElementById('statusDot');
+        this.statusText = document.getElementById('statusText');
         this.sessionInfo = document.getElementById('sessionInfo');
-        this.promptSymbol = document.getElementById('promptSymbol');
         this.autocompleteEl = document.getElementById('autocomplete');
-        this.loadingIndicator = document.getElementById('loadingIndicator');
         this.shortcutsModal = document.getElementById('shortcutsModal');
-        this.canvasPanel = document.getElementById('canvasPanel');
-
+        this.activityPanel = document.getElementById('activityPanel');
+        this.activityBadge = document.getElementById('activityBadge');
+        this.progressSection = document.getElementById('progressSection');
+        this.progressBar = document.getElementById('progressBar');
+        this.progressPercent = document.getElementById('progressPercent');
+        this.progressStatus = document.getElementById('progressStatus');
+        this.progressTime = document.getElementById('progressTime');
+        
         this.setupEventListeners();
         this.applyTheme(this.theme);
-        this.startConnectionMonitoring();
         this.checkConnection();
         this.loadModels();
         this.printWelcome();
+        this.startStatsTimer();
     }
-
+    
     setupEventListeners() {
         // Input handling
         this.commandInput.addEventListener('keydown', (e) => {
-            if (this.searchMode) {
-                this.handleSearchInput(e);
-                return;
-            }
-
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (this.autocompleteMatches.length > 0 && this.autocompleteIndex >= 0) {
@@ -95,26 +91,20 @@ class WebCLIApp {
             } else if (e.ctrlKey && e.key === 'c') {
                 e.preventDefault();
                 this.copyLastOutput();
-            } else if (e.ctrlKey && e.key === 'r') {
-                e.preventDefault();
-                this.startHistorySearch();
             } else if (e.key === 'Escape') {
                 this.hideAutocomplete();
                 this.closeShortcuts();
-                if (this.searchMode) {
-                    this.exitSearchMode();
-                }
             } else if (e.key === 'F1') {
                 e.preventDefault();
                 this.showShortcuts();
             }
         });
-
+        
         // Input for autocomplete
         this.commandInput.addEventListener('input', () => {
             this.updateAutocomplete();
         });
-
+        
         // Focus input on click anywhere
         document.addEventListener('click', (e) => {
             if (e.target.tagName !== 'BUTTON' && 
@@ -125,13 +115,14 @@ class WebCLIApp {
                 this.commandInput.focus();
             }
         });
-
+        
         // Model selection
         this.modelSelect.addEventListener('change', () => {
             api.setModel(this.modelSelect.value);
+            this.updateModelInfo();
             this.printSystem(`Model set to: ${this.modelSelect.value}`);
         });
-
+        
         // File drop handling
         this.dragOverlay = document.getElementById('dragOverlay');
         
@@ -140,951 +131,757 @@ class WebCLIApp {
             if (this.dragOverlay) {
                 this.dragOverlay.classList.add('active');
             }
-            document.body.classList.add('drag-over');
         });
-
+        
         document.addEventListener('dragover', (e) => {
             e.preventDefault();
         });
-
+        
         document.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            // Only remove if leaving the document, not entering a child
-            if (e.relatedTarget === null) {
-                if (this.dragOverlay) {
-                    this.dragOverlay.classList.remove('active');
-                }
-                document.body.classList.remove('drag-over');
+            if (e.relatedTarget === null && this.dragOverlay) {
+                this.dragOverlay.classList.remove('active');
             }
         });
-
+        
         document.addEventListener('drop', (e) => {
             e.preventDefault();
             if (this.dragOverlay) {
                 this.dragOverlay.classList.remove('active');
             }
-            document.body.classList.remove('drag-over');
             
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                // Initialize file handler if needed
-                if (!fileHandler) {
-                    fileHandler = new FileHandler(this);
-                }
-                
-                // Handle multiple files
-                if (files.length === 1) {
-                    fileHandler.importFile(files[0]);
-                } else {
-                    fileHandler.importBatch(files);
-                }
-            }
+            const files = Array.from(e.dataTransfer.files);
+            files.forEach(file => this.handleFile(file));
         });
-        
-        // Initialize file handler
-        if (typeof FileHandler !== 'undefined') {
-            fileHandler = new FileHandler(this);
-        }
     }
-
-    // ==================== Connection Monitoring ====================
-
-    startConnectionMonitoring() {
-        this.connectionCheckInterval = setInterval(() => {
-            this.checkConnection();
-        }, 30000); // Check every 30 seconds
-    }
-
-    async checkConnection() {
-        const health = await api.checkHealth();
-        
-        if (health.connected) {
-            this.connectionStatus.innerHTML = '<span class="status-connected" title="Connected">● Connected</span>';
-            this.connectionStatus.classList.remove('status-error', 'status-disconnected');
-        } else {
-            this.connectionStatus.innerHTML = `<span class="status-error" title="${health.error}">● Disconnected</span>`;
-            this.connectionStatus.classList.add('status-error');
-            
-            if (health.suggestions && health.suggestions.length > 0) {
-                this.printError(`Connection failed: ${health.error}`);
-                this.printSystem('Suggestions:\n' + health.suggestions.map(s => `  • ${s}`).join('\n'));
-            }
-        }
-    }
-
-    // ==================== Theme Support ====================
-
-    applyTheme(themeName) {
-        this.theme = themeName;
-        document.body.setAttribute('data-theme', themeName);
-        localStorage.setItem('webcli-theme', themeName);
-        
-        const themeBtn = document.getElementById('themeBtn');
-        if (themeBtn) {
-            themeBtn.textContent = themeName === 'dark' ? '🌙' : themeName === 'light' ? '☀️' : '⚡';
-        }
-    }
-
-    cycleTheme() {
-        const themes = ['dark', 'light', 'high-contrast'];
-        const currentIndex = themes.indexOf(this.theme);
-        const nextTheme = themes[(currentIndex + 1) % themes.length];
-        this.applyTheme(nextTheme);
-        this.printSystem(`Theme switched to: ${nextTheme}`);
-    }
-
-    // ==================== Autocomplete ====================
-
-    updateAutocomplete() {
-        const input = this.commandInput.value;
-        
-        if (!input.startsWith('/')) {
-            this.hideAutocomplete();
-            return;
-        }
-
-        this.autocompleteMatches = this.commands.filter(cmd => 
-            cmd.startsWith(input.toLowerCase()) && cmd !== input.toLowerCase()
-        );
-        
-        this.autocompleteIndex = -1;
-
-        if (this.autocompleteMatches.length > 0) {
-            this.showAutocomplete();
-        } else {
-            this.hideAutocomplete();
-        }
-    }
-
-    showAutocomplete() {
-        this.autocompleteEl.innerHTML = this.autocompleteMatches.map((match, index) => 
-            `<div class="autocomplete-item ${index === this.autocompleteIndex ? 'selected' : ''}" data-index="${index}">${match}</div>`
-        ).join('');
-        this.autocompleteEl.classList.remove('hidden');
-    }
-
-    hideAutocomplete() {
-        this.autocompleteEl.classList.add('hidden');
-        this.autocompleteMatches = [];
-        this.autocompleteIndex = -1;
-    }
-
-    navigateAutocomplete(direction) {
-        this.autocompleteIndex += direction;
-        
-        if (this.autocompleteIndex < 0) {
-            this.autocompleteIndex = this.autocompleteMatches.length - 1;
-        } else if (this.autocompleteIndex >= this.autocompleteMatches.length) {
-            this.autocompleteIndex = 0;
-        }
-        
-        this.showAutocomplete();
-    }
-
-    selectAutocomplete() {
-        if (this.autocompleteIndex >= 0 && this.autocompleteMatches[this.autocompleteIndex]) {
-            this.commandInput.value = this.autocompleteMatches[this.autocompleteIndex];
-            this.hideAutocomplete();
-        }
-    }
-
-    handleTabCompletion() {
-        const input = this.commandInput.value;
-        
-        if (this.autocompleteMatches.length > 0) {
-            this.selectAutocomplete();
-        } else if (input.startsWith('/')) {
-            // Complete partial command
-            const partial = input.toLowerCase();
-            const matches = this.commands.filter(cmd => cmd.startsWith(partial));
-            if (matches.length === 1) {
-                this.commandInput.value = matches[0] + ' ';
-            } else if (matches.length > 1) {
-                this.printSystem('Possible completions: ' + matches.join(', '));
-            }
-        }
-    }
-
-    // ==================== History Search (Ctrl+R) ====================
-
-    startHistorySearch() {
-        this.searchMode = true;
-        this.searchQuery = '';
-        this.searchResults = [];
-        this.searchIndex = -1;
-        this.printSystem('Reverse history search: Type to search, Enter to select, Ctrl+C to cancel');
-        this.commandInput.placeholder = '(reverse-i-search)';
-        this.commandInput.value = '';
-        this.commandInput.focus();
-    }
-
-    exitSearchMode() {
-        this.searchMode = false;
-        this.searchQuery = '';
-        this.commandInput.placeholder = 'Type a message or /help for commands...';
-        this.commandInput.value = '';
-    }
-
-    handleSearchInput(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            if (this.searchIndex >= 0 && this.searchResults[this.searchIndex]) {
-                this.commandInput.value = this.searchResults[this.searchIndex];
-                this.exitSearchMode();
-            }
-        } else if (e.ctrlKey && e.key === 'c') {
-            e.preventDefault();
-            this.exitSearchMode();
-        } else if (e.key === 'Backspace') {
-            this.searchQuery = this.searchQuery.slice(0, -1);
-            this.performSearch();
-        } else if (e.key.length === 1) {
-            this.searchQuery += e.key;
-            this.performSearch();
-        }
-        
-        if (this.searchQuery) {
-            this.commandInput.value = `(reverse-i-search) \`${this.searchQuery}\': ${this.searchResults[this.searchIndex] || ''}`;
-        }
-    }
-
-    performSearch() {
-        this.searchResults = this.commandHistory.filter(cmd => 
-            cmd.toLowerCase().includes(this.searchQuery.toLowerCase())
-        ).reverse();
-        this.searchIndex = 0;
-    }
-
-    // ==================== Commands ====================
-
+    
+    // ==================== Command Processing ====================
+    
     async sendCommand() {
         const input = this.commandInput.value.trim();
-        if (!input || this.isProcessing) return;
-
-        this.commandInput.value = '';
-        this.hideAutocomplete();
+        if (!input) return;
         
         // Add to history
         this.history.push(input);
         this.historyIndex = this.history.length;
+        this.saveCommandHistory();
         
-        // Add to persistent command history
-        if (!this.commandHistory.includes(input)) {
-            this.commandHistory.push(input);
-            if (this.commandHistory.length > 100) {
-                this.commandHistory.shift();
-            }
-            localStorage.setItem('webcli-cmd-history', JSON.stringify(this.commandHistory));
-        }
-
-        // Print user input
+        // Print input
         this.printInput(input);
-
-        // Handle commands
+        this.commandInput.value = '';
+        this.hideAutocomplete();
+        
+        // Process command
         if (input.startsWith('/')) {
-            await this.handleCommand(input);
+            await this.processCommand(input);
         } else {
-            await this.processInput(input);
+            await this.processQuery(input);
         }
     }
-
-    async handleCommand(input) {
-        // Parse command with quoted arguments support
-        const parsed = this.parseCommand(input.slice(1));
-        const cmd = parsed.command.toLowerCase();
-        const args = parsed.args;
-        const flags = parsed.flags;
-
+    
+    async processCommand(input) {
+        const parts = input.slice(1).split(' ');
+        const cmd = parts[0].toLowerCase();
+        const args = parts.slice(1);
+        
         switch (cmd) {
             case 'help':
+            case '?':
                 this.printHelp();
                 break;
-            case 'mode':
-                if (args[0]) this.setMode(args[0]);
-                else this.printSystem('Current mode: ' + this.mode);
+            case 'clear':
+            case 'cls':
+                this.clearOutput();
+                break;
+            case 'models':
+                await this.listModels();
                 break;
             case 'model':
                 if (args[0]) {
                     api.setModel(args[0]);
+                    this.updateModelInfo();
                     this.printSystem(`Model set to: ${args[0]}`);
                 } else {
-                    this.printSystem(`Current model: ${api.currentModel}`);
+                    this.printSystem(`Current model: ${api.currentModel || 'default'}`);
                 }
                 break;
-            case 'clear':
-                this.clearOutput();
+            case 'theme':
+                this.cycleTheme();
                 break;
-            case 'session':
-                this.printSystem(`Session ID: ${api.sessionId || 'none'}`);
+            case 'export':
+                this.exportSession();
                 break;
-            case 'new':
-                api.clearSession();
-                this.conversationHistory = [];
-                this.printSystem('New session started');
+            case 'save':
+                this.saveConversation(args[0] || 'session');
                 break;
-            case 'models':
-                await this.loadModels();
-                this.printSystem('Available models:\n' + api.models.map(m => `  • ${m.id} - ${m.description || m.name}`).join('\n'));
-                break;
-            case 'health':
-                await this.checkConnection();
+            case 'load':
+                this.loadConversation(args[0] || 'session');
                 break;
             case 'copy':
                 this.copyLastOutput();
                 break;
-            case 'save':
-                if (args[0]) {
-                    this.saveConversation(args[0]);
-                } else {
-                    this.printError('Usage: /save <filename>');
-                }
-                break;
-            case 'load':
-                if (args[0]) {
-                    this.loadConversation(args[0]);
-                } else {
-                    this.printError('Usage: /load <filename>');
-                }
-                break;
             case 'image':
-                if (args.length > 0) {
-                    await this.generateImage(args.join(' '));
-                } else {
-                    this.printError('Usage: /image <prompt>');
-                }
+                await this.generateImage(args.join(' '));
                 break;
             case 'upload':
                 this.triggerFileUpload();
                 break;
-            case 'edit':
-                if (args[0]) {
-                    this.openEditor(args[0]);
-                } else {
-                    this.printSystem('Usage: /edit <filename> - Opens file in editor mode');
-                }
+            case 'session':
+                this.printSessionInfo();
+                break;
+            case 'stats':
+                this.printStats();
                 break;
             case 'shortcuts':
             case 'keys':
                 this.showShortcuts();
                 break;
-            case 'theme':
-                if (args[0]) {
-                    if (['dark', 'light', 'high-contrast'].includes(args[0])) {
-                        this.applyTheme(args[0]);
-                        this.printSystem(`Theme set to: ${args[0]}`);
-                    } else {
-                        this.printError('Valid themes: dark, light, high-contrast');
-                    }
-                } else {
-                    this.cycleTheme();
-                }
-                break;
-            case 'export':
-                if (args[0]) {
-                    this.exportSession(args[0]);
-                } else {
-                    this.exportSession('txt');
-                }
-                break;
-            case 'import':
-                this.triggerImport(args[0]);
-                break;
-            case 'formats':
-                this.showSupportedFormats();
-                break;
-            case 'history':
-                this.showCommandHistory();
-                break;
-            case 'search':
-                if (args[0]) {
-                    this.searchInConversation(args.join(' '));
-                } else {
-                    this.printError('Usage: /search <query>');
-                }
+            case 'health':
+                await this.checkHealth();
                 break;
             default:
                 this.printError(`Unknown command: /${cmd}. Type /help for available commands.`);
         }
     }
-
-    parseCommand(input) {
-        const args = [];
-        const flags = {};
-        let current = '';
-        let inQuotes = false;
-        let quoteChar = '';
-
-        for (let i = 0; i < input.length; i++) {
-            const char = input[i];
-
-            if ((char === '"' || char === "'") && !inQuotes) {
-                inQuotes = true;
-                quoteChar = char;
-            } else if (char === quoteChar && inQuotes) {
-                inQuotes = false;
-                quoteChar = '';
-            } else if (char === ' ' && !inQuotes) {
-                if (current.startsWith('--')) {
-                    const [key, ...valParts] = current.slice(2).split('=');
-                    flags[key] = valParts.join('=') || true;
-                } else if (current.startsWith('-')) {
-                    flags[current.slice(1)] = true;
-                } else if (current) {
-                    args.push(current);
-                }
-                current = '';
-            } else {
-                current += char;
-            }
-        }
-
-        if (current) {
-            if (current.startsWith('--')) {
-                const [key, ...valParts] = current.slice(2).split('=');
-                flags[key] = valParts.join('=') || true;
-            } else if (current.startsWith('-')) {
-                flags[current.slice(1)] = true;
-            } else {
-                args.push(current);
-            }
-        }
-
-        return {
-            command: args.shift() || '',
-            args,
-            flags
-        };
-    }
-
-    // ==================== New Commands ====================
-
-    async copyLastOutput() {
-        if (this.lastResponse) {
-            try {
-                await navigator.clipboard.writeText(this.lastResponse);
-                this.printSystem('✓ Copied last response to clipboard');
-            } catch (err) {
-                this.printError('Failed to copy: ' + err.message);
-            }
-        } else {
-            this.printSystem('No response to copy');
-        }
-    }
-
-    saveConversation(filename) {
-        const conversation = {
-            timestamp: new Date().toISOString(),
-            sessionId: api.sessionId,
-            mode: this.mode,
-            history: this.history,
-            conversationHistory: this.conversationHistory
-        };
-        
-        this.conversations[filename] = conversation;
-        localStorage.setItem('webcli-conversations', JSON.stringify(this.conversations));
-        this.printSystem(`✓ Conversation saved as "${filename}"`);
-    }
-
-    loadConversation(filename) {
-        const conversation = this.conversations[filename];
-        if (conversation) {
-            this.history = conversation.history || [];
-            this.conversationHistory = conversation.conversationHistory || [];
-            this.historyIndex = this.history.length;
-            if (conversation.mode) {
-                this.setMode(conversation.mode);
-            }
-            this.printSystem(`✓ Conversation "${filename}" loaded (${conversation.history?.length || 0} messages)`);
-        } else {
-            this.printError(`Conversation "${filename}" not found`);
-            const saved = Object.keys(this.conversations);
-            if (saved.length > 0) {
-                this.printSystem('Saved conversations: ' + saved.join(', '));
-            }
-        }
-    }
-
-    async generateImage(prompt) {
-        this.showLoading('Generating image...');
-        
-        try {
-            const result = await api.generateImage(prompt);
-            
-            if (result.url || result.data?.[0]?.url) {
-                const imageUrl = result.url || result.data[0].url;
-                this.printImage(imageUrl, prompt);
-                this.printSystem('✓ Image generated successfully');
-            } else {
-                this.printError('Image generation returned no URL');
-            }
-        } catch (error) {
-            this.printError('Image generation failed: ' + error.message);
-        } finally {
-            this.hideLoading();
-        }
-    }
-
-    printImage(url, alt) {
-        const div = document.createElement('div');
-        div.className = 'image-output';
-        div.innerHTML = `
-            <div class="timestamp">${this.getTimestamp()}</div>
-            <img src="${this.escapeHtml(url)}" alt="${this.escapeHtml(alt)}" 
-                 style="max-width: 100%; max-height: 400px; border-radius: 8px; margin: 8px 0;"
-                 onerror="this.parentElement.innerHTML='<div class=\\'error\\'>Failed to load image</div>'">
-            <div class="text-sm text-gray-500">${this.escapeHtml(alt)}</div>
-        `;
-        this.outputArea.appendChild(div);
-        this.scrollToBottom();
-    }
-
-    triggerFileUpload() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.onchange = (e) => {
-            if (e.target.files.length > 0) {
-                this.handleFileUpload(e.target.files[0]);
-            }
-        };
-        input.click();
-    }
-
-    async handleFileUpload(file) {
-        this.showLoading(`Uploading ${file.name}...`);
-        
-        try {
-            const result = await api.uploadFile(file);
-            this.printSystem(`✓ File uploaded: ${file.name} (${this.formatBytes(file.size)})`);
-            this.printSystem(`File ID: ${result.id || result.file_id || 'N/A'}`);
-        } catch (error) {
-            this.printError('Upload failed: ' + error.message);
-        } finally {
-            this.hideLoading();
-        }
-    }
-
-    formatBytes(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    openEditor(filename) {
-        // For now, just print info. Could integrate with a code editor component
-        this.printSystem(`Editor mode for: ${filename}`);
-        this.printSystem('(Editor integration would open here)');
-    }
-
-    showShortcuts() {
-        this.shortcutsModal.classList.remove('hidden');
-    }
-
-    closeShortcuts() {
-        this.shortcutsModal.classList.add('hidden');
-    }
-
-    showCommandHistory() {
-        if (this.commandHistory.length === 0) {
-            this.printSystem('No command history');
+    
+    async processQuery(input) {
+        if (this.isProcessing) {
+            this.printWarning('Already processing. Please wait...');
             return;
         }
         
-        const history = this.commandHistory.slice(-20).map((cmd, i) => 
-            `  ${(i + 1).toString().padStart(3)}  ${cmd}`
-        ).join('\n');
-        
-        this.printSystem(`Command History (last 20 of ${this.commandHistory.length}):\n${history}`);
-    }
-
-    searchInConversation(query) {
-        const matches = this.history.filter(msg => 
-            msg.toLowerCase().includes(query.toLowerCase())
-        );
-        
-        if (matches.length === 0) {
-            this.printSystem(`No matches found for "${query}"`);
-        } else {
-            this.printSystem(`Found ${matches.length} match(es) for "${query}":`);
-            matches.forEach((match, i) => {
-                this.printSystem(`  ${i + 1}. ${match.substring(0, 100)}${match.length > 100 ? '...' : ''}`);
-            });
-        }
-    }
-
-    // ==================== UI Helpers ====================
-
-    showLoading(message) {
-        this.loadingIndicator.querySelector('.loading-text').textContent = message;
-        this.loadingIndicator.classList.remove('hidden');
         this.isProcessing = true;
-    }
-
-    hideLoading() {
-        this.loadingIndicator.classList.add('hidden');
-        this.isProcessing = false;
-    }
-
-    // ==================== Core Processing ====================
-
-    async processInput(input) {
-        this.isProcessing = true;
-        this.currentOutput = '';
-
-        const responseEl = document.createElement('div');
-        responseEl.className = 'ai-response mb-4 streaming-cursor';
-        responseEl.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span><br>`;
-        this.outputArea.appendChild(responseEl);
-
+        this.requestCount++;
+        this.messageCount += 2; // User + AI
+        
+        // Update activity
+        this.setActivity('processing', 'Generating response...', 'Analyzing prompt');
+        this.showProgress('Processing request', true);
+        
         try {
-            if (this.mode === 'chat') {
-                for await (const chunk of api.streamChat(input, api.currentModel, this.mode, this.conversationHistory)) {
-                    if (chunk.type === 'delta') {
-                        this.currentOutput += chunk.content;
-                        responseEl.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span><br>${this.renderMarkdown(this.currentOutput)}`;
-                        this.scrollToBottom();
-                    } else if (chunk.type === 'error') {
-                        responseEl.classList.remove('streaming-cursor');
-                        this.printError(chunk.error);
-                        if (chunk.suggestions) {
-                            this.printSystem('Suggestions:\n' + chunk.suggestions.map(s => `  • ${s}`).join('\n'));
-                        }
-                    } else if (chunk.type === 'done') {
-                        responseEl.classList.remove('streaming-cursor');
-                        this.lastResponse = this.currentOutput;
-                        this.conversationHistory.push(
-                            { role: 'user', content: input },
-                            { role: 'assistant', content: this.currentOutput }
-                        );
-                        this.updateSessionInfo();
-                    }
+            const startTime = Date.now();
+            
+            const response = await api.sendMessage(input, (chunk) => {
+                // Stream progress
+                if (chunk.type === 'delta') {
+                    this.appendToCurrentOutput(chunk.content);
                 }
-            } else if (this.mode === 'canvas') {
-                this.showLoading('Processing canvas request...');
-                const response = await api.sendCanvasRequest(input, 'document', this.canvasContent);
-                this.hideLoading();
-                
-                this.currentOutput = response.content || 'No content generated';
-                this.canvasContent = this.currentOutput;
-                this.lastResponse = this.currentOutput;
-                
-                // Update split view
-                const canvasPreview = document.getElementById('canvasPreview');
-                if (canvasPreview) {
-                    canvasPreview.innerHTML = this.renderMarkdown(this.currentOutput);
-                }
-                
-                responseEl.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span><br>${this.renderMarkdown(this.currentOutput)}`;
-                responseEl.classList.remove('streaming-cursor');
-                
-                if (response.suggestions?.length > 0) {
-                    this.printSystem(`Suggestions: ${response.suggestions.join(', ')}`);
-                }
-            } else if (this.mode === 'notation') {
-                this.showLoading('Processing notation...');
-                const response = await api.sendNotationRequest(input, 'expand');
-                this.hideLoading();
-                
-                this.currentOutput = response.result || 'No result generated';
-                this.lastResponse = this.currentOutput;
-                responseEl.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span><br>${this.renderMarkdown(this.currentOutput)}`;
-                responseEl.classList.remove('streaming-cursor');
-            }
+            });
+            
+            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+            
+            // Update stats
+            this.tokenCount += response.tokens || Math.ceil(input.length / 4 + (response.content?.length || 0) / 4);
+            this.updateStats();
+            
+            // Print response
+            this.printAI(response.content || 'No response');
+            
+            // Update activity
+            this.setActivity('success', `Response received (${duration}s)`, 'Complete');
+            this.hideProgress();
+            
+            // Add to conversation
+            this.lastResponse = response.content;
+            
         } catch (error) {
-            this.hideLoading();
-            responseEl.classList.remove('streaming-cursor');
-            this.printError(error.message);
+            this.printError(`Request failed: ${error.message}`);
+            this.setActivity('error', 'Request failed', error.message);
+            this.hideProgress();
+        } finally {
+            this.isProcessing = false;
+            this.currentOutput = '';
         }
-
-        this.isProcessing = false;
+    }
+    
+    // ==================== Activity & Progress Widgets ====================
+    
+    setActivity(type, text, meta = '') {
+        const icons = {
+            processing: '<div class="spinner"></div>',
+            success: '✓',
+            error: '✗',
+            waiting: '◈'
+        };
+        
+        const activityItem = document.createElement('div');
+        activityItem.className = `activity-item ${type === 'processing' ? 'active' : ''}`;
+        activityItem.innerHTML = `
+            <div class="activity-icon ${type}">${icons[type]}</div>
+            <div class="activity-text">${text}</div>
+            <div class="activity-meta">${meta}</div>
+        `;
+        
+        this.activityPanel.innerHTML = '';
+        this.activityPanel.appendChild(activityItem);
+        
+        this.activityBadge.textContent = type === 'processing' ? 'Working' : 
+                                          type === 'success' ? 'Done' : 
+                                          type === 'error' ? 'Error' : 'Idle';
+        this.activityBadge.className = type === 'processing' ? 'text-info' :
+                                       type === 'success' ? 'text-success' :
+                                       type === 'error' ? 'text-error' : 'text-muted';
+        
+        // Log activity
+        this.activityLog.push({
+            type,
+            text,
+            meta,
+            time: new Date().toISOString()
+        });
+        
+        this.currentActivity = { type, text, meta };
+    }
+    
+    showProgress(status, indeterminate = false) {
+        this.progressSection.style.display = 'block';
+        this.progressStatus.textContent = status;
+        this.progressStartTime = Date.now();
+        
+        if (indeterminate) {
+            this.progressBar.classList.add('indeterminate');
+            this.progressBar.style.width = '30%';
+        } else {
+            this.progressBar.classList.remove('indeterminate');
+            this.progressBar.style.width = '0%';
+        }
+        
+        // Update time
+        this.progressInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.progressStartTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            this.progressTime.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+    
+    updateProgress(percent, status) {
+        this.progressBar.classList.remove('indeterminate');
+        this.progressBar.style.width = `${percent}%`;
+        this.progressPercent.textContent = `${Math.round(percent)}%`;
+        if (status) {
+            this.progressStatus.textContent = status;
+        }
+    }
+    
+    hideProgress() {
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
+        this.progressSection.style.display = 'none';
+    }
+    
+    // ==================== Stats ====================
+    
+    startStatsTimer() {
+        setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            document.getElementById('statTime').textContent = 
+                mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        }, 1000);
+    }
+    
+    updateStats() {
+        document.getElementById('statMessages').textContent = this.messageCount;
+        document.getElementById('statTokens').textContent = this.tokenCount.toLocaleString();
+        document.getElementById('statRequests').textContent = this.requestCount;
+    }
+    
+    printStats() {
+        const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
+        this.printSystem(`
+Session Statistics:
+  Messages: ${this.messageCount}
+  Requests: ${this.requestCount}
+  Est. Tokens: ${this.tokenCount.toLocaleString()}
+  Duration: ${elapsed}s
+  Model: ${api.currentModel || 'default'}
+        `.trim());
+    }
+    
+    // ==================== Output Methods ====================
+    
+    printInput(text) {
+        const line = document.createElement('div');
+        line.className = 'line line-input';
+        line.innerHTML = `
+            <span class="prompt">❯</span>
+            <span class="input-text">${this.escapeHtml(text)}</span>
+        `;
+        this.terminalOutput.appendChild(line);
         this.scrollToBottom();
     }
-
-    // ==================== Markdown Rendering ====================
-
-    renderMarkdown(text) {
-        if (!text) return '';
+    
+    printAI(text) {
+        const line = document.createElement('div');
+        line.className = 'line line-output ai';
+        line.innerHTML = this.renderMarkdown(text);
+        this.terminalOutput.appendChild(line);
+        this.scrollToBottom();
         
+        // Highlight code blocks
+        line.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+        });
+    }
+    
+    printSystem(text) {
+        const line = document.createElement('div');
+        line.className = 'line line-output system';
+        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ${this.escapeHtml(text)}`;
+        this.terminalOutput.appendChild(line);
+        this.scrollToBottom();
+    }
+    
+    printError(text) {
+        const line = document.createElement('div');
+        line.className = 'line line-output error';
+        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ✗ ${this.escapeHtml(text)}`;
+        this.terminalOutput.appendChild(line);
+        this.scrollToBottom();
+    }
+    
+    printWarning(text) {
+        const line = document.createElement('div');
+        line.className = 'line line-output';
+        line.style.color = 'var(--warning)';
+        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ⚠ ${this.escapeHtml(text)}`;
+        this.terminalOutput.appendChild(line);
+        this.scrollToBottom();
+    }
+    
+    printWelcome() {
+        this.terminalOutput.innerHTML = '';
+        this.printSystem('Welcome to KimiBuilt Code CLI v3.0');
+        this.printSystem('Type /help for available commands');
+        this.printSystem(`Session started: ${new Date().toLocaleString()}`);
+        this.terminalOutput.appendChild(document.createElement('div')).style.height = '8px';
+    }
+    
+    printHelp() {
+        this.printAI(`
+## Available Commands
+
+**General:**
+  /help, /?          Show this help message
+  /clear, /cls       Clear the screen
+  /theme             Toggle light/dark theme
+  /shortcuts, /keys  Show keyboard shortcuts
+
+**AI Controls:**
+  /models            List available AI models
+  /model <name>      Change AI model
+  /image <prompt>    Generate an image
+  /upload            Upload a file for context
+
+**Session:**
+  /session           Show session information
+  /stats             Show session statistics
+  /save <name>       Save conversation
+  /load <name>       Load conversation
+  /export            Export conversation to file
+  /copy              Copy last response to clipboard
+
+**System:**
+  /health            Check API connection health
+
+Type any message to chat with the AI.
+        `.trim());
+    }
+    
+    // ==================== Helper Methods ====================
+    
+    renderMarkdown(text) {
+        // Simple markdown rendering
         let html = this.escapeHtml(text);
         
-        // Code blocks with syntax highlighting
+        // Code blocks
         html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             const language = lang || 'text';
-            const highlighted = this.highlightCode(code.trim(), language);
-            return `<div class="code-block"><div class="code-header">${language}</div><pre><code>${highlighted}</code></pre></div>`;
+            return `
+                <div class="code-block">
+                    <div class="code-header">
+                        <span>${language}</span>
+                        <div class="code-actions">
+                            <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
+                        </div>
+                    </div>
+                    <pre><code class="language-${language}">${code.trim()}</code></pre>
+                </div>
+            `;
         });
         
         // Inline code
         html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
         
         // Bold
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         
         // Italic
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        
-        // Headers
-        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-        
-        // Links
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-        
-        // Lists
-        html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
         
         // Line breaks
         html = html.replace(/\n/g, '<br>');
         
         return html;
     }
-
-    highlightCode(code, language) {
-        // Simple syntax highlighting
-        let highlighted = this.escapeHtml(code);
-        
-        // Keywords
-        const keywords = ['function', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 'return', 'class', 'import', 'export', 'from', 'async', 'await', 'try', 'catch'];
-        keywords.forEach(kw => {
-            highlighted = highlighted.replace(
-                new RegExp(`\\b${kw}\\b`, 'g'), 
-                `<span class="keyword">${kw}</span>`
-            );
-        });
-        
-        // Strings
-        highlighted = highlighted.replace(
-            /("[^"]*"|'[^']*')/g, 
-            '<span class="string">$1</span>'
-        );
-        
-        // Comments
-        highlighted = highlighted.replace(
-            /(\/\/.*$|\/\*[\s\S]*?\*\/)/gm, 
-            '<span class="comment">$1</span>'
-        );
-        
-        // Numbers
-        highlighted = highlighted.replace(
-            /\b(\d+)\b/g, 
-            '<span class="number">$1</span>'
-        );
-        
-        return highlighted;
-    }
-
-    // ==================== Mode Management ====================
-
-    setMode(mode) {
-        if (!['chat', 'canvas', 'notation'].includes(mode)) {
-            this.printError(`Invalid mode: ${mode}. Use: chat, canvas, or notation`);
-            return;
-        }
-        
-        this.mode = mode;
-        this.modeBadge.textContent = mode;
-        
-        // Update tabs
-        ['chat', 'canvas', 'notation'].forEach(m => {
-            const tab = document.getElementById(`tab-${m}`);
-            if (m === mode) {
-                tab.classList.remove('border-transparent');
-                tab.classList.add('border-blue-500');
-            } else {
-                tab.classList.add('border-transparent');
-                tab.classList.remove('border-blue-500');
-            }
-        });
-
-        // Show/hide canvas panel
-        if (mode === 'canvas') {
-            this.canvasPanel.classList.remove('hidden');
-            this.outputArea.style.height = 'calc(100vh - 380px)';
-        } else {
-            this.canvasPanel.classList.add('hidden');
-            this.outputArea.style.height = 'calc(100vh - 180px)';
-        }
-
-        this.printSystem(`Mode switched to: ${mode}`);
-    }
-
-    // ==================== Output Methods ====================
-
-    printWelcome() {
-        const welcome = document.createElement('div');
-        welcome.className = 'system mb-4';
-        welcome.innerHTML = `
-            <div class="timestamp">${this.getTimestamp()}</div>
-            <div class="text-green-400 font-bold">Welcome to KimiBuilt Web CLI v2.0</div>
-            <div class="mt-2 text-gray-400">
-                Commands:<br>
-                <span class="prompt">/help</span> - Show all commands<br>
-                <span class="prompt">/mode &lt;chat|canvas|notation&gt;</span> - Switch mode<br>
-                <span class="prompt">/model &lt;name&gt;</span> - Change AI model<br>
-                <span class="prompt">/clear</span> - Clear screen<br>
-                <span class="prompt">/theme</span> - Toggle theme<br>
-                <span class="prompt">/shortcuts</span> - Keyboard shortcuts (F1)
-            </div>
-        `;
-        this.outputArea.appendChild(welcome);
-        this.scrollToBottom();
-    }
-
-    printHelp() {
-        const help = document.createElement('div');
-        help.className = 'system';
-        help.innerHTML = `
-            <div class="font-bold text-blue-400 mb-2">Available Commands:</div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-1 text-sm">
-                <div><span class="prompt">/help</span> - Show this help</div>
-                <div><span class="prompt">/mode &lt;chat|canvas|notation&gt;</span> - Switch mode</div>
-                <div><span class="prompt">/model &lt;name&gt;</span> - Change AI model</div>
-                <div><span class="prompt">/models</span> - List available models</div>
-                <div><span class="prompt">/clear</span> - Clear screen</div>
-                <div><span class="prompt">/session</span> - Show session info</div>
-                <div><span class="prompt">/new</span> - Start new session</div>
-                <div><span class="prompt">/health</span> - Check connection</div>
-                <div><span class="prompt">/copy</span> - Copy last response</div>
-                <div><span class="prompt">/save &lt;filename&gt;</span> - Save conversation</div>
-                <div><span class="prompt">/load &lt;filename&gt;</span> - Load conversation</div>
-                <div><span class="prompt">/image &lt;prompt&gt;</span> - Generate image</div>
-                <div><span class="prompt">/upload</span> - Upload file</div>
-                <div><span class="prompt">/edit &lt;filename&gt;</span> - Open editor</div>
-                <div><span class="prompt">/theme [dark|light|high-contrast]</span> - Change theme</div>
-                <div><span class="prompt">/export [txt|json|md|html|doc|pdf]</span> - Export session</div>
-                <div><span class="prompt">/import [path]</span> - Import file(s)</div>
-                <div><span class="prompt">/formats</span> - Show supported formats</div>
-                <div><span class="prompt">/history</span> - Show command history</div>
-                <div><span class="prompt">/search &lt;query&gt;</span> - Search in conversation</div>
-            </div>
-            <div class="mt-3 text-gray-500">
-                <div class="font-bold">Keyboard Shortcuts:</div>
-                <div>Ctrl+L = Clear | Ctrl+C = Copy | ↑↓ = History | Tab = Autocomplete</div>
-                <div>Ctrl+R = Search history | F1 = Shortcuts help</div>
-            </div>
-            <div class="mt-2 text-gray-500">
-                <div class="font-bold">Drag & Drop:</div>
-                <div>Drop files directly onto the terminal to import them</div>
-            </div>
-        `;
-        this.outputArea.appendChild(help);
-        this.scrollToBottom();
-    }
-
-    printInput(text) {
+    
+    escapeHtml(text) {
         const div = document.createElement('div');
-        div.className = 'command-line user-input';
-        div.innerHTML = `<span class="prompt">❯</span> <span>${this.renderMarkdown(text)}</span>`;
-        this.outputArea.appendChild(div);
-        this.scrollToBottom();
+        div.textContent = text;
+        return div.innerHTML;
     }
-
-    printSystem(text) {
-        const div = document.createElement('div');
-        div.className = 'system';
-        div.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ${this.renderMarkdown(text)}`;
-        this.outputArea.appendChild(div);
-        this.scrollToBottom();
+    
+    getTimestamp() {
+        const now = new Date();
+        return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
     }
-
-    printError(text) {
-        const div = document.createElement('div');
-        div.className = 'error';
-        div.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> Error: ${this.escapeHtml(text)}`;
-        this.outputArea.appendChild(div);
-        this.scrollToBottom();
+    
+    scrollToBottom() {
+        this.terminalOutput.scrollTop = this.terminalOutput.scrollHeight;
     }
-
-    clearOutput() {
-        this.outputArea.innerHTML = '';
-        this.printWelcome();
-    }
-
-    async exportSession(format = 'txt') {
-        if (!fileHandler) {
-            fileHandler = new FileHandler(this);
-        }
-        
-        const validFormats = ['txt', 'json', 'md', 'html', 'docx', 'doc', 'pdf', 'markdown', 'text'];
-        const normalizedFormat = format.toLowerCase().replace('.', '');
-        
-        if (!validFormats.includes(normalizedFormat)) {
-            this.printError(`Invalid format: ${format}`);
-            this.printSystem('Valid formats: txt, json, md, html, docx, pdf');
-            return;
-        }
-        
-        this.showLoading('Exporting session...');
-        
+    
+    // ==================== API Methods ====================
+    
+    async checkConnection() {
         try {
-            const success = await fileHandler.exportSession(normalizedFormat);
-            if (success && normalizedFormat !== 'pdf') {
-                this.printSystem(`✓ Session exported as ${normalizedFormat.toUpperCase()}`);
+            this.statusDot.className = 'status-dot connecting';
+            this.statusText.textContent = 'Connecting...';
+            
+            const health = await api.healthCheck();
+            
+            if (health.connected) {
+                this.statusDot.className = 'status-dot online';
+                this.statusText.textContent = 'Connected';
+            } else {
+                this.statusDot.className = 'status-dot offline';
+                this.statusText.textContent = 'Disconnected';
             }
         } catch (error) {
-            this.printError(`Export failed: ${error.message}`);
-        } finally {
-            this.hideLoading();
+            this.statusDot.className = 'status-dot offline';
+            this.statusText.textContent = 'Offline';
         }
     }
-
-    /**
-     * Download file helper
-     */
-    downloadFile(content, filename, mimeType) {
-        const blob = new Blob([content], { type: mimeType });
+    
+    async checkHealth() {
+        this.setActivity('processing', 'Checking health...', 'Connecting');
+        try {
+            const health = await api.healthCheck();
+            this.printSystem(`Health Check:
+  Status: ${health.connected ? '✓ Connected' : '✗ Disconnected'}
+  Version: ${health.version || 'unknown'}
+  Models: ${health.models || 'unknown'}
+            `.trim());
+            this.setActivity('success', 'Health check complete', 'Connected');
+        } catch (error) {
+            this.printError(`Health check failed: ${error.message}`);
+            this.setActivity('error', 'Health check failed', error.message);
+        }
+    }
+    
+    async loadModels() {
+        try {
+            const models = await api.getModels();
+            this.modelSelect.innerHTML = models.map(m => 
+                `<option value="${m.id}" ${m.id === api.currentModel ? 'selected' : ''}>${m.id}</option>`
+            ).join('');
+            this.updateModelInfo();
+        } catch (error) {
+            this.modelSelect.innerHTML = '<option>gpt-4o</option>';
+        }
+    }
+    
+    async listModels() {
+        try {
+            const models = await api.getModels();
+            this.printAI(`## Available Models\n\n${models.map(m => `  • ${m.id}`).join('\n')}`);
+        } catch (error) {
+            this.printError('Failed to load models');
+        }
+    }
+    
+    updateModelInfo() {
+        const model = api.currentModel || 'gpt-4o';
+        document.getElementById('currentModelName').textContent = model;
+        document.getElementById('modelProvider').textContent = 'OpenAI';
+        
+        // Estimate context window
+        const contextSizes = {
+            'gpt-4o': '128K',
+            'gpt-4': '8K',
+            'gpt-4-turbo': '128K',
+            'gpt-3.5-turbo': '16K'
+        };
+        document.getElementById('modelContext').textContent = 
+            (contextSizes[model] || '8K') + ' ctx';
+    }
+    
+    // ==================== File Handling ====================
+    
+    triggerFileUpload() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.txt,.md,.json,.js,.ts,.py,.html,.css,.sql,.docx,.pdf';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) this.handleFile(file);
+        };
+        input.click();
+    }
+    
+    async handleFile(file) {
+        this.setActivity('processing', `Processing ${file.name}...`, 'Reading file');
+        
+        try {
+            const content = await api.uploadFile(file);
+            this.printSystem(`File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+            this.printAI(`File content from "${file.name}":\n\n\`\`\`\n${content.substring(0, 2000)}${content.length > 2000 ? '\n... (truncated)' : ''}\n\`\`\``);
+            this.setActivity('success', `File processed: ${file.name}`, 'Complete');
+        } catch (error) {
+            this.printError(`Failed to process file: ${error.message}`);
+            this.setActivity('error', 'File processing failed', error.message);
+        }
+    }
+    
+    // ==================== Image Generation ====================
+    
+    async generateImage(prompt) {
+        if (!prompt) {
+            this.printError('Please provide a prompt. Usage: /image <prompt>');
+            return;
+        }
+        
+        this.isProcessing = true;
+        this.setActivity('processing', 'Generating image...', 'AI working');
+        this.showProgress('Generating image', true);
+        
+        try {
+            const response = await api.generateImage(prompt);
+            this.printAI(`![Generated Image](${response.url})\n\n**Prompt:** ${prompt}`);
+            this.setActivity('success', 'Image generated', 'Complete');
+        } catch (error) {
+            this.printError(`Image generation failed: ${error.message}`);
+            this.setActivity('error', 'Image generation failed', error.message);
+        } finally {
+            this.isProcessing = false;
+            this.hideProgress();
+        }
+    }
+    
+    // ==================== Session Management ====================
+    
+    printSessionInfo() {
+        const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
+        this.printSystem(`
+Session Information:
+  ID: ${api.sessionId || 'none'}
+  Model: ${api.currentModel || 'default'}
+  Messages: ${this.messageCount}
+  Duration: ${elapsed}s
+  Start Time: ${new Date(this.sessionStartTime).toLocaleString()}
+        `.trim());
+    }
+    
+    saveConversation(name) {
+        const data = {
+            history: this.history,
+            timestamp: Date.now(),
+            model: api.currentModel
+        };
+        localStorage.setItem(`codecli_conv_${name}`, JSON.stringify(data));
+        this.printSystem(`Conversation saved as "${name}"`);
+    }
+    
+    loadConversation(name) {
+        const data = localStorage.getItem(`codecli_conv_${name}`);
+        if (data) {
+            const parsed = JSON.parse(data);
+            this.history = parsed.history || [];
+            this.printSystem(`Conversation "${name}" loaded (${this.history.length} messages)`);
+        } else {
+            this.printError(`Conversation "${name}" not found`);
+        }
+    }
+    
+    exportSession() {
+        const data = {
+            history: this.history,
+            timestamp: Date.now(),
+            model: api.currentModel
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
+        a.download = `codecli-session-${Date.now()}.json`;
         a.click();
-        document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        this.printSystem('Session exported');
     }
-
-    triggerImport(path) {
-        if (!fileHandler) {
-            fileHandler = new FileHandler(this);
+    
+    // ==================== UI Methods ====================
+    
+    clearOutput() {
+        this.terminalOutput.innerHTML = '';
+        this.printWelcome();
+    }
+    
+    cycleTheme() {
+        const themes = ['dark', 'light'];
+        const currentIndex = themes.indexOf(this.theme);
+        this.theme = themes[(currentIndex + 1) % themes.length];
+        this.applyTheme(this.theme);
+        localStorage.setItem('codecli-theme', this.theme);
+        this.printSystem(`Theme: ${this.theme}`);
+    }
+    
+    applyTheme(theme) {
+        document.body.setAttribute('data-theme', theme);
+    }
+    
+    copyLastOutput() {
+        if (this.lastResponse) {
+            navigator.clipboard.writeText(this.lastResponse);
+            this.printSystem('Last response copied to clipboard');
+        } else {
+            this.printWarning('No response to copy');
+        }
+    }
+    
+    copyCode(btn) {
+        const code = btn.closest('.code-block').querySelector('code').textContent;
+        navigator.clipboard.writeText(code);
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+    }
+    
+    showShortcuts() {
+        document.getElementById('shortcutsContent').innerHTML = `
+            <div class="grid gap-2 text-sm">
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>Send message</span>
+                    <code class="inline-code">Enter</code>
+                </div>
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>Command history</span>
+                    <code class="inline-code">↑ / ↓</code>
+                </div>
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>Autocomplete</span>
+                    <code class="inline-code">Tab</code>
+                </div>
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>Clear screen</span>
+                    <code class="inline-code">Ctrl + L</code>
+                </div>
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>Copy last response</span>
+                    <code class="inline-code">Ctrl + C</code>
+                </div>
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>Show help</span>
+                    <code class="inline-code">F1</code>
+                </div>
+                <div class="flex justify-between py-1">
+                    <span>Close/cancel</span>
+                    <code class="inline-code">Esc</code>
+                </div>
+            </div>
+        `;
+        this.shortcutsModal.classList.add('active');
+    }
+    
+    closeShortcuts() {
+        this.shortcutsModal.classList.remove('active');
+    }
+    
+    // ==================== Autocomplete ====================
+    
+    updateAutocomplete() {
+        const input = this.commandInput.value;
+        if (!input.startsWith('/')) {
+            this.hideAutocomplete();
+            return;
         }
         
-        // Create file input
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.multiple = true;
-        input.accept = '.docx,.doc,.pdf,.html,.htm,.md,.markdown,.txt,.json,.js,.jsx,.ts,.tsx,.py,.sh,.bash,.css,.scss,.xml,.yaml,.yml,.sql,.php,.rb,.go,.rs,.java,.c,.cpp,.h,.cs,.swift,.kt,.r,.pl,.lua';
+        const matches = this.commands.filter(cmd => cmd.startsWith(input.toLowerCase()));
+        if (matches.length === 0 || (matches.length === 1 && matches[0] === input)) {
+            this.hideAutocomplete();
+            return;
+        }
         
-        input.onchange = async (e) => {
-            const files = e.target.files;
-            if (files.length === 0) return;
-            
-            if (files.length === 1) {
-                await fileHandler.importFile(files[0]);
-            } else {
-                await fileHandler.importBatch(files);
+        this.autocompleteMatches = matches;
+        this.autocompleteIndex = -1;
+        
+        this.autocompleteEl.innerHTML = matches.map((match, i) => `
+            <div class="autocomplete-item ${i === 0 ? 'selected' : ''}" data-index="${i}">${match}</div>
+        `).join('');
+        
+        this.autocompleteEl.classList.remove('hidden');
+        
+        // Click handlers
+        this.autocompleteEl.querySelectorAll('.autocomplete-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.commandInput.value = item.textContent + ' ';
+                this.commandInput.focus();
+                this.hideAutocomplete();
+            });
+        });
+    }
+    
+    navigateAutocomplete(direction) {
+        if (this.autocompleteMatches.length === 0) return;
+        
+        this.autocompleteIndex += direction;
+        if (this.autocompleteIndex < 0) {
+            this.autocompleteIndex = this.autocompleteMatches.length - 1;
+        } else if (this.autocompleteIndex >= this.autocompleteMatches.length) {
+            this.autocompleteIndex = 0;
+        }
+        
+        this.autocompleteEl.querySelectorAll('.autocomplete-item').forEach((item, i) => {
+            item.classList.toggle('selected', i === this.autocompleteIndex);
+        });
+    }
+    
+    selectAutocomplete() {
+        if (this.autocompleteIndex >= 0) {
+            this.commandInput.value = this.autocompleteMatches[this.autocompleteIndex] + ' ';
+            this.commandInput.focus();
+            this.hideAutocomplete();
+        }
+    }
+    
+    hideAutocomplete() {
+        this.autocompleteEl.classList.add('hidden');
+        this.autocompleteMatches = [];
+        this.autocompleteIndex = -1;
+    }
+    
+    handleTabCompletion() {
+        const input = this.commandInput.value;
+        if (input.startsWith('/')) {
+            const matches = this.commands.filter(cmd => cmd.startsWith(input.toLowerCase()));
+            if (matches.length === 1) {
+                this.commandInput.value = matches[0] + ' ';
+            } else if (matches.length > 0) {
+                this.printSystem('Commands: ' + matches.join(', '));
             }
-        };
-        
-        input.click();
-    }
-
-    showSupportedFormats() {
-        if (!fileHandler) {
-            fileHandler = new FileHandler(this);
         }
-        const formats = fileHandler.showSupportedFormats();
-        this.printSystem(formats);
     }
-
+    
+    // ==================== History ====================
+    
     navigateHistory(direction) {
         if (this.history.length === 0) return;
         
         this.historyIndex += direction;
-        if (this.historyIndex < 0) this.historyIndex = 0;
-        if (this.historyIndex >= this.history.length) {
+        if (this.historyIndex < 0) {
+            this.historyIndex = 0;
+        } else if (this.historyIndex >= this.history.length) {
             this.historyIndex = this.history.length;
             this.commandInput.value = '';
             return;
@@ -1092,35 +889,30 @@ class WebCLIApp {
         
         this.commandInput.value = this.history[this.historyIndex];
     }
-
-    updateSessionInfo() {
-        const sessionId = api.sessionId || 'none';
-        this.sessionInfo.innerHTML = `Session: <span class="text-gray-400">${sessionId.slice(0, 8)}${sessionId.length > 8 ? '...' : ''}</span>`;
+    
+    saveCommandHistory() {
+        localStorage.setItem('codecli-cmd-history', JSON.stringify(this.history.slice(-100)));
     }
-
-    scrollToBottom() {
-        this.outputArea.scrollTop = this.outputArea.scrollHeight;
-    }
-
-    getTimestamp() {
-        return new Date().toLocaleTimeString();
-    }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    async loadModels() {
-        const models = await api.getModels();
-        this.modelSelect.innerHTML = models.map(m => 
-            `<option value="${m.id}">${m.name || m.id}</option>`
-        ).join('');
-        if (models.length > 0) {
-            api.setModel(models[0].id);
+    
+    // ==================== Streaming Helpers ====================
+    
+    appendToCurrentOutput(text) {
+        // For streaming responses - update the last AI output line
+        const lines = this.terminalOutput.querySelectorAll('.line-output.ai');
+        const lastLine = lines[lines.length - 1];
+        if (lastLine && lastLine.classList.contains('streaming')) {
+            lastLine.innerHTML = this.renderMarkdown(this.currentOutput + text);
+            this.currentOutput += text;
+            hljs.highlightAll();
+        } else {
+            this.currentOutput = text;
+            const line = document.createElement('div');
+            line.className = 'line line-output ai streaming';
+            line.innerHTML = this.renderMarkdown(text);
+            this.terminalOutput.appendChild(line);
         }
+        this.scrollToBottom();
     }
 }
 
-const app = new WebCLIApp();
+const app = new CodeCLIApp();
