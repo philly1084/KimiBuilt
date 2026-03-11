@@ -36,12 +36,13 @@ let commandHistory = [];
 let historyIndex = -1;
 let availableModels = [];
 let availableImageModels = [];
+let lastImageUrls = [];
 
 // Command definitions for auto-completion
 const COMMANDS = [
   '/new', '/mode', '/history', '/sessions', '/clear', '/help', '/quit', '/exit',
   '/url', '/config', '/theme', '/export', '/import', '/rename', '/delete',
-  '/copy', '/paste', '/undo', '/redo', '/search', '/settings',
+  '/copy', '/paste', '/undo', '/redo', '/search', '/settings', '/download-image',
   '/models', '/model', '/image', '/img', '/imgmodels'
 ];
 
@@ -117,6 +118,7 @@ function printHelp() {
     ['/models', 'List available chat models'],
     ['/model <id>', 'Set default model'],
     ['/image <prompt>', 'Generate an image'],
+    ['/download-image <url|index> [file]', 'Download an image from URL or last response'],
     ['/imgmodels', 'List image generation models'],
     ['/upload <file>', 'Upload an artifact to the current session'],
     ['/artifacts', 'List session artifacts'],
@@ -451,7 +453,7 @@ function handleImgModels() {
  */
 function parseImageOptions(args) {
   const options = {
-    model: 'dall-e-3',
+    model: null,
     size: '1024x1024',
     quality: 'standard',
     style: 'vivid',
@@ -490,6 +492,80 @@ function parseImageOptions(args) {
   
   return options;
 }
+function parseImageUrlsFromText(text) {
+  const source = String(text || '');
+  const urls = new Set();
+  const patterns = [
+    /<img[^>]+src="([^"]+)"/gi,
+    /!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/gi,
+    /\bhttps?:\/\/[^\s<>"')]+/gi,
+  ];
+
+  patterns.forEach((pattern) => {
+    let match;
+    while ((match = pattern.exec(source)) !== null) {
+      const value = match[1] || match[0];
+      if (!value) continue;
+      if (/^https?:\/\//i.test(value) && /(?:images\.unsplash\.com|plus\.unsplash\.com|images\.openai\.com|blob\.core\.windows\.net|\.(?:png|jpe?g|webp|gif)(?:\?|$))/i.test(value)) {
+        urls.add(value);
+      }
+    }
+  });
+
+  return Array.from(urls);
+}
+
+function inferImageExtension(imageUrl) {
+  try {
+    const parsed = new URL(imageUrl);
+    const pathname = parsed.pathname.toLowerCase();
+    if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return '.jpg';
+    if (pathname.endsWith('.webp')) return '.webp';
+    if (pathname.endsWith('.gif')) return '.gif';
+    return '.png';
+  } catch {
+    return '.png';
+  }
+}
+
+async function handleDownloadImageCommand(args) {
+  const parts = args.split(' ').filter(Boolean);
+  const target = parts[0];
+  const explicitPath = parts[1];
+
+  if (!target) {
+    console.log(chalk.yellow('Usage: /download-image <url|index> [output-file]'));
+    return true;
+  }
+
+  const combinedCandidates = [...lastImageUrls, ...parseImageUrlsFromText(accumulatedResponse)]
+    .filter((value, index, array) => value && array.indexOf(value) === index);
+
+  let imageUrl = target;
+  if (/^\d+$/.test(target)) {
+    imageUrl = combinedCandidates[Number(target) - 1];
+    if (!imageUrl) {
+      console.log(chalk.yellow(`No image URL found for index ${target}.`));
+      return true;
+    }
+  }
+
+  if (!/^https?:\/\//i.test(imageUrl)) {
+    console.log(chalk.yellow('Please provide a direct image URL or an index from the last image response.'));
+    return true;
+  }
+
+  const outputPath = explicitPath || `image-${Date.now()}${inferImageExtension(imageUrl)}`;
+  const spinner = createSpinner('Downloading image...');
+  spinner.start();
+  try {
+    await api.downloadImage(imageUrl, outputPath);
+    spinner.succeed(chalk.green(`Saved to ${outputPath}`));
+  } catch (err) {
+    spinner.fail(chalk.red(`Image download failed: ${err.message}`));
+  }
+  return true;
+}
 
 /**
  * Handle the /image command.
@@ -497,7 +573,7 @@ function parseImageOptions(args) {
  */
 async function handleImage(args) {
   if (!args.trim()) {
-    console.log(chalk.yellow('⚠ Usage: /image <prompt> [--model dall-e-3] [--size 1024x1024] [--quality hd] [--style vivid]'));
+    console.log(chalk.yellow('⚠ Usage: /image <prompt> [--model model-id] [--size 1024x1024] [--quality hd] [--style vivid]'));
     return;
   }
   
@@ -560,6 +636,7 @@ async function handleImage(args) {
     console.log(chalk.gray(`  Style: ${chalk.cyan(result.style || imageOptions.style)}`));
     
     if (result.data && result.data.length > 0) {
+      lastImageUrls = [];
       for (let i = 0; i < result.data.length; i++) {
         const img = result.data[i];
         console.log(chalk.cyan.bold(`\n  Image ${i + 1}:`));
@@ -588,6 +665,7 @@ async function handleImage(args) {
           }
           
           if (img.url) {
+            lastImageUrls.push(img.url);
             console.log(chalk.gray(`  URL: ${chalk.blue.underline(img.url)}`));
           }
         }
@@ -1000,6 +1078,9 @@ async function processInput(input) {
       case 'img':
         await handleImage(args);
         return true;
+      case 'download-image':
+        await handleDownloadImageCommand(args);
+        return true;
       case 'help':
       case '?':
         printHelp();
@@ -1260,7 +1341,7 @@ async function main() {
   startREPL();
 }
 
-COMMANDS.push('/upload', '/artifacts', '/download-artifact', '/makefile');
+COMMANDS.push('/upload', '/artifacts', '/download-artifact', '/download-image', '/makefile');
 
 async function handleArtifactUploadCommand(filePath) {
   if (!filePath) {
@@ -1364,6 +1445,9 @@ processInput = async function(input) {
   if (trimmed.startsWith('/download-artifact')) {
     return handleArtifactDownloadCommand(trimmed.replace('/download-artifact', '').trim());
   }
+  if (trimmed.startsWith('/download-image')) {
+    return handleDownloadImageCommand(trimmed.replace('/download-image', '').trim());
+  }
   if (trimmed.startsWith('/makefile')) {
     return handleMakeFileCommand(trimmed.replace('/makefile', '').trim());
   }
@@ -1375,6 +1459,13 @@ main().catch((err) => {
   console.error(chalk.red(`❌ Fatal error: ${err.message}`));
   process.exit(1);
 });
+
+
+
+
+
+
+
 
 
 

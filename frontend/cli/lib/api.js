@@ -326,31 +326,33 @@ class OpenAIClient {
    * @returns {Promise<Object>} Response data with image URLs
    */
   async generateImage(prompt, options = {}) {
-    this.refreshClient();
-    
     const { model, size, quality, style, n, sessionId } = options;
     
     const params = {
-      model: model || 'dall-e-3',
       prompt,
-      n: n || 1,
       size: size || '1024x1024',
     };
     
+    if (model) params.model = model;
+    if (n) params.n = n;
     if (quality) params.quality = quality;
     if (style) params.style = style;
-    if (sessionId) params.session_id = sessionId;
+    if (sessionId) params.sessionId = sessionId;
 
     try {
-      const response = await this.client.images.generate(params);
+      const response = await this._legacyRequest('/api/images', {
+        method: 'POST',
+        body: params,
+        timeout: 120000,
+      });
       
       return {
         data: response.data || [],
-        model: response.model || model || 'dall-e-3',
-        size: size || '1024x1024',
-        quality: quality || 'standard',
-        style: style || 'vivid',
-        sessionId: response.session_id || sessionId,
+        model: response.model || model || null,
+        size: response.size || params.size,
+        quality: response.quality || quality || null,
+        style: response.style || style || null,
+        sessionId: response.sessionId || sessionId,
       };
     } catch (err) {
       throw this._handleError(err);
@@ -575,6 +577,52 @@ function downloadArtifact(artifactId, outputPath) {
   });
 }
 
+function downloadImage(imageUrl, outputPath) {
+  const fs = require('fs');
+  const http = require('http');
+  const https = require('https');
+
+  return new Promise((resolve, reject) => {
+    let targetUrl;
+    try {
+      targetUrl = new URL(imageUrl);
+    } catch {
+      reject(new APIError(`Invalid image URL: ${imageUrl}`));
+      return;
+    }
+
+    const httpModule = targetUrl.protocol === 'https:' ? https : http;
+    const req = httpModule.request({
+      hostname: targetUrl.hostname,
+      port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
+      path: `${targetUrl.pathname}${targetUrl.search}`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'KimiBuilt-CLI/2.2.0',
+        Referer: 'https://unsplash.com/',
+      },
+    }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => reject(new APIError(`HTTP ${res.statusCode}: ${Buffer.concat(chunks).toString('utf8')}`, res.statusCode)));
+        return;
+      }
+
+      const file = fs.createWriteStream(outputPath);
+      res.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve(outputPath);
+      });
+      file.on('error', (err) => reject(new APIError(`Write failed: ${err.message}`)));
+    });
+
+    req.on('error', (err) => reject(new APIError(`Request failed: ${err.message}`)));
+    req.end();
+  });
+}
+
 // Export functions that use the OpenAI client
 module.exports = {
   APIError,
@@ -597,9 +645,12 @@ module.exports = {
   listArtifacts,
   generateArtifact,
   downloadArtifact,
+  downloadImage,
   parseSSE: (chunk) => [], // Deprecated: OpenAI SDK handles streaming internally
   OpenAIClient,
 };
+
+
 
 
 

@@ -274,17 +274,32 @@ const API = (function() {
     }
     
     // Generate image using backend API
-    async function generateImage(prompt, options = {}) {
-        const { model, size, quality, style } = options;
-        
+    async function generateImage(promptOrOptions, options = {}) {
+        const request = (promptOrOptions && typeof promptOrOptions === 'object' && !Array.isArray(promptOrOptions))
+            ? promptOrOptions
+            : { prompt: promptOrOptions, ...options };
+
+        const {
+            prompt,
+            model = null,
+            size = '1024x1024',
+            quality,
+            style,
+            n,
+            sessionId = currentSessionId,
+        } = request;
+
         const params = {
             prompt,
-            model: model || 'dall-e-3',
-            size: size || '1024x1024',
+            size,
         };
+
+        if (model) params.model = model;
 
         if (quality) params.quality = quality;
         if (style) params.style = style;
+        if (n) params.n = n;
+        if (sessionId) params.sessionId = sessionId;
         
         try {
             // Use the backend API endpoint
@@ -301,12 +316,18 @@ const API = (function() {
             }
             
             const data = await response.json();
+            const firstImage = data.data?.[0] || {};
+            const imageUrl = firstImage.url || (firstImage.b64_json ? `data:image/png;base64,${firstImage.b64_json}` : null);
             
             return {
-                url: data.data?.[0]?.url,
-                revised_prompt: data.data?.[0]?.revised_prompt,
+                url: imageUrl,
+                revised_prompt: firstImage.revised_prompt,
                 created: data.created,
-                model: params.model,
+                model: data.model || params.model,
+                size: data.size || params.size,
+                quality: data.quality || params.quality || null,
+                style: data.style || params.style || null,
+                sessionId: data.sessionId || sessionId,
             };
         } catch (error) {
             console.warn('Image generation failed:', error.message);
@@ -406,3 +427,6 @@ const API = (function() {
         BASE_URL,
     };
 })();
+
+
+
