@@ -1,7 +1,7 @@
 const OpenAI = require('openai');
 const { config } = require('./config');
 
-let client = null;
+let chatClient = null;
 
 const IMAGE_MODEL_KEYWORDS = [
     'gemini',
@@ -20,18 +20,46 @@ const IMAGE_MODEL_KEYWORDS = [
     'text-to-image',
 ];
 
+const OFFICIAL_OPENAI_IMAGE_MODELS = [
+    'gpt-image-1.5',
+    'gpt-image-1-mini',
+    'gpt-image-1',
+];
+
 function getClient() {
-    if (!client) {
-        client = new OpenAI({
+    if (!chatClient) {
+        chatClient = new OpenAI({
             apiKey: config.openai.apiKey,
             baseURL: config.openai.baseURL,
         });
     }
-    return client;
+    return chatClient;
 }
 
 function normalizeModelId(modelId = '') {
     return String(modelId || '').trim();
+}
+
+function hasDedicatedMediaConfig() {
+    return Boolean(normalizeModelId(config.media.apiKey));
+}
+
+function getImageProviderConfig() {
+    if (hasDedicatedMediaConfig()) {
+        return {
+            apiKey: config.media.apiKey,
+            baseURL: config.media.baseURL,
+            imageModel: config.media.imageModel,
+            source: 'official-openai',
+        };
+    }
+
+    return {
+        apiKey: config.openai.apiKey,
+        baseURL: config.openai.baseURL,
+        imageModel: config.openai.imageModel,
+        source: 'gateway',
+    };
 }
 
 function isLikelyImageModel(model = {}) {
@@ -59,7 +87,7 @@ function uniqueById(models = []) {
 }
 
 function sortImageModels(models = []) {
-    const configured = normalizeModelId(config.openai.imageModel);
+    const configured = normalizeModelId(getImageProviderConfig().imageModel);
 
     return [...models].sort((a, b) => {
         const aId = normalizeModelId(a.id);
@@ -79,6 +107,7 @@ function sortImageModels(models = []) {
         return aId.localeCompare(bId);
     });
 }
+
 function getImageModelMetadata(modelId, ownedBy = 'openai') {
     const normalized = normalizeModelId(modelId);
     const lower = normalized.toLowerCase();
@@ -126,19 +155,19 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
         return {
             id: normalized,
             name: normalized,
-            description: 'OpenAI-compatible image generation',
+            description: 'Official OpenAI image generation',
             owned_by: ownedBy,
             sizes: ['1024x1024', '1536x1024', '1024x1536', 'auto'],
             qualities: ['low', 'medium', 'high', 'auto'],
             styles: [],
-            maxImages: 1,
+            maxImages: 10,
         };
     }
 
     return {
         id: normalized,
         name: normalized,
-        description: 'Gateway-discovered image generation model',
+        description: 'Image generation model',
         owned_by: ownedBy,
         sizes: ['1024x1024'],
         qualities: [],
@@ -157,11 +186,21 @@ function toImageUrl(image = {}) {
     return null;
 }
 
+function parseErrorMessage(errorBody, status) {
+    try {
+        const parsed = JSON.parse(errorBody);
+        return parsed.error?.message || parsed.message || errorBody || `Image generation failed with HTTP ${status}`;
+    } catch (_error) {
+        return errorBody || `Image generation failed with HTTP ${status}`;
+    }
+}
+
 async function postImageGeneration(params) {
-    const configuredBaseURL = String(config.openai.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    const imageProvider = getImageProviderConfig();
+    const configuredBaseURL = String(imageProvider.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
     const candidateBaseURLs = [configuredBaseURL];
 
-    if (/\/v1$/i.test(configuredBaseURL)) {
+    if (/\/v1$/i.test(configuredBaseURL) && imageProvider.source !== 'official-openai') {
         candidateBaseURLs.push(configuredBaseURL.replace(/\/v1$/i, ''));
     }
 
@@ -171,7 +210,7 @@ async function postImageGeneration(params) {
         const response = await fetch(`${baseURL}/images/generations`, {
             method: 'POST',
             headers: {
-                Authorization: `Bearer ${config.openai.apiKey}`,
+                Authorization: `Bearer ${imageProvider.apiKey}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(params),
@@ -182,9 +221,10 @@ async function postImageGeneration(params) {
         }
 
         const errorBody = await response.text();
-        const error = new Error(errorBody || `Image generation failed with HTTP ${response.status}`);
+        const error = new Error(parseErrorMessage(errorBody, response.status));
         error.status = response.status;
         error.baseURL = baseURL;
+        error.provider = imageProvider.source;
         lastError = error;
 
         if (response.status !== 404) {
@@ -216,7 +256,22 @@ async function listModels() {
     }
 }
 
+function listOfficialImageModels() {
+    const configured = normalizeModelId(getImageProviderConfig().imageModel);
+    const modelIds = uniqueById(
+        [configured, ...OFFICIAL_OPENAI_IMAGE_MODELS]
+            .filter(Boolean)
+            .map((modelId) => ({ id: modelId })),
+    ).map((model) => getImageModelMetadata(model.id, 'openai'));
+
+    return sortImageModels(modelIds);
+}
+
 async function listImageModels() {
+    if (hasDedicatedMediaConfig()) {
+        return listOfficialImageModels();
+    }
+
     const discovered = uniqueById(
         (await listModels())
             .filter((model) => isLikelyImageModel(model))
@@ -237,8 +292,7 @@ async function listImageModels() {
 async function resolveImageModel(requestedModel = null) {
     const availableModels = await listImageModels();
     const requested = normalizeModelId(requestedModel);
-    const configured = normalizeModelId(config.openai.imageModel);
-    const geminiMatch = availableModels.find((model) => model.id.toLowerCase().includes('gemini'));
+    const configured = normalizeModelId(getImageProviderConfig().imageModel);
 
     if (requested) {
         const exactMatch = availableModels.find((model) => model.id === requested);
@@ -258,15 +312,14 @@ async function resolveImageModel(requestedModel = null) {
         return { modelId: configured, availableModels };
     }
 
-    if (geminiMatch) {
-        return { modelId: geminiMatch.id, availableModels };
-    }
-
     if (availableModels.length > 0) {
         return { modelId: availableModels[0].id, availableModels };
     }
 
-    const error = new Error('No image generation model is configured. Set OPENAI_IMAGE_MODEL or expose image models from the gateway.');
+    const message = hasDedicatedMediaConfig()
+        ? 'No media image model is configured. Set OPENAI_MEDIA_IMAGE_MODEL.'
+        : 'No image generation model is configured. Set OPENAI_IMAGE_MODEL or expose image models from the gateway.';
+    const error = new Error(message);
     error.status = 503;
     throw error;
 }
@@ -417,7 +470,7 @@ async function generateImage({
         params.style = style;
     }
 
-    console.log(`[OpenAI] Generating image with model=${params.model}, size=${params.size}, n=${params.n}`);
+    console.log(`[OpenAI] Generating image with provider=${getImageProviderConfig().source}, model=${params.model}, size=${params.size}, n=${params.n}`);
 
     const response = await postImageGeneration(params);
 
@@ -442,4 +495,3 @@ module.exports = {
     createResponse,
     generateImage,
 };
-

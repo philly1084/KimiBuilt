@@ -708,7 +708,7 @@ class UIHelpers {
 
     getPreferredImageModelId(models = this.availableImageModels) {
         const list = Array.isArray(models) ? models : [];
-        return list.find((model) => /-nb$/i.test(String(model.id || '')))?.id || list[0]?.id || '';
+        return list[0]?.id || '';
     }
     async loadImageModels() {
         try {
@@ -1193,7 +1193,7 @@ class UIHelpers {
                     <div class="session-info sidebar-session-info">
                         <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
                         <div class="session-meta">
-                            ${timeAgo} • ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                            ${timeAgo} â€¢ ${messageCount} message${messageCount !== 1 ? 's' : ''}
                         </div>
                     </div>
                     <div class="session-actions">
@@ -2090,7 +2090,7 @@ class UIHelpers {
         
         if (confirmBtn) {
             confirmBtn.disabled = true;
-            confirmBtn.innerHTML = '<span class="animate-spin inline-block mr-2">⟳</span> Importing...';
+            confirmBtn.innerHTML = '<span class="animate-spin inline-block mr-2">âŸ³</span> Importing...';
         }
         
         try {

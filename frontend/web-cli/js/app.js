@@ -430,7 +430,7 @@ Session Statistics:
         const line = document.createElement('div');
         line.className = 'line line-input';
         line.innerHTML = `
-            <span class="prompt">❯</span>
+            <span class="prompt">?</span>
             <span class="input-text">${this.escapeHtml(text)}</span>
         `;
         this.terminalOutput.appendChild(line);
@@ -464,7 +464,7 @@ Session Statistics:
     printError(text) {
         const line = document.createElement('div');
         line.className = 'line line-output error';
-        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ✗ ${this.escapeHtml(text)}`;
+        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ? ${this.escapeHtml(text)}`;
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
     }
@@ -473,7 +473,7 @@ Session Statistics:
         const line = document.createElement('div');
         line.className = 'line line-output';
         line.style.color = 'var(--warning)';
-        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ⚠ ${this.escapeHtml(text)}`;
+        line.innerHTML = `<span class="timestamp">${this.getTimestamp()}</span> ? ${this.escapeHtml(text)}`;
         this.terminalOutput.appendChild(line);
         this.scrollToBottom();
     }
@@ -500,8 +500,8 @@ Session Statistics:
   /models            List available AI models
   /model <name>      Change AI model
   /image <prompt>    Generate an image
-                     Defaults to gemini-2.5-flash-image-nb unless --model is provided
-                     Options: --model gemini-2.5-flash-image-nb, --size 1024x1024
+                     Defaults to the backend image model (official OpenAI if configured)
+                     Options: --model gpt-image-1.5, --size 1024x1024
                      --quality standard|hd, --style vivid|natural
   /unsplash <query>  Search Unsplash for stock images
                      Options: --orientation landscape|portrait|squarish
@@ -676,7 +676,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         try {
             const health = await api.healthCheck();
             this.printSystem(`Health Check:
-  Status: ${health.connected ? '✓ Connected' : '✗ Disconnected'}
+  Status: ${health.connected ? '? Connected' : '? Disconnected'}
   Version: ${health.version || 'unknown'}
   Models: ${health.models || 'unknown'}
             `.trim());
@@ -702,7 +702,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     async listModels() {
         try {
             const models = await api.getModels();
-            this.printAI(`## Available Models\n\n${models.map(m => `  • ${m.id}`).join('\n')}`);
+            this.printAI(`## Available Models\n\n${models.map(m => `  â€¢ ${m.id}`).join('\n')}`);
         } catch (error) {
             this.printError('Failed to load models');
         }
@@ -768,7 +768,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     async generateImage(input) {
         if (!input) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gemini-2.5-flash-image-nb] [--size 1024x1024] [--quality standard]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-1.5] [--size 1024x1024] [--quality standard]');
             return;
         }
         
@@ -776,14 +776,13 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         const { prompt, options } = this.parseImageArgs(input);
         
         if (!prompt) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gemini-2.5-flash-image-nb] [--size 1024x1024] [--quality standard]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gpt-image-1.5] [--size 1024x1024] [--quality standard]');
             return;
         }
         
         this.isProcessing = true;
         this.setStatus('thinking');
-        options.model = options.model || 'gemini-2.5-flash-image-nb';
-                this.printSystem(`Generating image with ${options.model}...`);
+        this.printSystem(`Generating image with ${options.model || 'backend default'}...`);
         
         try {
             const response = await api.generateImage(prompt, options);
@@ -934,8 +933,8 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             const dimensions = `${image.width}x${image.height}`;
             
             output += `${num}. **${this.escapeHtml(image.altDescription || image.description || 'Untitled')}**\n`;
-            output += `   📐 ${dimensions} | ❤️ ${image.likes} | 👤 ${this.escapeHtml(author)}\n`;
-            output += `   🔗 [View on Unsplash](${image.links.html})\n\n`;
+            output += `   ?? ${dimensions} | ?? ${image.likes} | ?? ${this.escapeHtml(author)}\n`;
+            output += `   ?? [View on Unsplash](${image.links.html})\n\n`;
             
             // Add small thumbnail preview
             output += `   <img src="${image.urls.small}" alt="${this.escapeHtml(image.altDescription || '')}" style="max-width: 300px; border-radius: 4px; margin: 5px 0;" />\n\n`;
@@ -1257,8 +1256,8 @@ Session Information:
             <div class="file-manager-overlay" onclick="app.closeFileManager()"></div>
             <div class="file-manager-content">
                 <div class="file-manager-header">
-                    <h3>📁 Session Files (${this.sessionFiles.length})</h3>
-                    <button class="file-manager-close" onclick="app.closeFileManager()">×</button>
+                    <h3>?? Session Files (${this.sessionFiles.length})</h3>
+                    <button class="file-manager-close" onclick="app.closeFileManager()">Ã—</button>
                 </div>
                 <div class="file-manager-body">
                     ${this.sessionFiles.length === 0 ? 
@@ -1267,8 +1266,8 @@ Session Information:
                             <div class="file-item" onclick="app.downloadFileById('${f.id}')">
                                 <span class="file-icon">${this.getFileIcon(f.filename)}</span>
                                 <span class="file-name">${f.filename}</span>
-                                <span class="file-meta">${this.formatFileSize(f.size)} • ${f.type}</span>
-                                <button class="file-download-btn" onclick="event.stopPropagation(); app.downloadFileById('${f.id}')">⬇</button>
+                                <span class="file-meta">${this.formatFileSize(f.size)} â€¢ ${f.type}</span>
+                                <button class="file-download-btn" onclick="event.stopPropagation(); app.downloadFileById('${f.id}')">?</button>
                             </div>
                         `).join('')
                     }
@@ -1297,13 +1296,13 @@ Session Information:
     getFileIcon(filename) {
         const ext = filename.split('.').pop()?.toLowerCase();
         const icons = {
-            mmd: '📊', png: '🖼', jpg: '🖼', jpeg: '🖼', gif: '🖼', svg: '🖼',
-            pdf: '📄', docx: '📄', doc: '📄', txt: '📝', md: '📝',
-            js: '📜', ts: '📜', py: '🐍', html: '🌐', css: '🎨',
-            json: '📋', xml: '📋', csv: '📊', xlsx: '📊',
-            zip: '📦', gz: '📦'
+            mmd: '??', png: '??', jpg: '??', jpeg: '??', gif: '??', svg: '??',
+            pdf: '??', docx: '??', doc: '??', txt: '??', md: '??',
+            js: '??', ts: '??', py: '??', html: '??', css: '??',
+            json: '??', xml: '??', csv: '??', xlsx: '??',
+            zip: '??', gz: '??'
         };
-        return icons[ext] || '📄';
+        return icons[ext] || '??';
     }
     
     /**
@@ -1376,7 +1375,7 @@ Session Information:
                 </div>
                 <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
                     <span>Command history</span>
-                    <code class="inline-code">↑ / ↓</code>
+                    <code class="inline-code">? / ?</code>
                 </div>
                 <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
                     <span>Autocomplete</span>
@@ -1546,6 +1545,7 @@ Session Information:
 }
 
 const app = new CodeCLIApp();
+
 
 
 

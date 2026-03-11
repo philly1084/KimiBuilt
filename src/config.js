@@ -5,12 +5,20 @@ const config = {
     port: parseInt(process.env.PORT, 10) || 3000,
     nodeEnv: process.env.NODE_ENV || 'development',
 
-    // OpenAI - Generation
+    // OpenAI-compatible gateway for chat/tool use
     openai: {
         apiKey: process.env.OPENAI_API_KEY,
         baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
         model: process.env.OPENAI_MODEL || 'gpt-4o',
         imageModel: process.env.OPENAI_IMAGE_MODEL || '',
+    },
+
+    // Official OpenAI media endpoints for image/video generation
+    media: {
+        apiKey: process.env.OPENAI_MEDIA_API_KEY || '',
+        baseURL: process.env.OPENAI_MEDIA_BASE_URL || 'https://api.openai.com/v1',
+        imageModel: process.env.OPENAI_MEDIA_IMAGE_MODEL || 'gpt-image-1.5',
+        videoModel: process.env.OPENAI_MEDIA_VIDEO_MODEL || 'sora-2',
     },
 
     // Ollama - Embeddings

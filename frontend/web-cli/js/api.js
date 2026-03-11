@@ -10,6 +10,7 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(window.location.hostname)
 
 // Default request timeout in milliseconds
 const DEFAULT_TIMEOUT = 30000;
+const IMAGE_TIMEOUT = 120000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
@@ -48,12 +49,12 @@ class WebCLIAPI {
     /**
      * Retry a fetch request with exponential backoff
      */
-    async fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
+    async fetchWithRetry(url, options = {}, retries = MAX_RETRIES, timeout = DEFAULT_TIMEOUT) {
         let lastError;
         
         for (let i = 0; i <= retries; i++) {
             try {
-                const response = await this.fetchWithTimeout(url, options);
+                const response = await this.fetchWithTimeout(url, options, timeout);
                 return response;
             } catch (error) {
                 lastError = error;
@@ -347,7 +348,7 @@ class WebCLIAPI {
                     n,
                     sessionId: this.sessionId,
                 }),
-            }, 2); // Fewer retries for image generation (expensive)
+            }, 2, IMAGE_TIMEOUT); // Images can legitimately take longer than chat responses
 
             if (!response.ok) {
                 if (response.status === 429) {
@@ -436,4 +437,5 @@ class WebCLIAPI {
 }
 
 const api = new WebCLIAPI();
+
 
