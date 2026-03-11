@@ -132,6 +132,7 @@ class SessionManager extends EventTarget {
                     this.currentSessionId = this.sessions[0]?.id || null;
                 }
 
+                await this.pruneBlankSessions();
                 this.saveToStorage();
             }
         } catch (error) {
@@ -144,6 +145,54 @@ class SessionManager extends EventTarget {
         return this.sessions;
     }
 
+    async pruneBlankSessions() {
+        const sessionsToRemove = this.sessions.filter((session) => this.isBlankSession(session));
+
+        if (sessionsToRemove.length === 0) {
+            return;
+        }
+
+        for (const session of sessionsToRemove) {
+            if (!this.isLocalSession(session.id)) {
+                try {
+                    await fetch(this.apiBaseUrl + '/sessions/' + session.id, {
+                        method: 'DELETE',
+                    });
+                } catch (error) {
+                    console.warn('Failed to delete blank backend session:', error);
+                }
+            }
+
+            this.sessionMessages.delete(session.id);
+        }
+
+        const removedIds = new Set(sessionsToRemove.map((session) => session.id));
+        this.sessions = this.sessions.filter((session) => !removedIds.has(session.id));
+
+        if (removedIds.has(this.currentSessionId)) {
+            this.currentSessionId = this.sessions[0]?.id || null;
+        }
+    }
+
+    isBlankSession(session) {
+        if (!session) {
+            return false;
+        }
+
+        const messages = this.sessionMessages.get(session.id) || [];
+        const hasMessages = messages.some((message) => {
+            if (message.type === 'image' && (message.imageUrl || message.isLoading)) {
+                return true;
+            }
+
+            return Boolean(String(message.content || message.prompt || '').trim());
+        });
+
+        const normalizedTitle = String(session.title || '').trim();
+        const isDefaultTitle = !normalizedTitle || normalizedTitle === 'New Chat';
+
+        return !hasMessages && isDefaultTitle;
+    }
     async createSession(mode = 'chat', options = {}) {
         let defaultModel;
         try {
@@ -756,8 +805,4 @@ class SessionManager extends EventTarget {
 // Create global session manager instance
 const sessionManager = new SessionManager();
 window.sessionManager = sessionManager;
-
-
-
-
 
