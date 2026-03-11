@@ -15,9 +15,7 @@ class CodeCLIApp {
         this.autocompleteMatches = [];
         this.lastResponse = '';
         this.sessionStartTime = Date.now();
-        this.messageCount = 0;
-        this.tokenCount = 0;
-        this.requestCount = 0;
+        
         // Session file storage
         this.sessionFiles = [];
         this.nextFileId = 1;
@@ -29,7 +27,7 @@ class CodeCLIApp {
         // Available commands for autocomplete
         this.commands = [
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
-            '/export', '/save', '/load', '/copy', '/image', '/diagram',
+            '/export', '/save', '/load', '/copy', '/image', '/unsplash', '/diagram',
             '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health',
             '/files', '/ls', '/download', '/open'
         ];
@@ -54,10 +52,22 @@ class CodeCLIApp {
         
         this.setupEventListeners();
         this.applyTheme(this.theme);
+        this.initMermaid();
         this.checkConnection();
         this.loadModels();
         this.printWelcome();
-        this.startStatsTimer();
+    }
+    
+    initMermaid() {
+        // Initialize Mermaid with appropriate theme
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: this.theme === 'dark' ? 'dark' : 'default',
+                securityLevel: 'loose',
+                fontFamily: 'var(--font-family)'
+            });
+        }
     }
     
     setupEventListeners() {
@@ -283,6 +293,9 @@ class CodeCLIApp {
             case 'image':
                 await this.generateImage(args.join(' '));
                 break;
+            case 'unsplash':
+                await this.searchUnsplash(args.join(' '));
+                break;
             case 'diagram':
                 if (!args[0] || args[0] === 'help' || args[0] === '?') {
                     this.printDiagramHelp();
@@ -332,8 +345,6 @@ class CodeCLIApp {
         }
         
         this.isProcessing = true;
-        this.requestCount++;
-        this.messageCount += 2; // User + AI
         
         // Update status
         this.setStatus('thinking');
@@ -350,9 +361,8 @@ class CodeCLIApp {
             
             const duration = ((Date.now() - startTime) / 1000).toFixed(1);
             
-            // Update stats
-            this.tokenCount += response.tokens || Math.ceil(input.length / 4 + (response.content?.length || 0) / 4);
-            this.updateStats();
+            // Finalize streaming output - remove streaming line and print full response
+            this.finalizeStreamingOutput();
             
             // Print response
             this.printAI(response.content || 'No response');
@@ -403,31 +413,12 @@ class CodeCLIApp {
         return div.innerHTML;
     }
     
-    // ==================== Stats ====================
-    
-    startStatsTimer() {
-        setInterval(() => {
-            const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            document.getElementById('statTime').textContent = 
-                mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        }, 1000);
-    }
-    
-    updateStats() {
-        document.getElementById('statMessages').textContent = this.messageCount;
-        document.getElementById('statTokens').textContent = this.tokenCount.toLocaleString();
-        document.getElementById('statRequests').textContent = this.requestCount;
-    }
+    // ==================== Session Info ====================
     
     printStats() {
         const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
         this.printSystem(`
 Session Statistics:
-  Messages: ${this.messageCount}
-  Requests: ${this.requestCount}
-  Est. Tokens: ${this.tokenCount.toLocaleString()}
   Duration: ${elapsed}s
   Model: ${api.currentModel || 'default'}
         `.trim());
@@ -457,6 +448,9 @@ Session Statistics:
         line.querySelectorAll('pre code').forEach((block) => {
             hljs.highlightElement(block);
         });
+        
+        // Render any mermaid diagrams
+        this.renderMermaidDiagrams(line);
     }
     
     printSystem(text) {
@@ -505,7 +499,11 @@ Session Statistics:
 **AI Controls:**
   /models            List available AI models
   /model <name>      Change AI model
-  /image <prompt>    Generate an image
+  /image <prompt>    Generate an image (DALL-E)
+                     Options: --model dall-e-3|dall-e-2, --size 1024x1024
+                     --quality standard|hd, --style vivid|natural
+  /unsplash <query>  Search Unsplash for stock images
+                     Options: --orientation landscape|portrait|squarish
   /diagram <type>    Generate Mermaid diagram
   /upload            Upload a file for context
 
@@ -565,9 +563,32 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         // Simple markdown rendering
         let html = this.escapeHtml(text);
         
-        // Code blocks
+        // Code blocks (including mermaid)
         html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             const language = lang || 'text';
+            const trimmedCode = code.trim();
+            
+            // Special handling for mermaid diagrams
+            if (language === 'mermaid') {
+                const diagramId = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                return `
+                    <div class="diagram-block">
+                        <div class="code-block mermaid-code">
+                            <div class="code-header">
+                                <span>mermaid</span>
+                                <div class="code-actions">
+                                    <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
+                                </div>
+                            </div>
+                            <pre><code class="language-mermaid">${trimmedCode}</code></pre>
+                        </div>
+                        <div class="diagram-preview">
+                            <div class="mermaid" id="${diagramId}">${trimmedCode}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            
             return `
                 <div class="code-block">
                     <div class="code-header">
@@ -576,7 +597,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                             <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
                         </div>
                     </div>
-                    <pre><code class="language-${language}">${code.trim()}</code></pre>
+                    <pre><code class="language-${language}">${trimmedCode}</code></pre>
                 </div>
             `;
         });
@@ -594,6 +615,22 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         html = html.replace(/\n/g, '<br>');
         
         return html;
+    }
+    
+    /**
+     * Render Mermaid diagrams after content is added to DOM
+     */
+    renderMermaidDiagrams(element) {
+        if (typeof mermaid !== 'undefined') {
+            try {
+                mermaid.run({
+                    querySelector: '.mermaid',
+                    suppressErrors: true
+                });
+            } catch (err) {
+                console.warn('[CLI] Mermaid rendering failed:', err);
+            }
+        }
     }
     
     escapeHtml(text) {
@@ -715,18 +752,60 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     // ==================== Image Generation ====================
     
-    async generateImage(prompt) {
+    async generateImage(input) {
+        if (!input) {
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model dall-e-3] [--size 1024x1024] [--quality standard]');
+            return;
+        }
+        
+        // Parse options from input
+        const { prompt, options } = this.parseImageArgs(input);
+        
         if (!prompt) {
-            this.printError('Please provide a prompt. Usage: /image <prompt>');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model dall-e-3] [--size 1024x1024] [--quality standard]');
             return;
         }
         
         this.isProcessing = true;
         this.setStatus('thinking');
+        this.printSystem(`Generating image with ${options.model || 'dall-e-3'}...`);
         
         try {
-            const response = await api.generateImage(prompt);
-            this.printAI(`![Generated Image](${response.url})\n\n**Prompt:** ${prompt}`);
+            const response = await api.generateImage(prompt, options);
+            
+            if (response.data && response.data.length > 0) {
+                const image = response.data[0];
+                const imageUrl = image.url || image.b64_json;
+                
+                // Create image display with metadata
+                let output = `## Generated Image\n\n`;
+                output += `<div class="generated-image-container">`;
+                output += `<img src="${imageUrl}" alt="${this.escapeHtml(prompt)}" class="generated-image" style="max-width: 100%; border-radius: 8px; margin: 10px 0;" />`;
+                output += `</div>\n\n`;
+                
+                // Add metadata
+                output += `**Model:** ${response.model || options.model || 'dall-e-3'}\n`;
+                output += `**Size:** ${response.size || options.size || '1024x1024'}\n`;
+                output += `**Quality:** ${response.quality || options.quality || 'standard'}\n`;
+                if (image.revised_prompt) {
+                    output += `**Revised Prompt:** ${this.escapeHtml(image.revised_prompt)}\n`;
+                }
+                output += `**Created:** ${new Date(response.created * 1000).toLocaleString()}\n`;
+                
+                // Add download link
+                const fileId = this.addSessionFile(
+                    `image-${Date.now()}.png`, 
+                    imageUrl, 
+                    'image/png', 
+                    'image'
+                );
+                output += `**File ID:** #${fileId} (use /files to manage)`;
+                
+                this.printAI(output);
+            } else {
+                this.printError('No image data received from API');
+            }
+            
             this.setStatus('ready');
         } catch (error) {
             this.printError(`Image generation failed: ${error.message}`);
@@ -734,6 +813,124 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         } finally {
             this.isProcessing = false;
         }
+    }
+    
+    /**
+     * Parse image command arguments
+     * Supports: --model, --size, --quality, --style
+     */
+    parseImageArgs(input) {
+        const options = {
+            model: 'dall-e-3',
+            size: '1024x1024',
+            quality: 'standard',
+            style: 'vivid'
+        };
+        
+        let prompt = input;
+        
+        // Parse --model
+        const modelMatch = input.match(/--model\s+(\S+)/);
+        if (modelMatch) {
+            options.model = modelMatch[1];
+            prompt = prompt.replace(modelMatch[0], '').trim();
+        }
+        
+        // Parse --size
+        const sizeMatch = input.match(/--size\s+(\d+x\d+)/);
+        if (sizeMatch) {
+            options.size = sizeMatch[1];
+            prompt = prompt.replace(sizeMatch[0], '').trim();
+        }
+        
+        // Parse --quality
+        const qualityMatch = input.match(/--quality\s+(standard|hd)/);
+        if (qualityMatch) {
+            options.quality = qualityMatch[1];
+            prompt = prompt.replace(qualityMatch[0], '').trim();
+        }
+        
+        // Parse --style
+        const styleMatch = input.match(/--style\s+(vivid|natural)/);
+        if (styleMatch) {
+            options.style = styleMatch[1];
+            prompt = prompt.replace(styleMatch[0], '').trim();
+        }
+        
+        return { prompt: prompt.trim(), options };
+    }
+    
+    /**
+     * Search Unsplash for stock images
+     */
+    async searchUnsplash(query) {
+        if (!query) {
+            this.printError('Please provide a search query. Usage: /unsplash <query> [--orientation landscape|portrait|squarish]');
+            return;
+        }
+        
+        // Parse options
+        let searchQuery = query;
+        let orientation = null;
+        
+        const orientationMatch = query.match(/--orientation\s+(landscape|portrait|squarish)/);
+        if (orientationMatch) {
+            orientation = orientationMatch[1];
+            searchQuery = searchQuery.replace(orientationMatch[0], '').trim();
+        }
+        
+        if (!searchQuery) {
+            this.printError('Please provide a search query. Usage: /unsplash <query> [--orientation landscape|portrait|squarish]');
+            return;
+        }
+        
+        this.isProcessing = true;
+        this.setStatus('thinking');
+        this.printSystem(`Searching Unsplash for "${searchQuery}"...`);
+        
+        try {
+            const response = await api.searchUnsplash(searchQuery, { orientation });
+            
+            if (response.results && response.results.length > 0) {
+                this.displayUnsplashResults(response.results, searchQuery, response.total);
+            } else {
+                this.printWarning(`No images found for "${searchQuery}"`);
+            }
+            
+            this.setStatus('ready');
+        } catch (error) {
+            this.printError(`Unsplash search failed: ${error.message}`);
+            this.setStatus('error');
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+    
+    /**
+     * Display Unsplash search results
+     */
+    displayUnsplashResults(results, query, total) {
+        let output = `## Unsplash Results for "${this.escapeHtml(query)}"\n\n`;
+        output += `Found ${total} images. Showing top ${results.length}:\n\n`;
+        
+        results.forEach((image, index) => {
+            const num = index + 1;
+            const author = image.author ? image.author.name : 'Unknown';
+            const dimensions = `${image.width}x${image.height}`;
+            
+            output += `${num}. **${this.escapeHtml(image.altDescription || image.description || 'Untitled')}**\n`;
+            output += `   📐 ${dimensions} | ❤️ ${image.likes} | 👤 ${this.escapeHtml(author)}\n`;
+            output += `   🔗 [View on Unsplash](${image.links.html})\n\n`;
+            
+            // Add small thumbnail preview
+            output += `   <img src="${image.urls.small}" alt="${this.escapeHtml(image.altDescription || '')}" style="max-width: 300px; border-radius: 4px; margin: 5px 0;" />\n\n`;
+        });
+        
+        output += `---\n`;
+        output += `To download, click the image or visit the Unsplash link.\n`;
+        output += `Images are licensed under the [Unsplash License](https://unsplash.com/license).`;
+        
+        this.printAI(output);
     }
     
     /**
@@ -914,7 +1111,6 @@ ${diagramCode}
 Session Information:
   ID: ${api.sessionId || 'none'}
   Model: ${api.currentModel || 'default'}
-  Messages: ${this.messageCount}
   Duration: ${elapsed}s
   Start Time: ${new Date(this.sessionStartTime).toLocaleString()}
         `.trim());
@@ -1128,6 +1324,16 @@ Session Information:
     
     applyTheme(theme) {
         document.body.setAttribute('data-theme', theme);
+        
+        // Update mermaid theme
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: theme === 'dark' ? 'dark' : 'default',
+                securityLevel: 'loose',
+                fontFamily: 'var(--font-family)'
+            });
+        }
     }
     
     copyLastOutput() {
@@ -1304,6 +1510,23 @@ Session Information:
             this.terminalOutput.appendChild(line);
         }
         this.scrollToBottom();
+    }
+    
+    /**
+     * Trigger mermaid rendering (useful for re-rendering after streaming)
+     */
+    refreshMermaidDiagrams() {
+        this.renderMermaidDiagrams(this.terminalOutput);
+    }
+    
+    /**
+     * Remove streaming line before printing final response
+     */
+    finalizeStreamingOutput() {
+        const streamingLine = this.terminalOutput.querySelector('.line-output.ai.streaming');
+        if (streamingLine) {
+            streamingLine.remove();
+        }
     }
 }
 

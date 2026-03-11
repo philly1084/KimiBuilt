@@ -18,6 +18,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
     
+    <!-- Mermaid.js for diagram rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
         
@@ -264,6 +267,53 @@
             font-size: 0.9em;
         }
 
+        /* ===== Diagram Rendering ===== */
+        .diagram-block {
+            margin: 12px 0;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            background: var(--bg-secondary);
+        }
+        
+        .diagram-block .mermaid-code {
+            margin: 0;
+            border: none;
+            border-bottom: 1px solid var(--border-color);
+            border-radius: 0;
+        }
+        
+        .diagram-preview {
+            padding: 16px;
+            background: var(--bg-primary);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100px;
+        }
+        
+        .diagram-preview .mermaid {
+            max-width: 100%;
+        }
+        
+        .diagram-preview .mermaid svg {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        /* Mermaid diagram styling adjustments */
+        .mermaid {
+            font-family: var(--font-family) !important;
+        }
+        
+        /* Ensure mermaid diagrams are visible */
+        .diagram-preview:empty::before {
+            content: 'Rendering diagram...';
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
         /* ===== Input Area ===== */
         .input-container {
             border-top: 1px solid var(--border-color);
@@ -379,201 +429,7 @@
             margin-right: 6px;
         }
 
-        /* ===== Side Panel (Widgets) ===== */
-        .side-panel {
-            width: 300px;
-            border-left: 1px solid var(--border-color);
-            background: var(--bg-secondary);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .panel-section {
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .panel-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            background: var(--bg-tertiary);
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-secondary);
-        }
-
-        .panel-content {
-            padding: 12px;
-        }
-
-        /* ===== Activity Widget ===== */
-        .activity-widget {
-            min-height: 120px;
-        }
-
-        .activity-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px;
-            border-radius: 6px;
-            margin-bottom: 6px;
-            font-size: 12px;
-        }
-
-        .activity-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .activity-item.active {
-            background: rgba(88, 166, 255, 0.1);
-            border: 1px solid rgba(88, 166, 255, 0.2);
-        }
-
-        .activity-icon {
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-
-        .activity-icon.processing {
-            background: rgba(88, 166, 255, 0.2);
-            color: var(--accent);
-        }
-
-        .activity-icon.success {
-            background: rgba(35, 134, 54, 0.2);
-            color: var(--success-bright);
-        }
-
-        .activity-icon.error {
-            background: rgba(248, 81, 73, 0.2);
-            color: var(--error);
-        }
-
-        .activity-icon.waiting {
-            background: rgba(210, 153, 34, 0.2);
-            color: var(--warning);
-        }
-
-        .activity-text {
-            flex: 1;
-            color: var(--text-primary);
-        }
-
-        .activity-meta {
-            color: var(--text-muted);
-            font-size: 11px;
-        }
-
-        /* ===== Progress Bar ===== */
-        .progress-container {
-            padding: 12px;
-        }
-
-        .progress-bar {
-            height: 4px;
-            background: var(--bg-tertiary);
-            border-radius: 2px;
-            overflow: hidden;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--accent), var(--accent-hover));
-            border-radius: 2px;
-            transition: width 0.3s ease;
-            position: relative;
-        }
-
-        .progress-fill.indeterminate {
-            width: 30%;
-            animation: progress-slide 1.5s infinite ease-in-out;
-        }
-
-        @keyframes progress-slide {
-            0% { transform: translateX(-100%); }
-            50% { transform: translateX(200%); }
-            100% { transform: translateX(-100%); }
-        }
-
-        .progress-text {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 6px;
-            font-size: 11px;
-            color: var(--text-secondary);
-        }
-
-        /* ===== Stats Widget ===== */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-
-        .stat-item {
-            background: var(--bg-tertiary);
-            padding: 10px;
-            border-radius: 6px;
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--accent);
-        }
-
-        .stat-label {
-            font-size: 10px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            margin-top: 2px;
-        }
-
-        /* ===== Model Info ===== */
-        .model-info {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .model-select-wrapper {
-            position: relative;
-        }
-
-        #modelSelect {
-            width: 100%;
-            padding: 8px 12px;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            color: var(--text-primary);
-            font-family: inherit;
-            font-size: 12px;
-            cursor: pointer;
-            outline: none;
-        }
-
-        #modelSelect:focus {
-            border-color: var(--accent);
-        }
-
-        .model-meta {
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-            color: var(--text-muted);
-        }
+        /* ===== Side Panel removed - using inline status ===== */
 
         /* ===== Toolbar Buttons ===== */
         .toolbar {
@@ -783,12 +639,6 @@
         .text-muted { color: var(--text-muted); }
 
         /* ===== Responsive ===== */
-        @media (max-width: 900px) {
-            .side-panel {
-                display: none;
-            }
-        }
-
         @media (max-width: 600px) {
             .header {
                 flex-wrap: wrap;
@@ -1019,58 +869,7 @@
                 </div>
             </div>
 
-            <!-- Side Panel (Stats Only) -->
-            <aside class="side-panel">
-                <!-- Stats -->
-                <div class="panel-section">
-                    <div class="panel-header">Session Stats</div>
-                    <div class="panel-content">
-                        <div class="stats-grid">
-                            <div class="stat-item">
-                                <div class="stat-value" id="statMessages">0</div>
-                                <div class="stat-label">Messages</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value" id="statTokens">0</div>
-                                <div class="stat-label">Est. Tokens</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value" id="statTime">0s</div>
-                                <div class="stat-label">Duration</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value" id="statRequests">0</div>
-                                <div class="stat-label">Requests</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Model Info -->
-                <div class="panel-section">
-                    <div class="panel-header">Model</div>
-                    <div class="panel-content">
-                        <div class="model-info">
-                            <div id="currentModelName" class="text-info" style="font-weight: 500;">--</div>
-                            <div class="model-meta">
-                                <span id="modelProvider">--</span>
-                                <span id="modelContext">-- ctx</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Command Queue -->
-                <div class="panel-section" id="queueSection" style="display: none;">
-                    <div class="panel-header">
-                        <span>Queue</span>
-                        <span id="queueCount" class="text-info">0</span>
-                    </div>
-                    <div class="panel-content">
-                        <div id="queueList" class="queue-list"></div>
-                    </div>
-                </div>
-            </aside>
+            <!-- Side Panel removed - using inline status instead -->
         </div>
     </div>
 

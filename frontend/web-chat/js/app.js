@@ -66,6 +66,9 @@ class ChatApp {
         // Initialize Lucide icons
         uiHelpers.reinitializeIcons();
         
+        // Restore input area state (hidden/shown)
+        uiHelpers.restoreInputAreaState();
+        
         // Focus input
         this.messageInput?.focus();
         
@@ -233,6 +236,12 @@ class ChatApp {
             if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
                 e.preventDefault();
                 uiHelpers.toggleSidebar();
+            }
+            
+            // Toggle input area: Ctrl+Shift+H
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') {
+                e.preventDefault();
+                uiHelpers.toggleInputArea();
             }
             
             // Close search/command palette on Escape
@@ -528,11 +537,14 @@ class ChatApp {
                 uiHelpers.openModelSelector();
                 break;
             case 'image':
+                this.handleImageCommand(args);
+                break;
+            case 'unsplash':
                 if (args) {
-                    const input = document.getElementById('image-prompt-input');
-                    if (input) input.value = args;
+                    this.searchUnsplashImages(args.trim());
+                } else {
+                    uiHelpers.showToast('Please provide a search query. Example: /unsplash sunset', 'warning');
                 }
-                uiHelpers.openImageModal();
                 break;
             case 'clear':
                 this.clearCurrentSession();
@@ -546,6 +558,181 @@ class ChatApp {
             default:
                 uiHelpers.showToast(`Unknown command: /${cmd}. Try /help for available commands.`, 'warning');
         }
+    }
+
+    /**
+     * Handle the /image command with optional --unsplash flag
+     * Examples:
+     *   /image a beautiful sunset - opens modal with prompt
+     *   /image --unsplash sunset - searches Unsplash directly
+     */
+    handleImageCommand(args) {
+        if (!args) {
+            uiHelpers.openImageModal();
+            return;
+        }
+
+        // Check for --unsplash flag
+        const unsplashMatch = args.match(/^--unsplash\s+(.+)$/i);
+        if (unsplashMatch) {
+            const query = unsplashMatch[1].trim();
+            this.searchUnsplashImages(query);
+            return;
+        }
+
+        // Regular image generation - open modal with prompt pre-filled
+        const input = document.getElementById('image-prompt-input');
+        if (input) input.value = args;
+        uiHelpers.openImageModal();
+    }
+
+    /**
+     * Search for images on Unsplash and display results
+     * @param {string} query - Search query
+     */
+    async searchUnsplashImages(query) {
+        if (!query) {
+            uiHelpers.showToast('Please provide a search query', 'warning');
+            return;
+        }
+
+        // Check if we need to create a session
+        if (!sessionManager.currentSessionId) {
+            await this.createNewSession();
+        }
+        
+        const sessionId = sessionManager.currentSessionId;
+        
+        // Hide welcome message
+        uiHelpers.hideWelcomeMessage();
+        
+        // Add user message with the search query
+        const userMessage = {
+            role: 'user',
+            content: `/unsplash ${query}`,
+            timestamp: new Date().toISOString()
+        };
+        
+        sessionManager.addMessage(sessionId, userMessage);
+        
+        const userMessageEl = uiHelpers.renderMessage(userMessage);
+        this.messagesContainer.appendChild(userMessageEl);
+        uiHelpers.scrollToBottom();
+        
+        // Create placeholder for search results
+        const searchMessageId = uiHelpers.generateMessageId();
+        this.currentImageMessageId = searchMessageId;
+        
+        const searchMessage = {
+            id: searchMessageId,
+            role: 'assistant',
+            type: 'unsplash-search',
+            query: query,
+            isLoading: true,
+            loadingText: 'Searching Unsplash...',
+            timestamp: new Date().toISOString()
+        };
+        
+        sessionManager.addMessage(sessionId, searchMessage);
+        
+        const searchMessageEl = uiHelpers.renderUnsplashSearchMessage(searchMessage);
+        this.messagesContainer.appendChild(searchMessageEl);
+        uiHelpers.reinitializeIcons(searchMessageEl);
+        uiHelpers.scrollToBottom();
+        
+        this.isGeneratingImage = true;
+        
+        try {
+            // Call the Unsplash search API
+            const result = await apiClient.searchUnsplash(query, { perPage: 9 });
+            
+            // Update the message with the results
+            const messages = sessionManager.getMessages(sessionId);
+            const msgIndex = messages.findIndex(m => m.id === searchMessageId);
+            if (msgIndex >= 0) {
+                messages[msgIndex] = {
+                    ...messages[msgIndex],
+                    isLoading: false,
+                    results: result.results,
+                    total: result.total,
+                    query: result.query
+                };
+                sessionManager.saveToStorage();
+            }
+            
+            // Update UI with results
+            uiHelpers.updateUnsplashSearchMessage(searchMessageId, {
+                results: result.results,
+                total: result.total,
+                query: result.query
+            });
+            
+            uiHelpers.showToast(`Found ${result.results.length} images on Unsplash`, 'success');
+            
+        } catch (error) {
+            console.error('Unsplash search failed:', error);
+            
+            // Update message with error
+            uiHelpers.updateUnsplashSearchMessage(searchMessageId, {
+                error: error.message || 'Failed to search Unsplash'
+            });
+            
+            // Remove from session
+            const messages = sessionManager.getMessages(sessionId);
+            const msgIndex = messages.findIndex(m => m.id === searchMessageId);
+            if (msgIndex >= 0) {
+                messages[msgIndex] = {
+                    ...messages[msgIndex],
+                    isLoading: false,
+                    error: error.message || 'Failed to search Unsplash'
+                };
+                sessionManager.saveToStorage();
+            }
+            
+            uiHelpers.showToast(error.message || 'Failed to search Unsplash', 'error');
+        } finally {
+            this.isGeneratingImage = false;
+            this.currentImageMessageId = null;
+            this.updateSessionInfo();
+            uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+        }
+    }
+
+    /**
+     * Select an Unsplash image and add it to the chat
+     * @param {string} messageId - The message ID containing the search results
+     * @param {Object} image - The selected image data
+     */
+    async selectUnsplashImage(messageId, image) {
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId) return;
+        
+        // Create a new message with the selected image
+        const imageMessageId = uiHelpers.generateMessageId();
+        
+        const imageMessage = {
+            id: imageMessageId,
+            role: 'assistant',
+            type: 'image',
+            imageUrl: image.urls.regular,
+            thumbnailUrl: image.urls.small,
+            prompt: image.description || image.altDescription || 'Unsplash image',
+            source: 'unsplash',
+            author: image.author,
+            unsplashLink: image.links.html,
+            timestamp: new Date().toISOString()
+        };
+        
+        sessionManager.addMessage(sessionId, imageMessage);
+        
+        const imageMessageEl = uiHelpers.renderImageMessage(imageMessage);
+        this.messagesContainer.appendChild(imageMessageEl);
+        uiHelpers.reinitializeIcons(imageMessageEl);
+        uiHelpers.scrollToBottom();
+        
+        uiHelpers.showToast('Image added to conversation', 'success');
+        this.updateSessionInfo();
+        uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
     }
 
     setInput(text) {
@@ -843,6 +1030,27 @@ class ChatApp {
     // Image Generation
     // ============================================
 
+    /**
+     * Handle the image modal action button
+     * Routes to either generate image or search Unsplash based on selected source
+     */
+    async handleImageModalAction() {
+        const options = uiHelpers.getImageGenerationOptions();
+        const source = uiHelpers.getImageSource();
+        
+        if (!options.prompt) {
+            uiHelpers.showToast(source === 'unsplash' ? 'Please enter a search query' : 'Please enter a prompt', 'warning');
+            return;
+        }
+        
+        if (source === 'unsplash') {
+            uiHelpers.closeImageModal();
+            await this.searchUnsplashImages(options.prompt);
+        } else {
+            await this.generateImage();
+        }
+    }
+
     async generateImage() {
         const options = uiHelpers.getImageGenerationOptions();
         
@@ -904,7 +1112,7 @@ class ChatApp {
             // Add sessionId to options
             options.sessionId = sessionId;
             
-            // Call API using OpenAI SDK
+            // Call API
             apiClient.setSessionId(sessionId);
             const result = await apiClient.generateImage(options);
             
@@ -919,7 +1127,7 @@ class ChatApp {
                     messages[msgIndex] = {
                         ...messages[msgIndex],
                         isLoading: false,
-                        imageUrl: imageData.url || imageData.b64_json,
+                        imageUrl: imageData.url,
                         revisedPrompt: imageData.revised_prompt,
                         model: result.model || options.model
                     };
@@ -928,7 +1136,7 @@ class ChatApp {
                 
                 // Update UI
                 uiHelpers.updateImageMessage(imageMessageId, {
-                    url: imageData.url || imageData.b64_json,
+                    url: imageData.url,
                     prompt: options.prompt,
                     revised_prompt: imageData.revised_prompt,
                     model: result.model || options.model

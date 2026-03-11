@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { generateImage } = require('../openai-client');
+const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 
 const router = Router();
 
@@ -104,6 +105,72 @@ router.get('/models', (_req, res) => {
             },
         ],
     });
+});
+
+/**
+ * Schema for image search requests.
+ */
+const searchSchema = {
+    query: { required: true, type: 'string' },
+    source: { required: false, type: 'string', enum: ['unsplash'] },
+    page: { required: false, type: 'number' },
+    per_page: { required: false, type: 'number' },
+    orientation: { required: false, type: 'string', enum: ['landscape', 'portrait', 'squarish'] },
+};
+
+/**
+ * POST /api/images/search
+ * Search for images from external sources (e.g., Unsplash).
+ * Currently supports Unsplash as the image source.
+ */
+router.post('/search', validate(searchSchema), async (req, res, next) => {
+    try {
+        const {
+            query,
+            source = 'unsplash',
+            page = 1,
+            per_page = 10,
+            orientation,
+        } = req.body;
+
+        if (source === 'unsplash') {
+            // Check if Unsplash is configured
+            if (!isUnsplashConfigured()) {
+                return res.status(503).json({
+                    error: {
+                        type: 'service_unavailable',
+                        message: 'Unsplash integration is not configured. Set UNSPLASH_ACCESS_KEY environment variable.',
+                    },
+                });
+            }
+
+            console.log(`[Images] Searching Unsplash: "${query}" (page=${page}, per_page=${per_page})`);
+
+            const results = await searchImages(query, {
+                page,
+                perPage: per_page,
+                orientation,
+            });
+
+            res.json({
+                source: 'unsplash',
+                query,
+                total: results.total,
+                total_pages: results.totalPages,
+                results: results.results,
+            });
+        } else {
+            return res.status(400).json({
+                error: {
+                    type: 'validation_error',
+                    message: `Unsupported image source: ${source}. Supported sources: unsplash`,
+                },
+            });
+        }
+    } catch (err) {
+        console.error('[Images] Search error:', err.message);
+        next(err);
+    }
 });
 
 module.exports = router;

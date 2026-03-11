@@ -323,8 +323,16 @@ class WebCLIAPI {
         }
     }
 
-    async generateImage(prompt, size = '1024x1024', style = 'natural') {
+    async generateImage(prompt, options = {}) {
         const baseUrl = API_BASE_URL.replace('/v1', '');
+        
+        const {
+            model = 'dall-e-3',
+            size = '1024x1024',
+            quality = 'standard',
+            style = 'vivid',
+            n = 1
+        } = options;
         
         try {
             const response = await this.fetchWithRetry(`${baseUrl}/api/images`, {
@@ -332,8 +340,11 @@ class WebCLIAPI {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt,
+                    model,
                     size,
+                    quality,
                     style,
+                    n,
                     sessionId: this.sessionId,
                 }),
             }, 2); // Fewer retries for image generation (expensive)
@@ -352,6 +363,46 @@ class WebCLIAPI {
             return data;
         } catch (error) {
             console.error('Image generation error:', error);
+            throw error;
+        }
+    }
+
+    async searchUnsplash(query, options = {}) {
+        const baseUrl = API_BASE_URL.replace('/v1', '');
+        
+        const {
+            page = 1,
+            perPage = 10,
+            orientation = null
+        } = options;
+        
+        try {
+            const params = new URLSearchParams({
+                q: query,
+                page: String(page),
+                per_page: String(Math.min(perPage, 30)),
+            });
+            
+            if (orientation) {
+                params.append('orientation', orientation);
+            }
+            
+            const response = await this.fetchWithTimeout(
+                `${baseUrl}/api/unsplash/search?${params.toString()}`,
+                { method: 'GET' },
+                15000
+            );
+
+            if (!response.ok) {
+                if (response.status === 503) {
+                    throw new Error('Unsplash is not configured. Please set UNSPLASH_ACCESS_KEY.');
+                }
+                throw new Error(`Unsplash search failed: HTTP ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Unsplash search error:', error);
             throw error;
         }
     }

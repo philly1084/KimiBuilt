@@ -528,8 +528,8 @@
             <!-- References will appear here -->
         </div>
         
-        <!-- Add Context Button -->
-        <div class="ai-assistant-content" style="padding: 8px 12px;">
+        <!-- Add Context Button & Model Indicator -->
+        <div class="ai-assistant-content" style="padding: 8px 12px; display: flex; gap: 8px; align-items: center;">
             <button class="ai-add-context-btn" onclick="AIAssistant.showContextMenu()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -537,6 +537,7 @@
                 </svg>
                 Add Context
             </button>
+            <span id="ai-model-indicator" class="ai-model-indicator" title="AI Model">--</span>
         </div>
         
         <!-- Context Selector Menu (hidden by default) -->

@@ -22,6 +22,7 @@ const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
 const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
+const unsplashRouter = require('./routes/unsplash');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -157,6 +158,7 @@ app.use('/api/models', modelsRouter);
 app.use('/api/images', imagesRouter);
 app.use('/api/artifacts', artifactsRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend')));

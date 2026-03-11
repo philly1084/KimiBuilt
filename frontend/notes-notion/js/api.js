@@ -273,51 +273,76 @@ const API = (function() {
         return result;
     }
     
-    // Generate image
+    // Generate image using backend API
     async function generateImage(prompt, options = {}) {
         const { model, size, quality, style } = options;
-        const openai = getClient();
         
         const params = {
-            model: model || 'dall-e-3',
             prompt,
-            n: 1,
+            model: model || 'dall-e-3',
             size: size || '1024x1024',
         };
 
         if (quality) params.quality = quality;
         if (style) params.style = style;
-        if (currentSessionId) params.session_id = currentSessionId;
         
         try {
-            let response;
+            // Use the backend API endpoint
+            const baseUrl = BASE_URL.replace('/v1', '');
+            const response = await fetch(`${baseUrl}/api/images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params),
+            });
             
-            if (openai) {
-                response = await openai.images.generate(params);
-            } else {
-                response = await fetchAPI('/images/generations', {
-                    method: 'POST',
-                    body: JSON.stringify(params),
-                });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
             
-            if (response.session_id) {
-                currentSessionId = response.session_id;
-            }
-
+            const data = await response.json();
+            
             return {
-                url: response.data?.[0]?.url,
-                revised_prompt: response.data?.[0]?.revised_prompt,
+                url: data.data?.[0]?.url,
+                revised_prompt: data.data?.[0]?.revised_prompt,
+                created: data.created,
                 model: params.model,
             };
         } catch (error) {
             console.warn('Image generation failed:', error.message);
+            throw error;
+        }
+    }
+    
+    // Search Unsplash for images
+    async function searchUnsplash(query, options = {}) {
+        const { perPage = 12, page = 1 } = options;
+        
+        try {
+            const baseUrl = BASE_URL.replace('/v1', '');
+            const params = new URLSearchParams({
+                q: query,
+                per_page: String(perPage),
+                page: String(page),
+            });
+            
+            const response = await fetch(`${baseUrl}/api/unsplash/search?${params}`);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            const data = await response.json();
+            
             return {
-                url: `https://placehold.co/1024x1024/4338ca/ffffff?text=${encodeURIComponent('Error: ' + error.message)}`,
-                revised_prompt: prompt,
-                model: params.model,
-                offline: true
+                results: data.results || [],
+                total: data.total || 0,
+                total_pages: data.total_pages || 0,
             };
+        } catch (error) {
+            console.warn('Unsplash search failed:', error.message);
+            throw error;
         }
     }
     
@@ -371,6 +396,7 @@ const API = (function() {
         streamChat,
         generate,
         generateImage,
+        searchUnsplash,
         setSessionId,
         clearModelCache,
         createSession,

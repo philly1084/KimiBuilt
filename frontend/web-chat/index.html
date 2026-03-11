@@ -217,7 +217,7 @@
             <div class="modal-header">
                 <div class="flex items-center gap-2">
                     <i data-lucide="image" class="w-5 h-5 text-purple-500" aria-hidden="true"></i>
-                    <h3 id="image-modal-title">Generate Image</h3>
+                    <h3 id="image-modal-title">Create Image</h3>
                 </div>
                 <button class="btn-icon" onclick="uiHelpers.closeImageModal()" aria-label="Close image generation modal">
                     <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
@@ -225,66 +225,103 @@
             </div>
             <div class="modal-body">
                 <div class="space-y-4">
+                    <!-- Source Selector -->
+                    <div class="image-source-selector" role="radiogroup" aria-label="Image source">
+                        <button type="button" 
+                                class="image-source-btn active" 
+                                data-source="generate"
+                                onclick="uiHelpers.setImageSource('generate')"
+                                role="radio"
+                                aria-checked="true">
+                            <i data-lucide="wand-2" class="w-4 h-4" aria-hidden="true"></i>
+                            <span>AI Generate</span>
+                        </button>
+                        <button type="button" 
+                                class="image-source-btn" 
+                                data-source="unsplash"
+                                onclick="uiHelpers.setImageSource('unsplash')"
+                                role="radio"
+                                aria-checked="false">
+                            <i data-lucide="camera" class="w-4 h-4" aria-hidden="true"></i>
+                            <span>Unsplash</span>
+                        </button>
+                    </div>
+                    
                     <!-- Prompt Input -->
                     <div>
-                        <label for="image-prompt-input" class="block text-sm font-medium text-text-secondary mb-2">Prompt</label>
+                        <label for="image-prompt-input" class="block text-sm font-medium text-text-secondary mb-2">
+                            <span id="image-prompt-label">Describe the image you want to generate...</span>
+                        </label>
                         <textarea 
                             id="image-prompt-input" 
                             class="w-full bg-bg-tertiary border border-border rounded-lg p-3 text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 resize-none"
                             rows="3"
-                            placeholder="Describe the image you want to generate..."
+                            placeholder="A futuristic cityscape at night with neon lights..."
                         ></textarea>
                     </div>
                     
-                    <!-- Model Selection -->
-                    <div>
-                        <label for="image-model-select" class="block text-sm font-medium text-text-secondary mb-2">Model</label>
-                        <select id="image-model-select" class="w-full bg-bg-tertiary border border-border rounded-lg p-2.5 text-text-primary focus:outline-none focus:border-accent">
-                            <option value="dall-e-3">DALL-E 3 (Recommended)</option>
-                            <option value="dall-e-2">DALL-E 2</option>
-                        </select>
-                    </div>
-                    
-                    <!-- Size Selection -->
-                    <div>
-                        <label for="image-size-select" class="block text-sm font-medium text-text-secondary mb-2">Size</label>
-                        <select id="image-size-select" class="w-full bg-bg-tertiary border border-border rounded-lg p-2.5 text-text-primary focus:outline-none focus:border-accent">
-                            <option value="1024x1024">1024x1024 (Square)</option>
-                            <option value="1792x1024">1792x1024 (Landscape)</option>
-                            <option value="1024x1792">1024x1792 (Portrait)</option>
-                        </select>
-                    </div>
-                    
-                    <!-- Quality Toggle (DALL-E 3 only) -->
-                    <div id="image-quality-container">
-                        <label class="block text-sm font-medium text-text-secondary mb-2">Quality</label>
-                        <div class="flex gap-2" role="radiogroup" aria-label="Image quality">
-                            <button type="button" class="quality-btn active flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-quality="standard" role="radio" aria-checked="true">
-                                Standard
-                            </button>
-                            <button type="button" class="quality-btn flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-quality="hd" role="radio" aria-checked="false">
-                                HD
-                            </button>
+                    <!-- AI Generation Options -->
+                    <div id="ai-generation-options">
+                        <!-- Model Selection -->
+                        <div class="mb-4">
+                            <label for="image-model-select" class="block text-sm font-medium text-text-secondary mb-2">Model</label>
+                            <select id="image-model-select" class="w-full bg-bg-tertiary border border-border rounded-lg p-2.5 text-text-primary focus:outline-none focus:border-accent">
+                                <option value="dall-e-3">DALL-E 3 (Recommended)</option>
+                                <option value="dall-e-2">DALL-E 2</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Size Selection -->
+                        <div class="mb-4">
+                            <label for="image-size-select" class="block text-sm font-medium text-text-secondary mb-2">Size</label>
+                            <select id="image-size-select" class="w-full bg-bg-tertiary border border-border rounded-lg p-2.5 text-text-primary focus:outline-none focus:border-accent">
+                                <option value="1024x1024">1024x1024 (Square)</option>
+                                <option value="1792x1024">1792x1024 (Landscape)</option>
+                                <option value="1024x1792">1024x1792 (Portrait)</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Quality Toggle (DALL-E 3 only) -->
+                        <div id="image-quality-container" class="mb-4">
+                            <label class="block text-sm font-medium text-text-secondary mb-2">Quality</label>
+                            <div class="flex gap-2" role="radiogroup" aria-label="Image quality">
+                                <button type="button" class="quality-btn active flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-quality="standard" role="radio" aria-checked="true">
+                                    Standard
+                                </button>
+                                <button type="button" class="quality-btn flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-quality="hd" role="radio" aria-checked="false">
+                                    HD
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Style Toggle (DALL-E 3 only) -->
+                        <div id="image-style-container">
+                            <label class="block text-sm font-medium text-text-secondary mb-2">Style</label>
+                            <div class="flex gap-2" role="radiogroup" aria-label="Image style">
+                                <button type="button" class="style-btn active flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-style="vivid" role="radio" aria-checked="true">
+                                    Vivid
+                                </button>
+                                <button type="button" class="style-btn flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-style="natural" role="radio" aria-checked="false">
+                                    Natural
+                                </button>
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- Style Toggle (DALL-E 3 only) -->
-                    <div id="image-style-container">
-                        <label class="block text-sm font-medium text-text-secondary mb-2">Style</label>
-                        <div class="flex gap-2" role="radiogroup" aria-label="Image style">
-                            <button type="button" class="style-btn active flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-style="vivid" role="radio" aria-checked="true">
-                                Vivid
-                            </button>
-                            <button type="button" class="style-btn flex-1 py-2 px-3 rounded-lg border border-border bg-bg-tertiary text-sm font-medium transition-all" data-style="natural" role="radio" aria-checked="false">
-                                Natural
-                            </button>
+                    <!-- Unsplash Options -->
+                    <div id="unsplash-options" class="hidden">
+                        <div class="p-3 bg-bg-tertiary rounded-lg border border-border">
+                            <p class="text-sm text-text-secondary flex items-center gap-2">
+                                <i data-lucide="info" class="w-4 h-4" aria-hidden="true"></i>
+                                Search millions of free high-quality photos from Unsplash.
+                            </p>
                         </div>
                     </div>
                     
-                    <!-- Generate Button -->
-                    <button id="image-generate-btn" class="btn-primary w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all" onclick="app.generateImage()">
+                    <!-- Action Button -->
+                    <button id="image-generate-btn" class="btn-primary w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all" onclick="app.handleImageModalAction()">
                         <i data-lucide="wand-2" class="w-5 h-5" aria-hidden="true"></i>
-                        <span>Generate Image</span>
+                        <span id="image-action-text">Generate Image</span>
                     </button>
                 </div>
             </div>
@@ -510,8 +547,13 @@
                 <!-- Messages will be rendered here -->
             </div>
             
+            <!-- Input Area Toggle Button -->
+            <button id="input-toggle-btn" class="input-toggle-btn" onclick="uiHelpers.toggleInputArea()" title="Toggle input area" aria-label="Toggle input area">
+                <i data-lucide="chevron-down" class="w-4 h-4" id="input-toggle-icon" aria-hidden="true"></i>
+            </button>
+            
             <!-- Input Area -->
-            <div class="input-area bg-bg-secondary border-t border-border p-4">
+            <div id="input-area" class="input-area bg-bg-secondary border-t border-border p-4">
                 <div class="max-w-4xl mx-auto">
                     <div class="relative flex items-end gap-2 bg-bg-tertiary rounded-xl border border-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition-all shadow-sm">
                         <!-- Image Generation Button -->

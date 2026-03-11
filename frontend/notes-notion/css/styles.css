@@ -1389,6 +1389,159 @@ body {
     margin-top: 8px;
 }
 
+/* ===== AI Image Source Tabs ===== */
+.ai-image-source-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.ai-image-tab {
+    flex: 1;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.ai-image-tab:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+}
+
+.ai-image-tab.active {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+/* ===== Unsplash Results ===== */
+.unsplash-results-container {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.unsplash-results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.unsplash-results-header span {
+    font-weight: 500;
+}
+
+.unsplash-results-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.unsplash-result-item {
+    aspect-ratio: 1;
+    background-size: cover;
+    background-position: center;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.unsplash-result-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.unsplash-result-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.unsplash-result-item:hover .unsplash-result-overlay {
+    opacity: 1;
+}
+
+.unsplash-photographer {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.unsplash-select-btn {
+    padding: 6px 12px;
+    background: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.unsplash-select-btn:hover {
+    background: var(--bg-secondary);
+}
+
+.unsplash-no-results {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.unsplash-no-results svg {
+    opacity: 0.5;
+}
+
+/* Responsive adjustments for Unsplash grid */
+@media (max-width: 768px) {
+    .unsplash-results-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .unsplash-results-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .ai-image-source-tabs {
+        flex-direction: column;
+    }
+}
+
 /* Bookmark Block */
 .block[data-type="bookmark"] .block-content {
     width: 100%;

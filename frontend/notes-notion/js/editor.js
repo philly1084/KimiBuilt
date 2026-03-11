@@ -1359,7 +1359,7 @@ const Editor = (function() {
      * Get the current model for AI operations
      */
     function getCurrentModel() {
-        return currentPage?.model || Blocks.getDefaultModel?.() || 'gpt-4o';
+        return currentPage?.defaultModel || Blocks.getDefaultModel?.() || 'gpt-4o';
     }
     
     /**

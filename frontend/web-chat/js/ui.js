@@ -15,7 +15,8 @@ class UIHelpers {
         // Image generation state
         this.imageGenerationState = {
             quality: 'standard',
-            style: 'vivid'
+            style: 'vivid',
+            source: 'generate' // 'generate' or 'unsplash'
         };
         
         // Model selector state
@@ -272,13 +273,25 @@ class UIHelpers {
         const imageUrl = message.imageUrl;
         const revisedPrompt = message.revisedPrompt;
         const prompt = message.prompt;
+        const source = message.source || 'generated';
         
         const messageEl = document.createElement('div');
         messageEl.className = 'message assistant';
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
         messageEl.setAttribute('role', 'article');
-        messageEl.setAttribute('aria-label', 'Generated image');
+        messageEl.setAttribute('aria-label', source === 'unsplash' ? 'Unsplash image' : 'Generated image');
+        
+        // Build attribution for Unsplash images
+        let attributionHtml = '';
+        if (source === 'unsplash' && message.author) {
+            attributionHtml = `
+                <div class="image-attribution">
+                    Photo by <a href="${message.author.link}?utm_source=kimibuilt&utm_medium=referral" target="_blank" rel="noopener">${this.escapeHtml(message.author.name)}</a> on 
+                    <a href="${message.unsplashLink}?utm_source=kimibuilt&utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>
+                </div>
+            `;
+        }
         
         const imageHtml = isLoading ? `
             <div class="image-container loading" aria-busy="true" aria-label="Generating image">
@@ -289,11 +302,12 @@ class UIHelpers {
             </div>
         ` : `
             <div class="image-container">
-                <img src="${imageUrl}" alt="${this.escapeHtmlAttr(prompt || 'Generated image')}" 
+                <img src="${imageUrl}" alt="${this.escapeHtmlAttr(prompt || 'Image')}" 
                      onclick="uiHelpers.openImageLightbox('${imageUrl}')" 
                      onload="uiHelpers.scrollToBottom()"
                      loading="lazy">
             </div>
+            ${attributionHtml}
             ${revisedPrompt ? `
                 <div class="image-revised-prompt">
                     <div class="label">Revised Prompt</div>
@@ -301,7 +315,7 @@ class UIHelpers {
                 </div>
             ` : ''}
             <div class="image-actions">
-                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${imageUrl}', '${this.escapeHtmlAttr(prompt || 'generated-image')}.png')" aria-label="Download image">
+                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${imageUrl}', '${this.escapeHtmlAttr(prompt || 'image')}.jpg')" aria-label="Download image">
                     <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Download</span>
                 </button>
@@ -309,16 +323,26 @@ class UIHelpers {
                     <i data-lucide="link" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Copy URL</span>
                 </button>
+                ${source === 'unsplash' ? `
+                <button class="image-action-btn" onclick="window.open('${message.unsplashLink}?utm_source=kimibuilt&utm_medium=referral', '_blank')" aria-label="View on Unsplash">
+                    <i data-lucide="external-link" class="w-4 h-4" aria-hidden="true"></i>
+                    <span>View on Unsplash</span>
+                </button>
+                ` : ''}
             </div>
         `;
         
+        const sourceIcon = source === 'unsplash' ? 'camera' : 'sparkles';
+        const sourceText = source === 'unsplash' ? 'Unsplash' : (message.model || 'Generated');
+        const sourceLabel = source === 'unsplash' ? 'Stock Photo' : 'Generated Image';
+        
         messageEl.innerHTML = `
             <div class="message-avatar assistant" aria-hidden="true">
-                <i data-lucide="image" class="w-4 h-4"></i>
+                <i data-lucide="${source === 'unsplash' ? 'camera' : 'image'}" class="w-4 h-4"></i>
             </div>
             <div class="message-content">
                 <div class="message-header">
-                    <span class="message-author">AI Image Generator</span>
+                    <span class="message-author">${source === 'unsplash' ? 'Unsplash' : 'AI Image Generator'}</span>
                     <span class="message-time" title="${fullTimestamp}">${time}</span>
                     <div class="message-actions">
                         ${!isLoading ? `
@@ -331,10 +355,10 @@ class UIHelpers {
                 <div class="message-image">
                     <div class="image-generation-info">
                         <div class="icon" aria-hidden="true">
-                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                            <i data-lucide="${sourceIcon}" class="w-3.5 h-3.5"></i>
                         </div>
-                        <span class="text">Generated Image</span>
-                        ${message.model ? `<span class="meta">${message.model}</span>` : ''}
+                        <span class="text">${sourceLabel}</span>
+                        <span class="meta">${sourceText}</span>
                     </div>
                     ${prompt ? `<p class="text-sm text-text-secondary mb-3">"${this.escapeHtml(prompt)}"</p>` : ''}
                     ${imageHtml}
@@ -343,6 +367,157 @@ class UIHelpers {
         `;
         
         return messageEl;
+    }
+
+    /**
+     * Render an Unsplash search results message
+     * @param {Object} message - The search message data
+     * @returns {HTMLElement} - The rendered message element
+     */
+    renderUnsplashSearchMessage(message) {
+        const messageId = message.id || this.generateMessageId();
+        const time = this.formatTime(message.timestamp);
+        const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
+        
+        const isLoading = message.isLoading;
+        const query = message.query;
+        const results = message.results || [];
+        const total = message.total || 0;
+        const error = message.error;
+        
+        const messageEl = document.createElement('div');
+        messageEl.className = 'message assistant';
+        messageEl.id = messageId;
+        messageEl.dataset.messageId = messageId;
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', 'Unsplash search results');
+        
+        let contentHtml = '';
+        
+        if (isLoading) {
+            contentHtml = `
+                <div class="unsplash-search-loading" aria-busy="true">
+                    <div class="spinner" role="progressbar" aria-valuemin="0" aria-valuemax="100"></div>
+                    <span class="text">${message.loadingText || 'Searching Unsplash...'}</span>
+                </div>
+            `;
+        } else if (error) {
+            contentHtml = `
+                <div class="unsplash-search-error">
+                    <i data-lucide="alert-circle" class="w-5 h-5" aria-hidden="true"></i>
+                    <span>${this.escapeHtml(error)}</span>
+                </div>
+            `;
+        } else if (results.length > 0) {
+            contentHtml = `
+                <div class="unsplash-search-results">
+                    <div class="unsplash-results-header">
+                        <span class="unsplash-results-count">${results.length} of ${total} results</span>
+                        <span class="unsplash-results-hint">Click an image to add it to the conversation</span>
+                    </div>
+                    <div class="unsplash-results-grid">
+                        ${results.map((image, index) => `
+                            <div class="unsplash-result-item" 
+                                 onclick="app.selectUnsplashImage('${messageId}', ${JSON.stringify(this.escapeHtmlForJSON(image)).replace(/"/g, '&quot;')})"
+                                 role="button"
+                                 tabindex="0"
+                                 aria-label="Select image by ${image.author ? image.author.name : 'Unknown'}"
+                                 title="Photo by ${image.author ? image.author.name : 'Unknown'} - Click to select">
+                                <img src="${image.urls.small}" 
+                                     alt="${this.escapeHtmlAttr(image.altDescription || image.description || 'Unsplash image')}" 
+                                     loading="lazy">
+                                <div class="unsplash-result-overlay">
+                                    <span class="unsplash-result-author">${image.author ? this.escapeHtml(image.author.name) : 'Unknown'}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        } else {
+            contentHtml = `
+                <div class="unsplash-search-empty">
+                    <i data-lucide="search-x" class="w-8 h-8" aria-hidden="true"></i>
+                    <p>No images found for "${this.escapeHtml(query)}"</p>
+                </div>
+            `;
+        }
+        
+        messageEl.innerHTML = `
+            <div class="message-avatar assistant" aria-hidden="true">
+                <i data-lucide="search" class="w-4 h-4"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-author">Unsplash Search</span>
+                    <span class="message-time" title="${fullTimestamp}">${time}</span>
+                </div>
+                <div class="message-unsplash-search">
+                    <div class="unsplash-search-info">
+                        <div class="icon" aria-hidden="true">
+                            <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+                        </div>
+                        <span class="text">Stock Photos</span>
+                    </div>
+                    ${query ? `<p class="unsplash-search-query">"${this.escapeHtml(query)}"</p>` : ''}
+                    ${contentHtml}
+                </div>
+            </div>
+        `;
+        
+        return messageEl;
+    }
+
+    /**
+     * Update an Unsplash search message with results or error
+     * @param {string} messageId - The message ID to update
+     * @param {Object} data - The update data
+     */
+    updateUnsplashSearchMessage(messageId, data) {
+        const messageEl = document.getElementById(messageId);
+        if (!messageEl) return false;
+        
+        // Create new message element with the updated data
+        const newMessage = {
+            id: messageId,
+            role: 'assistant',
+            type: 'unsplash-search',
+            query: data.query,
+            isLoading: false,
+            results: data.results,
+            total: data.total,
+            error: data.error,
+            timestamp: new Date().toISOString()
+        };
+        
+        const newEl = this.renderUnsplashSearchMessage(newMessage);
+        messageEl.replaceWith(newEl);
+        this.reinitializeIcons(newEl);
+        this.scrollToBottom();
+        
+        return true;
+    }
+
+    /**
+     * Escape HTML for safe use in JSON
+     * @param {Object} obj - Object to escape
+     * @returns {Object} - Escaped object
+     */
+    escapeHtmlForJSON(obj) {
+        if (typeof obj === 'string') {
+            return this.escapeHtml(obj);
+        }
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.escapeHtmlForJSON(item));
+        }
+        if (obj && typeof obj === 'object') {
+            const escaped = {};
+            for (const [key, value] of Object.entries(obj)) {
+                escaped[key] = this.escapeHtmlForJSON(value);
+            }
+            return escaped;
+        }
+        return obj;
     }
 
     updateImageMessage(messageId, imageData) {
@@ -544,7 +719,48 @@ class UIHelpers {
         
         this.imageGenerationState.quality = 'standard';
         this.imageGenerationState.style = 'vivid';
+        this.imageGenerationState.source = 'generate';
         this.updateToggleButtons();
+        this.setImageSource('generate');
+    }
+
+    /**
+     * Set the image source (generate or unsplash)
+     * @param {string} source - 'generate' or 'unsplash'
+     */
+    setImageSource(source) {
+        this.imageGenerationState.source = source;
+        
+        // Update button states
+        document.querySelectorAll('.image-source-btn').forEach(btn => {
+            const isActive = btn.dataset.source === source;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-checked', isActive);
+        });
+        
+        // Show/hide appropriate options
+        const aiOptions = document.getElementById('ai-generation-options');
+        const unsplashOptions = document.getElementById('unsplash-options');
+        const promptLabel = document.getElementById('image-prompt-label');
+        const actionText = document.getElementById('image-action-text');
+        const actionIcon = document.querySelector('#image-generate-btn i');
+        
+        if (source === 'generate') {
+            aiOptions?.classList.remove('hidden');
+            unsplashOptions?.classList.add('hidden');
+            if (promptLabel) promptLabel.textContent = 'Describe the image you want to generate...';
+            if (actionText) actionText.textContent = 'Generate Image';
+            if (actionIcon) actionIcon.setAttribute('data-lucide', 'wand-2');
+        } else {
+            aiOptions?.classList.add('hidden');
+            unsplashOptions?.classList.remove('hidden');
+            if (promptLabel) promptLabel.textContent = 'What are you looking for?';
+            if (actionText) actionText.textContent = 'Search Unsplash';
+            if (actionIcon) actionIcon.setAttribute('data-lucide', 'search');
+        }
+        
+        // Re-initialize icons
+        this.reinitializeIcons();
     }
 
     setupImageGenerationToggles() {
@@ -626,7 +842,8 @@ class UIHelpers {
         const options = {
             prompt: promptInput?.value?.trim() || '',
             model: model,
-            size: sizeSelect?.value || '1024x1024'
+            size: sizeSelect?.value || '1024x1024',
+            source: this.imageGenerationState.source
         };
         
         if (model === 'dall-e-3') {
@@ -635,6 +852,14 @@ class UIHelpers {
         }
         
         return options;
+    }
+
+    /**
+     * Get the current image source
+     * @returns {string} - 'generate' or 'unsplash'
+     */
+    getImageSource() {
+        return this.imageGenerationState.source;
     }
 
     setImageGenerateButtonState(isGenerating) {
@@ -1479,12 +1704,14 @@ class UIHelpers {
         
         return [
             { category: 'Actions', icon: 'plus', title: 'New Chat', description: 'Start a new conversation', action: 'new-chat', shortcut: 'Ctrl+N' },
-            { category: 'Actions', icon: 'image', title: 'Generate Image', description: 'Open image generation panel', action: 'open-image-modal', shortcut: 'Ctrl+I' },
+            { category: 'Actions', icon: 'image', title: 'Create Image', description: 'Generate AI images or search Unsplash', action: 'open-image-modal', shortcut: 'Ctrl+I' },
+            { category: 'Actions', icon: 'camera', title: 'Search Unsplash', description: 'Find free stock photos', action: 'open-image-modal:unsplash' },
             { category: 'Actions', icon: 'folder-open', title: 'Open File Manager', description: 'View and manage session files', action: 'open-file-manager', shortcut: 'Ctrl+Shift+F' },
             { category: 'Actions', icon: 'search', title: 'Search Messages', description: 'Search in current conversation', action: 'search', shortcut: 'Ctrl+F' },
             { category: 'Actions', icon: 'keyboard', title: 'Keyboard Shortcuts', description: 'View all keyboard shortcuts', action: 'show-shortcuts' },
             { category: 'Model', icon: 'cpu', title: 'Change Model', description: 'Select a different AI model', action: 'open-model-selector' },
             { category: 'Navigation', icon: 'sidebar', title: 'Toggle Sidebar', description: 'Show or hide the sidebar', action: 'toggle-sidebar', shortcut: 'Ctrl+B' },
+            { category: 'View', icon: 'minimize-2', title: 'Toggle Input Area', description: 'Show or hide the message input', action: 'toggle-input-area', shortcut: 'Ctrl+Shift+H' },
             { category: 'View', icon: 'sun', title: 'Toggle Theme', description: 'Switch between light and dark mode', action: 'toggle-theme' },
             ...(hasMessages ? [
                 { category: 'Export', icon: 'download', title: 'Export as Markdown', description: 'Download conversation as .md file', action: 'export-md' },
@@ -1512,6 +1739,14 @@ class UIHelpers {
             return;
         }
         
+        // Handle open-image-modal with source
+        if (action.startsWith('open-image-modal')) {
+            const source = action.split(':')[1] || 'generate';
+            this.openImageModal();
+            this.setImageSource(source);
+            return;
+        }
+        
         switch (action) {
             case 'new-chat':
                 window.chatApp?.createNewSession();
@@ -1521,6 +1756,9 @@ class UIHelpers {
                 break;
             case 'toggle-sidebar':
                 this.toggleSidebar();
+                break;
+            case 'toggle-input-area':
+                this.toggleInputArea();
                 break;
             case 'toggle-theme':
                 this.toggleTheme();
@@ -1550,9 +1788,6 @@ class UIHelpers {
                 if (sessionManager.currentSessionId) {
                     this.confirmDeleteSession(sessionManager.currentSessionId);
                 }
-                break;
-            case 'open-image-modal':
-                this.openImageModal();
                 break;
             case 'open-file-manager':
                 if (window.fileManager) {
@@ -1587,12 +1822,18 @@ class UIHelpers {
             { key: 'Ctrl + K', description: 'Open command palette' },
             { key: 'Ctrl + N', description: 'New chat' },
             { key: 'Ctrl + F', description: 'Search messages' },
-            { key: 'Ctrl + I', description: 'Generate image' },
+            { key: 'Ctrl + I', description: 'Create image (AI or Unsplash)' },
             { key: 'Ctrl + B', description: 'Toggle sidebar' },
+            { key: 'Ctrl + Shift + H', description: 'Toggle input area' },
             { key: 'Shift + Enter', description: 'New line in input' },
             { key: 'Enter', description: 'Send message' },
             { key: 'Esc', description: 'Close modals/panels' },
             { key: 'Ctrl + /', description: 'Show this help' },
+            { key: '', description: '' },
+            { key: 'Commands', description: '/image [prompt] - Generate AI images' },
+            { key: '', description: '/unsplash [query] - Search stock photos' },
+            { key: '', description: '/model [name] - Change AI model' },
+            { key: '', description: '/clear - Clear conversation' },
             { key: '', description: '' },
             { key: 'Import/Export', description: 'Supports DOCX, PDF, HTML, Markdown, TXT, and JSON formats' },
         ];
@@ -2220,6 +2461,54 @@ class UIHelpers {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    // ============================================
+    // Input Area Toggle
+    // ============================================
+    
+    toggleInputArea() {
+        const inputArea = document.getElementById('input-area');
+        const toggleBtn = document.getElementById('input-toggle-btn');
+        const toggleIcon = document.getElementById('input-toggle-icon');
+        
+        if (!inputArea || !toggleBtn) return;
+        
+        const isHidden = inputArea.classList.toggle('hidden');
+        toggleBtn.classList.toggle('input-hidden', isHidden);
+        
+        // Update icon
+        if (toggleIcon) {
+            toggleIcon.setAttribute('data-lucide', isHidden ? 'chevron-up' : 'chevron-down');
+            lucide.createIcons();
+        }
+        
+        // Save preference
+        localStorage.setItem('webchat_input_hidden', isHidden ? 'true' : 'false');
+        
+        // Scroll to bottom if showing input
+        if (!isHidden) {
+            setTimeout(() => this.scrollToBottom(), 100);
+            // Focus input
+            const messageInput = document.getElementById('message-input');
+            if (messageInput) messageInput.focus();
+        }
+    }
+    
+    restoreInputAreaState() {
+        const isHidden = localStorage.getItem('webchat_input_hidden') === 'true';
+        if (isHidden) {
+            const inputArea = document.getElementById('input-area');
+            const toggleBtn = document.getElementById('input-toggle-btn');
+            const toggleIcon = document.getElementById('input-toggle-icon');
+            
+            if (inputArea) inputArea.classList.add('hidden');
+            if (toggleBtn) toggleBtn.classList.add('input-hidden');
+            if (toggleIcon) {
+                toggleIcon.setAttribute('data-lucide', 'chevron-up');
+                lucide.createIcons();
+            }
+        }
     }
 }
 

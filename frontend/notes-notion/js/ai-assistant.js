@@ -45,6 +45,21 @@ const AIAssistant = (function() {
         setupEventListeners();
         loadState();
         updateReferencesDisplay();
+        updateModelIndicator();
+    }
+    
+    /**
+     * Update the model indicator display
+     */
+    function updateModelIndicator() {
+        const indicator = document.getElementById('ai-model-indicator');
+        if (!indicator) return;
+        
+        const model = window.Editor?.getCurrentModel?.() || 'default';
+        // Truncate long model names
+        const displayName = model.length > 15 ? model.split('-').pop() : model;
+        indicator.textContent = displayName;
+        indicator.title = `Using model: ${model}`;
     }
     
     /**
@@ -135,6 +150,7 @@ const AIAssistant = (function() {
             widget.classList.add('collapsed');
         } else {
             widget.classList.remove('collapsed');
+            updateModelIndicator();
         }
         
         saveState();
@@ -159,6 +175,8 @@ const AIAssistant = (function() {
         widget.classList.remove('minimized');
         widget.classList.remove('collapsed');
         toggle.style.display = 'none';
+        
+        updateModelIndicator();
         
         if (input) {
             setTimeout(() => input.focus(), 100);

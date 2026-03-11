@@ -644,3 +644,24 @@
 .sidebar.collapsed ~ .ai-assistant-toggle {
     /* Already positioned from right, no change needed */
 }
+
+
+/* ===== Model Indicator ===== */
+.ai-model-indicator {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+    cursor: help;
+}
+
+.ai-model-indicator:hover {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+}

@@ -1093,7 +1093,10 @@ const Blocks = (function() {
             size: '1024x1024',
             quality: 'standard',
             style: 'vivid',
-            status: 'pending'
+            source: 'ai', // 'ai' or 'unsplash'
+            status: 'pending',
+            unsplashResults: null,
+            selectedUnsplashId: null
         };
         
         // Ensure block content is properly initialized
@@ -1101,7 +1104,7 @@ const Blocks = (function() {
             block.content = content;
         }
         
-        // Show generated image if available
+        // Show generated/selected image if available
         if (content.imageUrl && content.status === 'done') {
             const imgContainer = document.createElement('div');
             imgContainer.className = 'ai-image-container';
@@ -1111,7 +1114,7 @@ const Blocks = (function() {
             
             const img = document.createElement('img');
             img.src = content.imageUrl;
-            img.alt = content.prompt || 'AI generated image';
+            img.alt = content.prompt || 'Image';
             img.className = 'ai-image';
             
             img.addEventListener('error', () => {
@@ -1130,17 +1133,26 @@ const Blocks = (function() {
             imgWrapper.appendChild(img);
             imgContainer.appendChild(imgWrapper);
             
-            // Model indicator
+            // Source indicator
             const modelBadge = document.createElement('div');
             modelBadge.className = 'ai-image-model-badge';
-            modelBadge.textContent = `Generated with ${content.model}`;
+            if (content.source === 'unsplash') {
+                modelBadge.textContent = 'Photo by Unsplash';
+                if (content.unsplashPhotographer) {
+                    modelBadge.innerHTML = `Photo by <a href="${content.unsplashPhotographerUrl}" target="_blank" rel="noopener" style="color: var(--accent-color);">${content.unsplashPhotographer}</a> on Unsplash`;
+                }
+            } else {
+                modelBadge.textContent = `Generated with ${content.model}`;
+            }
             imgContainer.appendChild(modelBadge);
             
             // Prompt display
-            const promptDisplay = document.createElement('div');
-            promptDisplay.className = 'ai-image-prompt-display';
-            promptDisplay.innerHTML = `<strong>Prompt:</strong> ${escapeHtml(content.prompt)}`;
-            imgContainer.appendChild(promptDisplay);
+            if (content.prompt) {
+                const promptDisplay = document.createElement('div');
+                promptDisplay.className = 'ai-image-prompt-display';
+                promptDisplay.innerHTML = `<strong>${content.source === 'unsplash' ? 'Search:' : 'Prompt:'}</strong> ${escapeHtml(content.prompt)}`;
+                imgContainer.appendChild(promptDisplay);
+            }
             
             // Actions
             const actions = document.createElement('div');
@@ -1148,10 +1160,12 @@ const Blocks = (function() {
             
             const regenerateBtn = document.createElement('button');
             regenerateBtn.className = 'ai-image-btn';
-            regenerateBtn.innerHTML = '🔄 Regenerate';
+            regenerateBtn.innerHTML = content.source === 'unsplash' ? '🔍 Search Again' : '🔄 Regenerate';
             regenerateBtn.addEventListener('click', () => {
                 content.status = 'pending';
                 content.imageUrl = null;
+                content.unsplashResults = null;
+                content.selectedUnsplashId = null;
                 wrapper.innerHTML = '';
                 const newContent = renderAIImageBlock(block, isEditable);
                 wrapper.appendChild(newContent);
@@ -1160,7 +1174,7 @@ const Blocks = (function() {
             const downloadBtn = document.createElement('a');
             downloadBtn.className = 'ai-image-btn primary';
             downloadBtn.href = content.imageUrl;
-            downloadBtn.download = `ai-image-${Date.now()}.png`;
+            downloadBtn.download = `image-${Date.now()}.png`;
             downloadBtn.target = '_blank';
             downloadBtn.textContent = '⬇️ Download';
             
@@ -1186,10 +1200,91 @@ const Blocks = (function() {
             loading.className = 'ai-image-loading';
             loading.innerHTML = `
                 <div class="ai-image-spinner"></div>
-                <div class="ai-image-loading-text">Generating image...</div>
+                <div class="ai-image-loading-text">${content.source === 'unsplash' ? 'Searching Unsplash...' : 'Generating image...'}</div>
                 <div class="ai-image-loading-subtext">"${escapeHtml(content.prompt)}"</div>
             `;
             wrapper.appendChild(loading);
+        } else if (content.status === 'search_results') {
+            // Show Unsplash search results
+            const resultsContainer = document.createElement('div');
+            resultsContainer.className = 'unsplash-results-container';
+            
+            const header = document.createElement('div');
+            header.className = 'unsplash-results-header';
+            header.innerHTML = `
+                <span>Search results for "${escapeHtml(content.prompt)}"</span>
+                <button class="ai-image-btn close-results">✕ Close</button>
+            `;
+            header.querySelector('.close-results').addEventListener('click', () => {
+                content.status = 'pending';
+                content.unsplashResults = null;
+                wrapper.innerHTML = '';
+                const newContent = renderAIImageBlock(block, isEditable);
+                wrapper.appendChild(newContent);
+            });
+            resultsContainer.appendChild(header);
+            
+            if (content.unsplashResults && content.unsplashResults.length > 0) {
+                const grid = document.createElement('div');
+                grid.className = 'unsplash-results-grid';
+                
+                content.unsplashResults.forEach((photo, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'unsplash-result-item';
+                    item.style.backgroundImage = `url(${photo.urls.small})`;
+                    item.title = `Photo by ${photo.user.name}`;
+                    
+                    const overlay = document.createElement('div');
+                    overlay.className = 'unsplash-result-overlay';
+                    overlay.innerHTML = `
+                        <span class="unsplash-photographer">${escapeHtml(photo.user.name)}</span>
+                        <button class="unsplash-select-btn">Select</button>
+                    `;
+                    
+                    overlay.querySelector('.unsplash-select-btn').addEventListener('click', () => {
+                        content.imageUrl = photo.urls.regular;
+                        content.status = 'done';
+                        content.source = 'unsplash';
+                        content.selectedUnsplashId = photo.id;
+                        content.unsplashPhotographer = photo.user.name;
+                        content.unsplashPhotographerUrl = photo.user.links?.html || photo.user.portfolio_url || '#';
+                        
+                        wrapper.innerHTML = '';
+                        const newContent = renderAIImageBlock(block, isEditable);
+                        wrapper.appendChild(newContent);
+                        
+                        if (window.Editor) {
+                            window.Editor.savePage();
+                        }
+                    });
+                    
+                    item.appendChild(overlay);
+                    grid.appendChild(item);
+                });
+                
+                resultsContainer.appendChild(grid);
+            } else {
+                const noResults = document.createElement('div');
+                noResults.className = 'unsplash-no-results';
+                noResults.innerHTML = `
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <div>No images found for "${escapeHtml(content.prompt)}"</div>
+                    <button class="ai-image-btn" style="margin-top: 12px;">Try Another Search</button>
+                `;
+                noResults.querySelector('.ai-image-btn').addEventListener('click', () => {
+                    content.status = 'pending';
+                    content.unsplashResults = null;
+                    wrapper.innerHTML = '';
+                    const newContent = renderAIImageBlock(block, isEditable);
+                    wrapper.appendChild(newContent);
+                });
+                resultsContainer.appendChild(noResults);
+            }
+            
+            wrapper.appendChild(resultsContainer);
         } else if (content.status === 'error') {
             // Show error state
             const error = document.createElement('div');
@@ -1200,11 +1295,12 @@ const Blocks = (function() {
                     <line x1="12" y1="8" x2="12" y2="12"></line>
                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
                 </svg>
-                <div>Failed to generate image</div>
+                <div>${content.errorMessage || 'Failed to generate image'}</div>
                 <button class="ai-image-btn retry-btn">Try Again</button>
             `;
             error.querySelector('.retry-btn').addEventListener('click', () => {
                 content.status = 'pending';
+                content.errorMessage = null;
                 wrapper.innerHTML = '';
                 const newContent = renderAIImageBlock(block, isEditable);
                 wrapper.appendChild(newContent);
@@ -1215,15 +1311,47 @@ const Blocks = (function() {
             const form = document.createElement('div');
             form.className = 'ai-image-form';
             
+            // Source selector tabs
+            const sourceTabs = document.createElement('div');
+            sourceTabs.className = 'ai-image-source-tabs';
+            sourceTabs.innerHTML = `
+                <button class="ai-image-tab ${content.source !== 'unsplash' ? 'active' : ''}" data-source="ai">
+                    ✨ AI Generate
+                </button>
+                <button class="ai-image-tab ${content.source === 'unsplash' ? 'active' : ''}" data-source="unsplash">
+                    📷 Unsplash Search
+                </button>
+            `;
+            
+            sourceTabs.querySelectorAll('.ai-image-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    sourceTabs.querySelectorAll('.ai-image-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    content.source = tab.dataset.source;
+                    
+                    // Toggle options visibility
+                    if (content.source === 'unsplash') {
+                        aiOptionsRow.style.display = 'none';
+                        generateBtn.innerHTML = '🔍 Search Unsplash';
+                    } else {
+                        aiOptionsRow.style.display = 'flex';
+                        generateBtn.innerHTML = '✨ Generate Image';
+                    }
+                });
+            });
+            
             const promptInput = document.createElement('textarea');
             promptInput.className = 'ai-image-prompt-input';
-            promptInput.placeholder = 'Describe the image you want to generate...';
+            promptInput.placeholder = content.source === 'unsplash' 
+                ? 'Search for photos (e.g., nature, architecture, people)...' 
+                : 'Describe the image you want to generate...';
             promptInput.value = content.prompt || '';
             promptInput.rows = 3;
             
-            // Options row
-            const optionsRow = document.createElement('div');
-            optionsRow.className = 'ai-image-options';
+            // AI Options row (hidden for Unsplash)
+            const aiOptionsRow = document.createElement('div');
+            aiOptionsRow.className = 'ai-image-options';
+            aiOptionsRow.style.display = content.source === 'unsplash' ? 'none' : 'flex';
             
             // Model selector
             const modelSelect = document.createElement('select');
@@ -1262,10 +1390,10 @@ const Blocks = (function() {
             `;
             styleSelect.value = content.style || 'vivid';
             
-            optionsRow.appendChild(modelSelect);
-            optionsRow.appendChild(sizeSelect);
-            optionsRow.appendChild(qualitySelect);
-            optionsRow.appendChild(styleSelect);
+            aiOptionsRow.appendChild(modelSelect);
+            aiOptionsRow.appendChild(sizeSelect);
+            aiOptionsRow.appendChild(qualitySelect);
+            aiOptionsRow.appendChild(styleSelect);
             
             // Buttons
             const buttons = document.createElement('div');
@@ -1273,7 +1401,7 @@ const Blocks = (function() {
             
             const generateBtn = document.createElement('button');
             generateBtn.className = 'ai-image-btn primary';
-            generateBtn.innerHTML = '✨ Generate Image';
+            generateBtn.innerHTML = content.source === 'unsplash' ? '🔍 Search Unsplash' : '✨ Generate Image';
             
             const cancelBtn = document.createElement('button');
             cancelBtn.className = 'ai-image-btn';
@@ -1288,15 +1416,19 @@ const Blocks = (function() {
                 const prompt = promptInput.value.trim();
                 if (!prompt) return;
                 
+                const currentSource = content.source || 'ai';
+                
                 // Update block content
                 block.content = {
                     prompt,
+                    source: currentSource,
                     model: modelSelect.value,
                     size: sizeSelect.value,
                     quality: qualitySelect.value,
                     style: styleSelect.value,
-                    status: 'generating',
-                    imageUrl: null
+                    status: currentSource === 'unsplash' ? 'generating' : 'generating',
+                    imageUrl: null,
+                    unsplashResults: null
                 };
                 
                 // Show loading
@@ -1304,42 +1436,68 @@ const Blocks = (function() {
                 const loadingContent = renderAIImageBlock(block, isEditable);
                 wrapper.appendChild(loadingContent);
                 
-                // Generate image
-                try {
-                    const result = await API.generateImage({
-                        prompt,
-                        model: block.content.model,
-                        size: block.content.size,
-                        quality: block.content.quality,
-                        style: block.content.style
-                    });
-                    
-                    block.content.imageUrl = result.url;
-                    block.content.status = 'done';
-                    
-                    // Re-render with result
-                    wrapper.innerHTML = '';
-                    const newContent = renderAIImageBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
-                    
-                    // Save page
-                    if (window.Editor) {
-                        window.Editor.savePage();
+                if (currentSource === 'unsplash') {
+                    // Search Unsplash
+                    try {
+                        const result = await API.searchUnsplash(prompt, { perPage: 9 });
+                        
+                        block.content.unsplashResults = result.results;
+                        block.content.status = 'search_results';
+                        block.content.totalResults = result.total;
+                        
+                        // Re-render with results
+                        wrapper.innerHTML = '';
+                        const newContent = renderAIImageBlock(block, isEditable);
+                        wrapper.appendChild(newContent);
+                    } catch (err) {
+                        console.error('Unsplash search error:', err);
+                        block.content.status = 'error';
+                        block.content.errorMessage = 'Failed to search Unsplash. Please try again.';
+                        wrapper.innerHTML = '';
+                        const errorContent = renderAIImageBlock(block, isEditable);
+                        wrapper.appendChild(errorContent);
                     }
-                } catch (err) {
-                    console.error('Image generation error:', err);
-                    block.content.status = 'error';
-                    wrapper.innerHTML = '';
-                    const errorContent = renderAIImageBlock(block, isEditable);
-                    wrapper.appendChild(errorContent);
+                } else {
+                    // Generate AI image
+                    try {
+                        const result = await API.generateImage({
+                            prompt,
+                            model: block.content.model,
+                            size: block.content.size,
+                            quality: block.content.quality,
+                            style: block.content.style
+                        });
+                        
+                        block.content.imageUrl = result.url;
+                        block.content.status = 'done';
+                        block.content.revisedPrompt = result.revised_prompt;
+                        
+                        // Re-render with result
+                        wrapper.innerHTML = '';
+                        const newContent = renderAIImageBlock(block, isEditable);
+                        wrapper.appendChild(newContent);
+                        
+                        // Save page
+                        if (window.Editor) {
+                            window.Editor.savePage();
+                        }
+                    } catch (err) {
+                        console.error('Image generation error:', err);
+                        block.content.status = 'error';
+                        block.content.errorMessage = err.message || 'Failed to generate image';
+                        wrapper.innerHTML = '';
+                        const errorContent = renderAIImageBlock(block, isEditable);
+                        wrapper.appendChild(errorContent);
+                    }
                 }
             });
             
             buttons.appendChild(generateBtn);
             buttons.appendChild(cancelBtn);
             
+            form.appendChild(sourceTabs);
             form.appendChild(promptInput);
-            form.appendChild(optionsRow);
+            form.appendChild(aiOptionsRow);
             form.appendChild(buttons);
             wrapper.appendChild(form);
             

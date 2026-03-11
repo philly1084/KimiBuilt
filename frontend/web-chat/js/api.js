@@ -562,6 +562,19 @@ class OpenAIAPIClient extends EventTarget {
     // Image Generation API
     // ============================================
 
+    /**
+     * Generate images using the backend API
+     * POST /api/images
+     * @param {Object} options - Image generation options
+     * @param {string} options.prompt - Image prompt (required)
+     * @param {string} options.model - Model to use (optional, default: 'dall-e-3')
+     * @param {string} options.size - Image size (optional, default: '1024x1024')
+     * @param {string} options.quality - Image quality (optional, default: 'standard')
+     * @param {string} options.style - Image style (optional, default: 'vivid')
+     * @param {number} options.n - Number of images (optional, default: 1)
+     * @param {string} options.sessionId - Session ID (optional)
+     * @returns {Promise<Object>} - { sessionId, created, data: [{ url, revised_prompt }], model, size, quality, style }
+     */
     async generateImage(options = {}) {
         const {
             prompt,
@@ -574,19 +587,22 @@ class OpenAIAPIClient extends EventTarget {
         } = options;
 
         const params = {
-            model,
             prompt,
+            model,
+            size,
+            quality,
+            style,
             n: n || 1,
-            size: size || '1024x1024',
         };
 
-        if (quality) params.quality = quality;
-        if (style) params.style = style;
         if (sessionId || this.currentSessionId) {
-            params.session_id = sessionId || this.currentSessionId;
+            params.sessionId = sessionId || this.currentSessionId;
         }
 
         let lastError = null;
+        
+        // Extract base URL without /v1
+        const baseUrl = API_BASE_URL.replace('/v1', '');
         
         for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
             try {
@@ -594,25 +610,28 @@ class OpenAIAPIClient extends EventTarget {
                     await this.sleep(this.getRetryDelay(attempt - 1));
                 }
 
-                // Use fetch if SDK not available
-                if (!this.client) {
-                    const response = await fetch(`${API_BASE_URL}/images/generations`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(params),
-                    });
-                    
-                    if (!response.ok) {
-                        const error = new Error(`HTTP ${response.status}`);
-                        error.status = response.status;
-                        throw error;
-                    }
-                    
-                    return await response.json();
+                const response = await fetch(`${baseUrl}/api/images`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params),
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    const error = new Error(errorData.error?.message || `HTTP ${response.status}`);
+                    error.status = response.status;
+                    error.response = errorData;
+                    throw error;
                 }
-
-                const response = await this.client.images.generate(params);
-                return response;
+                
+                const data = await response.json();
+                
+                // Update current session ID if returned
+                if (data.sessionId) {
+                    this.currentSessionId = data.sessionId;
+                }
+                
+                return data;
                 
             } catch (error) {
                 lastError = error;
@@ -624,6 +643,104 @@ class OpenAIAPIClient extends EventTarget {
         }
         
         throw new Error(this.parseErrorMessage(lastError, lastError?.response));
+    }
+
+    /**
+     * Search for images on Unsplash
+     * GET /api/unsplash/search
+     * @param {string} query - Search query
+     * @param {Object} options - Search options
+     * @param {number} options.page - Page number (default: 1)
+     * @param {number} options.perPage - Results per page (default: 10, max: 30)
+     * @param {string} options.orderBy - Sort order: 'relevant' or 'latest'
+     * @param {string} options.orientation - Filter: 'landscape', 'portrait', or 'squarish'
+     * @returns {Promise<Object>} - { source, query, total, total_pages, results: [...] }
+     */
+    async searchUnsplash(query, options = {}) {
+        const {
+            page = 1,
+            perPage = 10,
+            orderBy = 'relevant',
+            orientation = null
+        } = options;
+
+        if (!query || query.trim() === '') {
+            throw new Error('Search query is required');
+        }
+
+        // Extract base URL without /v1
+        const baseUrl = API_BASE_URL.replace('/v1', '');
+        
+        const params = new URLSearchParams({
+            q: query.trim(),
+            page: String(page),
+            per_page: String(Math.min(perPage, 30)),
+            order_by: orderBy,
+        });
+
+        if (orientation) {
+            params.append('orientation', orientation);
+        }
+
+        let lastError = null;
+        
+        for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    await this.sleep(this.getRetryDelay(attempt - 1));
+                }
+
+                const response = await fetch(`${baseUrl}/api/unsplash/search?${params.toString()}`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    const error = new Error(errorData.error?.message || `HTTP ${response.status}`);
+                    error.status = response.status;
+                    error.response = errorData;
+                    throw error;
+                }
+                
+                return await response.json();
+                
+            } catch (error) {
+                lastError = error;
+                
+                if (!this.isRetryableError(error) || attempt === RETRY_CONFIG.maxRetries) {
+                    throw new Error(this.parseErrorMessage(error, error.response));
+                }
+            }
+        }
+        
+        throw new Error(this.parseErrorMessage(lastError, lastError?.response));
+    }
+
+    /**
+     * Get available image generation models
+     * GET /api/images/models
+     * @returns {Promise<Object>} - { models: [...] }
+     */
+    async getImageModelsFromAPI() {
+        // Extract base URL without /v1
+        const baseUrl = API_BASE_URL.replace('/v1', '');
+        
+        try {
+            const response = await fetch(`${baseUrl}/api/images/models`);
+            if (response.ok) {
+                const data = await response.json();
+                return data.models || [];
+            }
+        } catch (e) {
+            console.warn('[API] Failed to fetch image models from API:', e.message);
+        }
+        
+        // Fallback to default models
+        return [
+            { id: 'dall-e-3', name: 'DALL-E 3', description: 'High quality images with detailed prompts' },
+            { id: 'dall-e-2', name: 'DALL-E 2', description: 'Faster, lower cost image generation' }
+        ];
     }
 
     // ============================================
