@@ -58,6 +58,27 @@ function uniqueById(models = []) {
     });
 }
 
+function sortImageModels(models = []) {
+    const configured = normalizeModelId(config.openai.imageModel);
+
+    return [...models].sort((a, b) => {
+        const aId = normalizeModelId(a.id);
+        const bId = normalizeModelId(b.id);
+        const aConfigured = configured && aId === configured ? 1 : 0;
+        const bConfigured = configured && bId === configured ? 1 : 0;
+        if (aConfigured !== bConfigured) {
+            return bConfigured - aConfigured;
+        }
+
+        const aNb = /-nb$/i.test(aId) ? 1 : 0;
+        const bNb = /-nb$/i.test(bId) ? 1 : 0;
+        if (aNb !== bNb) {
+            return bNb - aNb;
+        }
+
+        return aId.localeCompare(bId);
+    });
+}
 function getImageModelMetadata(modelId, ownedBy = 'openai') {
     const normalized = normalizeModelId(modelId);
     const lower = normalized.toLowerCase();
@@ -203,14 +224,14 @@ async function listImageModels() {
     );
 
     if (discovered.length > 0) {
-        return discovered;
+        return sortImageModels(discovered);
     }
 
-    return uniqueById(
+    return sortImageModels(uniqueById(
         [config.openai.imageModel]
             .filter(Boolean)
             .map((modelId) => getImageModelMetadata(modelId, 'openai')),
-    );
+    ));
 }
 
 async function resolveImageModel(requestedModel = null) {

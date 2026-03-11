@@ -499,8 +499,9 @@ Session Statistics:
 **AI Controls:**
   /models            List available AI models
   /model <name>      Change AI model
-  /image <prompt>    Generate an image (DALL-E)
-                     Options: --model dall-e-3|dall-e-2, --size 1024x1024
+  /image <prompt>    Generate an image
+                     Defaults to gemini-2.5-flash-image-nb unless --model is provided
+                     Options: --model gemini-2.5-flash-image-nb, --size 1024x1024
                      --quality standard|hd, --style vivid|natural
   /unsplash <query>  Search Unsplash for stock images
                      Options: --orientation landscape|portrait|squarish
@@ -767,7 +768,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     async generateImage(input) {
         if (!input) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model dall-e-3] [--size 1024x1024] [--quality standard]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gemini-2.5-flash-image-nb] [--size 1024x1024] [--quality standard]');
             return;
         }
         
@@ -775,13 +776,14 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         const { prompt, options } = this.parseImageArgs(input);
         
         if (!prompt) {
-            this.printError('Please provide a prompt. Usage: /image <prompt> [--model dall-e-3] [--size 1024x1024] [--quality standard]');
+            this.printError('Please provide a prompt. Usage: /image <prompt> [--model gemini-2.5-flash-image-nb] [--size 1024x1024] [--quality standard]');
             return;
         }
         
         this.isProcessing = true;
         this.setStatus('thinking');
-        this.printSystem(`Generating image with ${options.model || 'dall-e-3'}...`);
+        options.model = options.model || 'gemini-2.5-flash-image-nb';
+                this.printSystem(`Generating image with ${options.model}...`);
         
         try {
             const response = await api.generateImage(prompt, options);
@@ -797,7 +799,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                 output += `</div>\n\n`;
                 
                 // Add metadata
-                output += `**Model:** ${response.model || options.model || 'dall-e-3'}\n`;
+                output += `**Model:** ${response.model || options.model || 'gateway default'}\n`;
                 output += `**Size:** ${response.size || options.size || '1024x1024'}\n`;
                 output += `**Quality:** ${response.quality || options.quality || 'standard'}\n`;
                 if (image.revised_prompt) {
@@ -834,7 +836,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
      */
     parseImageArgs(input) {
         const options = {
-            model: 'dall-e-3',
+            model: null,
             size: '1024x1024',
             quality: 'standard',
             style: 'vivid'
@@ -1544,3 +1546,6 @@ Session Information:
 }
 
 const app = new CodeCLIApp();
+
+
+

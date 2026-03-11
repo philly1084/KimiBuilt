@@ -706,6 +706,10 @@ class UIHelpers {
         this.trapFocus(modal);
     }
 
+    getPreferredImageModelId(models = this.availableImageModels) {
+        const list = Array.isArray(models) ? models : [];
+        return list.find((model) => /-nb$/i.test(String(model.id || '')))?.id || list[0]?.id || '';
+    }
     async loadImageModels() {
         try {
             const models = await apiClient.getImageModelsFromAPI();
@@ -718,7 +722,7 @@ class UIHelpers {
                     .join('');
 
                 if (!this.availableImageModels.find((model) => model.id === modelSelect.value)) {
-                    modelSelect.value = this.availableImageModels[0].id;
+                    modelSelect.value = this.getPreferredImageModelId();
                 }
 
                 this.updateImageOptionsForModel(modelSelect.value);
@@ -739,7 +743,7 @@ class UIHelpers {
         const sizeSelect = document.getElementById('image-size-select');
         
         if (promptInput) promptInput.value = '';
-        if (modelSelect) modelSelect.value = this.availableImageModels[0]?.id || '';
+        if (modelSelect) modelSelect.value = this.getPreferredImageModelId();
         if (sizeSelect) sizeSelect.value = '1024x1024';
         
         this.imageGenerationState.quality = 'standard';
@@ -862,6 +866,7 @@ class UIHelpers {
         const sizeSelect = document.getElementById('image-size-select');
         
         const selectedModel = this.availableImageModels.find((entry) => entry.id === modelSelect?.value)
+            || this.availableImageModels.find((entry) => entry.id === this.getPreferredImageModelId())
             || this.availableImageModels[0]
             || {};
         const model = modelSelect?.value || selectedModel.id || '';
@@ -2543,19 +2548,4 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
