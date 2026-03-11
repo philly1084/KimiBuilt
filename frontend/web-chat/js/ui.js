@@ -21,6 +21,7 @@ class UIHelpers {
         
         // Model selector state
         this.availableModels = [];
+        this.availableImageModels = [];
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         this.currentModel = savedModel || 'gpt-4o';
         this.updateModelUI();
@@ -696,6 +697,8 @@ class UIHelpers {
             if (input) input.focus();
         }, 100);
         
+        this.loadImageModels();
+
         // Setup toggle buttons
         this.setupImageGenerationToggles();
         
@@ -703,6 +706,26 @@ class UIHelpers {
         this.trapFocus(modal);
     }
 
+    async loadImageModels() {
+        try {
+            const models = await apiClient.getImageModelsFromAPI();
+            this.availableImageModels = Array.isArray(models) ? models : [];
+
+            const modelSelect = document.getElementById('image-model-select');
+            if (modelSelect && this.availableImageModels.length > 0) {
+                modelSelect.innerHTML = this.availableImageModels
+                    .map((model) => `<option value="${model.id}">${model.name || model.id}</option>`)
+                    .join('');
+
+                if (!this.availableImageModels.find((model) => model.id === modelSelect.value)) {
+                    modelSelect.value = this.availableImageModels[0].id;
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load image models:', error);
+            this.availableImageModels = [];
+        }
+    }
     closeImageModal() {
         const modal = document.getElementById('image-modal');
         modal.classList.add('hidden');
@@ -714,7 +737,7 @@ class UIHelpers {
         const sizeSelect = document.getElementById('image-size-select');
         
         if (promptInput) promptInput.value = '';
-        if (modelSelect) modelSelect.value = 'dall-e-3';
+        if (modelSelect) modelSelect.value = this.availableImageModels[0]?.id || 'gpt-image-1';
         if (sizeSelect) sizeSelect.value = '1024x1024';
         
         this.imageGenerationState.quality = 'standard';
@@ -838,7 +861,7 @@ class UIHelpers {
         const promptInput = document.getElementById('image-prompt-input');
         const sizeSelect = document.getElementById('image-size-select');
         
-        const model = modelSelect?.value || 'dall-e-3';
+        const model = modelSelect?.value || this.availableImageModels[0]?.id || 'gpt-image-1';
         const options = {
             prompt: promptInput?.value?.trim() || '',
             model: model,
@@ -2515,6 +2538,8 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
+
+
 
 
 

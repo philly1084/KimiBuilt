@@ -123,6 +123,22 @@
         .status-dot.offline { background: var(--error); }
         .status-dot.connecting { background: var(--warning); animation: pulse 1s infinite; }
 
+        /* Header Model Display */
+        .header-model {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            margin-left: 8px;
+            font-family: var(--font-mono);
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -818,6 +834,7 @@
                     <span id="statusDot" class="status-dot connecting"></span>
                     <span id="statusText">Connecting...</span>
                 </div>
+                <span id="headerModelDisplay" class="header-model" title="Current AI model">--</span>
             </div>
             <div class="toolbar">
                 <select id="modelSelect" style="padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 12px;">

@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
-const { generateImage } = require('../openai-client');
+const { generateImage, listImageModels } = require('../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 
 const router = Router();
@@ -10,22 +10,17 @@ const imageSchema = {
     prompt: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
     model: { required: false, type: 'string' },
-    size: { required: false, type: 'string', enum: ['256x256', '512x512', '1024x1024', '1024x1792', '1792x1024'] },
-    quality: { required: false, type: 'string', enum: ['standard', 'hd'] },
-    style: { required: false, type: 'string', enum: ['vivid', 'natural'] },
+    size: { required: false, type: 'string' },
+    quality: { required: false, type: 'string' },
+    style: { required: false, type: 'string' },
     n: { required: false, type: 'number' },
 };
 
-/**
- * POST /api/images
- * Generate images using DALL-E or compatible API.
- * Follows OpenAI image generation API standard.
- */
 router.post('/', validate(imageSchema), async (req, res, next) => {
     try {
         const {
             prompt,
-            model = 'dall-e-3',
+            model = null,
             size = '1024x1024',
             quality = 'standard',
             style = 'vivid',
@@ -33,7 +28,6 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         } = req.body;
         let { sessionId } = req.body;
 
-        // Auto-create session for image generation
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'image' });
@@ -49,7 +43,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        console.log(`[Images] Generating image with ${model}: "${prompt.substring(0, 50)}..."`);
+        console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${prompt.substring(0, 50)}..."`);
 
         const response = await generateImage({
             prompt,
@@ -57,20 +51,19 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             size,
             quality,
             style,
-            n: Math.min(n, 10), // Max 10 images
+            n: Math.min(n, 10),
         });
 
-        // Store in session for history
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
 
         res.json({
             sessionId,
             created: response.created,
             data: response.data,
-            model,
-            size,
-            quality,
-            style,
+            model: response.model,
+            size: response.size,
+            quality: response.quality,
+            style: response.style,
         });
     } catch (err) {
         console.error('[Images] Error:', err.message);
@@ -78,38 +71,15 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
     }
 });
 
-/**
- * GET /api/images/models
- * Get available image generation models.
- */
-router.get('/models', (_req, res) => {
-    res.json({
-        models: [
-            {
-                id: 'dall-e-3',
-                name: 'DALL-E 3',
-                description: 'High quality images with detailed prompts',
-                sizes: ['1024x1024', '1024x1792', '1792x1024'],
-                qualities: ['standard', 'hd'],
-                styles: ['vivid', 'natural'],
-                maxImages: 1,
-            },
-            {
-                id: 'dall-e-2',
-                name: 'DALL-E 2',
-                description: 'Faster, lower cost image generation',
-                sizes: ['256x256', '512x512', '1024x1024'],
-                qualities: ['standard'],
-                styles: [],
-                maxImages: 10,
-            },
-        ],
-    });
+router.get('/models', async (_req, res, next) => {
+    try {
+        const models = await listImageModels();
+        res.json({ models });
+    } catch (err) {
+        next(err);
+    }
 });
 
-/**
- * Schema for image search requests.
- */
 const searchSchema = {
     query: { required: true, type: 'string' },
     source: { required: false, type: 'string', enum: ['unsplash'] },
@@ -118,11 +88,6 @@ const searchSchema = {
     orientation: { required: false, type: 'string', enum: ['landscape', 'portrait', 'squarish'] },
 };
 
-/**
- * POST /api/images/search
- * Search for images from external sources (e.g., Unsplash).
- * Currently supports Unsplash as the image source.
- */
 router.post('/search', validate(searchSchema), async (req, res, next) => {
     try {
         const {
@@ -134,7 +99,6 @@ router.post('/search', validate(searchSchema), async (req, res, next) => {
         } = req.body;
 
         if (source === 'unsplash') {
-            // Check if Unsplash is configured
             if (!isUnsplashConfigured()) {
                 return res.status(503).json({
                     error: {

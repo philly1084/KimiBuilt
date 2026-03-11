@@ -1119,6 +1119,7 @@ class ChatApp {
             // Update the image message with the result
             if (result.data && result.data.length > 0) {
                 const imageData = result.data[0];
+                const imageUrl = imageData.url || (imageData.b64_json ? `data:image/png;base64,${imageData.b64_json}` : null);
                 
                 // Update session storage
                 const messages = sessionManager.getMessages(sessionId);
@@ -1127,7 +1128,7 @@ class ChatApp {
                     messages[msgIndex] = {
                         ...messages[msgIndex],
                         isLoading: false,
-                        imageUrl: imageData.url,
+                        imageUrl: imageUrl,
                         revisedPrompt: imageData.revised_prompt,
                         model: result.model || options.model
                     };
@@ -1136,7 +1137,7 @@ class ChatApp {
                 
                 // Update UI
                 uiHelpers.updateImageMessage(imageMessageId, {
-                    url: imageData.url,
+                    url: imageUrl,
                     prompt: options.prompt,
                     revised_prompt: imageData.revised_prompt,
                     model: result.model || options.model
@@ -1432,3 +1433,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.chatApp = new ChatApp();
     window.app = window.chatApp; // Backward compatibility
 });
+
+
+
+

@@ -3,9 +3,23 @@ const { config } = require('./config');
 
 let client = null;
 
-/**
- * Get or create the singleton OpenAI client.
- */
+const IMAGE_MODEL_KEYWORDS = [
+    'gpt-image',
+    'dall-e',
+    'flux',
+    'sdxl',
+    'stable-diffusion',
+    'diffusion',
+    'recraft',
+    'ideogram',
+    'midjourney',
+    'imagen',
+    'image-gen',
+    'text-to-image',
+];
+
+const LEGACY_IMAGE_MODELS = ['gpt-image-1', 'dall-e-3', 'dall-e-2'];
+
 function getClient() {
     if (!client) {
         client = new OpenAI({
@@ -16,123 +30,173 @@ function getClient() {
     return client;
 }
 
-/**
- * Get list of available models from the API.
- * @returns {Promise<Array>} List of models
- */
+function normalizeModelId(modelId = '') {
+    return String(modelId || '').trim();
+}
+
+function isLikelyImageModel(model = {}) {
+    const id = normalizeModelId(typeof model === 'string' ? model : model.id).toLowerCase();
+    const owner = String(model.owned_by || '').toLowerCase();
+    if (!id) return false;
+
+    if (IMAGE_MODEL_KEYWORDS.some((keyword) => id.includes(keyword))) {
+        return true;
+    }
+
+    return owner.includes('image');
+}
+
+function uniqueById(models = []) {
+    const seen = new Set();
+    return models.filter((model) => {
+        const id = normalizeModelId(model.id);
+        if (!id || seen.has(id)) {
+            return false;
+        }
+        seen.add(id);
+        return true;
+    });
+}
+
+function getImageModelMetadata(modelId, ownedBy = 'openai') {
+    const normalized = normalizeModelId(modelId);
+    const lower = normalized.toLowerCase();
+
+    if (lower.includes('dall-e-3')) {
+        return {
+            id: normalized,
+            name: normalized,
+            description: 'High quality image generation',
+            owned_by: ownedBy,
+            sizes: ['1024x1024', '1024x1792', '1792x1024'],
+            qualities: ['standard', 'hd'],
+            styles: ['vivid', 'natural'],
+            maxImages: 1,
+        };
+    }
+
+    if (lower.includes('dall-e-2')) {
+        return {
+            id: normalized,
+            name: normalized,
+            description: 'Fast image generation',
+            owned_by: ownedBy,
+            sizes: ['256x256', '512x512', '1024x1024'],
+            qualities: ['standard'],
+            styles: [],
+            maxImages: 10,
+        };
+    }
+
+    if (lower.includes('gpt-image')) {
+        return {
+            id: normalized,
+            name: normalized,
+            description: 'OpenAI-compatible image generation',
+            owned_by: ownedBy,
+            sizes: ['1024x1024', '1536x1024', '1024x1536', 'auto'],
+            qualities: ['low', 'medium', 'high', 'auto'],
+            styles: [],
+            maxImages: 1,
+        };
+    }
+
+    return {
+        id: normalized,
+        name: normalized,
+        description: 'Gateway-discovered image generation model',
+        owned_by: ownedBy,
+        sizes: ['1024x1024'],
+        qualities: [],
+        styles: [],
+        maxImages: 1,
+    };
+}
+
+function toImageUrl(image = {}) {
+    if (image.url) {
+        return image.url;
+    }
+    if (image.b64_json) {
+        return `data:image/png;base64,${image.b64_json}`;
+    }
+    return null;
+}
+
 async function listModels() {
     const openai = getClient();
     console.log(`[OpenAI] Fetching models from: ${config.openai.baseURL}`);
-    
+
     try {
         const response = await openai.models.list();
         const models = response.data || [];
         console.log(`[OpenAI] Successfully fetched ${models.length} models`);
-        
+
         if (models.length > 0) {
-            console.log(`[OpenAI] Available models: ${models.map(m => m.id).join(', ')}`);
+            console.log(`[OpenAI] Available models: ${models.map((model) => model.id).join(', ')}`);
         }
-        
+
         return models;
     } catch (err) {
         console.error('[OpenAI] Failed to list models:', err.message);
         console.error('[OpenAI] Error details:', err.code, err.type);
-        
-        // Return empty array - let frontend handle empty state
         return [];
     }
 }
 
-/**
- * Create a response using the OpenAI Chat Completions API.
- * Supports both streaming and non-streaming modes.
- * Compatible with n8n-openai-cli-gateway and standard OpenAI-compatible APIs.
- *
- * @param {Object} options
- * @param {string|Array} options.input - The user message or input array
- * @param {string} [options.previousResponseId] - Previous response ID for conversation continuity (unused, kept for compatibility)
- * @param {string[]} [options.contextMessages] - Additional context (e.g. from memory retrieval)
- * @param {string} [options.instructions] - System-level instructions
- * @param {boolean} [options.stream] - Whether to stream the response
- * @param {string} [options.model] - Model to use (defaults to config.openai.model)
- * @returns {Promise<Object|AsyncIterable>} Response object or stream
- */
-async function createResponse({
-    input,
-    previousResponseId = null,
-    contextMessages = [],
-    instructions = null,
-    stream = false,
-    model = null,
-}) {
-    const openai = getClient();
+async function listImageModels() {
+    const discovered = uniqueById(
+        (await listModels())
+            .filter((model) => isLikelyImageModel(model))
+            .map((model) => getImageModelMetadata(model.id, model.owned_by || 'openai')),
+    );
 
-    // Build messages array for Chat Completions API
-    const messages = [];
-
-    // Add system instructions if provided
-    if (instructions) {
-        messages.push({
-            role: 'system',
-            content: instructions,
-        });
+    if (discovered.length > 0) {
+        return discovered;
     }
 
-    // Inject retrieved memories as context
-    if (contextMessages.length > 0) {
-        messages.push({
-            role: 'system',
-            content: `[Relevant context from memory]\n${contextMessages.join('\n---\n')}`,
-        });
-    }
+    const fallbacks = uniqueById(
+        [config.openai.imageModel, ...LEGACY_IMAGE_MODELS]
+            .filter(Boolean)
+            .map((modelId) => getImageModelMetadata(modelId, 'openai')),
+    );
 
-    // Add the actual user input
-    if (typeof input === 'string') {
-        messages.push({
-            role: 'user',
-            content: input,
-        });
-    } else if (Array.isArray(input)) {
-        // Input is already an array of messages
-        messages.push(...input);
-    } else {
-        // Single message object
-        messages.push(input);
-    }
-
-    const params = {
-        model: model || config.openai.model,
-        messages,
-        stream,
-    };
-
-    console.log(`[OpenAI] Creating chat completion: model=${params.model}, stream=${stream}, messages=${messages.length}`);
-    console.log(`[OpenAI] Full params:`, JSON.stringify(params, null, 2));
-
-    try {
-        const response = await openai.chat.completions.create(params);
-        
-        // Normalize response format to match what the routes expect
-        if (stream) {
-            // For streaming, return an async iterable that yields normalized events
-            return normalizeStreamResponse(response);
-        } else {
-            // For non-streaming, wrap the response to match expected format
-            return normalizeChatResponse(response);
-        }
-    } catch (error) {
-        console.error('[OpenAI] Error creating chat completion:', error.message);
-        console.error('[OpenAI] Error type:', error.type);
-        console.error('[OpenAI] Error code:', error.code);
-        throw error;
-    }
+    return fallbacks;
 }
 
-/**
- * Normalize Chat Completions API response to match the expected format
- * @param {Object} response - OpenAI chat completion response
- * @returns {Object} Normalized response
- */
+async function resolveImageModel(requestedModel = null) {
+    const availableModels = await listImageModels();
+    const requested = normalizeModelId(requestedModel);
+    const configured = normalizeModelId(config.openai.imageModel);
+
+    if (requested) {
+        const exactMatch = availableModels.find((model) => model.id === requested);
+        if (exactMatch) {
+            return { modelId: exactMatch.id, availableModels };
+        }
+
+        if (!LEGACY_IMAGE_MODELS.includes(requested)) {
+            return { modelId: requested, availableModels };
+        }
+    }
+
+    if (configured) {
+        const configuredMatch = availableModels.find((model) => model.id === configured);
+        if (configuredMatch) {
+            return { modelId: configuredMatch.id, availableModels };
+        }
+    }
+
+    if (availableModels.length > 0) {
+        if (requested && requested !== availableModels[0].id) {
+            console.warn(`[OpenAI] Falling back from unavailable image model "${requested}" to "${availableModels[0].id}"`);
+        }
+        return { modelId: availableModels[0].id, availableModels };
+    }
+
+    return { modelId: requested || configured || LEGACY_IMAGE_MODELS[0], availableModels };
+}
+
 function normalizeChatResponse(response) {
     return {
         id: response.id,
@@ -155,36 +219,28 @@ function normalizeChatResponse(response) {
     };
 }
 
-/**
- * Normalize streaming Chat Completions response to yield expected event format
- * @param {AsyncIterable} stream - OpenAI stream
- * @returns {AsyncGenerator} Normalized events
- */
 async function* normalizeStreamResponse(stream) {
     let responseId = null;
     let model = null;
-    
+
     for await (const chunk of stream) {
-        // Capture metadata from first chunk
         if (!responseId && chunk.id) {
             responseId = chunk.id;
         }
         if (!model && chunk.model) {
             model = chunk.model;
         }
-        
+
         const delta = chunk.choices[0]?.delta?.content || '';
         const finishReason = chunk.choices[0]?.finish_reason;
-        
-        // Yield delta event
+
         if (delta) {
             yield {
                 type: 'response.output_text.delta',
                 delta,
             };
         }
-        
-        // Yield completion event
+
         if (finishReason) {
             yield {
                 type: 'response.completed',
@@ -198,51 +254,117 @@ async function* normalizeStreamResponse(stream) {
     }
 }
 
-/**
- * Generate images using DALL-E or compatible image generation API.
- * 
- * @param {Object} options
- * @param {string} options.prompt - The image description
- * @param {string} [options.model] - Model to use (dall-e-3, dall-e-2)
- * @param {string} [options.size] - Image size (1024x1024, 1024x1792, 1792x1024)
- * @param {string} [options.quality] - Image quality (standard, hd)
- * @param {string} [options.style] - Image style (vivid, natural)
- * @param {number} [options.n] - Number of images (1-10)
- * @returns {Promise<Object>} Image generation response
- */
+async function createResponse({
+    input,
+    previousResponseId = null,
+    contextMessages = [],
+    instructions = null,
+    stream = false,
+    model = null,
+}) {
+    const openai = getClient();
+    const messages = [];
+
+    if (instructions) {
+        messages.push({
+            role: 'system',
+            content: instructions,
+        });
+    }
+
+    if (contextMessages.length > 0) {
+        messages.push({
+            role: 'system',
+            content: `[Relevant context from memory]\n${contextMessages.join('\n---\n')}`,
+        });
+    }
+
+    if (typeof input === 'string') {
+        messages.push({
+            role: 'user',
+            content: input,
+        });
+    } else if (Array.isArray(input)) {
+        messages.push(...input);
+    } else {
+        messages.push(input);
+    }
+
+    const params = {
+        model: model || config.openai.model,
+        messages,
+        stream,
+    };
+
+    console.log(`[OpenAI] Creating chat completion: model=${params.model}, stream=${stream}, messages=${messages.length}`);
+    console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
+
+    try {
+        const response = await openai.chat.completions.create(params);
+        return stream ? normalizeStreamResponse(response) : normalizeChatResponse(response);
+    } catch (error) {
+        console.error('[OpenAI] Error creating chat completion:', error.message);
+        console.error('[OpenAI] Error type:', error.type);
+        console.error('[OpenAI] Error code:', error.code);
+        throw error;
+    }
+}
+
 async function generateImage({
     prompt,
-    model = 'dall-e-3',
+    model = null,
     size = '1024x1024',
     quality = 'standard',
     style = 'vivid',
     n = 1,
 }) {
     const openai = getClient();
-    
+    const { modelId, availableModels } = await resolveImageModel(model);
+    const selectedModel = availableModels.find((entry) => entry.id === modelId) || getImageModelMetadata(modelId);
+
+    const supportedSizes = Array.isArray(selectedModel.sizes) ? selectedModel.sizes : [];
+    const supportedQualities = Array.isArray(selectedModel.qualities) ? selectedModel.qualities : [];
+    const supportedStyles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
+
     const params = {
-        model,
+        model: modelId,
         prompt,
-        n,
-        size,
+        n: Math.min(n || 1, selectedModel.maxImages || 10),
+        size: supportedSizes.includes(size) ? size : (supportedSizes[0] || size || '1024x1024'),
     };
 
-    // dall-e-3 specific parameters
-    if (model === 'dall-e-3') {
+    if (quality && supportedQualities.includes(quality)) {
         params.quality = quality;
+    }
+
+    if (style && supportedStyles.includes(style)) {
         params.style = style;
     }
 
+    console.log(`[OpenAI] Generating image with model=${params.model}, size=${params.size}, n=${params.n}`);
+
     const response = await openai.images.generate(params);
-    
+
     return {
         created: response.created,
-        data: response.data.map(img => ({
-            url: img.url,
-            b64_json: img.b64_json,
-            revised_prompt: img.revised_prompt,
+        model: params.model,
+        size: params.size,
+        quality: params.quality || null,
+        style: params.style || null,
+        data: (response.data || []).map((image) => ({
+            url: toImageUrl(image),
+            b64_json: image.b64_json,
+            revised_prompt: image.revised_prompt,
         })),
     };
 }
 
-module.exports = { getClient, listModels, createResponse, generateImage };
+module.exports = {
+    getClient,
+    listModels,
+    listImageModels,
+    createResponse,
+    generateImage,
+};
+
+

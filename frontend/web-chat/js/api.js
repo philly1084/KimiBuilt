@@ -548,14 +548,35 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     async getImageModels() {
-        // Image models are typically static, return defaults
-        return {
-            object: 'list',
-            data: [
-                { id: 'dall-e-3', object: 'model', created: Date.now(), owned_by: 'openai' },
-                { id: 'dall-e-2', object: 'model', created: Date.now(), owned_by: 'openai' }
-            ]
-        };
+        const baseUrl = API_BASE_URL.replace('/v1', '');
+
+        try {
+            const response = await fetch(`${baseUrl}/api/images/models`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            return {
+                object: 'list',
+                data: (data.models || []).map((model) => ({
+                    id: model.id,
+                    object: 'model',
+                    created: Date.now(),
+                    owned_by: model.owned_by || 'openai',
+                    metadata: model,
+                })),
+            };
+        } catch (error) {
+            console.warn('[API] Failed to fetch image models:', error.message);
+            return {
+                object: 'list',
+                data: [
+                    { id: 'gpt-image-1', object: 'model', created: Date.now(), owned_by: 'openai', metadata: { id: 'gpt-image-1', name: 'gpt-image-1', sizes: ['1024x1024'], qualities: ['auto', 'high'], styles: [] } },
+                    { id: 'dall-e-3', object: 'model', created: Date.now(), owned_by: 'openai', metadata: { id: 'dall-e-3', name: 'DALL-E 3', sizes: ['1024x1024', '1024x1792', '1792x1024'], qualities: ['standard', 'hd'], styles: ['vivid', 'natural'] } },
+                ],
+            };
+        }
     }
 
     // ============================================
@@ -723,24 +744,8 @@ class OpenAIAPIClient extends EventTarget {
      * @returns {Promise<Object>} - { models: [...] }
      */
     async getImageModelsFromAPI() {
-        // Extract base URL without /v1
-        const baseUrl = API_BASE_URL.replace('/v1', '');
-        
-        try {
-            const response = await fetch(`${baseUrl}/api/images/models`);
-            if (response.ok) {
-                const data = await response.json();
-                return data.models || [];
-            }
-        } catch (e) {
-            console.warn('[API] Failed to fetch image models from API:', e.message);
-        }
-        
-        // Fallback to default models
-        return [
-            { id: 'dall-e-3', name: 'DALL-E 3', description: 'High quality images with detailed prompts' },
-            { id: 'dall-e-2', name: 'DALL-E 2', description: 'Faster, lower cost image generation' }
-        ];
+        const response = await this.getImageModels();
+        return response.data.map((model) => model.metadata || { id: model.id, name: model.id });
     }
 
     // ============================================
@@ -793,6 +798,8 @@ class OpenAIAPIClient extends EventTarget {
 // Create global API client instance
 const apiClient = new OpenAIAPIClient();
 window.apiClient = apiClient;
+
+
 
 
 

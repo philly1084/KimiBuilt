@@ -709,18 +709,31 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     updateModelInfo() {
         const model = api.currentModel || 'gpt-4o';
-        document.getElementById('currentModelName').textContent = model;
-        document.getElementById('modelProvider').textContent = 'OpenAI';
         
-        // Estimate context window
-        const contextSizes = {
-            'gpt-4o': '128K',
-            'gpt-4': '8K',
-            'gpt-4-turbo': '128K',
-            'gpt-3.5-turbo': '16K'
-        };
-        document.getElementById('modelContext').textContent = 
-            (contextSizes[model] || '8K') + ' ctx';
+        // Update the select dropdown to match current model
+        if (this.modelSelect) {
+            // Check if the model exists in the dropdown
+            const options = Array.from(this.modelSelect.options);
+            const modelExists = options.some(opt => opt.value === model);
+            
+            if (modelExists) {
+                this.modelSelect.value = model;
+            } else if (options.length > 0 && options[0].value !== 'Loading models...') {
+                // If model not in list, add it as a temporary option
+                const tempOption = document.createElement('option');
+                tempOption.value = model;
+                tempOption.textContent = model;
+                this.modelSelect.insertBefore(tempOption, this.modelSelect.firstChild);
+                this.modelSelect.value = model;
+            }
+        }
+        
+        // Update header model display
+        const headerModel = document.getElementById('headerModelDisplay');
+        if (headerModel) {
+            headerModel.textContent = model;
+            headerModel.title = `Current model: ${model}`;
+        }
     }
     
     // ==================== File Handling ====================
