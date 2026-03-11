@@ -154,10 +154,24 @@ const API = (function() {
     
     // Get image models
     async function getImageModels() {
-        return [
-            { id: 'dall-e-3', name: 'DALL-E 3', sizes: ['1024x1024', '1024x1792', '1792x1024'], qualities: ['standard', 'hd'] },
-            { id: 'dall-e-2', name: 'DALL-E 2', sizes: ['256x256', '512x512', '1024x1024'], qualities: ['standard'] }
-        ];
+        try {
+            const baseUrl = BASE_URL.replace('/v1', '');
+            const response = await fetch(`${baseUrl}/api/images/models`);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            }
+
+            const data = await response.json();
+            return data.models || [];
+        } catch (error) {
+            console.warn('Failed to fetch image models:', error.message);
+            return [
+                { id: '', name: 'Gateway Default', sizes: ['1024x1024'], qualities: [], styles: [] },
+                { id: 'dall-e-3', name: 'DALL-E 3', sizes: ['1024x1024', '1024x1792', '1792x1024'], qualities: ['standard', 'hd'] },
+                { id: 'dall-e-2', name: 'DALL-E 2', sizes: ['256x256', '512x512', '1024x1024'], qualities: ['standard'] }
+            ];
+        }
     }
     
     // Streaming chat - uses fetch fallback
@@ -427,6 +441,7 @@ const API = (function() {
         BASE_URL,
     };
 })();
+
 
 
 

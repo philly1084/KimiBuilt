@@ -349,7 +349,7 @@ router.post('/images/generations', async (req, res, next) => {
     try {
         const {
             prompt,
-            model = 'dall-e-3',
+            model = null,
             n = 1,
             size = '1024x1024',
             quality = 'standard',
@@ -399,6 +399,7 @@ router.post('/images/generations', async (req, res, next) => {
 });
 
 module.exports = router;
+
 
 
 

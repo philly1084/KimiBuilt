@@ -4,6 +4,8 @@ const { config } = require('./config');
 let client = null;
 
 const IMAGE_MODEL_KEYWORDS = [
+    'gemini',
+    'image-generation',
     'gpt-image',
     'dall-e',
     'flux',
@@ -61,6 +63,19 @@ function uniqueById(models = []) {
 function getImageModelMetadata(modelId, ownedBy = 'openai') {
     const normalized = normalizeModelId(modelId);
     const lower = normalized.toLowerCase();
+
+    if (lower.includes('gemini')) {
+        return {
+            id: normalized,
+            name: normalized,
+            description: 'Gemini image generation via OpenAI-compatible gateway',
+            owned_by: ownedBy,
+            sizes: ['1024x1024'],
+            qualities: [],
+            styles: [],
+            maxImages: 1,
+        };
+    }
 
     if (lower.includes('dall-e-3')) {
         return {
@@ -168,6 +183,7 @@ async function resolveImageModel(requestedModel = null) {
     const availableModels = await listImageModels();
     const requested = normalizeModelId(requestedModel);
     const configured = normalizeModelId(config.openai.imageModel);
+    const geminiMatch = availableModels.find((model) => model.id.toLowerCase().includes('gemini'));
 
     if (requested) {
         const exactMatch = availableModels.find((model) => model.id === requested);
@@ -185,6 +201,13 @@ async function resolveImageModel(requestedModel = null) {
         if (configuredMatch) {
             return { modelId: configuredMatch.id, availableModels };
         }
+    }
+
+    if (geminiMatch) {
+        if (requested && requested !== geminiMatch.id) {
+            console.warn(`[OpenAI] Falling back from unavailable image model "${requested}" to Gemini image model "${geminiMatch.id}"`);
+        }
+        return { modelId: geminiMatch.id, availableModels };
     }
 
     if (availableModels.length > 0) {
@@ -366,5 +389,6 @@ module.exports = {
     createResponse,
     generateImage,
 };
+
 
 

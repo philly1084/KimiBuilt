@@ -137,7 +137,7 @@ const Blocks = (function() {
     
     // Default model configuration
     const DEFAULT_MODEL = 'gpt-4o';
-    const DEFAULT_IMAGE_MODEL = 'dall-e-3';
+    const DEFAULT_IMAGE_MODEL = '';
     
     /**
      * Create a new block
@@ -1357,10 +1357,29 @@ const Blocks = (function() {
             const modelSelect = document.createElement('select');
             modelSelect.className = 'ai-image-select';
             modelSelect.innerHTML = `
-                <option value="dall-e-3">DALL-E 3</option>
-                <option value="dall-e-2">DALL-E 2</option>
+                <option value="">Gateway Default (Recommended)</option>
             `;
             modelSelect.value = content.model || DEFAULT_IMAGE_MODEL;
+
+            if (window.API && typeof window.API.getImageModels === 'function') {
+                window.API.getImageModels()
+                    .then((models) => {
+                        const imageModels = Array.isArray(models) ? models : [];
+                        imageModels.forEach((model) => {
+                            const option = document.createElement('option');
+                            option.value = model.id || '';
+                            option.textContent = model.name || model.id || 'Gateway Default';
+                            if (!option.value && modelSelect.querySelector('option[value=""]')) {
+                                return;
+                            }
+                            modelSelect.appendChild(option);
+                        });
+                        modelSelect.value = content.model || DEFAULT_IMAGE_MODEL || '';
+                    })
+                    .catch((error) => {
+                        console.warn('Failed to load image models for AI image block:', error.message);
+                    });
+            }
             
             // Size selector
             const sizeSelect = document.createElement('select');
@@ -2095,3 +2114,4 @@ const Blocks = (function() {
         }
     };
 })();
+

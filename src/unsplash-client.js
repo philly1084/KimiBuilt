@@ -178,6 +178,15 @@ function normalizeImage(image) {
             profileImage: image.user.profile_image?.small,
             link: image.user.links?.html,
         } : null,
+        // Keep raw-style compatibility for clients that still expect Unsplash's user shape.
+        user: image.user ? {
+            id: image.user.id,
+            name: image.user.name,
+            username: image.user.username,
+            portfolio_url: image.user.portfolio_url,
+            profile_image: image.user.profile_image,
+            links: image.user.links,
+        } : null,
         width: image.width,
         height: image.height,
         color: image.color,
@@ -192,3 +201,4 @@ module.exports = {
     searchImages,
     getRandomImage,
 };
+
