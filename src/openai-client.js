@@ -137,24 +137,41 @@ function toImageUrl(image = {}) {
 }
 
 async function postImageGeneration(params) {
-    const baseURL = String(config.openai.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
-    const response = await fetch(`${baseURL}/images/generations`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${config.openai.apiKey}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(params),
-    });
+    const configuredBaseURL = String(config.openai.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    const candidateBaseURLs = [configuredBaseURL];
 
-    if (!response.ok) {
+    if (/\/v1$/i.test(configuredBaseURL)) {
+        candidateBaseURLs.push(configuredBaseURL.replace(/\/v1$/i, ''));
+    }
+
+    let lastError = null;
+
+    for (const baseURL of candidateBaseURLs) {
+        const response = await fetch(`${baseURL}/images/generations`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${config.openai.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(params),
+        });
+
+        if (response.ok) {
+            return response.json();
+        }
+
         const errorBody = await response.text();
         const error = new Error(errorBody || `Image generation failed with HTTP ${response.status}`);
         error.status = response.status;
-        throw error;
+        error.baseURL = baseURL;
+        lastError = error;
+
+        if (response.status !== 404) {
+            throw error;
+        }
     }
 
-    return response.json();
+    throw lastError || new Error('Image generation failed.');
 }
 
 async function listModels() {
