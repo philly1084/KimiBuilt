@@ -714,12 +714,14 @@ class UIHelpers {
             const modelSelect = document.getElementById('image-model-select');
             if (modelSelect && this.availableImageModels.length > 0) {
                 modelSelect.innerHTML = this.availableImageModels
-                    .map((model) => `<option value="${model.id}">${model.name || model.id}</option>`)
+                    .map((model) => `<option value="${model.id}">${model.name || model.id || 'Gateway Default'}</option>` )
                     .join('');
 
                 if (!this.availableImageModels.find((model) => model.id === modelSelect.value)) {
                     modelSelect.value = this.availableImageModels[0].id;
                 }
+
+                this.updateImageOptionsForModel(modelSelect.value);
             }
         } catch (error) {
             console.error('Failed to load image models:', error);
@@ -737,7 +739,7 @@ class UIHelpers {
         const sizeSelect = document.getElementById('image-size-select');
         
         if (promptInput) promptInput.value = '';
-        if (modelSelect) modelSelect.value = this.availableImageModels[0]?.id || 'gpt-image-1';
+        if (modelSelect) modelSelect.value = this.availableImageModels[0]?.id || '';
         if (sizeSelect) sizeSelect.value = '1024x1024';
         
         this.imageGenerationState.quality = 'standard';
@@ -834,26 +836,24 @@ class UIHelpers {
         const styleContainer = document.getElementById('image-style-container');
         
         if (!sizeSelect) return;
-        
-        if (model === 'dall-e-3') {
-            // DALL-E 3 supports all sizes
-            sizeSelect.innerHTML = `
-                <option value="1024x1024">1024x1024 (Square)</option>
-                <option value="1792x1024">1792x1024 (Landscape)</option>
-                <option value="1024x1792">1024x1792 (Portrait)</option>
-            `;
-            if (qualityContainer) qualityContainer.style.display = 'block';
-            if (styleContainer) styleContainer.style.display = 'block';
-        } else {
-            // DALL-E 2 supports different sizes
-            sizeSelect.innerHTML = `
-                <option value="256x256">256x256</option>
-                <option value="512x512">512x512</option>
-                <option value="1024x1024">1024x1024</option>
-            `;
-            if (qualityContainer) qualityContainer.style.display = 'none';
-            if (styleContainer) styleContainer.style.display = 'none';
+
+        const selectedModel = this.availableImageModels.find((entry) => entry.id === model) || {};
+        const sizes = Array.isArray(selectedModel.sizes) && selectedModel.sizes.length > 0
+            ? selectedModel.sizes
+            : ['1024x1024'];
+        const supportsQuality = Array.isArray(selectedModel.qualities) && selectedModel.qualities.length > 0;
+        const supportsStyle = Array.isArray(selectedModel.styles) && selectedModel.styles.length > 0;
+
+        sizeSelect.innerHTML = sizes
+            .map((size) => `<option value="${size}">${size}</option>`)
+            .join('');
+
+        if (!sizes.includes(sizeSelect.value)) {
+            sizeSelect.value = sizes[0];
         }
+
+        if (qualityContainer) qualityContainer.style.display = supportsQuality ? 'block' : 'none';
+        if (styleContainer) styleContainer.style.display = supportsStyle ? 'block' : 'none';
     }
 
     getImageGenerationOptions() {
@@ -861,7 +861,10 @@ class UIHelpers {
         const promptInput = document.getElementById('image-prompt-input');
         const sizeSelect = document.getElementById('image-size-select');
         
-        const model = modelSelect?.value || this.availableImageModels[0]?.id || 'gpt-image-1';
+        const selectedModel = this.availableImageModels.find((entry) => entry.id === modelSelect?.value)
+            || this.availableImageModels[0]
+            || {};
+        const model = modelSelect?.value || selectedModel.id || '';
         const options = {
             prompt: promptInput?.value?.trim() || '',
             model: model,
@@ -869,8 +872,10 @@ class UIHelpers {
             source: this.imageGenerationState.source
         };
         
-        if (model === 'dall-e-3') {
+        if (Array.isArray(selectedModel.qualities) && selectedModel.qualities.includes(this.imageGenerationState.quality)) {
             options.quality = this.imageGenerationState.quality;
+        }
+        if (Array.isArray(selectedModel.styles) && selectedModel.styles.includes(this.imageGenerationState.style)) {
             options.style = this.imageGenerationState.style;
         }
         
@@ -2538,6 +2543,15 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
+
+
+
+
+
+
+
+
+
 
 
 

@@ -327,7 +327,7 @@ class WebCLIAPI {
         const baseUrl = API_BASE_URL.replace('/v1', '');
         
         const {
-            model = 'dall-e-3',
+            model = null,
             size = '1024x1024',
             quality = 'standard',
             style = 'vivid',
@@ -436,3 +436,4 @@ class WebCLIAPI {
 }
 
 const api = new WebCLIAPI();
+

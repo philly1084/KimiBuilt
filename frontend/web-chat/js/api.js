@@ -599,7 +599,7 @@ class OpenAIAPIClient extends EventTarget {
     async generateImage(options = {}) {
         const {
             prompt,
-            model = 'dall-e-3',
+            model = null,
             size = '1024x1024',
             quality = 'standard',
             style = 'vivid',
@@ -745,7 +745,7 @@ class OpenAIAPIClient extends EventTarget {
      */
     async getImageModelsFromAPI() {
         const response = await this.getImageModels();
-        return response.data.map((model) => model.metadata || { id: model.id, name: model.id });
+        return response.data.map((model) => model.metadata || { id: model.id, name: model.id || 'Gateway Default' });
     }
 
     // ============================================
@@ -798,6 +798,7 @@ class OpenAIAPIClient extends EventTarget {
 // Create global API client instance
 const apiClient = new OpenAIAPIClient();
 window.apiClient = apiClient;
+
 
 
 

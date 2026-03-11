@@ -176,49 +176,39 @@ class OpenAICanvasAPI {
         const { prompt, model, size, quality, style, n } = options;
         
         const params = {
-            model: model || 'dall-e-3',
             prompt,
             n: n || 1,
             size: size || '1024x1024',
         };
 
+        if (model) params.model = model;
         if (quality) params.quality = quality;
         if (style) params.style = style;
-        if (this.sessionId) params.session_id = this.sessionId;
+        if (this.sessionId) params.sessionId = this.sessionId;
 
-        // Use fetch if SDK not available
-        if (!this.client) {
-            try {
-                const response = await fetch(`${this.baseURL}/images/generations`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(params),
-                });
-                
-                if (!response.ok) {
-                    throw await this.buildRequestError(response);
-                }
-                
-                const data = await response.json();
-                
-                if (data.session_id) {
-                    this.sessionId = data.session_id;
-                }
-                
-                return data;
-            } catch (error) {
-                console.error('Image generation error:', error);
-                throw error;
+        try {
+            const baseUrl = this.baseURL.replace(/\/v1$/, '');
+            const response = await fetch(`${baseUrl}/api/images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params),
+            });
+
+            if (!response.ok) {
+                throw await this.buildRequestError(response);
             }
-        }
 
-        const response = await this.client.images.generate(params);
-        
-        if (response.session_id) {
-            this.sessionId = response.session_id;
-        }
+            const data = await response.json();
 
-        return response;
+            if (data.sessionId) {
+                this.sessionId = data.sessionId;
+            }
+
+            return data;
+        } catch (error) {
+            console.error('Image generation error:', error);
+            throw error;
+        }
     }
 
     // Get models
@@ -254,13 +244,21 @@ class OpenAICanvasAPI {
         }
     }
 
-    // Get image models (use hardcoded list or fetch from backend)
+    // Get image models from backend
     async getImageModels() {
-        // For now return hardcoded, could add /v1/images/models endpoint
-        return [
-            { id: 'dall-e-3', name: 'DALL-E 3', description: 'High quality images' },
-            { id: 'dall-e-2', name: 'DALL-E 2', description: 'Standard quality' }
-        ];
+        try {
+            const baseUrl = this.baseURL.replace(/\/v1$/, '');
+            const response = await fetch(`${baseUrl}/api/images/models`);
+            if (!response.ok) {
+                throw await this.buildRequestError(response);
+            }
+
+            const data = await response.json();
+            return data.models || [];
+        } catch (error) {
+            console.warn('Failed to fetch image models:', error.message);
+            return [{ id: '', name: 'Gateway Default', description: 'Use the backend default image model' }];
+        }
     }
 
     // Health check (custom)
@@ -341,3 +339,6 @@ const autoBaseUrl = localHostnames.has(currentHost)
     : `${currentOrigin}/v1`;
 
 window.apiManager = new OpenAICanvasAPI(autoBaseUrl);
+
+
+

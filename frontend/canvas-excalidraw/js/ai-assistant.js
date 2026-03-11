@@ -22,10 +22,10 @@ class AIAssistant {
         
         // Image generation settings
         this.imageSettings = {
-            model: 'dall-e-3',
+            model: '',
             size: '1024x1024',
-            quality: 'standard',
-            style: 'vivid'
+            quality: null,
+            style: null
         };
         
         // Image click position for placing generated images
@@ -855,3 +855,7 @@ class AIAssistant {
 
 // Create global instance
 window.aiAssistant = new AIAssistant();
+
+
+
+

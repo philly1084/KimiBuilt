@@ -138,6 +138,27 @@ function toImageUrl(image = {}) {
     return null;
 }
 
+async function postImageGeneration(params) {
+    const baseURL = String(config.openai.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    const response = await fetch(`${baseURL}/images/generations`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${config.openai.apiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        const error = new Error(errorBody || `Image generation failed with HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+    }
+
+    return response.json();
+}
+
 async function listModels() {
     const openai = getClient();
     console.log(`[OpenAI] Fetching models from: ${config.openai.baseURL}`);
@@ -341,7 +362,6 @@ async function generateImage({
     style = 'vivid',
     n = 1,
 }) {
-    const openai = getClient();
     const { modelId, availableModels } = await resolveImageModel(model);
     const selectedModel = availableModels.find((entry) => entry.id === modelId) || getImageModelMetadata(modelId);
 
@@ -350,11 +370,14 @@ async function generateImage({
     const supportedStyles = Array.isArray(selectedModel.styles) ? selectedModel.styles : [];
 
     const params = {
-        model: modelId,
         prompt,
         n: Math.min(n || 1, selectedModel.maxImages || 10),
         size: supportedSizes.includes(size) ? size : (supportedSizes[0] || size || '1024x1024'),
     };
+
+    if (modelId) {
+        params.model = modelId;
+    }
 
     if (quality && supportedQualities.includes(quality)) {
         params.quality = quality;
@@ -366,7 +389,7 @@ async function generateImage({
 
     console.log(`[OpenAI] Generating image with model=${params.model}, size=${params.size}, n=${params.n}`);
 
-    const response = await openai.images.generate(params);
+    const response = await postImageGeneration(params);
 
     return {
         created: response.created,
@@ -389,6 +412,9 @@ module.exports = {
     createResponse,
     generateImage,
 };
+
+
+
 
 
 
