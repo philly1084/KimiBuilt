@@ -610,7 +610,7 @@ const Blocks = (function() {
     }
     
     /**
-     * Render a Mermaid diagram block
+     * Render a Mermaid diagram block with AI integration
      */
     function renderMermaidBlock(block, isEditable = true) {
         const wrapper = document.createElement('div');
@@ -619,38 +619,109 @@ const Blocks = (function() {
         const content = typeof block.content === 'object' ? block.content : { text: block.content || '', diagramType: 'flowchart' };
         
         if (isEditable && (!content.text || content.text.trim() === '')) {
-            // Show input form for new diagram
+            // ===== EMPTY STATE: Show creation options =====
+            const container = document.createElement('div');
+            container.className = 'mermaid-empty-state';
+            container.style.cssText = 'border: 2px dashed var(--border-color); border-radius: var(--radius-lg); padding: 24px; text-align: center; background: var(--bg-secondary);';
+            
+            // Header
+            const header = document.createElement('div');
+            header.innerHTML = '📊 <strong>Create Diagram</strong>';
+            header.style.cssText = 'font-size: 16px; margin-bottom: 16px; color: var(--text-primary);';
+            container.appendChild(header);
+            
+            // AI Generation option
+            const aiBtn = document.createElement('button');
+            aiBtn.className = 'mermaid-ai-btn';
+            aiBtn.innerHTML = '✨ Generate with AI';
+            aiBtn.style.cssText = 'width: 100%; padding: 12px; margin-bottom: 12px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; border: none; border-radius: var(--radius-md); font-size: 14px; cursor: pointer; font-weight: 500;';
+            aiBtn.addEventListener('click', () => {
+                // Open AI assistant and add a reference to this diagram block
+                askAIFromDiagram(block, typeSelect.value);
+            });
+            container.appendChild(aiBtn);
+            
+            // Divider
+            const divider = document.createElement('div');
+            divider.style.cssText = 'display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--text-muted); font-size: 12px;';
+            divider.innerHTML = '<span style="flex: 1; height: 1px; background: var(--border-color);"></span>or<span style="flex: 1; height: 1px; background: var(--border-color);"></span>';
+            container.appendChild(divider);
+            
+            // Manual creation
             const typeSelect = document.createElement('select');
             typeSelect.className = 'mermaid-type-select';
             typeSelect.innerHTML = `
-                <option value="flowchart">Flowchart</option>
-                <option value="sequence">Sequence Diagram</option>
-                <option value="class">Class Diagram</option>
-                <option value="state">State Diagram</option>
-                <option value="er">Entity Relationship</option>
-                <option value="gantt">Gantt Chart</option>
-                <option value="pie">Pie Chart</option>
-                <option value="mindmap">Mindmap</option>
+                <option value="flowchart">📈 Flowchart</option>
+                <option value="sequence">📋 Sequence Diagram</option>
+                <option value="class">🏗️ Class Diagram</option>
+                <option value="state">🔀 State Diagram</option>
+                <option value="er">🗂️ Entity Relationship</option>
+                <option value="gantt">📅 Gantt Chart</option>
+                <option value="pie">🥧 Pie Chart</option>
+                <option value="mindmap">🧠 Mindmap</option>
+                <option value="gitgraph">🌿 Git Graph</option>
             `;
             typeSelect.style.cssText = 'width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary);';
+            container.appendChild(typeSelect);
+            
+            const manualBtn = document.createElement('button');
+            manualBtn.className = 'ai-image-btn';
+            manualBtn.textContent = 'Write Code Manually';
+            manualBtn.style.cssText = 'width: 100%;';
+            manualBtn.addEventListener('click', () => {
+                block.content = { text: '', diagramType: typeSelect.value, _showEditor: true };
+                wrapper.innerHTML = '';
+                wrapper.appendChild(renderMermaidBlock(block, isEditable));
+            });
+            container.appendChild(manualBtn);
+            
+            wrapper.appendChild(container);
+            
+        } else if (isEditable && content._showEditor) {
+            // ===== EDITOR STATE: Manual code editing =====
+            delete content._showEditor;
+            
+            const header = document.createElement('div');
+            header.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px;';
+            
+            const typeSelect = document.createElement('select');
+            typeSelect.innerHTML = `
+                <option value="flowchart" ${content.diagramType === 'flowchart' ? 'selected' : ''}>Flowchart</option>
+                <option value="sequence" ${content.diagramType === 'sequence' ? 'selected' : ''}>Sequence</option>
+                <option value="class" ${content.diagramType === 'class' ? 'selected' : ''}>Class</option>
+                <option value="state" ${content.diagramType === 'state' ? 'selected' : ''}>State</option>
+                <option value="er" ${content.diagramType === 'er' ? 'selected' : ''}>ER</option>
+                <option value="gantt" ${content.diagramType === 'gantt' ? 'selected' : ''}>Gantt</option>
+                <option value="pie" ${content.diagramType === 'pie' ? 'selected' : ''}>Pie</option>
+                <option value="mindmap" ${content.diagramType === 'mindmap' ? 'selected' : ''}>Mindmap</option>
+                <option value="gitgraph" ${content.diagramType === 'gitgraph' ? 'selected' : ''}>Git Graph</option>
+            `;
+            typeSelect.style.cssText = 'padding: 6px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary);';
+            header.appendChild(typeSelect);
+            
+            const aiHelpBtn = document.createElement('button');
+            aiHelpBtn.className = 'ai-image-btn';
+            aiHelpBtn.innerHTML = '✨ Ask AI';
+            aiHelpBtn.addEventListener('click', () => {
+                askAIFromDiagram(block, typeSelect.value, input.value);
+            });
+            header.appendChild(aiHelpBtn);
+            
+            wrapper.appendChild(header);
             
             const input = document.createElement('textarea');
             input.className = 'mermaid-input';
-            input.placeholder = 'Type Mermaid diagram code...\n\nExample:\ngraph TD;\n    A[Start] --> B{Decision};\n    B -->|Yes| C[Action 1];\n    B -->|No| D[Action 2];';
+            input.placeholder = `Describe your ${content.diagramType || 'diagram'} here, or type Mermaid code...\n\nTip: Use ✨ Ask AI to generate code from a description!`;
             input.value = content.text || '';
-            input.style.cssText = 'width: 100%; min-height: 120px; padding: 12px; font-family: monospace; font-size: 13px; border: 1px solid var(--border-color); border-radius: var(--radius-md); resize: vertical; background: var(--bg-secondary);';
+            input.style.cssText = 'width: 100%; min-height: 150px; padding: 12px; font-family: monospace; font-size: 13px; border: 1px solid var(--border-color); border-radius: var(--radius-md); resize: vertical; background: var(--bg-secondary);';
+            wrapper.appendChild(input);
             
             const btnRow = document.createElement('div');
             btnRow.style.cssText = 'display: flex; gap: 8px; margin-top: 8px;';
             
             const renderBtn = document.createElement('button');
             renderBtn.className = 'ai-image-btn primary';
-            renderBtn.textContent = 'Render Diagram';
-            
-            const templatesBtn = document.createElement('button');
-            templatesBtn.className = 'ai-image-btn';
-            templatesBtn.textContent = 'Templates';
-            
+            renderBtn.textContent = '✓ Render Diagram';
             renderBtn.addEventListener('click', () => {
                 const diagramText = input.value.trim();
                 if (diagramText) {
@@ -661,46 +732,86 @@ const Blocks = (function() {
                 }
             });
             
-            templatesBtn.addEventListener('click', () => {
-                const templates = {
-                    flowchart: `graph TD
-    A[Start] --> B{Is it?}
-    B -->|Yes| C[OK]
-    C --> D[Rethink]
-    D --> B
-    B ---->|No| E[End]`,
-                    sequence: `sequenceDiagram
-    participant A as Alice
-    participant B as Bob
-    A->>B: Hello Bob, how are you?
-    B-->>A: Great!`,
-                    class: `classDiagram
-    class Animal {
-        +String name
-        +makeSound()
-    }
-    class Dog {
-        +fetch()
-    }
-    Animal <|-- Dog`,
-                    mindmap: `mindmap
-  root((mindmap))
-    Origins
-      Long history
-    Research
-      On effectiveness`
-                };
-                input.value = templates[typeSelect.value] || templates.flowchart;
+            const templateBtn = document.createElement('button');
+            templateBtn.className = 'ai-image-btn';
+            templateBtn.textContent = '📋 Template';
+            templateBtn.addEventListener('click', () => {
+                input.value = getMermaidTemplate(typeSelect.value);
+            });
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'ai-image-btn';
+            cancelBtn.textContent = '✕ Cancel';
+            cancelBtn.addEventListener('click', () => {
+                if (!content.text) {
+                    // Delete empty block
+                    const blockEl = wrapper.closest('.block');
+                    if (blockEl && window.Editor) {
+                        window.Editor.deleteBlock?.(block.id);
+                    }
+                } else {
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderMermaidBlock(block, isEditable));
+                }
             });
             
             btnRow.appendChild(renderBtn);
-            btnRow.appendChild(templatesBtn);
-            
-            wrapper.appendChild(typeSelect);
-            wrapper.appendChild(input);
+            btnRow.appendChild(templateBtn);
+            btnRow.appendChild(cancelBtn);
             wrapper.appendChild(btnRow);
+            
             setTimeout(() => input.focus(), 0);
+            
         } else {
+            // ===== RENDERED STATE: Show diagram with AI actions =====
+            const toolbar = document.createElement('div');
+            toolbar.className = 'mermaid-toolbar';
+            toolbar.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;';
+            
+            // AI Actions
+            const aiActionsLabel = document.createElement('span');
+            aiActionsLabel.textContent = 'AI:';
+            aiActionsLabel.style.cssText = 'color: var(--text-muted); font-size: 12px; display: flex; align-items: center;';
+            toolbar.appendChild(aiActionsLabel);
+            
+            const actions = [
+                { label: '✨ Improve', prompt: 'Improve this diagram by making it clearer and more professional:' },
+                { label: '🔧 Fix', prompt: 'Fix any syntax errors in this diagram:' },
+                { label: '📝 Explain', prompt: 'Explain what this diagram shows:' },
+                { label: '➕ Expand', prompt: 'Expand this diagram with more detail:' }
+            ];
+            
+            actions.forEach(action => {
+                const btn = document.createElement('button');
+                btn.className = 'mermaid-action-btn';
+                btn.textContent = action.label;
+                btn.style.cssText = 'padding: 4px 10px; font-size: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary);';
+                btn.addEventListener('click', () => {
+                    askAIFromDiagram(block, content.diagramType, content.text, action.prompt);
+                });
+                btn.addEventListener('mouseenter', () => btn.style.background = 'var(--bg-hover)');
+                btn.addEventListener('mouseleave', () => btn.style.background = 'var(--bg-tertiary)');
+                toolbar.appendChild(btn);
+            });
+            
+            const spacer = document.createElement('div');
+            spacer.style.flex = '1';
+            toolbar.appendChild(spacer);
+            
+            // Edit button
+            const editBtn = document.createElement('button');
+            editBtn.className = 'ai-image-btn';
+            editBtn.textContent = '✎ Edit';
+            editBtn.style.cssText = 'padding: 4px 10px; font-size: 12px;';
+            editBtn.addEventListener('click', () => {
+                block.content = { ...content, _showEditor: true };
+                wrapper.innerHTML = '';
+                wrapper.appendChild(renderMermaidBlock(block, isEditable));
+            });
+            toolbar.appendChild(editBtn);
+            
+            wrapper.appendChild(toolbar);
+            
             // Render the diagram
             const diagramContainer = document.createElement('div');
             diagramContainer.className = 'mermaid-diagram-container';
@@ -722,28 +833,152 @@ const Blocks = (function() {
                     try {
                         mermaid.run({ querySelector: '#' + diagramId });
                     } catch (err) {
-                        diagramContainer.innerHTML = `<div style="color: red; padding: 16px;">Error rendering diagram: ${err.message}</div><pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(content.text || '')}</pre>`;
+                        diagramContainer.innerHTML = `
+                            <div style="color: red; padding: 16px;">
+                                ⚠️ Error rendering diagram: ${err.message}
+                                <br><br>
+                                <button class="ai-image-btn" onclick="this.closest('.mermaid-block').querySelector('button:contains(\\'🔧 Fix\\')')?.click()">
+                                    🔧 Ask AI to Fix
+                                </button>
+                            </div>
+                            <pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(content.text || '')}</pre>
+                        `;
                     }
                 }, 100);
             } else {
                 diagramContainer.innerHTML = `<pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(content.text || '')}</pre><div style="color: var(--text-muted); margin-top: 8px; font-size: 12px;">Mermaid library not loaded</div>`;
             }
-            
-            if (isEditable) {
-                const editBtn = document.createElement('button');
-                editBtn.className = 'ai-image-btn';
-                editBtn.textContent = 'Edit';
-                editBtn.style.marginTop = '8px';
-                editBtn.addEventListener('click', () => {
-                    block.content = { ...content, text: '' };
-                    wrapper.innerHTML = '';
-                    wrapper.appendChild(renderMermaidBlock(block, isEditable));
-                });
-                wrapper.appendChild(editBtn);
-            }
         }
         
         return wrapper;
+    }
+    
+    /**
+     * Helper: Open AI assistant with diagram context
+     */
+    function askAIFromDiagram(block, diagramType, currentCode = '', customPrompt = '') {
+        if (typeof AIAssistant === 'undefined') {
+            alert('AI Assistant not loaded. Please try again in a moment.');
+            return;
+        }
+        
+        // Add diagram as reference
+        const ref = {
+            type: 'section',
+            id: block.id || 'diagram-' + Date.now(),
+            title: `${diagramType} diagram`,
+            blockType: 'mermaid',
+            preview: `${diagramType}: ${currentCode.substring(0, 50)}...`
+        };
+        
+        AIAssistant.addReference(ref);
+        
+        // If there's custom prompt, send it directly
+        if (customPrompt) {
+            const fullPrompt = customPrompt + '\n\n```mermaid\n' + (currentCode || `[Create a ${diagramType} diagram]`) + '\n```';
+            AIAssistant.setPrompt(fullPrompt);
+            AIAssistant.send();
+        } else {
+            // Just open the assistant with the diagram as context
+            AIAssistant.setPrompt(`Create a ${diagramType} diagram for: `);
+        }
+    }
+    
+    /**
+     * Helper: Get template for diagram type
+     */
+    function getMermaidTemplate(type) {
+        const templates = {
+            flowchart: `graph TD
+    A[Start] --> B{Is it valid?}
+    B -->|Yes| C[Process Data]
+    B -->|No| D[Show Error]
+    C --> E[Save Result]
+    D --> F[Log Error]
+    E --> G[End]
+    F --> G`,
+            sequence: `sequenceDiagram
+    actor User
+    participant App
+    participant API
+    participant DB
+    
+    User->>App: Submit request
+    App->>API: Validate data
+    API->>DB: Query records
+    DB-->>API: Return results
+    API-->>App: Send response
+    App-->>User: Display result`,
+            class: `classDiagram
+    class User {
+        +String id
+        +String email
+        +login()
+        +logout()
+    }
+    class Order {
+        +String orderId
+        +Date date
+        +calculateTotal()
+    }
+    User "1" --> "*" Order : places`,
+            state: `stateDiagram-v2
+    [*] --> Idle
+    Idle --> Processing : start
+    Processing --> Success : complete
+    Processing --> Error : fail
+    Success --> [*]
+    Error --> Idle : retry`,
+            er: `erDiagram
+    USER ||--o{ ORDER : places
+    USER {
+        string id PK
+        string email
+        string name
+    }
+    ORDER {
+        int id PK
+        string user_id FK
+        date created_at
+        float total
+    }`,
+            gantt: `gantt
+    title Project Timeline
+    dateFormat YYYY-MM-DD
+    section Planning
+    Requirements   :a1, 2024-01-01, 7d
+    Design         :a2, after a1, 5d
+    section Development
+    Coding         :a3, after a2, 14d
+    Testing        :a4, after a3, 7d`,
+            pie: `pie title Distribution
+    "Category A" : 40
+    "Category B" : 30
+    "Category C" : 20
+    "Category D" : 10`,
+            mindmap: `mindmap
+  root((Main Topic))
+    Subtopic 1
+      Detail A
+      Detail B
+    Subtopic 2
+      Detail C
+    Subtopic 3`,
+            gitgraph: `gitGraph
+    commit id: "Initial"
+    branch feature-a
+    checkout feature-a
+    commit id: "Add feature A"
+    commit id: "Fix bug"
+    checkout main
+    merge feature-a id: "Merge A"
+    branch feature-b
+    checkout feature-b
+    commit id: "Add feature B"
+    checkout main
+    merge feature-b id: "Merge B"`
+        };
+        return templates[type] || templates.flowchart;
     }
     
     /**

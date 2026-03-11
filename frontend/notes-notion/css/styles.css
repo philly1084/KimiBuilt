@@ -797,10 +797,10 @@ body {
     border: 2px dashed var(--accent-color);
 }
 
-/* Add Block Button (+) - Per row add button */
+/* Add Block Button (+) - Per row add button - POSITIONED LEFT of drag handle */
 .block-add-btn {
     position: absolute;
-    left: -20px;
+    left: -48px;
     top: 50%;
     transform: translateY(-50%);
     width: 20px;
@@ -819,6 +819,7 @@ body {
     line-height: 1;
     padding: 0;
     user-select: none;
+    z-index: 5;
 }
 
 .block:hover .block-add-btn {
@@ -832,7 +833,7 @@ body {
     color: white;
 }
 
-/* Block Handle (⋮⋮) - IMPROVED: Better visibility */
+/* Block Handle (⋮⋮) - Drag handle positioned to the RIGHT of + button */
 .block-handle {
     position: absolute;
     left: -24px;
@@ -848,6 +849,7 @@ body {
     transition: opacity 0.15s, color 0.15s, background 0.15s;
     user-select: none;
     border-radius: var(--radius-sm);
+    z-index: 5;
 }
 
 .block:hover .block-handle,
@@ -3613,4 +3615,115 @@ body {
         width: 100%;
         min-width: unset;
     }
+}
+
+
+/* ===== Mermaid Diagram Block Styles ===== */
+
+.mermaid-block {
+    margin: 8px 0;
+}
+
+/* Empty State */
+.mermaid-empty-state {
+    transition: all 0.2s ease;
+}
+
+.mermaid-empty-state:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-primary);
+}
+
+.mermaid-ai-btn {
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.mermaid-ai-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.mermaid-ai-btn:active {
+    transform: translateY(0);
+}
+
+/* Toolbar */
+.mermaid-toolbar {
+    opacity: 0.8;
+    transition: opacity 0.15s ease;
+}
+
+.mermaid-block:hover .mermaid-toolbar {
+    opacity: 1;
+}
+
+.mermaid-action-btn {
+    transition: all 0.15s ease;
+}
+
+.mermaid-action-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+/* Type Select */
+.mermaid-type-select {
+    cursor: pointer;
+}
+
+.mermaid-type-select option {
+    padding: 4px;
+}
+
+/* Input */
+.mermaid-input {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mermaid-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.2);
+}
+
+/* Diagram Container */
+.mermaid-diagram-container {
+    transition: box-shadow 0.15s ease;
+}
+
+.mermaid-diagram-container:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.mermaid-diagram-container .mermaid {
+    display: flex;
+    justify-content: center;
+}
+
+.mermaid-diagram-container .mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Error State */
+.mermaid-error {
+    padding: 16px;
+    background: var(--color-red);
+    border-radius: var(--radius-md);
+    color: #dc2626;
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] .mermaid-empty-state {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .mermaid-ai-btn {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .mermaid-ai-btn:hover {
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
 }

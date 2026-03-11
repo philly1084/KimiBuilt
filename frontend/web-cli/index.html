@@ -308,6 +308,77 @@
             color: var(--text-muted);
         }
 
+        /* CLI Status Indicator */
+        .cli-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .cli-status::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .cli-status.ready {
+            color: var(--success-bright);
+        }
+        .cli-status.ready::before {
+            background: var(--success-bright);
+            box-shadow: 0 0 6px var(--success-bright);
+        }
+        
+        .cli-status.thinking {
+            color: var(--accent);
+        }
+        .cli-status.thinking::before {
+            background: var(--accent);
+            animation: pulse 1s infinite;
+        }
+        
+        .cli-status.error {
+            color: var(--error);
+        }
+        .cli-status.error::before {
+            background: var(--error);
+        }
+        
+        .queue-indicator {
+            color: var(--warning);
+            font-weight: 500;
+        }
+        .queue-indicator::before {
+            content: '[+';
+        }
+        .queue-indicator::after {
+            content: ' queued]';
+        }
+        
+        /* Queue List in Side Panel */
+        .queue-list {
+            font-size: 11px;
+        }
+        .queue-item {
+            padding: 4px 8px;
+            margin: 2px 0;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--text-secondary);
+        }
+        .queue-item::before {
+            content: '>';
+            color: var(--accent);
+            margin-right: 6px;
+        }
+
         /* ===== Side Panel (Widgets) ===== */
         .side-panel {
             width: 300px;
@@ -733,6 +804,158 @@
                 display: none;
             }
         }
+        
+        /* ===== File Manager Modal ===== */
+        .file-manager-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .file-manager-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+        }
+        
+        .file-manager-content {
+            position: relative;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            animation: modalIn 0.2s ease;
+        }
+        
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        
+        .file-manager-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .file-manager-header h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .file-manager-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+        
+        .file-manager-close:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        
+        .file-manager-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        
+        .file-manager-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 4px;
+        }
+        
+        .file-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .file-icon {
+            font-size: 20px;
+            width: 24px;
+            text-align: center;
+        }
+        
+        .file-name {
+            flex: 1;
+            font-size: 14px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .file-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+        
+        .file-download-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.15s;
+        }
+        
+        .file-download-btn:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        
+        .file-manager-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-color);
+        }
     </style>
 </head>
 <body data-theme="dark">
@@ -788,45 +1011,16 @@
                     <div class="input-meta">
                         <span id="sessionInfo">Session: none</span>
                         <span>•</span>
-                        <span>Ctrl+L=Clear | Ctrl+C=Copy | ↑↓=History | F1=Help</span>
+                        <span id="cliStatus" class="cli-status ready">Ready</span>
+                        <span id="queueIndicator" class="queue-indicator hidden" title="Commands queued"></span>
+                        <span style="margin-left: auto;">Ctrl+L=Clear | ↑↓=History | F1=Help</span>
                     </div>
                     <div id="autocomplete" class="autocomplete hidden"></div>
                 </div>
             </div>
 
-            <!-- Side Panel (Widgets) -->
+            <!-- Side Panel (Stats Only) -->
             <aside class="side-panel">
-                <!-- Activity Status -->
-                <div class="panel-section activity-widget">
-                    <div class="panel-header">
-                        <span>Activity</span>
-                        <span id="activityBadge" class="text-muted">Idle</span>
-                    </div>
-                    <div class="panel-content" id="activityPanel">
-                        <div class="activity-item">
-                            <div class="activity-icon waiting">◈</div>
-                            <div class="activity-text">Ready for input</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Progress -->
-                <div class="panel-section" id="progressSection" style="display: none;">
-                    <div class="panel-header">
-                        <span>Progress</span>
-                        <span id="progressPercent">0%</span>
-                    </div>
-                    <div class="progress-container">
-                        <div class="progress-bar">
-                            <div id="progressBar" class="progress-fill indeterminate" style="width: 0%"></div>
-                        </div>
-                        <div class="progress-text">
-                            <span id="progressStatus">Initializing...</span>
-                            <span id="progressTime">--:--</span>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Stats -->
                 <div class="panel-section">
                     <div class="panel-header">Session Stats</div>
@@ -863,6 +1057,17 @@
                                 <span id="modelContext">-- ctx</span>
                             </div>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- Command Queue -->
+                <div class="panel-section" id="queueSection" style="display: none;">
+                    <div class="panel-header">
+                        <span>Queue</span>
+                        <span id="queueCount" class="text-info">0</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="queueList" class="queue-list"></div>
                     </div>
                 </div>
             </aside>

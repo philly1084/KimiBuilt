@@ -490,7 +490,17 @@ Respond with the modified content only. When given context references, use them 
                 })
             });
             
-            if (!response.ok) throw new Error('Request failed');
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => 'Unknown error');
+                let errorMsg = `HTTP ${response.status}`;
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    errorMsg += `: ${errorJson.error?.message || errorJson.message || errorText}`;
+                } catch {
+                    errorMsg += errorText ? `: ${errorText}` : '';
+                }
+                throw new Error(errorMsg);
+            }
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -526,7 +536,22 @@ Respond with the modified content only. When given context references, use them 
             
         } catch (error) {
             hideProcessing();
-            showResponse('Error: ' + error.message);
+            let errorMsg = error.message;
+            
+            // Provide helpful messages for common errors
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                errorMsg = 'Cannot connect to AI server. Please check:\n' +
+                          '• Is the backend running on port 3000?\n' +
+                          '• Check your network connection.';
+            } else if (error.message.includes('429')) {
+                errorMsg = 'Rate limit exceeded. Please wait a moment and try again.';
+            } else if (error.message.includes('401') || error.message.includes('403')) {
+                errorMsg = 'Authentication failed. Please check your API key.';
+            } else if (error.message.includes('500')) {
+                errorMsg = 'Server error. The AI service may be temporarily unavailable.';
+            }
+            
+            showResponse('Error: ' + errorMsg);
         }
     }
     
@@ -842,6 +867,25 @@ Respond with the modified content only. When given context references, use them 
     // Initialize on DOM ready
     document.addEventListener('DOMContentLoaded', init);
     
+    /**
+     * Set the input prompt and focus
+     */
+    function setPrompt(text) {
+        if (input) {
+            input.value = text;
+            input.focus();
+            // Expand if minimized
+            if (isMinimized) restore();
+        }
+    }
+    
+    /**
+     * Get current prompt value
+     */
+    function getPrompt() {
+        return input ? input.value : '';
+    }
+    
     // Public API
     return {
         toggleCollapse,
@@ -856,6 +900,8 @@ Respond with the modified content only. When given context references, use them 
         removeReference,
         clearReferences,
         send,
+        setPrompt,
+        getPrompt,
         quickAction,
         insertBelow,
         replaceSelected

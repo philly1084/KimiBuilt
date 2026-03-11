@@ -1363,11 +1363,10 @@ const Editor = (function() {
     }
     
     /**
-     * Update empty state visibility and add block hint
+     * Update empty state visibility
      */
     function updateEmptyState() {
         const emptyState = document.getElementById('empty-state');
-        const addBlockHint = document.getElementById('add-block-hint');
         
         const isEmpty = !currentPage?.blocks?.length || 
             (currentPage.blocks.length === 1 && !currentPage.blocks[0].content);
@@ -1376,10 +1375,7 @@ const Editor = (function() {
             emptyState.style.display = isEmpty ? 'block' : 'none';
         }
         
-        if (addBlockHint) {
-            // Show hint when there are blocks but not in empty state
-            addBlockHint.style.display = (!isEmpty && currentPage?.blocks?.length > 0) ? 'flex' : 'none';
-        }
+        // Note: add-block-hint disabled - users can use the + button on blocks instead
     }
     
     // Expose to window for access from other modules

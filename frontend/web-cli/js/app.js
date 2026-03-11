@@ -18,16 +18,20 @@ class CodeCLIApp {
         this.messageCount = 0;
         this.tokenCount = 0;
         this.requestCount = 0;
-        this.activityLog = [];
-        this.currentActivity = null;
-        this.progressInterval = null;
-        this.progressStartTime = null;
+        // Session file storage
+        this.sessionFiles = [];
+        this.nextFileId = 1;
+        
+        // Command queue
+        this.commandQueue = [];
+        this.isProcessingQueue = false;
         
         // Available commands for autocomplete
         this.commands = [
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
             '/export', '/save', '/load', '/copy', '/image', '/diagram',
-            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health'
+            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health',
+            '/files', '/ls', '/download', '/open'
         ];
         
         this.init();
@@ -42,13 +46,11 @@ class CodeCLIApp {
         this.sessionInfo = document.getElementById('sessionInfo');
         this.autocompleteEl = document.getElementById('autocomplete');
         this.shortcutsModal = document.getElementById('shortcutsModal');
-        this.activityPanel = document.getElementById('activityPanel');
-        this.activityBadge = document.getElementById('activityBadge');
-        this.progressSection = document.getElementById('progressSection');
-        this.progressBar = document.getElementById('progressBar');
-        this.progressPercent = document.getElementById('progressPercent');
-        this.progressStatus = document.getElementById('progressStatus');
-        this.progressTime = document.getElementById('progressTime');
+        this.cliStatus = document.getElementById('cliStatus');
+        this.queueIndicator = document.getElementById('queueIndicator');
+        this.queueSection = document.getElementById('queueSection');
+        this.queueList = document.getElementById('queueList');
+        this.queueCount = document.getElementById('queueCount');
         
         this.setupEventListeners();
         this.applyTheme(this.theme);
@@ -94,9 +96,13 @@ class CodeCLIApp {
             } else if (e.key === 'Escape') {
                 this.hideAutocomplete();
                 this.closeShortcuts();
+                this.closeFileManager();
             } else if (e.key === 'F1') {
                 e.preventDefault();
                 this.showShortcuts();
+            } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+                e.preventDefault();
+                this.openFileManager();
             }
         });
         
@@ -171,11 +177,65 @@ class CodeCLIApp {
         this.commandInput.value = '';
         this.hideAutocomplete();
         
+        // If currently processing, queue the command
+        if (this.isProcessing) {
+            this.commandQueue.push(input);
+            this.updateQueueDisplay();
+            this.printSystem(`Queued: ${input.substring(0, 50)}${input.length > 50 ? '...' : ''}`);
+            return;
+        }
+        
+        // Process immediately
+        await this.processCommandItem(input);
+    }
+    
+    async processCommandItem(input) {
         // Process command
         if (input.startsWith('/')) {
             await this.processCommand(input);
         } else {
             await this.processQuery(input);
+        }
+        
+        // Process next queued command if any
+        this.processQueue();
+    }
+    
+    async processQueue() {
+        if (this.isProcessingQueue || this.commandQueue.length === 0) return;
+        
+        this.isProcessingQueue = true;
+        
+        while (this.commandQueue.length > 0 && !this.isProcessing) {
+            const nextCommand = this.commandQueue.shift();
+            this.updateQueueDisplay();
+            this.printSystem(`Running queued: ${nextCommand.substring(0, 50)}${nextCommand.length > 50 ? '...' : ''}`);
+            await this.processCommandItem(nextCommand);
+        }
+        
+        this.isProcessingQueue = false;
+    }
+    
+    updateQueueDisplay() {
+        const count = this.commandQueue.length;
+        
+        // Update indicator
+        if (this.queueIndicator) {
+            this.queueIndicator.textContent = count;
+            this.queueIndicator.classList.toggle('hidden', count === 0);
+        }
+        
+        // Update side panel
+        if (this.queueSection) {
+            this.queueSection.style.display = count > 0 ? 'block' : 'none';
+        }
+        if (this.queueCount) {
+            this.queueCount.textContent = count;
+        }
+        if (this.queueList) {
+            this.queueList.innerHTML = this.commandQueue.map(cmd => 
+                `<div class="queue-item">${this.escapeHtml(cmd.substring(0, 40))}${cmd.length > 40 ? '...' : ''}</div>`
+            ).join('');
         }
     }
     
@@ -246,6 +306,20 @@ class CodeCLIApp {
             case 'health':
                 await this.checkHealth();
                 break;
+            case 'files':
+            case 'ls':
+                this.listFiles();
+                break;
+            case 'download':
+                if (args[0]) {
+                    await this.downloadFileById(args[0]);
+                } else {
+                    this.printError('Usage: /download <file-id>  (use /files to see IDs)');
+                }
+                break;
+            case 'open':
+                this.openFileManager();
+                break;
             default:
                 this.printError(`Unknown command: /${cmd}. Type /help for available commands.`);
         }
@@ -261,9 +335,8 @@ class CodeCLIApp {
         this.requestCount++;
         this.messageCount += 2; // User + AI
         
-        // Update activity
-        this.setActivity('processing', 'Generating response...', 'Analyzing prompt');
-        this.showProgress('Processing request', true);
+        // Update status
+        this.setStatus('thinking');
         
         try {
             const startTime = Date.now();
@@ -284,99 +357,50 @@ class CodeCLIApp {
             // Print response
             this.printAI(response.content || 'No response');
             
-            // Update activity
-            this.setActivity('success', `Response received (${duration}s)`, 'Complete');
-            this.hideProgress();
+            // Update status
+            this.setStatus('ready');
             
             // Add to conversation
             this.lastResponse = response.content;
             
         } catch (error) {
             this.printError(`Request failed: ${error.message}`);
-            this.setActivity('error', 'Request failed', error.message);
-            this.hideProgress();
+            this.setStatus('error');
         } finally {
             this.isProcessing = false;
             this.currentOutput = '';
+            // Process any queued commands
+            this.processQueue();
         }
     }
     
-    // ==================== Activity & Progress Widgets ====================
+    // ==================== Simple Status & Queue ====================
     
-    setActivity(type, text, meta = '') {
-        const icons = {
-            processing: '<div class="spinner"></div>',
-            success: '✓',
-            error: '✗',
-            waiting: '◈'
-        };
+    setStatus(state) {
+        // state: 'ready', 'thinking', 'error'
+        if (!this.cliStatus) return;
         
-        const activityItem = document.createElement('div');
-        activityItem.className = `activity-item ${type === 'processing' ? 'active' : ''}`;
-        activityItem.innerHTML = `
-            <div class="activity-icon ${type}">${icons[type]}</div>
-            <div class="activity-text">${text}</div>
-            <div class="activity-meta">${meta}</div>
-        `;
+        this.cliStatus.className = `cli-status ${state}`;
         
-        this.activityPanel.innerHTML = '';
-        this.activityPanel.appendChild(activityItem);
-        
-        this.activityBadge.textContent = type === 'processing' ? 'Working' : 
-                                          type === 'success' ? 'Done' : 
-                                          type === 'error' ? 'Error' : 'Idle';
-        this.activityBadge.className = type === 'processing' ? 'text-info' :
-                                       type === 'success' ? 'text-success' :
-                                       type === 'error' ? 'text-error' : 'text-muted';
-        
-        // Log activity
-        this.activityLog.push({
-            type,
-            text,
-            meta,
-            time: new Date().toISOString()
-        });
-        
-        this.currentActivity = { type, text, meta };
-    }
-    
-    showProgress(status, indeterminate = false) {
-        this.progressSection.style.display = 'block';
-        this.progressStatus.textContent = status;
-        this.progressStartTime = Date.now();
-        
-        if (indeterminate) {
-            this.progressBar.classList.add('indeterminate');
-            this.progressBar.style.width = '30%';
-        } else {
-            this.progressBar.classList.remove('indeterminate');
-            this.progressBar.style.width = '0%';
-        }
-        
-        // Update time
-        this.progressInterval = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - this.progressStartTime) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            this.progressTime.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-        }, 1000);
-    }
-    
-    updateProgress(percent, status) {
-        this.progressBar.classList.remove('indeterminate');
-        this.progressBar.style.width = `${percent}%`;
-        this.progressPercent.textContent = `${Math.round(percent)}%`;
-        if (status) {
-            this.progressStatus.textContent = status;
+        switch(state) {
+            case 'thinking':
+                this.cliStatus.textContent = 'Thinking...';
+                break;
+            case 'error':
+                this.cliStatus.textContent = 'Error';
+                setTimeout(() => this.setStatus('ready'), 3000);
+                break;
+            case 'ready':
+            default:
+                this.cliStatus.textContent = 'Ready';
+                break;
         }
     }
     
-    hideProgress() {
-        if (this.progressInterval) {
-            clearInterval(this.progressInterval);
-            this.progressInterval = null;
-        }
-        this.progressSection.style.display = 'none';
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     // ==================== Stats ====================
@@ -493,6 +517,11 @@ Session Statistics:
   /export            Export conversation to file
   /copy              Copy last response to clipboard
 
+**Files:**
+  /files, /ls        List session files
+  /download <id>     Download file by ID
+  /open              Open file manager (GUI)
+
 **System:**
   /health            Check API connection health
 
@@ -605,7 +634,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     }
     
     async checkHealth() {
-        this.setActivity('processing', 'Checking health...', 'Connecting');
+        this.setStatus('thinking');
         try {
             const health = await api.healthCheck();
             this.printSystem(`Health Check:
@@ -613,10 +642,10 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
   Version: ${health.version || 'unknown'}
   Models: ${health.models || 'unknown'}
             `.trim());
-            this.setActivity('success', 'Health check complete', 'Connected');
+            this.setStatus('ready');
         } catch (error) {
             this.printError(`Health check failed: ${error.message}`);
-            this.setActivity('error', 'Health check failed', error.message);
+            this.setStatus('error');
         }
     }
     
@@ -671,16 +700,16 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     }
     
     async handleFile(file) {
-        this.setActivity('processing', `Processing ${file.name}...`, 'Reading file');
+        this.setStatus('thinking');
         
         try {
             const content = await api.uploadFile(file);
             this.printSystem(`File uploaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
             this.printAI(`File content from "${file.name}":\n\n\`\`\`\n${content.substring(0, 2000)}${content.length > 2000 ? '\n... (truncated)' : ''}\n\`\`\``);
-            this.setActivity('success', `File processed: ${file.name}`, 'Complete');
+            this.setStatus('ready');
         } catch (error) {
             this.printError(`Failed to process file: ${error.message}`);
-            this.setActivity('error', 'File processing failed', error.message);
+            this.setStatus('error');
         }
     }
     
@@ -693,19 +722,17 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         }
         
         this.isProcessing = true;
-        this.setActivity('processing', 'Generating image...', 'AI working');
-        this.showProgress('Generating image', true);
+        this.setStatus('thinking');
         
         try {
             const response = await api.generateImage(prompt);
             this.printAI(`![Generated Image](${response.url})\n\n**Prompt:** ${prompt}`);
-            this.setActivity('success', 'Image generated', 'Complete');
+            this.setStatus('ready');
         } catch (error) {
             this.printError(`Image generation failed: ${error.message}`);
-            this.setActivity('error', 'Image generation failed', error.message);
+            this.setStatus('error');
         } finally {
             this.isProcessing = false;
-            this.hideProgress();
         }
     }
     
@@ -714,8 +741,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
      */
     async generateDiagram(type = 'flowchart', description = '') {
         this.isProcessing = true;
-        this.setActivity('processing', 'Generating diagram...', 'AI working');
-        this.showProgress('Generating diagram', true);
+        this.setStatus('thinking');
         
         try {
             // Try to get AI-generated diagram code
@@ -740,6 +766,9 @@ Return ONLY valid Mermaid syntax code, no explanations, no markdown code blocks.
             const filename = `diagram-${type}-${Date.now()}.mmd`;
             this.downloadFile(diagramCode, filename, 'text/plain');
             
+            // Add to session files
+            const file = this.addSessionFile(filename, diagramCode, 'text/plain', 'diagram');
+            
             // Show preview in terminal
             this.printAI(`## Generated ${type} diagram
 
@@ -747,14 +776,18 @@ Return ONLY valid Mermaid syntax code, no explanations, no markdown code blocks.
 ${diagramCode}
 \`\`\`
 
-**Downloaded:** ${filename}`);
+**Downloaded:** ${filename}
+**File ID:** #${file.id} (use /files to manage)`);
             
-            this.setActivity('success', 'Diagram generated', 'Complete');
+            this.setStatus('ready');
         } catch (error) {
             // Fallback: generate template
             const diagramCode = this.getMermaidTemplate(type, description);
             const filename = `diagram-${type}-${Date.now()}.mmd`;
             this.downloadFile(diagramCode, filename, 'text/plain');
+            
+            // Add to session files
+            const file = this.addSessionFile(filename, diagramCode, 'text/plain', 'diagram');
             
             this.printAI(`## Generated ${type} diagram (template)
 
@@ -762,12 +795,12 @@ ${diagramCode}
 ${diagramCode}
 \`\`\`
 
-**Downloaded:** ${filename}`);
+**Downloaded:** ${filename}
+**File ID:** #${file.id} (use /files to manage)`);
             
-            this.setActivity('success', 'Diagram generated', 'Complete');
+            this.setStatus('ready');
         } finally {
             this.isProcessing = false;
-            this.hideProgress();
         }
     }
     
@@ -924,6 +957,159 @@ Session Information:
         this.printSystem('Session exported');
     }
     
+    // ==================== File Management ====================
+    
+    /**
+     * Add a file to the session
+     */
+    addSessionFile(filename, content, mimeType, type = 'generated') {
+        const file = {
+            id: this.nextFileId++,
+            filename,
+            content,
+            mimeType,
+            type,
+            size: new Blob([content]).size,
+            createdAt: new Date().toISOString()
+        };
+        this.sessionFiles.push(file);
+        return file;
+    }
+    
+    /**
+     * List all session files
+     */
+    listFiles() {
+        if (this.sessionFiles.length === 0) {
+            this.printSystem('No files in this session. Generate files with /diagram, /image, or AI file generation.');
+            return;
+        }
+        
+        const lines = ['## Session Files', ''];
+        lines.push('ID  | Name                          | Type       | Size   | Created');
+        lines.push('----|-------------------------------|------------|--------|----------------');
+        
+        this.sessionFiles.forEach(file => {
+            const id = String(file.id).padStart(3);
+            const name = file.filename.substring(0, 30).padEnd(30);
+            const type = file.type.padEnd(10);
+            const size = this.formatFileSize(file.size).padEnd(6);
+            const time = new Date(file.createdAt).toLocaleTimeString();
+            lines.push(`${id} | ${name} | ${type} | ${size} | ${time}`);
+        });
+        
+        lines.push('');
+        lines.push('Commands: /download <id> | /open (GUI) | Click file in output');
+        
+        this.printAI(lines.join('\n'));
+    }
+    
+    /**
+     * Download a file by ID
+     */
+    async downloadFileById(id) {
+        const fileId = parseInt(id, 10);
+        const file = this.sessionFiles.find(f => f.id === fileId);
+        
+        if (!file) {
+            this.printError(`File #${id} not found. Use /files to see available files.`);
+            return;
+        }
+        
+        this.downloadFile(file.content, file.filename, file.mimeType);
+        this.printSystem(`Downloaded: ${file.filename}`);
+    }
+    
+    /**
+     * Format file size
+     */
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+    
+    /**
+     * Open file manager modal
+     */
+    openFileManager() {
+        // Remove existing modal
+        const existing = document.getElementById('file-manager-modal');
+        if (existing) existing.remove();
+        
+        const modal = document.createElement('div');
+        modal.id = 'file-manager-modal';
+        modal.className = 'file-manager-modal';
+        modal.innerHTML = `
+            <div class="file-manager-overlay" onclick="app.closeFileManager()"></div>
+            <div class="file-manager-content">
+                <div class="file-manager-header">
+                    <h3>📁 Session Files (${this.sessionFiles.length})</h3>
+                    <button class="file-manager-close" onclick="app.closeFileManager()">×</button>
+                </div>
+                <div class="file-manager-body">
+                    ${this.sessionFiles.length === 0 ? 
+                        '<div class="file-manager-empty">No files yet. Generate files with /diagram, /image, or ask the AI.</div>' :
+                        this.sessionFiles.map(f => `
+                            <div class="file-item" onclick="app.downloadFileById('${f.id}')">
+                                <span class="file-icon">${this.getFileIcon(f.filename)}</span>
+                                <span class="file-name">${f.filename}</span>
+                                <span class="file-meta">${this.formatFileSize(f.size)} • ${f.type}</span>
+                                <button class="file-download-btn" onclick="event.stopPropagation(); app.downloadFileById('${f.id}')">⬇</button>
+                            </div>
+                        `).join('')
+                    }
+                </div>
+                <div class="file-manager-footer">
+                    <button class="ai-image-btn" onclick="app.closeFileManager()">Close</button>
+                    <button class="ai-image-btn primary" onclick="app.downloadAllFiles()">Download All (ZIP)</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    }
+    
+    /**
+     * Close file manager modal
+     */
+    closeFileManager() {
+        const modal = document.getElementById('file-manager-modal');
+        if (modal) modal.remove();
+    }
+    
+    /**
+     * Get icon for file type
+     */
+    getFileIcon(filename) {
+        const ext = filename.split('.').pop()?.toLowerCase();
+        const icons = {
+            mmd: '📊', png: '🖼', jpg: '🖼', jpeg: '🖼', gif: '🖼', svg: '🖼',
+            pdf: '📄', docx: '📄', doc: '📄', txt: '📝', md: '📝',
+            js: '📜', ts: '📜', py: '🐍', html: '🌐', css: '🎨',
+            json: '📋', xml: '📋', csv: '📊', xlsx: '📊',
+            zip: '📦', gz: '📦'
+        };
+        return icons[ext] || '📄';
+    }
+    
+    /**
+     * Download all files as ZIP (simplified - downloads individually)
+     */
+    downloadAllFiles() {
+        if (this.sessionFiles.length === 0) return;
+        
+        this.printSystem(`Downloading ${this.sessionFiles.length} files...`);
+        this.sessionFiles.forEach((file, i) => {
+            setTimeout(() => {
+                this.downloadFile(file.content, file.filename, file.mimeType);
+            }, i * 200);
+        });
+        this.closeFileManager();
+    }
+    
     // ==================== UI Methods ====================
     
     clearOutput() {
@@ -986,6 +1172,10 @@ Session Information:
                 <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
                     <span>Show help</span>
                     <code class="inline-code">F1</code>
+                </div>
+                <div class="flex justify-between py-1 border-b" style="border-color: var(--border-color);">
+                    <span>File manager</span>
+                    <code class="inline-code">Ctrl + Shift + F</code>
                 </div>
                 <div class="flex justify-between py-1">
                     <span>Close/cancel</span>

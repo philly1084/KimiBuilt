@@ -865,7 +865,12 @@ class UIHelpers {
         const codeBlocks = container.querySelectorAll('pre code');
         codeBlocks.forEach(block => {
             if (window.Prism) {
-                Prism.highlightElement(block);
+                try {
+                    Prism.highlightElement(block);
+                } catch (err) {
+                    // Silently skip highlighting for problematic languages
+                    console.warn('[UI] Syntax highlighting failed:', err.message);
+                }
             }
         });
     }
