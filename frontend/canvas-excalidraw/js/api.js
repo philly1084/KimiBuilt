@@ -340,5 +340,3 @@ const autoBaseUrl = localHostnames.has(currentHost)
 
 window.apiManager = new OpenAICanvasAPI(autoBaseUrl);
 
-
-

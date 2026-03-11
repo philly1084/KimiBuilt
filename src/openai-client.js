@@ -20,8 +20,6 @@ const IMAGE_MODEL_KEYWORDS = [
     'text-to-image',
 ];
 
-const LEGACY_IMAGE_MODELS = ['gpt-image-1', 'dall-e-3', 'dall-e-2'];
-
 function getClient() {
     if (!client) {
         client = new OpenAI({
@@ -191,13 +189,11 @@ async function listImageModels() {
         return discovered;
     }
 
-    const fallbacks = uniqueById(
-        [config.openai.imageModel, ...LEGACY_IMAGE_MODELS]
+    return uniqueById(
+        [config.openai.imageModel]
             .filter(Boolean)
             .map((modelId) => getImageModelMetadata(modelId, 'openai')),
     );
-
-    return fallbacks;
 }
 
 async function resolveImageModel(requestedModel = null) {
@@ -212,9 +208,7 @@ async function resolveImageModel(requestedModel = null) {
             return { modelId: exactMatch.id, availableModels };
         }
 
-        if (!LEGACY_IMAGE_MODELS.includes(requested)) {
-            return { modelId: requested, availableModels };
-        }
+        return { modelId: requested, availableModels };
     }
 
     if (configured) {
@@ -222,23 +216,21 @@ async function resolveImageModel(requestedModel = null) {
         if (configuredMatch) {
             return { modelId: configuredMatch.id, availableModels };
         }
+
+        return { modelId: configured, availableModels };
     }
 
     if (geminiMatch) {
-        if (requested && requested !== geminiMatch.id) {
-            console.warn(`[OpenAI] Falling back from unavailable image model "${requested}" to Gemini image model "${geminiMatch.id}"`);
-        }
         return { modelId: geminiMatch.id, availableModels };
     }
 
     if (availableModels.length > 0) {
-        if (requested && requested !== availableModels[0].id) {
-            console.warn(`[OpenAI] Falling back from unavailable image model "${requested}" to "${availableModels[0].id}"`);
-        }
         return { modelId: availableModels[0].id, availableModels };
     }
 
-    return { modelId: requested || configured || LEGACY_IMAGE_MODELS[0], availableModels };
+    const error = new Error('No image generation model is configured. Set OPENAI_IMAGE_MODEL or expose image models from the gateway.');
+    error.status = 503;
+    throw error;
 }
 
 function normalizeChatResponse(response) {
@@ -412,9 +404,4 @@ module.exports = {
     createResponse,
     generateImage,
 };
-
-
-
-
-
 

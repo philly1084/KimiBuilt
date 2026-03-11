@@ -168,8 +168,6 @@ const API = (function() {
             console.warn('Failed to fetch image models:', error.message);
             return [
                 { id: '', name: 'Gateway Default', sizes: ['1024x1024'], qualities: [], styles: [] },
-                { id: 'dall-e-3', name: 'DALL-E 3', sizes: ['1024x1024', '1024x1792', '1792x1024'], qualities: ['standard', 'hd'] },
-                { id: 'dall-e-2', name: 'DALL-E 2', sizes: ['256x256', '512x512', '1024x1024'], qualities: ['standard'] }
             ];
         }
     }
@@ -441,7 +439,4 @@ const API = (function() {
         BASE_URL,
     };
 })();
-
-
-
 

@@ -572,8 +572,7 @@ class OpenAIAPIClient extends EventTarget {
             return {
                 object: 'list',
                 data: [
-                    { id: 'gpt-image-1', object: 'model', created: Date.now(), owned_by: 'openai', metadata: { id: 'gpt-image-1', name: 'gpt-image-1', sizes: ['1024x1024'], qualities: ['auto', 'high'], styles: [] } },
-                    { id: 'dall-e-3', object: 'model', created: Date.now(), owned_by: 'openai', metadata: { id: 'dall-e-3', name: 'DALL-E 3', sizes: ['1024x1024', '1024x1792', '1792x1024'], qualities: ['standard', 'hd'], styles: ['vivid', 'natural'] } },
+                    { id: '', object: 'model', created: Date.now(), owned_by: 'openai', metadata: { id: '', name: 'Gateway Default', sizes: ['1024x1024'], qualities: [], styles: [] } },
                 ],
             };
         }
@@ -798,9 +797,4 @@ class OpenAIAPIClient extends EventTarget {
 // Create global API client instance
 const apiClient = new OpenAIAPIClient();
 window.apiClient = apiClient;
-
-
-
-
-
 
