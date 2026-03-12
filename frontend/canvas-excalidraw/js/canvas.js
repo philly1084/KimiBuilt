@@ -390,6 +390,13 @@ class InfiniteCanvas {
             case 'image':
             case 'sticky':
             case 'frame':
+            case 'triangle':
+            case 'star':
+            case 'heart':
+            case 'cloud':
+            case 'cylinder':
+            case 'cube':
+            case 'speechBubble':
                 return x >= element.x - halfWidth && 
                        x <= element.x + halfWidth &&
                        y >= element.y - halfHeight && 
@@ -397,8 +404,21 @@ class InfiniteCanvas {
             
             case 'line':
             case 'arrow':
+            case 'connector':
                 if (element.points && element.points.length >= 2) {
-                    return this.pointToLineDistance(x, y, element.points[0], element.points[1]) < 10 + padding;
+                    return this.pointToLineDistance(x, y, element.points[0], element.points[element.points.length - 1]) < 10 + padding;
+                }
+                return false;
+            
+            case 'curvedArrow':
+            case 'elbowArrow':
+                if (element.points && element.points.length >= 3) {
+                    // Check distance to each line segment
+                    for (let i = 0; i < element.points.length - 1; i++) {
+                        if (this.pointToLineDistance(x, y, element.points[i], element.points[i + 1]) < 10 + padding) {
+                            return true;
+                        }
+                    }
                 }
                 return false;
             

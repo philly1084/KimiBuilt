@@ -209,6 +209,7 @@ class AIAssistant {
         this.isGenerating = true;
         this.showStatus('Thinking...', 'loading');
         this.generateBtn.disabled = true;
+        window.app?.showLoading('AI is thinking...');
 
         this.chatHistory.push({ role: 'user', content: prompt });
         this.trimChatHistory();
@@ -230,6 +231,7 @@ class AIAssistant {
         } finally {
             this.isGenerating = false;
             this.generateBtn.disabled = false;
+            window.app?.hideLoading();
         }
     }
     
@@ -237,6 +239,7 @@ class AIAssistant {
         this.isGenerating = true;
         this.showStatus('Generating diagram...', 'loading');
         this.generateBtn.disabled = true;
+        window.app?.showLoading('Generating diagram...');
         
         try {
             // Get current canvas state for context
@@ -260,6 +263,7 @@ class AIAssistant {
         } finally {
             this.isGenerating = false;
             this.generateBtn.disabled = false;
+            window.app?.hideLoading();
         }
     }
     
@@ -267,6 +271,7 @@ class AIAssistant {
         this.isGenerating = true;
         this.showStatus('Generating image...', 'loading');
         this.generateBtn.disabled = true;
+        window.app?.showLoading('Generating image...');
         
         try {
             this.addConversationMessage('user', prompt);
@@ -298,6 +303,7 @@ class AIAssistant {
         } finally {
             this.isGenerating = false;
             this.generateBtn.disabled = false;
+            window.app?.hideLoading();
         }
     }
     

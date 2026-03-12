@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kimi Canvas - Excalidraw Style</title>
     <link rel="stylesheet" href="css/styles.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;700&family=Roboto+Mono:wght@400;500&family=Fira+Code:wght@400;500&family=Merriweather:wght@400;700&family=Poppins:wght@400;600&family=Bebas+Neue&family=Lobster&family=Pacifico&family=Dancing+Script:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/roughjs@4.6.6/bundled/rough.js"></script>
     <script src="https://unpkg.com/perfect-freehand@1.2.0/dist/perfect-freehand.umd.js"></script>
     <!-- OpenAI SDK (optional - will use fetch fallback if blocked) -->
@@ -61,11 +63,35 @@
                     <path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
                 </svg>
             </button>
-            <button id="themeToggle" title="Toggle Theme">
-                <svg viewBox="0 0 24 24" width="18" height="18">
-                    <path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-3.03 0-5.5-2.47-5.5-5.5 0-1.82.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
-                </svg>
-            </button>
+            <!-- Theme Picker Dropdown -->
+            <div class="theme-picker dropdown" id="themeDropdown">
+                <button id="themePickerBtn" title="Theme">
+                    <svg viewBox="0 0 24 24" width="18" height="18">
+                        <path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-3.03 0-5.5-2.47-5.5-5.5 0-1.82.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
+                    </svg>
+                </button>
+                <div class="dropdown-menu">
+                    <div class="dropdown-header">Select Theme</div>
+                    <button class="dropdown-item" data-theme="light">
+                        <span style="font-size: 16px;">☀️</span> Light
+                    </button>
+                    <button class="dropdown-item" data-theme="dark">
+                        <span style="font-size: 16px;">🌙</span> Dark
+                    </button>
+                    <button class="dropdown-item" data-theme="sepia">
+                        <span style="font-size: 16px;">📜</span> Sepia
+                    </button>
+                    <button class="dropdown-item" data-theme="ocean">
+                        <span style="font-size: 16px;">🌊</span> Ocean
+                    </button>
+                    <button class="dropdown-item" data-theme="forest">
+                        <span style="font-size: 16px;">🌲</span> Forest
+                    </button>
+                    <button class="dropdown-item" data-theme="contrast">
+                        <span style="font-size: 16px;">⚡</span> High Contrast
+                    </button>
+                </div>
+            </div>
             <div class="dropdown" id="exportDropdown">
                 <button id="exportBtn" title="Export">
                     <svg viewBox="0 0 24 24" width="18" height="18">
@@ -116,80 +142,221 @@
 
     <!-- Left Toolbar -->
     <aside class="toolbar">
-        <div class="tool-group">
-            <button class="tool-btn active" data-tool="selection" data-key="v" title="Selection (V or 1)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="rectangle" data-key="r" title="Rectangle (R or 2)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <rect x="3" y="6" width="18" height="12" fill="none" stroke="currentColor" stroke-width="2"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="diamond" data-key="d" title="Diamond (D or 3)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="none" stroke="currentColor" stroke-width="2" d="M12 3l9 9-9 9-9-9z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="ellipse" data-key="o" title="Ellipse (O or 4)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <ellipse cx="12" cy="12" rx="9" ry="6" fill="none" stroke="currentColor" stroke-width="2"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="arrow" data-key="a" title="Arrow (A or 5)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="line" data-key="l" title="Line (L or 6)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <line x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="freedraw" data-key="p" title="Pencil (P or 7)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="text" data-key="t" title="Text (T or 8)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M5 4v3h5.5v12h3V7H19V4z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="sticky" data-key="s" title="Sticky Note (S)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h9l5-5V5c0-1.1-.9-2-2-2zm-7 14H7v-2h5v2zm5-4H7v-2h10v2zm0-4H7V7h10v2z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="frame" data-key="f" title="Frame (F)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <rect x="3" y="3" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4,2"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="image" data-key="i" title="Image (I or 0)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                </svg>
-            </button>
-            <button class="tool-btn" data-tool="eraser" data-key="e" title="Eraser (E or 9)">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20H12c.28 0 .55-.06.8-.17l7.23-7.23c.78-.78.78-2.05 0-2.83l-4.54-4.54c-.39-.39-.9-.59-1.42-.59z"/>
-                </svg>
-            </button>
+        <!-- Selection -->
+        <div class="tool-category">
+            <div class="tool-category-content">
+                <button class="tool-btn active" data-tool="selection" data-key="v" title="Selection (V or 1)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+                    </svg>
+                </button>
+            </div>
         </div>
         <div class="tool-separator"></div>
-        <button class="tool-btn ai-btn" data-tool="ai-image" data-key="g" title="AI Image Generation (G)">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                <circle cx="18" cy="6" r="3" fill="#ff6b6b"/>
-            </svg>
-        </button>
-        <button class="tool-btn ai-btn" id="aiAssistantBtn" title="AI Assistant">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M7.5 2C7.5 2 8.5 5.5 12 5.5C15.5 5.5 16.5 2 16.5 2C16.5 2 15 9.5 12 9.5C9 9.5 7.5 2 7.5 2ZM2 12.5C2 12.5 5.5 11.5 5.5 15C5.5 18.5 2 19.5 2 19.5C2 19.5 9.5 18 9.5 15C9.5 12 2 12.5 2 12.5ZM22 12.5C22 12.5 14.5 12 14.5 15C14.5 18 22 19.5 22 19.5C22 19.5 18.5 18.5 18.5 15C18.5 11.5 22 12.5 22 12.5ZM7.5 22C7.5 22 9 15.5 12 15.5C15 15.5 16.5 22 16.5 22C16.5 22 15.5 18.5 12 18.5C8.5 18.5 7.5 22 7.5 22Z"/>
-            </svg>
-        </button>
+
+        <!-- Basic Shapes -->
+        <div class="tool-category">
+            <div class="tool-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>Basic</span>
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                </svg>
+            </div>
+            <div class="tool-category-content">
+                <button class="tool-btn" data-tool="rectangle" data-key="r" title="Rectangle (R or 2)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <rect x="3" y="6" width="18" height="12" fill="none" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="ellipse" data-key="o" title="Ellipse (O or 4)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <ellipse cx="12" cy="12" rx="9" ry="6" fill="none" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="triangle" data-key="t" title="Triangle (T)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="none" stroke="currentColor" stroke-width="2" d="M12 3l10 18H2L12 3z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Advanced Shapes -->
+        <div class="tool-category">
+            <div class="tool-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>Shapes</span>
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                </svg>
+            </div>
+            <div class="tool-category-content">
+                <button class="tool-btn" data-tool="diamond" data-key="d" title="Diamond (D or 3)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="none" stroke="currentColor" stroke-width="2" d="M12 3l9 9-9 9-9-9z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="star" data-key="*" title="Star (*)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M12 2l3 7h7l-5.5 4 2 7-6.5-4-6.5 4 2-7L2 9h7l3-7z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="heart" title="Heart">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="cloud" title="Cloud">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="cylinder" title="Cylinder">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <ellipse cx="12" cy="6" rx="8" ry="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <path fill="none" stroke="currentColor" stroke-width="1.5" d="M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="cube" title="3D Box">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="none" stroke="currentColor" stroke-width="1.5" d="M12 2L2 7v10l10 5 10-5V7L12 2z"/>
+                        <path fill="none" stroke="currentColor" stroke-width="1.5" d="M2 7l10 5 10-5M12 12v10"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="speechBubble" title="Speech Bubble">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Lines & Arrows -->
+        <div class="tool-category">
+            <div class="tool-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>Lines</span>
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                </svg>
+            </div>
+            <div class="tool-category-content">
+                <button class="tool-btn" data-tool="line" data-key="l" title="Line (L or 6)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <line x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="arrow" data-key="a" title="Arrow (A or 5)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="doubleArrow" title="Double Arrow">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M6 4l-1.41 1.41L9.17 10H2v2h7.17l-4.58 4.59L6 18l6-6-6-6zm12 0l-1.41 1.41L21.17 10H14v2h7.17l-4.58 4.59L18 18l6-6-6-6z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="curvedArrow" title="Curved Arrow">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c.91 0 1.79-.13 2.62-.36l1.76 1.76c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41l-1.76-1.76c.23-.83.36-1.71.36-2.62 0-5.52-4.48-10-10-10zm-1 14.17V12H8.83L12 8.83l3.17 3.17H13v4.17l3.59 3.59L16.17 21l-4.17-4.17z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="elbowArrow" title="Elbow Arrow">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M20 4h-8v2h6v6h2V4zM4 20h8v-2H6v-6H4v8zM4 4v8h2V6h6V4H4z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="connector" title="Connector">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <circle cx="6" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="18" cy="6" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="18" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <path fill="none" stroke="currentColor" stroke-width="1.5" d="M9 12h3c0-3 3-3 3-6M9 12h3c0 3 3 3 3 6"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Drawing -->
+        <div class="tool-category">
+            <div class="tool-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>Draw</span>
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                </svg>
+            </div>
+            <div class="tool-category-content">
+                <button class="tool-btn" data-tool="freedraw" data-key="p" title="Pencil (P or 7)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="eraser" data-key="e" title="Eraser (E or 9)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20H12c.28 0 .55-.06.8-.17l7.23-7.23c.78-.78.78-2.05 0-2.83l-4.54-4.54c-.39-.39-.9-.59-1.42-.59z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="stickers" data-key="k" title="Stickers (K)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7v-2z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div class="tool-category">
+            <div class="tool-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>Content</span>
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                </svg>
+            </div>
+            <div class="tool-category-content">
+                <button class="tool-btn" data-tool="text" data-key="x" title="Text (X)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M5 4v3h5.5v12h3V7H19V4z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="sticky" data-key="s" title="Sticky Note (S)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h9l5-5V5c0-1.1-.9-2-2-2zm-7 14H7v-2h5v2zm5-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="frame" data-key="f" title="Frame (F)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <rect x="3" y="3" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4,2"/>
+                    </svg>
+                </button>
+                <button class="tool-btn" data-tool="image" data-key="i" title="Image (I or 0)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="tool-separator"></div>
+
+        <!-- AI Tools -->
+        <div class="tool-category">
+            <div class="tool-category-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>AI</span>
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                    <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                </svg>
+            </div>
+            <div class="tool-category-content">
+                <button class="tool-btn ai-btn" data-tool="ai-image" data-key="g" title="AI Image Generation (G)">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                        <circle cx="18" cy="6" r="3" fill="#ff6b6b"/>
+                    </svg>
+                </button>
+                <button class="tool-btn ai-btn" id="aiAssistantBtn" title="AI Assistant">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M7.5 2C7.5 2 8.5 5.5 12 5.5C15.5 5.5 16.5 2 16.5 2C16.5 2 15 9.5 12 9.5C9 9.5 7.5 2 7.5 2ZM2 12.5C2 12.5 5.5 11.5 5.5 15C5.5 18.5 2 19.5 2 19.5C2 19.5 9.5 18 9.5 15C9.5 12 2 12.5 2 12.5ZM22 12.5C22 12.5 14.5 12 14.5 15C14.5 18 22 19.5 22 19.5C22 19.5 18.5 18.5 18.5 15C18.5 11.5 22 12.5 22 12.5ZM7.5 22C7.5 22 9 15.5 12 15.5C15 15.5 16.5 22 16.5 22C16.5 22 15.5 18.5 12 18.5C8.5 18.5 7.5 22 7.5 22Z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
     </aside>
 
     <!-- Main Canvas Container -->
@@ -214,6 +381,22 @@
         </div>
     </main>
 
+    <!-- Layers Panel (Right Side, before Properties) -->
+    <aside class="layers-panel" id="layersPanel">
+        <div class="panel-header">
+            <h3>Layers</h3>
+            <button id="addLayerBtn" title="New Layer">+</button>
+        </div>
+        <div class="layers-list" id="layersList">
+            <!-- Layer items populated by JS -->
+        </div>
+        <div class="layer-controls">
+            <button id="duplicateLayerBtn" title="Duplicate Layer">📋</button>
+            <button id="deleteLayerBtn" title="Delete Layer">🗑️</button>
+            <button id="mergeLayerBtn" title="Merge Down">⬇️</button>
+        </div>
+    </aside>
+
     <!-- Properties Panel (Right Side) -->
     <aside class="properties-panel" id="propertiesPanel">
         <div class="panel-header">
@@ -230,30 +413,252 @@
                 </button>
             </div>
 
-            <!-- Stroke Color -->
+            <!-- Stroke Color Section -->
             <div class="property-group">
                 <label>Stroke</label>
-                <div class="color-picker" id="strokeColorPicker">
-                    <button class="color-btn active" data-color="#000000" style="background: #000000;"></button>
-                    <button class="color-btn" data-color="#e03131" style="background: #e03131;"></button>
-                    <button class="color-btn" data-color="#2f9e44" style="background: #2f9e44;"></button>
-                    <button class="color-btn" data-color="#1971c2" style="background: #1971c2;"></button>
-                    <button class="color-btn" data-color="#f08c00" style="background: #f08c00;"></button>
-                    <button class="color-btn" data-color="#9c36b5" style="background: #9c36b5;"></button>
+                <div class="color-section expanded" data-target="stroke" id="strokeColorSection">
+                    <div class="color-section-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <span class="section-title">
+                            <svg viewBox="0 0 24 24" width="14" height="14">
+                                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            Choose Stroke Color
+                        </span>
+                        <svg class="toggle-icon" viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                        </svg>
+                    </div>
+                    <div class="color-section-content">
+                        <!-- Quick Colors -->
+                        <div class="color-picker" id="strokeColorPicker">
+                            <button class="color-btn active" data-color="#000000" style="background: #000000;"></button>
+                            <button class="color-btn" data-color="#e03131" style="background: #e03131;"></button>
+                            <button class="color-btn" data-color="#2f9e44" style="background: #2f9e44;"></button>
+                            <button class="color-btn" data-color="#1971c2" style="background: #1971c2;"></button>
+                            <button class="color-btn" data-color="#f08c00" style="background: #f08c00;"></button>
+                            <button class="color-btn" data-color="#9c36b5" style="background: #9c36b5;"></button>
+                        </div>
+                        
+                        <!-- Color Tabs -->
+                        <div class="color-tabs">
+                            <button class="color-tab-btn active" data-tab="brand">Brand</button>
+                            <button class="color-tab-btn" data-tab="pastels">Pastels</button>
+                            <button class="color-tab-btn" data-tab="excalidraw">Excalidraw</button>
+                            <button class="color-tab-btn" data-tab="grays">Grays</button>
+                        </div>
+                        
+                        <!-- Brand Colors -->
+                        <div class="color-tab-content active" data-tab="brand">
+                            <div class="color-picker-extended">
+                                <button class="color-btn" data-color="#e03131" style="background: #e03131;" title="Red"></button>
+                                <button class="color-btn" data-color="#c2255c" style="background: #c2255c;" title="Pink"></button>
+                                <button class="color-btn" data-color="#9c36b5" style="background: #9c36b5;" title="Grape"></button>
+                                <button class="color-btn" data-color="#6741d9" style="background: #6741d9;" title="Violet"></button>
+                                <button class="color-btn" data-color="#4c6ef5" style="background: #4c6ef5;" title="Indigo"></button>
+                                <button class="color-btn" data-color="#1971c2" style="background: #1971c2;" title="Blue"></button>
+                                <button class="color-btn" data-color="#0c8599" style="background: #0c8599;" title="Cyan"></button>
+                                <button class="color-btn" data-color="#099268" style="background: #099268;" title="Teal"></button>
+                                <button class="color-btn" data-color="#2f9e44" style="background: #2f9e44;" title="Green"></button>
+                                <button class="color-btn" data-color="#66a80f" style="background: #66a80f;" title="Lime"></button>
+                                <button class="color-btn" data-color="#f08c00" style="background: #f08c00;" title="Yellow"></button>
+                                <button class="color-btn" data-color="#e8590c" style="background: #e8590c;" title="Orange"></button>
+                            </div>
+                        </div>
+                        
+                        <!-- Pastel Colors -->
+                        <div class="color-tab-content" data-tab="pastels">
+                            <div class="color-picker-extended">
+                                <button class="color-btn" data-color="#ffc9c9" style="background: #ffc9c9;" title="Pink Pastel"></button>
+                                <button class="color-btn" data-color="#eebefa" style="background: #eebefa;" title="Grape Pastel"></button>
+                                <button class="color-btn" data-color="#d0bfff" style="background: #d0bfff;" title="Violet Pastel"></button>
+                                <button class="color-btn" data-color="#bac8ff" style="background: #bac8ff;" title="Indigo Pastel"></button>
+                                <button class="color-btn" data-color="#a5d8ff" style="background: #a5d8ff;" title="Blue Pastel"></button>
+                                <button class="color-btn" data-color="#99e9f2" style="background: #99e9f2;" title="Cyan Pastel"></button>
+                                <button class="color-btn" data-color="#96f2d7" style="background: #96f2d7;" title="Teal Pastel"></button>
+                                <button class="color-btn" data-color="#b2f2bb" style="background: #b2f2bb;" title="Green Pastel"></button>
+                                <button class="color-btn" data-color="#d8f5a2" style="background: #d8f5a2;" title="Lime Pastel"></button>
+                                <button class="color-btn" data-color="#ffec99" style="background: #ffec99;" title="Yellow Pastel"></button>
+                                <button class="color-btn" data-color="#ffd8a8" style="background: #ffd8a8;" title="Orange Pastel"></button>
+                                <button class="color-btn" data-color="#ffa8a8" style="background: #ffa8a8;" title="Red Pastel"></button>
+                            </div>
+                        </div>
+                        
+                        <!-- Excalidraw Colors -->
+                        <div class="color-tab-content" data-tab="excalidraw">
+                            <div class="color-picker-extended">
+                                <button class="color-btn" data-color="#ff6b6b" style="background: #ff6b6b;" title="Excalidraw Red"></button>
+                                <button class="color-btn" data-color="#ff9ff3" style="background: #ff9ff3;" title="Excalidraw Pink"></button>
+                                <button class="color-btn" data-color="#a29bfe" style="background: #a29bfe;" title="Excalidraw Purple"></button>
+                                <button class="color-btn" data-color="#74b9ff" style="background: #74b9ff;" title="Excalidraw Blue"></button>
+                                <button class="color-btn" data-color="#81ecec" style="background: #81ecec;" title="Excalidraw Cyan"></button>
+                                <button class="color-btn" data-color="#00b894" style="background: #00b894;" title="Excalidraw Teal"></button>
+                                <button class="color-btn" data-color="#55efc4" style="background: #55efc4;" title="Excalidraw Green"></button>
+                                <button class="color-btn" data-color="#ffeaa7" style="background: #ffeaa7;" title="Excalidraw Yellow"></button>
+                                <button class="color-btn" data-color="#fdcb6e" style="background: #fdcb6e;" title="Excalidraw Orange"></button>
+                                <button class="color-btn" data-color="#e17055" style="background: #e17055;" title="Excalidraw Coral"></button>
+                                <button class="color-btn" data-color="#d63031" style="background: #d63031;" title="Excalidraw Brown"></button>
+                                <button class="color-btn" data-color="#636e72" style="background: #636e72;" title="Excalidraw Gray"></button>
+                            </div>
+                        </div>
+                        
+                        <!-- Grays -->
+                        <div class="color-tab-content" data-tab="grays">
+                            <div class="color-picker-extended">
+                                <button class="color-btn" data-color="#ffffff" style="background: #ffffff; border: 1px solid var(--border-color);" title="White"></button>
+                                <button class="color-btn" data-color="#f8f9fa" style="background: #f8f9fa; border: 1px solid var(--border-color);" title="Gray 50"></button>
+                                <button class="color-btn" data-color="#f1f3f5" style="background: #f1f3f5;" title="Gray 100"></button>
+                                <button class="color-btn" data-color="#e9ecef" style="background: #e9ecef;" title="Gray 200"></button>
+                                <button class="color-btn" data-color="#dee2e6" style="background: #dee2e6;" title="Gray 300"></button>
+                                <button class="color-btn" data-color="#ced4da" style="background: #ced4da;" title="Gray 400"></button>
+                                <button class="color-btn" data-color="#adb5bd" style="background: #adb5bd;" title="Gray 500"></button>
+                                <button class="color-btn" data-color="#868e96" style="background: #868e96;" title="Gray 600"></button>
+                                <button class="color-btn" data-color="#495057" style="background: #495057;" title="Gray 700"></button>
+                                <button class="color-btn" data-color="#343a40" style="background: #343a40;" title="Gray 800"></button>
+                                <button class="color-btn" data-color="#212529" style="background: #212529;" title="Gray 900"></button>
+                                <button class="color-btn" data-color="#000000" style="background: #000000;" title="Black"></button>
+                            </div>
+                        </div>
+                        
+                        <!-- Custom Color -->
+                        <div class="custom-color-wrapper">
+                            <input type="color" class="custom-color-input" id="customStrokeColor" data-target="stroke" value="#000000">
+                            <span class="custom-color-label">Custom Color</span>
+                        </div>
+                        
+                        <!-- Recent Colors -->
+                        <div class="color-history">
+                            <div class="color-history-label">Recent Colors</div>
+                            <div class="color-picker-row" id="strokeColorHistory">
+                                <span class="color-history-empty">No recent colors</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Background Color -->
+            <!-- Background Color Section -->
             <div class="property-group">
                 <label>Background</label>
-                <div class="color-picker" id="backgroundColorPicker">
-                    <button class="color-btn transparent active" data-color="transparent" title="Transparent"></button>
-                    <button class="color-btn" data-color="#ffc9c9" style="background: #ffc9c9;"></button>
-                    <button class="color-btn" data-color="#b2f2bb" style="background: #b2f2bb;"></button>
-                    <button class="color-btn" data-color="#a5d8ff" style="background: #a5d8ff;"></button>
-                    <button class="color-btn" data-color="#ffec99" style="background: #ffec99;"></button>
-                    <button class="color-btn" data-color="#eebefa" style="background: #eebefa;"></button>
-                    <button class="color-btn" data-color="#ffffff" style="background: #ffffff;"></button>
+                <div class="color-section expanded" data-target="background" id="backgroundColorSection">
+                    <div class="color-section-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <span class="section-title">
+                            <svg viewBox="0 0 24 24" width="14" height="14">
+                                <rect x="3" y="3" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            Choose Fill Style
+                        </span>
+                        <svg class="toggle-icon" viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+                        </svg>
+                    </div>
+                    <div class="color-section-content">
+                        <!-- Fill Type Tabs -->
+                        <div class="color-tabs">
+                            <button class="color-tab-btn active" data-bg-tab="solid">Solid</button>
+                            <button class="color-tab-btn" data-bg-tab="gradient">Gradient</button>
+                            <button class="color-tab-btn" data-bg-tab="pattern">Pattern</button>
+                        </div>
+                        
+                        <!-- Solid Colors -->
+                        <div class="color-bg-tab-content active" data-bg-tab="solid">
+                            <!-- Quick Colors -->
+                            <div class="color-picker" id="backgroundColorPicker">
+                                <button class="color-btn transparent active" data-color="transparent" title="Transparent"></button>
+                                <button class="color-btn" data-color="#ffc9c9" style="background: #ffc9c9;"></button>
+                                <button class="color-btn" data-color="#b2f2bb" style="background: #b2f2bb;"></button>
+                                <button class="color-btn" data-color="#a5d8ff" style="background: #a5d8ff;"></button>
+                                <button class="color-btn" data-color="#ffec99" style="background: #ffec99;"></button>
+                                <button class="color-btn" data-color="#eebefa" style="background: #eebefa;"></button>
+                                <button class="color-btn" data-color="#ffffff" style="background: #ffffff;"></button>
+                            </div>
+                            
+                            <!-- Extended Colors -->
+                            <div style="margin-top: 10px;">
+                                <div class="color-picker-extended">
+                                    <button class="color-btn" data-color="#ffffff" style="background: #ffffff; border: 1px solid var(--border-color);" title="White"></button>
+                                    <button class="color-btn" data-color="#f8f9fa" style="background: #f8f9fa; border: 1px solid var(--border-color);" title="Gray 50"></button>
+                                    <button class="color-btn" data-color="#ffc9c9" style="background: #ffc9c9;" title="Pink Pastel"></button>
+                                    <button class="color-btn" data-color="#eebefa" style="background: #eebefa;" title="Grape Pastel"></button>
+                                    <button class="color-btn" data-color="#d0bfff" style="background: #d0bfff;" title="Violet Pastel"></button>
+                                    <button class="color-btn" data-color="#bac8ff" style="background: #bac8ff;" title="Indigo Pastel"></button>
+                                    <button class="color-btn" data-color="#a5d8ff" style="background: #a5d8ff;" title="Blue Pastel"></button>
+                                    <button class="color-btn" data-color="#99e9f2" style="background: #99e9f2;" title="Cyan Pastel"></button>
+                                    <button class="color-btn" data-color="#96f2d7" style="background: #96f2d7;" title="Teal Pastel"></button>
+                                    <button class="color-btn" data-color="#b2f2bb" style="background: #b2f2bb;" title="Green Pastel"></button>
+                                    <button class="color-btn" data-color="#d8f5a2" style="background: #d8f5a2;" title="Lime Pastel"></button>
+                                    <button class="color-btn" data-color="#ffec99" style="background: #ffec99;" title="Yellow Pastel"></button>
+                                    <button class="color-btn" data-color="#ffd8a8" style="background: #ffd8a8;" title="Orange Pastel"></button>
+                                    <button class="color-btn" data-color="#ffa8a8" style="background: #ffa8a8;" title="Red Pastel"></button>
+                                    <button class="color-btn" data-color="#ff6b6b" style="background: #ff6b6b;" title="Excalidraw Red"></button>
+                                    <button class="color-btn" data-color="#a29bfe" style="background: #a29bfe;" title="Excalidraw Purple"></button>
+                                    <button class="color-btn" data-color="#74b9ff" style="background: #74b9ff;" title="Excalidraw Blue"></button>
+                                    <button class="color-btn" data-color="#55efc4" style="background: #55efc4;" title="Excalidraw Green"></button>
+                                    <button class="color-btn" data-color="#ffeaa7" style="background: #ffeaa7;" title="Excalidraw Yellow"></button>
+                                    <button class="color-btn" data-color="#fdcb6e" style="background: #fdcb6e;" title="Excalidraw Orange"></button>
+                                    <button class="color-btn" data-color="#212529" style="background: #212529;" title="Gray 900"></button>
+                                </div>
+                            </div>
+                            
+                            <!-- Custom Color -->
+                            <div class="custom-color-wrapper">
+                                <input type="color" class="custom-color-input" id="customBackgroundColor" data-target="background" value="#ffc9c9">
+                                <span class="custom-color-label">Custom Color</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Gradients -->
+                        <div class="color-bg-tab-content" data-bg-tab="gradient">
+                            <div class="gradient-tabs">
+                                <button class="gradient-tab-btn active" data-gradient-type="linear">Linear</button>
+                                <button class="gradient-tab-btn" data-gradient-type="radial">Radial</button>
+                            </div>
+                            
+                            <!-- Linear Gradients -->
+                            <div class="gradient-picker" id="linearGradients">
+                                <button class="gradient-btn" data-gradient="sunset" data-gradient-type="linear" data-name="Sunset" title="Sunset"></button>
+                                <button class="gradient-btn" data-gradient="ocean" data-gradient-type="linear" data-name="Ocean" title="Ocean"></button>
+                                <button class="gradient-btn" data-gradient="forest" data-gradient-type="linear" data-name="Forest" title="Forest"></button>
+                                <button class="gradient-btn" data-gradient="fire" data-gradient-type="linear" data-name="Fire" title="Fire"></button>
+                                <button class="gradient-btn" data-gradient="twilight" data-gradient-type="linear" data-name="Twilight" title="Twilight"></button>
+                                <button class="gradient-btn" data-gradient="berry" data-gradient-type="linear" data-name="Berry" title="Berry"></button>
+                                <button class="gradient-btn" data-gradient="sky" data-gradient-type="linear" data-name="Sky" title="Sky"></button>
+                                <button class="gradient-btn" data-gradient="mint" data-gradient-type="linear" data-name="Mint" title="Mint"></button>
+                                <button class="gradient-btn" data-gradient="peach" data-gradient-type="linear" data-name="Peach" title="Peach"></button>
+                                <button class="gradient-btn" data-gradient="lavender" data-gradient-type="linear" data-name="Lavender" title="Lavender"></button>
+                            </div>
+                            
+                            <!-- Radial Gradients -->
+                            <div class="gradient-picker" id="radialGradients" style="display: none;">
+                                <button class="gradient-btn" data-gradient="sunrise" data-gradient-type="radial" data-name="Sunrise" title="Sunrise"></button>
+                                <button class="gradient-btn" data-gradient="bubblegum" data-gradient-type="radial" data-name="Bubblegum" title="Bubblegum"></button>
+                                <button class="gradient-btn" data-gradient="midnight" data-gradient-type="radial" data-name="Midnight" title="Midnight"></button>
+                                <button class="gradient-btn" data-gradient="spring" data-gradient-type="radial" data-name="Spring" title="Spring"></button>
+                                <button class="gradient-btn" data-gradient="warmth" data-gradient-type="radial" data-name="Warmth" title="Warmth"></button>
+                            </div>
+                        </div>
+                        
+                        <!-- Patterns -->
+                        <div class="color-bg-tab-content" data-bg-tab="pattern">
+                            <div class="pattern-picker">
+                                <button class="pattern-btn" data-pattern="dots" data-name="Dots" title="Dots"></button>
+                                <button class="pattern-btn" data-pattern="dotsSmall" data-name="Small" title="Small Dots"></button>
+                                <button class="pattern-btn" data-pattern="lines" data-name="Lines" title="Lines"></button>
+                                <button class="pattern-btn" data-pattern="linesDiagonal" data-name="Diagonal" title="Diagonal Lines"></button>
+                                <button class="pattern-btn" data-pattern="crosshatch" data-name="Cross" title="Crosshatch"></button>
+                                <button class="pattern-btn" data-pattern="waves" data-name="Waves" title="Waves"></button>
+                                <button class="pattern-btn" data-pattern="grid" data-name="Grid" title="Grid"></button>
+                                <button class="pattern-btn" data-pattern="checkerboard" data-name="Check" title="Checkerboard"></button>
+                            </div>
+                        </div>
+                        
+                        <!-- Recent Colors -->
+                        <div class="color-history">
+                            <div class="color-history-label">Recent Colors</div>
+                            <div class="color-picker-row" id="backgroundColorHistory">
+                                <span class="color-history-empty">No recent colors</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -347,14 +752,145 @@
                 </div>
             </div>
 
-            <!-- Font Family (for text) -->
+            <!-- Enhanced Font Family (for text) -->
             <div class="property-group" id="fontFamilyGroup">
                 <label>Font</label>
-                <select id="fontFamilySelect" class="font-select">
-                    <option value="Virgil, cursive">Hand-drawn</option>
-                    <option value="system-ui, sans-serif">Normal</option>
-                    <option value="monospace">Code</option>
-                </select>
+                <!-- Font Search -->
+                <div class="font-search-container">
+                    <input type="text" id="fontSearchInput" class="font-search-input" placeholder="Search fonts...">
+                    <svg class="font-search-icon" viewBox="0 0 24 24" width="16" height="16">
+                        <path fill="currentColor" d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                    </svg>
+                </div>
+                
+                <!-- Font Category Tabs -->
+                <div class="font-category-tabs">
+                    <button class="font-tab active" data-category="sans">Sans</button>
+                    <button class="font-tab" data-category="serif">Serif</button>
+                    <button class="font-tab" data-category="mono">Mono</button>
+                    <button class="font-tab" data-category="display">Display</button>
+                    <button class="font-tab" data-category="handwriting">Script</button>
+                </div>
+                
+                <!-- Recently Used Fonts -->
+                <div class="font-recent-section" id="fontRecentSection" style="display: none;">
+                    <div class="font-category">Recently Used</div>
+                    <div class="font-list" id="recentFontsList"></div>
+                </div>
+                
+                <!-- Font List -->
+                <div class="font-list" id="fontList"></div>
+            </div>
+
+            <!-- Text Alignment -->
+            <div class="property-group" id="textAlignmentGroup">
+                <label>Text Align</label>
+                <div class="text-alignment-picker">
+                    <button class="text-align-btn active" data-align="center" title="Center">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M7 15v2h10v-2H7zm-4-6v2h18V9H3zm4-6v2h10V3H7z"/>
+                        </svg>
+                    </button>
+                    <button class="text-align-btn" data-align="left" title="Left">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M15 15H3v2h12v-2zm0-8H3v2h12V7zM3 13h18v-2H3v2zm0 8h18v-2H3v2zM3 3v2h18V3H3z"/>
+                        </svg>
+                    </button>
+                    <button class="text-align-btn" data-align="right" title="Right">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 21h18v-2H3v2zm6-4h12v-2H9v2zm-6-4h18v-2H3v2zm6-4h12V7H9v2zM3 3v2h18V3H3z"/>
+                        </svg>
+                    </button>
+                    <button class="text-align-btn" data-align="justify" title="Justify">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M3 21h18v-2H3v2zm0-4h18v-2H3v2zm0-4h18v-2H3v2zm0-4h18V7H3v2zm0-6v2h18V3H3z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Text Style (Bold, Italic, Underline, Strikethrough) -->
+            <div class="property-group" id="textStyleGroup">
+                <label>Text Style</label>
+                <div class="text-style-toolbar">
+                    <button class="text-style-btn bold" data-style="bold" title="Bold (Ctrl+B)">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"/>
+                        </svg>
+                    </button>
+                    <button class="text-style-btn italic" data-style="italic" title="Italic (Ctrl+I)">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"/>
+                        </svg>
+                    </button>
+                    <button class="text-style-btn underline" data-style="underline" title="Underline (Ctrl+U)">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z"/>
+                        </svg>
+                    </button>
+                    <button class="text-style-btn strikethrough" data-style="strikethrough" title="Strikethrough">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M6.85 7.08C6.85 4.37 9.45 3 12.24 3c1.64 0 3 .49 3.9 1.28.77.65 1.46 1.73 1.46 3.24h-2.04c0-.35-.31-.75-.85-.75-.77 0-1.08.47-1.08.91 0 .51.32.91.93 1.21h5.41v2h-6.47c-1.67 0-3.2-.61-4.19-1.7C7.1 8.51 6.85 7.81 6.85 7.08zM21 12v2h-8.07c-1.07 0-1.94.72-1.94 1.65 0 .93.87 1.35 1.87 1.35 1.24 0 1.93-.65 2.28-1.35h2.1c-.49 1.67-2.28 2.35-4.38 2.35-2.66 0-4.41-1.32-4.41-3.35 0-2.03 1.75-3.65 4.41-3.65H21zM3 11h18v2H3v-2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Text Transform -->
+            <div class="property-group" id="textTransformGroup">
+                <label>Text Transform</label>
+                <div class="text-transform-picker">
+                    <button class="text-transform-btn active" data-transform="none" title="Normal">
+                        <span class="transform-label">Aa</span>
+                    </button>
+                    <button class="text-transform-btn" data-transform="uppercase" title="Uppercase">
+                        <span class="transform-label">AA</span>
+                    </button>
+                    <button class="text-transform-btn" data-transform="lowercase" title="Lowercase">
+                        <span class="transform-label">aa</span>
+                    </button>
+                    <button class="text-transform-btn" data-transform="capitalize" title="Capitalize">
+                        <span class="transform-label">Aa</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Letter Spacing -->
+            <div class="property-group" id="letterSpacingGroup">
+                <label>Letter Spacing <span id="letterSpacingValue">0px</span></label>
+                <input type="range" id="letterSpacingSlider" min="-2" max="10" value="0" step="0.5" class="spacing-slider">
+            </div>
+
+            <!-- Line Height -->
+            <div class="property-group" id="lineHeightGroup">
+                <label>Line Height <span id="lineHeightValue">1.4</span></label>
+                <input type="range" id="lineHeightSlider" min="1.0" max="2.5" value="1.4" step="0.1" class="spacing-slider">
+            </div>
+
+            <!-- Text Shadow -->
+            <div class="property-group" id="textShadowGroup">
+                <div class="text-shadow-header">
+                    <label>Text Shadow</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="textShadowToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="text-shadow-options" id="textShadowOptions" style="display: none;">
+                    <div class="shadow-color-picker">
+                        <span class="shadow-label">Color</span>
+                        <div class="color-picker-inline" id="textShadowColorPicker">
+                            <button class="color-btn shadow-color active" data-color="rgba(0,0,0,0.3)" style="background: rgba(0,0,0,0.3);"></button>
+                            <button class="color-btn shadow-color" data-color="rgba(0,0,0,0.5)" style="background: rgba(0,0,0,0.5);"></button>
+                            <button class="color-btn shadow-color" data-color="rgba(0,0,0,0.7)" style="background: rgba(0,0,0,0.7);"></button>
+                            <button class="color-btn shadow-color" data-color="rgba(255,255,255,0.5)" style="background: rgba(255,255,255,0.5);"></button>
+                        </div>
+                    </div>
+                    <div class="shadow-blur-control">
+                        <span class="shadow-label">Blur <span id="shadowBlurValue">2px</span></span>
+                        <input type="range" id="shadowBlurSlider" min="0" max="10" value="2" class="spacing-slider">
+                    </div>
+                </div>
             </div>
 
             <!-- Image Properties (for AI-generated images) -->
@@ -421,6 +957,75 @@
                 </div>
             </div>
 
+            <!-- Corner Radius (for rectangles) -->
+            <div class="property-group" id="cornerRadiusGroup" style="display: none;">
+                <label>Corner Radius</label>
+                <input type="range" id="cornerRadiusSlider" min="0" max="50" value="0" class="corner-radius-slider">
+                <div style="display: flex; justify-content: space-between;">
+                    <span class="property-value" id="cornerRadiusValue">0px</span>
+                </div>
+            </div>
+
+            <!-- Star Points (for stars) -->
+            <div class="property-group" id="starPointsGroup" style="display: none;">
+                <label>Star Points</label>
+                <div class="star-points-picker" id="starPointsPicker">
+                    <button class="star-points-btn" data-points="3">3</button>
+                    <button class="star-points-btn active" data-points="5">5</button>
+                    <button class="star-points-btn" data-points="6">6</button>
+                    <button class="star-points-btn" data-points="8">8</button>
+                </div>
+            </div>
+
+            <!-- Arrowhead Style (for arrows) -->
+            <div class="property-group" id="arrowheadGroup" style="display: none;">
+                <label>Arrowhead</label>
+                <div class="arrowhead-picker" id="arrowheadPicker">
+                    <button class="arrowhead-btn active" data-arrowhead="end" title="End Arrow">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M4 12h12l-4-4v8l4-4H4z"/>
+                        </svg>
+                    </button>
+                    <button class="arrowhead-btn" data-arrowhead="start" title="Start Arrow">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M20 12H8l4 4V8l-4 4h12z"/>
+                        </svg>
+                    </button>
+                    <button class="arrowhead-btn" data-arrowhead="both" title="Both Ends">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M6 8l-4 4 4 4V8zm12 0v8l4-4-4-4z"/>
+                        </svg>
+                    </button>
+                    <button class="arrowhead-btn" data-arrowhead="none" title="No Arrow">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Connector Style (for connectors) -->
+            <div class="property-group" id="connectorStyleGroup" style="display: none;">
+                <label>Connector Style</label>
+                <div class="connector-style-picker" id="connectorStylePicker">
+                    <button class="connector-btn active" data-style="straight" title="Straight">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                    <button class="connector-btn" data-style="curved" title="Curved">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="none" stroke="currentColor" stroke-width="2" d="M4 20Q12 4 20 12"/>
+                        </svg>
+                    </button>
+                    <button class="connector-btn" data-style="elbow" title="Elbow">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="none" stroke="currentColor" stroke-width="2" d="M4 20v-8h16"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
             <!-- Layer Actions -->
             <div class="property-group layer-actions">
                 <button id="deleteBtn" class="action-btn danger">Delete</button>
@@ -442,6 +1047,68 @@
         </div>
         <div class="bottom-right">
             <div class="collab-cursors" id="collabCursors"></div>
+        </div>
+    </div>
+
+    <!-- Stickers Panel -->
+    <aside class="stickers-panel" id="stickersPanel" style="display: none;">
+        <div class="panel-header">
+            <h3>Stickers & Icons</h3>
+            <input type="search" id="stickerSearch" placeholder="Search icons...">
+        </div>
+        <div class="stickers-categories">
+            <button class="category-btn active" data-category="emoji">😀</button>
+            <button class="category-btn" data-category="arrows">➡️</button>
+            <button class="category-btn" data-category="shapes">🔷</button>
+            <button class="category-btn" data-category="tech">💻</button>
+            <button class="category-btn" data-category="nature">🌿</button>
+        </div>
+        <div class="stickers-grid" id="stickersGrid">
+            <!-- Stickers populated by JS -->
+        </div>
+    </aside>
+
+    <!-- Templates Modal -->
+    <div id="templatesModal" class="modal" style="display: none;">
+        <div class="modal-content templates-content">
+            <div class="modal-header">
+                <h2>Templates</h2>
+                <button class="close-btn" id="closeTemplates">&times;</button>
+            </div>
+            <div class="templates-grid">
+                <div class="template-card" data-template="flowchart">
+                    <div class="template-preview">📊</div>
+                    <span>Flowchart</span>
+                </div>
+                <div class="template-card" data-template="wireframe">
+                    <div class="template-preview">📱</div>
+                    <span>Wireframe</span>
+                </div>
+                <div class="template-card" data-template="mindmap">
+                    <div class="template-preview">🧠</div>
+                    <span>Mind Map</span>
+                </div>
+                <div class="template-card" data-template="orgchart">
+                    <div class="template-preview">🏢</div>
+                    <span>Org Chart</span>
+                </div>
+                <div class="template-card" data-template="kanban">
+                    <div class="template-preview">📋</div>
+                    <span>Kanban Board</span>
+                </div>
+                <div class="template-card" data-template="swot">
+                    <div class="template-preview">📈</div>
+                    <span>SWOT Analysis</span>
+                </div>
+                <div class="template-card" data-template="timeline">
+                    <div class="template-preview">⏱️</div>
+                    <span>Timeline</span>
+                </div>
+                <div class="template-card" data-template="gantt">
+                    <div class="template-preview">📅</div>
+                    <span>Gantt Chart</span>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -616,12 +1283,20 @@
                         <span>Rectangle</span>
                     </div>
                     <div class="shortcut-item">
+                        <span class="key">O / 4</span>
+                        <span>Ellipse</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">T</span>
+                        <span>Triangle</span>
+                    </div>
+                    <div class="shortcut-item">
                         <span class="key">D / 3</span>
                         <span>Diamond</span>
                     </div>
                     <div class="shortcut-item">
-                        <span class="key">O / 4</span>
-                        <span>Ellipse</span>
+                        <span class="key">*</span>
+                        <span>Star</span>
                     </div>
                     <div class="shortcut-item">
                         <span class="key">A / 5</span>
@@ -636,7 +1311,7 @@
                         <span>Pencil</span>
                     </div>
                     <div class="shortcut-item">
-                        <span class="key">T / 8</span>
+                        <span class="key">X / 8</span>
                         <span>Text</span>
                     </div>
                     <div class="shortcut-item">
@@ -648,16 +1323,16 @@
                         <span>Image</span>
                     </div>
                     <div class="shortcut-item">
-                        <span class="key">G</span>
-                        <span>AI Image Tool</span>
-                    </div>
-                    <div class="shortcut-item">
                         <span class="key">S</span>
                         <span>Sticky Note</span>
                     </div>
                     <div class="shortcut-item">
                         <span class="key">F</span>
                         <span>Frame</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">G</span>
+                        <span>AI Image Tool</span>
                     </div>
                     <div class="shortcut-item">
                         <span class="key">Space + Drag</span>
@@ -723,10 +1398,35 @@
                         <span class="key">?</span>
                         <span>Show Help</span>
                     </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+T</span>
+                        <span>Templates Gallery</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+Shift+S</span>
+                        <span>Toggle Stickers Panel</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">Ctrl+L</span>
+                        <span>Toggle Layers Panel</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="key">K</span>
+                        <span>Stickers Tool</span>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <span>Generating...</span>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="tooltip"></div>
 
     <!-- File Drop Overlay -->
     <div class="file-drop-overlay" id="fileDropOverlay">
@@ -755,11 +1455,15 @@
 
     <script src="js/history.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/colors.js"></script>
     <script src="js/renderer.js"></script>
     <script src="js/tools.js"></script>
     <script src="js/selection.js"></script>
     <script src="js/properties.js"></script>
     <script src="js/canvas.js"></script>
+    <script src="js/layers.js"></script>
+    <script src="js/templates.js"></script>
+    <script src="js/stickers.js"></script>
     <script src="js/ai-assistant.js"></script>
     <script src="js/import-export.js"></script>
     <script src="js/app.js"></script>

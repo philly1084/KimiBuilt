@@ -6,6 +6,7 @@ const Selection = (function() {
     let selectedBlockId = null;
     let draggedBlockId = null;
     let dragOverBlockId = null;
+    let dragOverPosition = 'after';
     let isDragging = false;
     let dragPreview = null;
     let dropIndicator = null;
@@ -376,11 +377,13 @@ const Selection = (function() {
         
         blockElement.addEventListener('drop', (e) => {
             e.preventDefault();
+            dragOverBlockId = blockId;
+            showDropIndicator(blockElement, e);
             hideDropIndicator();
             
             if (draggedBlockId && draggedBlockId !== blockId) {
                 if (callbacks.onDrop) {
-                    callbacks.onDrop(draggedBlockId, blockId);
+                    callbacks.onDrop(draggedBlockId, blockId, dragOverPosition);
                 }
             }
             
@@ -457,8 +460,10 @@ const Selection = (function() {
         
         // Determine if dropping above or below
         if (e.clientY < midpoint) {
+            dragOverPosition = 'before';
             indicator.style.top = `${rect.top - 2}px`;
         } else {
+            dragOverPosition = 'after';
             indicator.style.top = `${rect.bottom - 2}px`;
         }
         
@@ -517,7 +522,7 @@ const Selection = (function() {
         // Handle drop
         if (draggedBlockId && dragOverBlockId && draggedBlockId !== dragOverBlockId) {
             if (callbacks.onDrop) {
-                callbacks.onDrop(draggedBlockId, dragOverBlockId);
+                callbacks.onDrop(draggedBlockId, dragOverBlockId, dragOverPosition);
             }
         }
         
@@ -545,6 +550,7 @@ const Selection = (function() {
         
         draggedBlockId = null;
         dragOverBlockId = null;
+        dragOverPosition = 'after';
         
         setTimeout(() => {
             isDragging = false;
@@ -827,3 +833,4 @@ const Selection = (function() {
         setCallbacks: (newCallbacks) => Object.assign(callbacks, newCallbacks)
     };
 })();
+

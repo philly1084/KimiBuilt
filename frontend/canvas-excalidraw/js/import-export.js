@@ -39,6 +39,8 @@ class ImportExportManager {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `canvas-${timestamp}`;
 
+        window.app?.showLoading(`Exporting to ${format.toUpperCase()}...`);
+
         try {
             switch (format) {
                 case 'png':
@@ -69,6 +71,8 @@ class ImportExportManager {
         } catch (error) {
             console.error('Export error:', error);
             window.app?.showToast(`Export failed: ${error.message}`);
+        } finally {
+            window.app?.hideLoading();
         }
     }
 
@@ -473,6 +477,7 @@ class ImportExportManager {
      */
     async importFiles(files) {
         const results = [];
+        window.app?.showLoading(`Importing ${files.length} file(s)...`);
         
         for (const file of files) {
             try {
@@ -495,6 +500,7 @@ class ImportExportManager {
             window.app?.showToast(`${failCount} file(s) failed to import`);
         }
 
+        window.app?.hideLoading();
         return results;
     }
 

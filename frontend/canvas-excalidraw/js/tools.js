@@ -28,7 +28,19 @@ class ToolManager {
             edgeType: 'sharp',
             opacity: 1,
             fontSize: 20,
-            fontFamily: 'Virgil, cursive'
+            fontFamily: 'Virgil, cursive',
+            // Text styling defaults
+            textAlign: 'center',
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            textTransform: 'none',
+            letterSpacing: 0,
+            lineHeight: 1.4,
+            textShadow: false,
+            textShadowColor: 'rgba(0,0,0,0.3)',
+            textShadowBlur: 2
         };
         
         this.init();
@@ -119,6 +131,11 @@ class ToolManager {
                 const tooltip = document.getElementById('aiImageTooltip');
                 if (tooltip) tooltip.style.display = 'block';
                 break;
+            case 'stickers':
+                container.style.cursor = 'default';
+                // Show stickers panel
+                window.stickersManager?.showStickersPanel();
+                break;
             default:
                 container.classList.add('drawing');
                 container.style.cursor = 'crosshair';
@@ -201,11 +218,44 @@ class ToolManager {
             case 'ellipse':
                 this.startShape('ellipse', worldPos);
                 break;
+            case 'triangle':
+                this.startShape('triangle', worldPos);
+                break;
+            case 'star':
+                this.startShape('star', worldPos, { points: 5 });
+                break;
+            case 'heart':
+                this.startShape('heart', worldPos);
+                break;
+            case 'cloud':
+                this.startShape('cloud', worldPos);
+                break;
+            case 'cylinder':
+                this.startShape('cylinder', worldPos);
+                break;
+            case 'cube':
+                this.startShape('cube', worldPos);
+                break;
+            case 'speechBubble':
+                this.startShape('speechBubble', worldPos);
+                break;
             case 'line':
                 this.startLine('line', worldPos);
                 break;
             case 'arrow':
-                this.startLine('arrow', worldPos);
+                this.startLine('arrow', worldPos, { arrowhead: 'end' });
+                break;
+            case 'doubleArrow':
+                this.startLine('arrow', worldPos, { arrowhead: 'both' });
+                break;
+            case 'curvedArrow':
+                this.startCurvedArrow(worldPos);
+                break;
+            case 'elbowArrow':
+                this.startElbowArrow(worldPos);
+                break;
+            case 'connector':
+                this.startConnector(worldPos);
                 break;
             case 'freedraw':
                 this.startFreedraw(worldPos);
@@ -416,15 +466,30 @@ class ToolManager {
         
         // Get element bounds
         let bounds;
-        if (el.type === 'line' || el.type === 'arrow') {
+        if (el.type === 'line' || el.type === 'arrow' || el.type === 'connector') {
             if (!el.points || el.points.length < 2) return null;
             const p1 = el.points[0];
-            const p2 = el.points[1];
+            const p2 = el.points[el.points.length - 1];
             bounds = {
                 x: Math.min(p1.x, p2.x) - padding,
                 y: Math.min(p1.y, p2.y) - padding,
                 width: Math.abs(p2.x - p1.x) + padding * 2,
                 height: Math.abs(p2.y - p1.y) + padding * 2
+            };
+        } else if (el.type === 'curvedArrow' || el.type === 'elbowArrow') {
+            if (!el.points || el.points.length < 3) return null;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const p of el.points) {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+            }
+            bounds = {
+                x: minX - padding,
+                y: minY - padding,
+                width: maxX - minX + padding * 2,
+                height: maxY - minY + padding * 2
             };
         } else if (el.type === 'freedraw') {
             if (!el.points || el.points.length === 0) return null;
@@ -634,7 +699,7 @@ class ToolManager {
         window.renderer?.updateSelectionBox(el);
     }
     
-    startShape(type, pos) {
+    startShape(type, pos, options = {}) {
         this.isDrawing = true;
         this.currentElement = {
             id: this.generateId(),
@@ -643,12 +708,61 @@ class ToolManager {
             y: pos.y,
             width: 0,
             height: 0,
-            ...this.getElementProperties()
+            ...this.getElementProperties(),
+            ...options
         };
         window.infiniteCanvas.elements.push(this.currentElement);
     }
     
-    startLine(type, pos) {
+    startCurvedArrow(pos) {
+        this.isDrawing = true;
+        this.currentElement = {
+            id: this.generateId(),
+            type: 'curvedArrow',
+            x: pos.x,
+            y: pos.y,
+            points: [{ x: pos.x, y: pos.y }, { x: pos.x + 100, y: pos.y - 50 }, { x: pos.x + 200, y: pos.y }],
+            width: 200,
+            height: 100,
+            ...this.getElementProperties(),
+            arrowhead: 'end'
+        };
+        window.infiniteCanvas.elements.push(this.currentElement);
+    }
+    
+    startElbowArrow(pos) {
+        this.isDrawing = true;
+        this.currentElement = {
+            id: this.generateId(),
+            type: 'elbowArrow',
+            x: pos.x,
+            y: pos.y,
+            points: [{ x: pos.x, y: pos.y }, { x: pos.x, y: pos.y + 100 }, { x: pos.x + 150, y: pos.y + 100 }],
+            width: 150,
+            height: 100,
+            ...this.getElementProperties(),
+            arrowhead: 'end'
+        };
+        window.infiniteCanvas.elements.push(this.currentElement);
+    }
+    
+    startConnector(pos) {
+        this.isDrawing = true;
+        this.currentElement = {
+            id: this.generateId(),
+            type: 'connector',
+            x: pos.x,
+            y: pos.y,
+            points: [{ x: pos.x, y: pos.y }, { x: pos.x + 150, y: pos.y }],
+            width: 150,
+            height: 0,
+            ...this.getElementProperties(),
+            connectorStyle: 'straight'
+        };
+        window.infiniteCanvas.elements.push(this.currentElement);
+    }
+    
+    startLine(type, pos, options = {}) {
         this.isDrawing = true;
         this.currentElement = {
             id: this.generateId(),
@@ -658,7 +772,8 @@ class ToolManager {
             points: [{ x: pos.x, y: pos.y }, { x: pos.x, y: pos.y }],
             width: 0,
             height: 0,
-            ...this.getElementProperties()
+            ...this.getElementProperties(),
+            ...options
         };
         window.infiniteCanvas.elements.push(this.currentElement);
     }
@@ -712,6 +827,13 @@ class ToolManager {
             case 'ellipse':
             case 'frame':
             case 'sticky':
+            case 'triangle':
+            case 'star':
+            case 'heart':
+            case 'cloud':
+            case 'cylinder':
+            case 'cube':
+            case 'speechBubble':
                 let width = snappedPos.x - this.startPos.x;
                 let height = snappedPos.y - this.startPos.y;
                 
@@ -756,6 +878,37 @@ class ToolManager {
                     el.x = (el.points[0].x + el.points[1].x) / 2;
                     el.y = (el.points[0].y + el.points[1].y) / 2;
                 }
+                break;
+                
+            case 'curvedArrow':
+                // Update control point and end point
+                el.points[2] = { x: snappedPos.x, y: snappedPos.y };
+                el.points[1] = { 
+                    x: (el.points[0].x + snappedPos.x) / 2, 
+                    y: snappedPos.y 
+                };
+                el.x = (el.points[0].x + snappedPos.x) / 2;
+                el.y = (el.points[0].y + snappedPos.y) / 2;
+                el.width = Math.abs(snappedPos.x - el.points[0].x);
+                el.height = Math.abs(snappedPos.y - el.points[0].y);
+                break;
+                
+            case 'elbowArrow':
+                // Update elbow point and end point
+                el.points[1] = { x: el.points[0].x, y: snappedPos.y };
+                el.points[2] = { x: snappedPos.x, y: snappedPos.y };
+                el.x = (el.points[0].x + snappedPos.x) / 2;
+                el.y = (el.points[0].y + snappedPos.y) / 2;
+                el.width = Math.abs(snappedPos.x - el.points[0].x);
+                el.height = Math.abs(snappedPos.y - el.points[0].y);
+                break;
+                
+            case 'connector':
+                el.points[1] = { x: snappedPos.x, y: snappedPos.y };
+                el.x = (el.points[0].x + snappedPos.x) / 2;
+                el.y = (el.points[0].y + snappedPos.y) / 2;
+                el.width = Math.abs(el.points[1].x - el.points[0].x);
+                el.height = Math.abs(el.points[1].y - el.points[0].y);
                 break;
                 
             case 'freedraw':
@@ -1171,13 +1324,19 @@ class ToolManager {
                 case '2':
                     this.setTool('rectangle');
                     break;
+                case 'o':
+                case '4':
+                    this.setTool('ellipse');
+                    break;
+                case 't':
+                    this.setTool('triangle');
+                    break;
                 case 'd':
                 case '3':
                     this.setTool('diamond');
                     break;
-                case 'o':
-                case '4':
-                    this.setTool('ellipse');
+                case '*':
+                    this.setTool('star');
                     break;
                 case 'a':
                 case '5':
@@ -1191,7 +1350,7 @@ class ToolManager {
                 case '7':
                     this.setTool('freedraw');
                     break;
-                case 't':
+                case 'x':
                 case '8':
                     this.setTool('text');
                     break;
@@ -1211,6 +1370,9 @@ class ToolManager {
                     break;
                 case 'g':
                     this.setTool('ai-image');
+                    break;
+                case 'k':
+                    this.setTool('stickers');
                     break;
             }
         }

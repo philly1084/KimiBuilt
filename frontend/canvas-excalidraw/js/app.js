@@ -36,6 +36,9 @@ class App {
             this.setupAIModeToggles();
             window.aiAssistant?.setMode('chat');
             
+            // Setup tooltips
+            this.setupTooltips();
+            
             console.log('Kimi Canvas initialized with OpenAI SDK');
         });
     }
@@ -131,9 +134,28 @@ class App {
             window.infiniteCanvas?.resetZoom();
         });
         
-        // Theme toggle
-        document.getElementById('themeToggle')?.addEventListener('click', () => {
-            this.toggleTheme();
+        // Theme picker dropdown
+        const themePickerBtn = document.getElementById('themePickerBtn');
+        const themeDropdown = document.getElementById('themeDropdown');
+        
+        themePickerBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            themeDropdown?.classList.toggle('active');
+        });
+        
+        // Theme selection
+        document.querySelectorAll('[data-theme]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const theme = btn.dataset.theme;
+                this.setTheme(theme);
+                themeDropdown?.classList.remove('active');
+            });
+        });
+        
+        // Close theme dropdown when clicking outside
+        document.addEventListener('click', () => {
+            themeDropdown?.classList.remove('active');
         });
         
         // Export button - show new export dialog
@@ -187,6 +209,21 @@ class App {
         // Clear canvas button
         document.getElementById('clearBtn')?.addEventListener('click', () => {
             this.clearCanvas();
+        });
+        
+        // Templates button (if exists in menu/toolbar)
+        document.getElementById('templatesBtn')?.addEventListener('click', () => {
+            window.templatesManager?.showTemplatesModal();
+        });
+        
+        // Menu button - open templates
+        document.getElementById('menuBtn')?.addEventListener('click', () => {
+            window.templatesManager?.showTemplatesModal();
+        });
+        
+        // Stickers toggle button (if exists in toolbar)
+        document.querySelector('.tool-btn[data-tool="stickers"]')?.addEventListener('click', () => {
+            window.stickersManager?.toggleStickersPanel();
         });
         
         // Legacy Export modal (keep for backward compatibility)
@@ -273,6 +310,24 @@ class App {
             // Help shortcut
             if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && !isInputActive) {
                 this.showHelpModal();
+            }
+            
+            // Templates shortcut (Ctrl/Cmd + T)
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't' && !isInputActive) {
+                e.preventDefault();
+                window.templatesManager?.showTemplatesModal();
+            }
+            
+            // Stickers shortcut (Ctrl/Cmd + Shift + S)
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's' && !isInputActive) {
+                e.preventDefault();
+                window.stickersManager?.toggleStickersPanel();
+            }
+            
+            // Layers panel toggle (Ctrl/Cmd + L)
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l' && !isInputActive && !e.shiftKey) {
+                e.preventDefault();
+                document.getElementById('layersPanel')?.classList.toggle('active');
             }
             
             // Escape to close modals and deselect
@@ -471,12 +526,33 @@ class App {
         }
     }
     
-    toggleTheme() {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', newTheme);
-        localStorage.setItem('kimi-canvas-theme', newTheme);
+    setTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('kimi-canvas-theme', theme);
         window.infiniteCanvas?.render();
+        this.showToast(`Theme changed to ${theme.charAt(0).toUpperCase() + theme.slice(1)}`);
+    }
+    
+    toggleTheme() {
+        // Legacy toggle - cycles through light/dark
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        this.setTheme(newTheme);
+    }
+    
+    showLoading(message = 'Loading...') {
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) {
+            overlay.querySelector('span').textContent = message;
+            overlay.style.display = 'flex';
+        }
+    }
+    
+    hideLoading() {
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
     }
     
     setupExport() {
@@ -1017,7 +1093,7 @@ class App {
             border-radius: 8px;
             box-shadow: var(--shadow-md);
             z-index: 10000;
-            animation: fadeIn 0.2s ease;
+            animation: toastSlide 0.3s ease;
         `;
         document.body.appendChild(toast);
         
@@ -1025,6 +1101,52 @@ class App {
             toast.style.animation = 'fadeOut 0.2s ease';
             setTimeout(() => toast.remove(), 200);
         }, duration);
+    }
+    
+    setupTooltips() {
+        // Add hover tooltips for elements with title attribute
+        const tooltip = document.getElementById('tooltip');
+        if (!tooltip) return;
+        
+        document.querySelectorAll('[title]').forEach(el => {
+            const title = el.getAttribute('title');
+            el.removeAttribute('title');
+            el.dataset.tooltip = title;
+            
+            el.addEventListener('mouseenter', (e) => {
+                tooltip.textContent = title;
+                tooltip.classList.add('visible');
+                this.positionTooltip(e, tooltip);
+            });
+            
+            el.addEventListener('mousemove', (e) => {
+                this.positionTooltip(e, tooltip);
+            });
+            
+            el.addEventListener('mouseleave', () => {
+                tooltip.classList.remove('visible');
+            });
+        });
+    }
+    
+    positionTooltip(e, tooltip) {
+        const x = e.clientX;
+        const y = e.clientY;
+        const rect = tooltip.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Position above by default
+        let top = y - rect.height - 10;
+        let left = x - rect.width / 2;
+        
+        // Adjust if off-screen
+        if (left < 10) left = 10;
+        if (left + rect.width > viewportWidth - 10) left = viewportWidth - rect.width - 10;
+        if (top < 10) top = y + 20; // Show below if not enough space above
+        
+        tooltip.style.top = `${top}px`;
+        tooltip.style.left = `${left}px`;
     }
     
     handleAIGeneratedDiagram(payload) {

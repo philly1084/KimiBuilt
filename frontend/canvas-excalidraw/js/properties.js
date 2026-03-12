@@ -1,6 +1,6 @@
 /**
  * Properties Module - Right panel property controls
- * Enhanced: Added alignment tools, grid snapping toggle
+ * Enhanced: Extended color system with gradients, patterns, and color history
  */
 
 class PropertiesManager {
@@ -10,7 +10,7 @@ class PropertiesManager {
     }
     
     init() {
-        // Stroke color picker
+        // Legacy color pickers (for backwards compatibility)
         document.querySelectorAll('#strokeColorPicker .color-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 this.setStrokeColor(btn.dataset.color);
@@ -18,11 +18,102 @@ class PropertiesManager {
             });
         });
         
-        // Background color picker
         document.querySelectorAll('#backgroundColorPicker .color-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 this.setBackgroundColor(btn.dataset.color);
                 this.updateColorUI(btn, '#backgroundColorPicker');
+                // Clear gradient/pattern when setting solid color
+                this.clearGradientAndPattern();
+            });
+        });
+        
+        // Extended color pickers - Stroke
+        document.querySelectorAll('#strokeColorSection .color-picker-extended .color-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const color = btn.dataset.color;
+                this.setStrokeColor(color);
+                this.updateExtendedColorUI(btn, '#strokeColorSection');
+                if (window.ColorSystem) {
+                    window.ColorSystem.addToHistory(color);
+                }
+            });
+        });
+        
+        // Extended color pickers - Background
+        document.querySelectorAll('#backgroundColorSection .color-picker-extended .color-btn, #backgroundColorSection .color-picker .color-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const color = btn.dataset.color;
+                this.setBackgroundColor(color);
+                this.updateExtendedColorUI(btn, '#backgroundColorSection');
+                this.clearGradientAndPattern();
+                if (window.ColorSystem) {
+                    window.ColorSystem.addToHistory(color);
+                }
+            });
+        });
+        
+        // Custom color inputs
+        const customStrokeColor = document.getElementById('customStrokeColor');
+        if (customStrokeColor) {
+            customStrokeColor.addEventListener('change', (e) => {
+                this.setStrokeColor(e.target.value);
+                if (window.ColorSystem) {
+                    window.ColorSystem.addToHistory(e.target.value);
+                }
+            });
+        }
+        
+        const customBackgroundColor = document.getElementById('customBackgroundColor');
+        if (customBackgroundColor) {
+            customBackgroundColor.addEventListener('change', (e) => {
+                this.setBackgroundColor(e.target.value);
+                this.clearGradientAndPattern();
+                if (window.ColorSystem) {
+                    window.ColorSystem.addToHistory(e.target.value);
+                }
+            });
+        }
+        
+        // Color tabs (stroke)
+        document.querySelectorAll('#strokeColorSection .color-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                this.switchColorTab(tab, '#strokeColorSection');
+            });
+        });
+        
+        // Background fill type tabs
+        document.querySelectorAll('#backgroundColorSection .color-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.bgTab;
+                this.switchBackgroundTab(tab);
+            });
+        });
+        
+        // Gradient buttons
+        document.querySelectorAll('.gradient-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const gradientKey = btn.dataset.gradient;
+                const type = btn.dataset.gradientType || 'linear';
+                this.applyGradient(gradientKey, type);
+                this.updateGradientUI(btn);
+            });
+        });
+        
+        // Gradient type tabs
+        document.querySelectorAll('.gradient-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.dataset.gradientType;
+                this.switchGradientType(type);
+            });
+        });
+        
+        // Pattern buttons
+        document.querySelectorAll('.pattern-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const patternKey = btn.dataset.pattern;
+                this.applyPattern(patternKey);
+                this.updatePatternUI(btn);
             });
         });
         
@@ -143,6 +234,147 @@ class PropertiesManager {
                 btn.classList.toggle('active', enabled);
             }
         });
+        
+        // Corner radius slider
+        const cornerRadiusSlider = document.getElementById('cornerRadiusSlider');
+        if (cornerRadiusSlider) {
+            cornerRadiusSlider.addEventListener('input', (e) => {
+                this.setCornerRadius(parseInt(e.target.value));
+                document.getElementById('cornerRadiusValue').textContent = e.target.value + 'px';
+            });
+        }
+        
+        // Star points picker
+        document.querySelectorAll('#starPointsPicker .star-points-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.setStarPoints(parseInt(btn.dataset.points));
+                this.updateStarPointsUI(btn);
+            });
+        });
+        
+        // Arrowhead picker
+        document.querySelectorAll('#arrowheadPicker .arrowhead-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.setArrowhead(btn.dataset.arrowhead);
+                this.updateArrowheadUI(btn);
+            });
+        });
+        
+        // Connector style picker
+        document.querySelectorAll('#connectorStylePicker .connector-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.setConnectorStyle(btn.dataset.style);
+                this.updateConnectorStyleUI(btn);
+            });
+        });
+        
+        // Initialize color history UI
+        this.updateColorHistoryUI();
+    }
+    
+    // Switch color tab
+    switchColorTab(tab, container) {
+        const section = document.querySelector(container);
+        if (!section) return;
+        
+        // Update tab buttons
+        section.querySelectorAll('.color-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        
+        // Update tab content
+        section.querySelectorAll('.color-tab-content').forEach(content => {
+            content.classList.toggle('active', content.dataset.tab === tab);
+        });
+    }
+    
+    // Switch background fill type tab
+    switchBackgroundTab(tab) {
+        const section = document.getElementById('backgroundColorSection');
+        if (!section) return;
+        
+        // Update tab buttons
+        section.querySelectorAll('.color-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.bgTab === tab);
+        });
+        
+        // Update tab content
+        section.querySelectorAll('.color-bg-tab-content').forEach(content => {
+            content.classList.toggle('active', content.dataset.bgTab === tab);
+        });
+    }
+    
+    // Switch gradient type
+    switchGradientType(type) {
+        // Update tab buttons
+        document.querySelectorAll('.gradient-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.gradientType === type);
+        });
+        
+        // Show/hide gradient grids
+        const linearGrid = document.getElementById('linearGradients');
+        const radialGrid = document.getElementById('radialGradients');
+        
+        if (linearGrid) linearGrid.style.display = type === 'linear' ? 'grid' : 'none';
+        if (radialGrid) radialGrid.style.display = type === 'radial' ? 'grid' : 'none';
+    }
+    
+    // Apply gradient to selected elements
+    applyGradient(gradientKey, type) {
+        const canvas = window.infiniteCanvas;
+        if (!canvas || !window.ColorSystem) return;
+        
+        const gradient = window.ColorSystem.gradients[type]?.[gradientKey];
+        if (!gradient) return;
+        
+        let changed = false;
+        for (const el of canvas.selectedElements) {
+            el.fillType = 'gradient';
+            el.gradient = { ...gradient };
+            el.backgroundColor = 'transparent';
+            el.pattern = null;
+            changed = true;
+        }
+        
+        if (changed) {
+            canvas.render();
+            window.historyManager?.pushState(canvas.elements);
+        }
+    }
+    
+    // Apply pattern to selected elements
+    applyPattern(patternKey) {
+        const canvas = window.infiniteCanvas;
+        if (!canvas || !window.ColorSystem) return;
+        
+        const pattern = window.ColorSystem.patterns[patternKey];
+        if (!pattern) return;
+        
+        let changed = false;
+        for (const el of canvas.selectedElements) {
+            el.fillType = 'pattern';
+            el.pattern = { ...pattern, key: patternKey };
+            el.backgroundColor = 'transparent';
+            el.gradient = null;
+            changed = true;
+        }
+        
+        if (changed) {
+            canvas.render();
+            window.historyManager?.pushState(canvas.elements);
+        }
+    }
+    
+    // Clear gradient and pattern when setting solid color
+    clearGradientAndPattern() {
+        const canvas = window.infiniteCanvas;
+        if (!canvas) return;
+        
+        for (const el of canvas.selectedElements) {
+            el.fillType = 'solid';
+            el.gradient = null;
+            el.pattern = null;
+        }
     }
     
     updateForSelection() {
@@ -152,6 +384,7 @@ class PropertiesManager {
         if (elements.length === 0) {
             this.selectedElement = null;
             this.disableControls(true);
+            this.updateShapePropertyGroups(null);
             return;
         }
         
@@ -159,12 +392,14 @@ class PropertiesManager {
             this.selectedElement = elements[0];
             this.disableControls(false);
             this.syncUItoElement(this.selectedElement);
+            this.updateShapePropertyGroups(this.selectedElement);
         } else {
             // Multiple selection - disable specific controls
             this.selectedElement = null;
             this.disableControls(false);
             document.getElementById('fontSizeGroup')?.classList.add('disabled');
             document.getElementById('fontFamilyGroup')?.classList.add('disabled');
+            this.updateShapePropertyGroups(null);
         }
         
         // Update alignment button visibility
@@ -172,6 +407,39 @@ class PropertiesManager {
         
         // Update AI image properties visibility
         this.updateAIImageProperties(elements);
+    }
+    
+    updateShapePropertyGroups(element) {
+        // Hide all shape-specific groups by default
+        const cornerRadiusGroup = document.getElementById('cornerRadiusGroup');
+        const starPointsGroup = document.getElementById('starPointsGroup');
+        const arrowheadGroup = document.getElementById('arrowheadGroup');
+        const connectorStyleGroup = document.getElementById('connectorStyleGroup');
+        
+        if (cornerRadiusGroup) cornerRadiusGroup.style.display = 'none';
+        if (starPointsGroup) starPointsGroup.style.display = 'none';
+        if (arrowheadGroup) arrowheadGroup.style.display = 'none';
+        if (connectorStyleGroup) connectorStyleGroup.style.display = 'none';
+        
+        if (!element) return;
+        
+        // Show relevant groups based on element type
+        switch (element.type) {
+            case 'rectangle':
+                if (cornerRadiusGroup) cornerRadiusGroup.style.display = 'flex';
+                break;
+            case 'star':
+                if (starPointsGroup) starPointsGroup.style.display = 'flex';
+                break;
+            case 'arrow':
+            case 'curvedArrow':
+            case 'elbowArrow':
+                if (arrowheadGroup) arrowheadGroup.style.display = 'flex';
+                break;
+            case 'connector':
+                if (connectorStyleGroup) connectorStyleGroup.style.display = 'flex';
+                break;
+        }
     }
     
     updateAlignmentVisibility(selectionCount) {
@@ -195,9 +463,30 @@ class PropertiesManager {
         const strokeBtn = document.querySelector(`#strokeColorPicker .color-btn[data-color="${element.strokeColor}"]`);
         if (strokeBtn) this.updateColorUI(strokeBtn, '#strokeColorPicker');
         
+        // Also update extended color pickers
+        const strokeExtendedBtn = document.querySelector(`#strokeColorSection .color-btn[data-color="${element.strokeColor}"]`);
+        if (strokeExtendedBtn) this.updateExtendedColorUI(strokeExtendedBtn, '#strokeColorSection');
+        
         // Update background color
-        const bgBtn = document.querySelector(`#backgroundColorPicker .color-btn[data-color="${element.backgroundColor}"]`);
-        if (bgBtn) this.updateColorUI(bgBtn, '#backgroundColorPicker');
+        if (element.fillType === 'gradient' && element.gradient) {
+            // Find and highlight the gradient button
+            const gradientBtn = document.querySelector(`.gradient-btn[data-gradient="${this.getGradientKey(element.gradient)}"]`);
+            if (gradientBtn) this.updateGradientUI(gradientBtn);
+            this.switchBackgroundTab('gradient');
+        } else if (element.fillType === 'pattern' && element.pattern) {
+            // Find and highlight the pattern button
+            const patternBtn = document.querySelector(`.pattern-btn[data-pattern="${element.pattern.key}"]`);
+            if (patternBtn) this.updatePatternUI(patternBtn);
+            this.switchBackgroundTab('pattern');
+        } else {
+            // Solid color
+            const bgBtn = document.querySelector(`#backgroundColorPicker .color-btn[data-color="${element.backgroundColor}"]`);
+            if (bgBtn) this.updateColorUI(bgBtn, '#backgroundColorPicker');
+            
+            const bgExtendedBtn = document.querySelector(`#backgroundColorSection .color-btn[data-color="${element.backgroundColor}"]`);
+            if (bgExtendedBtn) this.updateExtendedColorUI(bgExtendedBtn, '#backgroundColorSection');
+            this.switchBackgroundTab('solid');
+        }
         
         // Update stroke width
         const widthBtn = document.querySelector(`#strokeWidthPicker .stroke-btn[data-width="${element.strokeWidth}"]`);
@@ -235,6 +524,44 @@ class PropertiesManager {
         if (element.type === 'image' && element.aiGenerated) {
             this.updateAIImageInfo(element);
         }
+        
+        // Update corner radius (for rectangles)
+        if (element.type === 'rectangle') {
+            const cornerRadiusSlider = document.getElementById('cornerRadiusSlider');
+            const cornerRadiusValue = document.getElementById('cornerRadiusValue');
+            if (cornerRadiusSlider) cornerRadiusSlider.value = element.cornerRadius || 0;
+            if (cornerRadiusValue) cornerRadiusValue.textContent = (element.cornerRadius || 0) + 'px';
+        }
+        
+        // Update star points (for stars)
+        if (element.type === 'star') {
+            const starPointsBtn = document.querySelector(`#starPointsPicker .star-points-btn[data-points="${element.starPoints || 5}"]`);
+            if (starPointsBtn) this.updateStarPointsUI(starPointsBtn);
+        }
+        
+        // Update arrowhead (for arrows)
+        if (element.type === 'arrow' || element.type === 'curvedArrow' || element.type === 'elbowArrow') {
+            const arrowheadBtn = document.querySelector(`#arrowheadPicker .arrowhead-btn[data-arrowhead="${element.arrowhead || 'end'}"]`);
+            if (arrowheadBtn) this.updateArrowheadUI(arrowheadBtn);
+        }
+        
+        // Update connector style (for connectors)
+        if (element.type === 'connector') {
+            const connectorBtn = document.querySelector(`#connectorStylePicker .connector-btn[data-style="${element.connectorStyle || 'straight'}"]`);
+            if (connectorBtn) this.updateConnectorStyleUI(connectorBtn);
+        }
+    }
+    
+    // Helper to get gradient key from gradient object
+    getGradientKey(gradient) {
+        if (!window.ColorSystem) return null;
+        
+        for (const type of ['linear', 'radial']) {
+            for (const [key, g] of Object.entries(window.ColorSystem.gradients[type] || {})) {
+                if (g.name === gradient.name) return key;
+            }
+        }
+        return null;
     }
     
     updateAIImageProperties(elements) {
@@ -304,6 +631,22 @@ class PropertiesManager {
         this.updateSelectedElements('fontFamily', family);
     }
     
+    setCornerRadius(radius) {
+        this.updateSelectedElements('cornerRadius', radius);
+    }
+    
+    setStarPoints(points) {
+        this.updateSelectedElements('starPoints', points);
+    }
+    
+    setArrowhead(arrowhead) {
+        this.updateSelectedElements('arrowhead', arrowhead);
+    }
+    
+    setConnectorStyle(style) {
+        this.updateSelectedElements('connectorStyle', style);
+    }
+    
     updateSelectedElements(property, value) {
         const canvas = window.infiniteCanvas;
         let changed = false;
@@ -336,6 +679,25 @@ class PropertiesManager {
         activeBtn.classList.add('active');
     }
     
+    updateExtendedColorUI(activeBtn, container) {
+        if (!activeBtn) return;
+        const section = document.querySelector(container);
+        if (section) {
+            section.querySelectorAll('.color-btn').forEach(btn => btn.classList.remove('active'));
+            activeBtn.classList.add('active');
+        }
+    }
+    
+    updateGradientUI(activeBtn) {
+        document.querySelectorAll('.gradient-btn').forEach(btn => btn.classList.remove('active'));
+        if (activeBtn) activeBtn.classList.add('active');
+    }
+    
+    updatePatternUI(activeBtn) {
+        document.querySelectorAll('.pattern-btn').forEach(btn => btn.classList.remove('active'));
+        if (activeBtn) activeBtn.classList.add('active');
+    }
+    
     updateStrokeWidthUI(activeBtn) {
         document.querySelectorAll('#strokeWidthPicker .stroke-btn').forEach(btn => btn.classList.remove('active'));
         activeBtn.classList.add('active');
@@ -359,6 +721,58 @@ class PropertiesManager {
     updateFontSizeUI(activeBtn) {
         document.querySelectorAll('#fontSizePicker .font-size-btn').forEach(btn => btn.classList.remove('active'));
         activeBtn.classList.add('active');
+    }
+    
+    updateStarPointsUI(activeBtn) {
+        document.querySelectorAll('#starPointsPicker .star-points-btn').forEach(btn => btn.classList.remove('active'));
+        activeBtn.classList.add('active');
+    }
+    
+    updateArrowheadUI(activeBtn) {
+        document.querySelectorAll('#arrowheadPicker .arrowhead-btn').forEach(btn => btn.classList.remove('active'));
+        activeBtn.classList.add('active');
+    }
+    
+    updateConnectorStyleUI(activeBtn) {
+        document.querySelectorAll('#connectorStylePicker .connector-btn').forEach(btn => btn.classList.remove('active'));
+        activeBtn.classList.add('active');
+    }
+    
+    // Update color history UI
+    updateColorHistoryUI() {
+        if (!window.ColorSystem) return;
+        
+        const updateHistory = (containerId, history) => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            if (history.length === 0) {
+                container.innerHTML = '<span class="color-history-empty">No recent colors</span>';
+                return;
+            }
+            
+            container.innerHTML = history.map(color => `
+                <button class="color-btn" data-color="${color}" style="background: ${color};" title="${color}"></button>
+            `).join('');
+            
+            // Attach listeners
+            container.querySelectorAll('.color-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const section = container.closest('.color-section');
+                    const target = section?.dataset.target || 'background';
+                    if (target === 'stroke') {
+                        this.setStrokeColor(btn.dataset.color);
+                    } else {
+                        this.setBackgroundColor(btn.dataset.color);
+                        this.clearGradientAndPattern();
+                    }
+                });
+            });
+        };
+        
+        // Update both history containers
+        updateHistory('strokeColorHistory', window.ColorSystem.history);
+        updateHistory('backgroundColorHistory', window.ColorSystem.history);
     }
 }
 

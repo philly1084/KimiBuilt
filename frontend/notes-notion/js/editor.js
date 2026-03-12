@@ -686,6 +686,7 @@ const Editor = (function() {
      */
     function handleBlockKeydown(e, block, input) {
         const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
         const range = sel.getRangeAt(0);
         
         switch (e.key) {
@@ -744,6 +745,13 @@ const Editor = (function() {
                 }
                 break;
                 
+            case 'Delete':
+                if (shouldDeleteCurrentBlock(input, range)) {
+                    e.preventDefault();
+                    deleteBlock(block.id);
+                }
+                break;
+                
             case 'Tab':
                 e.preventDefault();
                 saveToHistory();
@@ -782,12 +790,26 @@ const Editor = (function() {
         }
     }
     
+    function shouldDeleteCurrentBlock(input, range) {
+        if (!range.collapsed) {
+            const selectedText = range.toString().trim();
+            return selectedText === input.textContent.trim();
+        }
+
+        if (!input.textContent.trim()) {
+            return true;
+        }
+
+        return isAtStart(range, input) && isAtEnd(range, input);
+    }
+
     /**
      * Handle keyup events (for slash command and mention detection)
      */
     function handleBlockKeyup(e, block, input) {
         const text = input.textContent;
         const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
         const range = sel.getRangeAt(0);
         
         // Check for slash at start
@@ -1268,7 +1290,7 @@ const Editor = (function() {
     /**
      * Reorder blocks (drag and drop)
      */
-    function reorderBlocks(draggedId, targetId) {
+    function reorderBlocks(draggedId, targetId, position = 'after') {
         if (!currentPage || draggedId === targetId) return;
         
         saveToHistory();
@@ -1280,10 +1302,13 @@ const Editor = (function() {
         
         // Remove dragged block
         const [draggedBlock] = currentPage.blocks.splice(draggedIndex, 1);
+        const adjustedTargetIndex = currentPage.blocks.findIndex(b => b.id === targetId);
+        if (!draggedBlock || adjustedTargetIndex === -1) return;
         
-        // Insert at target position
-        const newIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
-        currentPage.blocks.splice(newIndex + 1, 0, draggedBlock);
+        const insertIndex = position === 'before'
+            ? adjustedTargetIndex
+            : adjustedTargetIndex + 1;
+        currentPage.blocks.splice(insertIndex, 0, draggedBlock);
         
         refreshEditor();
         autoSave();
@@ -1452,3 +1477,4 @@ const Editor = (function() {
     
     return window.Editor;
 })();
+

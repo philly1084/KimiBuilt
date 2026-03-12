@@ -8,8 +8,8 @@ const Storage = (function() {
     const CURRENT_PAGE_KEY = 'notes_notion_current_page';
     const THEME_KEY = 'notes_notion_theme';
     const GLOBAL_MODEL_KEY = 'notes_notion_global_model';
-    
-    // Storage state
+    const ASSET_DB_NAME = 'notes_notion_assets';
+    const ASSET_STORE_NAME = 'assets';
     let storageAvailable = true;
     let storageError = null;
     let memoryFallback = null; // In-memory fallback when localStorage fails
@@ -20,7 +20,7 @@ const Storage = (function() {
             {
                 id: 'welcome',
                 title: 'Welcome to Notes',
-                icon: '👋',
+                icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹',
                 cover: null,
                 defaultModel: null,
                 properties: [],
@@ -64,7 +64,7 @@ const Storage = (function() {
                     {
                         id: 'block-5',
                         type: 'bulleted_list',
-                        content: 'Drag blocks using the ⋮⋮ handle to reorder',
+                        content: 'Drag blocks using the ÃƒÂ¢Ã¢â‚¬Â¹Ã‚Â®ÃƒÂ¢Ã¢â‚¬Â¹Ã‚Â® handle to reorder',
                         children: [],
                         formatting: {},
                         color: null,
@@ -109,7 +109,7 @@ const Storage = (function() {
                     {
                         id: 'block-10',
                         type: 'callout',
-                        content: '💡 Tip: Select text and use the AI toolbar to transform it with different models. Each page can have its own default AI model!',
+                        content: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¡ Tip: Select text and use the AI toolbar to transform it with different models. Each page can have its own default AI model!',
                         children: [],
                         formatting: {},
                         color: null,
@@ -154,6 +154,118 @@ const Storage = (function() {
      */
     function generateBlockId() {
         return 'block-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    }
+
+    function openAssetDb() {
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) {
+                reject(new Error('indexedDB unavailable'));
+                return;
+            }
+
+            const request = window.indexedDB.open(ASSET_DB_NAME, 1);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains(ASSET_STORE_NAME)) {
+                    db.createObjectStore(ASSET_STORE_NAME);
+                }
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('Failed to open asset database'));
+        });
+    }
+
+    async function saveImageAsset(sourceUrl) {
+        if (!sourceUrl) return null;
+        if (String(sourceUrl).startsWith('asset://')) return String(sourceUrl);
+
+        try {
+            const response = await fetch(sourceUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const blob = await response.blob();
+            const assetId = 'asset-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const db = await openAssetDb();
+
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(ASSET_STORE_NAME, 'readwrite');
+                tx.objectStore(ASSET_STORE_NAME).put(blob, assetId);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error || new Error('Failed to store image asset'));
+            });
+
+            db.close();
+            return `asset://${assetId}`;
+        } catch (error) {
+            console.warn('Failed to save image asset:', error.message);
+            return sourceUrl;
+        }
+    }
+
+    async function resolveImageAsset(assetRef) {
+        const ref = String(assetRef || '');
+        if (!ref.startsWith('asset://')) {
+            return ref || null;
+        }
+
+        const assetId = ref.slice('asset://'.length);
+
+        try {
+            const db = await openAssetDb();
+            const blob = await new Promise((resolve, reject) => {
+                const tx = db.transaction(ASSET_STORE_NAME, 'readonly');
+                const request = tx.objectStore(ASSET_STORE_NAME).get(assetId);
+                request.onsuccess = () => resolve(request.result || null);
+                request.onerror = () => reject(request.error || new Error('Failed to read image asset'));
+            });
+            db.close();
+
+            if (!blob) return null;
+            return URL.createObjectURL(blob);
+        } catch (error) {
+            console.warn('Failed to resolve image asset:', error.message);
+            return null;
+        }
+    }
+
+    function normalizeBlockForStorage(block) {
+        if (!block || typeof block !== 'object') return block;
+
+        const nextBlock = { ...block };
+        if (Array.isArray(nextBlock.children)) {
+            nextBlock.children = nextBlock.children.map(normalizeBlockForStorage);
+        }
+
+        if (nextBlock.type === 'ai_image' && nextBlock.content && typeof nextBlock.content === 'object') {
+            const nextContent = { ...nextBlock.content };
+            delete nextContent._resolvedImageUrl;
+            delete nextContent._assetLoading;
+            delete nextContent.unsplashResults;
+            delete nextContent.errorMessage;
+
+            if (nextContent.imageAssetId && (!nextContent.imageUrl || String(nextContent.imageUrl).startsWith('blob:'))) {
+                nextContent.imageUrl = `asset://${nextContent.imageAssetId}`;
+            }
+
+            nextBlock.content = nextContent;
+        }
+
+        return nextBlock;
+    }
+
+    function normalizeDataForStorage(data) {
+        const clone = JSON.parse(JSON.stringify(data));
+        clone.pages = (clone.pages || []).map((page) => ({
+            ...page,
+            blocks: (page.blocks || []).map(normalizeBlockForStorage),
+        }));
+        clone.trash = (clone.trash || []).map((page) => ({
+            ...page,
+            blocks: (page.blocks || []).map(normalizeBlockForStorage),
+        }));
+        return clone;
     }
     
     /**
@@ -210,16 +322,16 @@ const Storage = (function() {
      * Save all data to localStorage with error handling
      */
     function saveAll(data) {
+        const normalizedData = normalizeDataForStorage(data);
         // Always update memory fallback
-        memoryFallback = JSON.parse(JSON.stringify(data));
-        
+        memoryFallback = JSON.parse(JSON.stringify(normalizedData));
         if (!storageAvailable) {
             console.warn('Saving to memory only - localStorage unavailable');
             return { success: false, memoryOnly: true, error: storageError };
         }
         
         try {
-            const serialized = JSON.stringify(data);
+            const serialized = JSON.stringify(normalizedData);
             
             // Check size before saving (localStorage limit is typically 5-10MB)
             const sizeInMB = serialized.length / 1024 / 1024;
@@ -574,7 +686,7 @@ const Storage = (function() {
                         md += `${indent}---\n\n`;
                         break;
                     case 'callout':
-                        md += `${indent}> 💡 ${block.content}\n\n`;
+                        md += `${indent}> ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¡ ${block.content}\n\n`;
                         break;
                     case 'ai_image':
                         md += `${indent}![AI Image: ${block.content.prompt || ''}](${block.content.imageUrl || ''})\n\n`;
@@ -630,6 +742,8 @@ const Storage = (function() {
         loadAll,
         saveAll,
         getStorageStatus,
+        saveImageAsset,
+        resolveImageAsset,
         exportToFile,
         importFromFile,
         getPages,
@@ -650,3 +764,5 @@ const Storage = (function() {
         clearAll
     };
 })();
+
+

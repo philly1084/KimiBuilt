@@ -1,12 +1,13 @@
 /**
  * Renderer Module - Rough.js rendering engine
- * Fixed: Better rough.js integration, new element types (sticky, frame)
+ * Enhanced: Support for gradients, patterns, and improved fill styles
  */
 
 class Renderer {
     constructor() {
         this.rough = window.rough;
         this.generators = new Map(); // Cache generators for different roughness values
+        this.patternCanvases = new Map(); // Cache pattern canvases
     }
     
     getGenerator(roughness = 1) {
@@ -90,6 +91,156 @@ class Renderer {
         return options;
     }
     
+    // Create gradient fill
+    createGradient(ctx, element, x, y, width, height) {
+        if (!element.gradient) return null;
+        
+        const gradient = element.gradient;
+        let canvasGradient;
+        
+        if (gradient.type === 'linear') {
+            // Parse direction (e.g., "135deg")
+            const angle = parseInt(gradient.direction) || 135;
+            const rad = (angle - 90) * Math.PI / 180;
+            
+            // Calculate start and end points based on angle
+            const cx = x + width / 2;
+            const cy = y + height / 2;
+            const dx = Math.cos(rad) * width / 2;
+            const dy = Math.sin(rad) * height / 2;
+            
+            canvasGradient = ctx.createLinearGradient(
+                cx - dx, cy - dy,
+                cx + dx, cy + dy
+            );
+        } else if (gradient.type === 'radial') {
+            const cx = x + width / 2;
+            const cy = y + height / 2;
+            const r = Math.max(width, height) / 2;
+            
+            canvasGradient = ctx.createRadialGradient(
+                cx, cy, 0,
+                cx, cy, r
+            );
+        }
+        
+        if (canvasGradient && gradient.stops) {
+            gradient.stops.forEach((stop, index) => {
+                const offset = index / (gradient.stops.length - 1);
+                canvasGradient.addColorStop(offset, stop);
+            });
+        }
+        
+        return canvasGradient;
+    }
+    
+    // Create pattern fill
+    createPattern(ctx, element) {
+        if (!element.pattern) return null;
+        
+        const patternKey = `${element.pattern.key}_${element.strokeColor || '#000000'}`;
+        
+        // Check cache
+        if (this.patternCanvases.has(patternKey)) {
+            return this.patternCanvases.get(patternKey);
+        }
+        
+        // Create pattern canvas
+        const patternCanvas = document.createElement('canvas');
+        const patternCtx = patternCanvas.getContext('2d');
+        const size = parseInt(element.pattern.size) || 10;
+        
+        patternCanvas.width = size;
+        patternCanvas.height = size;
+        
+        // Draw pattern
+        const color = element.strokeColor || '#000000';
+        patternCtx.strokeStyle = color;
+        patternCtx.fillStyle = color;
+        
+        switch (element.pattern.key) {
+            case 'dots':
+                patternCtx.beginPath();
+                patternCtx.arc(size/2, size/2, 1.5, 0, Math.PI * 2);
+                patternCtx.fill();
+                break;
+            case 'dotsSmall':
+                patternCtx.beginPath();
+                patternCtx.arc(size/2, size/2, 1, 0, Math.PI * 2);
+                patternCtx.fill();
+                break;
+            case 'lines':
+                patternCtx.lineWidth = 1;
+                patternCtx.beginPath();
+                patternCtx.moveTo(size/2, 0);
+                patternCtx.lineTo(size/2, size);
+                patternCtx.stroke();
+                break;
+            case 'linesDiagonal':
+                patternCtx.lineWidth = 1;
+                patternCtx.beginPath();
+                patternCtx.moveTo(0, size);
+                patternCtx.lineTo(size, 0);
+                patternCtx.stroke();
+                break;
+            case 'crosshatch':
+                patternCtx.lineWidth = 1;
+                patternCtx.beginPath();
+                patternCtx.moveTo(0, 0);
+                patternCtx.lineTo(size, size);
+                patternCtx.moveTo(size, 0);
+                patternCtx.lineTo(0, size);
+                patternCtx.stroke();
+                break;
+            case 'waves':
+                patternCtx.lineWidth = 1;
+                patternCtx.beginPath();
+                for (let i = 0; i < size; i += 2) {
+                    patternCtx.lineTo(i, size/2 + Math.sin(i * 0.5) * 2);
+                }
+                patternCtx.stroke();
+                break;
+            case 'grid':
+                patternCtx.lineWidth = 1;
+                patternCtx.beginPath();
+                patternCtx.moveTo(size/2, 0);
+                patternCtx.lineTo(size/2, size);
+                patternCtx.moveTo(0, size/2);
+                patternCtx.lineTo(size, size/2);
+                patternCtx.stroke();
+                break;
+            case 'checkerboard':
+                patternCtx.fillRect(0, 0, size/2, size/2);
+                patternCtx.fillRect(size/2, size/2, size/2, size/2);
+                break;
+        }
+        
+        const pattern = ctx.createPattern(patternCanvas, 'repeat');
+        this.patternCanvases.set(patternKey, pattern);
+        return pattern;
+    }
+    
+    // Apply fill to context
+    applyFill(ctx, element, x, y, width, height) {
+        if (element.fillType === 'gradient' && element.gradient) {
+            const gradient = this.createGradient(ctx, element, x, y, width, height);
+            if (gradient) {
+                ctx.fillStyle = gradient;
+                return true;
+            }
+        } else if (element.fillType === 'pattern' && element.pattern) {
+            const pattern = this.createPattern(ctx, element);
+            if (pattern) {
+                ctx.fillStyle = pattern;
+                return true;
+            }
+        } else if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+            ctx.fillStyle = element.backgroundColor;
+            return true;
+        }
+        return false;
+    }
+    
     drawRectangle(ctx, rc, element, options) {
         const x = element.x - element.width / 2;
         const y = element.y - element.height / 2;
@@ -98,9 +249,12 @@ class Renderer {
 
         ctx.save();
         this.applyStrokeStyle(ctx, element);
-        this.applyFillStyle(ctx, element);
+        
+        // Apply fill
+        const hasFill = this.applyFill(ctx, element, x, y, w, h);
+        
         this.beginRoundedRect(ctx, x, y, w, h, element.edgeType === 'round' ? Math.min(w, h) * 0.1 : 0);
-        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+        if (hasFill) {
             ctx.fill();
         }
         ctx.stroke();
@@ -132,14 +286,24 @@ class Renderer {
 
         ctx.save();
         this.applyStrokeStyle(ctx, element);
-        this.applyFillStyle(ctx, element);
+        
+        // Calculate bounding box for gradient/pattern
+        const x = cx - hw;
+        const y = cy - hh;
+        const w = element.width;
+        const h = element.height;
+        
+        // Apply fill
+        const hasFill = this.applyFill(ctx, element, x, y, w, h);
+        
         ctx.beginPath();
         ctx.moveTo(cx, cy - hh);
         ctx.lineTo(cx + hw, cy);
         ctx.lineTo(cx, cy + hh);
         ctx.lineTo(cx - hw, cy);
         ctx.closePath();
-        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+        
+        if (hasFill) {
             ctx.fill();
         }
         ctx.stroke();
@@ -154,13 +318,25 @@ class Renderer {
     drawEllipse(ctx, rc, element, options) {
         const cx = element.x;
         const cy = element.y;
+        const rx = element.width / 2;
+        const ry = element.height / 2;
 
         ctx.save();
         this.applyStrokeStyle(ctx, element);
-        this.applyFillStyle(ctx, element);
+        
+        // Calculate bounding box for gradient/pattern
+        const x = cx - rx;
+        const y = cy - ry;
+        const w = element.width;
+        const h = element.height;
+        
+        // Apply fill
+        const hasFill = this.applyFill(ctx, element, x, y, w, h);
+        
         ctx.beginPath();
-        ctx.ellipse(cx, cy, element.width / 2, element.height / 2, 0, 0, Math.PI * 2);
-        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        
+        if (hasFill) {
             ctx.fill();
         }
         ctx.stroke();
@@ -407,8 +583,19 @@ class Renderer {
         ctx.save();
         ctx.globalAlpha = element.opacity ?? 1;
         
-        // Fill background
-        ctx.fillStyle = element.backgroundColor || '#ffec99';
+        // Apply fill for sticky note
+        if (element.fillType === 'gradient' && element.gradient) {
+            const gradient = this.createGradient(ctx, element, x, y, w, h);
+            if (gradient) ctx.fillStyle = gradient;
+            else ctx.fillStyle = element.backgroundColor || '#ffec99';
+        } else if (element.fillType === 'pattern' && element.pattern) {
+            const pattern = this.createPattern(ctx, element);
+            if (pattern) ctx.fillStyle = pattern;
+            else ctx.fillStyle = element.backgroundColor || '#ffec99';
+        } else {
+            ctx.fillStyle = element.backgroundColor || '#ffec99';
+        }
+        
         ctx.fillRect(x, y, w, h);
         
         // Draw border
@@ -469,9 +656,24 @@ class Renderer {
         ctx.save();
         ctx.globalAlpha = element.opacity ?? 1;
         
-        // Draw frame background
-        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+        // Apply fill for frame background
+        if (element.fillType === 'gradient' && element.gradient) {
+            const gradient = this.createGradient(ctx, element, x, y, w, h);
+            if (gradient) ctx.fillStyle = gradient;
+            else if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+                ctx.fillStyle = element.backgroundColor;
+            }
+        } else if (element.fillType === 'pattern' && element.pattern) {
+            const pattern = this.createPattern(ctx, element);
+            if (pattern) ctx.fillStyle = pattern;
+            else if (element.backgroundColor && element.backgroundColor !== 'transparent') {
+                ctx.fillStyle = element.backgroundColor;
+            }
+        } else if (element.backgroundColor && element.backgroundColor !== 'transparent') {
             ctx.fillStyle = element.backgroundColor;
+        }
+        
+        if (element.backgroundColor && element.backgroundColor !== 'transparent') {
             ctx.fillRect(x, y, w, h);
         }
         

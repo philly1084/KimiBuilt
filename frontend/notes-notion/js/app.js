@@ -139,8 +139,8 @@
             onDuplicate: (blockId) => {
                 Editor.duplicateBlock(blockId);
             },
-            onDrop: (draggedId, targetId) => {
-                Editor.reorderBlocks(draggedId, targetId);
+            onDrop: (draggedId, targetId, position) => {
+                Editor.reorderBlocks(draggedId, targetId, position);
             },
             onColorChange: (blockId, color) => {
                 Editor.setBlockColor(blockId, color);
@@ -651,3 +651,4 @@
     };
     
 })();
+
