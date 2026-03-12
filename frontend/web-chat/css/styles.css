@@ -1465,48 +1465,40 @@ code[class*="language-"] {
    Connection Status
    ============================================ */
 
-#connection-status,
-#sidebar-connection-status {
+#connection-status {
     transition: all var(--transition-fast);
 }
 
-#connection-status.connected,
-#sidebar-connection-status.connected {
+#connection-status.connected {
     background-color: rgba(34, 197, 94, 0.1);
     color: var(--success);
 }
 
-#connection-status.connecting,
-#sidebar-connection-status.connecting {
+#connection-status.connecting {
     background-color: rgba(245, 158, 11, 0.1);
     color: var(--warning);
 }
 
-#connection-status.disconnected,
-#sidebar-connection-status.disconnected {
+#connection-status.disconnected {
     background-color: rgba(239, 68, 68, 0.1);
     color: var(--error);
 }
 
-#status-dot,
-#sidebar-status-dot {
+#status-dot {
     transition: all var(--transition-fast);
 }
 
-#status-dot.connected,
-#sidebar-status-dot.connected {
+#status-dot.connected {
     background-color: var(--success) !important;
     box-shadow: 0 0 8px var(--success);
 }
 
-#status-dot.connecting,
-#sidebar-status-dot.connecting {
+#status-dot.connecting {
     background-color: var(--warning) !important;
     animation: pulse 1.5s infinite;
 }
 
-#status-dot.disconnected,
-#sidebar-status-dot.disconnected {
+#status-dot.disconnected {
     background-color: var(--error) !important;
 }
 

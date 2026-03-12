@@ -547,6 +547,15 @@ const Editor = (function() {
         
         const renderFn = Blocks.render[block.type] || Blocks.render.text;
         const content = renderFn(block, true);
+        
+        // Apply text color if set
+        if (block.textColor) {
+            const input = content.querySelector('.block-input');
+            if (input) {
+                input.classList.add(`text-color-${block.textColor}`);
+            }
+        }
+        
         blockEl.appendChild(content);
         
         setupBlockInteractions(blockEl, block);
@@ -1194,7 +1203,7 @@ const Editor = (function() {
     }
     
     /**
-     * Change block color
+     * Change block color (background)
      */
     function setBlockColor(blockId, color) {
         if (!currentPage) return;
@@ -1208,15 +1217,48 @@ const Editor = (function() {
         
         const blockEl = document.querySelector(`.block[data-block-id="${blockId}"]`);
         if (blockEl) {
-            // Remove existing color classes
+            // Remove existing background color classes
             blockEl.classList.forEach(cls => {
-                if (cls.startsWith('color-')) {
+                if (cls.startsWith('color-') && !cls.startsWith('color-text-')) {
                     blockEl.classList.remove(cls);
                 }
             });
             
             if (color) {
                 blockEl.classList.add(`color-${color}`);
+            }
+        }
+        
+        autoSave();
+    }
+    
+    /**
+     * Change text color
+     */
+    function setTextColor(blockId, color) {
+        if (!currentPage) return;
+        
+        saveToHistory();
+        
+        const block = currentPage.blocks.find(b => b.id === blockId);
+        if (!block) return;
+        
+        block.textColor = color;
+        
+        const blockEl = document.querySelector(`.block[data-block-id="${blockId}"]`);
+        if (blockEl) {
+            const input = blockEl.querySelector('.block-input');
+            if (input) {
+                // Remove existing text color classes
+                input.classList.forEach(cls => {
+                    if (cls.startsWith('text-color-')) {
+                        input.classList.remove(cls);
+                    }
+                });
+                
+                if (color) {
+                    input.classList.add(`text-color-${color}`);
+                }
             }
         }
         
@@ -1389,6 +1431,7 @@ const Editor = (function() {
         duplicateBlock,
         convertBlockType,
         setBlockColor,
+        setTextColor,
         reorderBlocks,
         focusBlock,
         savePage,

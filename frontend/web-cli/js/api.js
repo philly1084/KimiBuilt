@@ -17,7 +17,7 @@ const RETRY_DELAY = 1000;
 class WebCLIAPI {
     constructor() {
         this.sessionId = null;
-        this.currentModel = 'gpt-4o';
+        this.currentModel = null;
         this.models = [];
         this.connectionStatus = 'unknown';
         this.lastHealthCheck = null;
@@ -131,6 +131,12 @@ class WebCLIAPI {
             if (response.ok) {
                 const data = await response.json();
                 this.models = data.data || [];
+                if (this.models.length > 0) {
+                    const modelExists = this.currentModel && this.models.some((model) => model.id === this.currentModel);
+                    if (!modelExists) {
+                        this.currentModel = this.models[0].id;
+                    }
+                }
                 return this.models;
             }
         } catch (error) {
@@ -144,6 +150,9 @@ class WebCLIAPI {
             { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: 'High capability model' },
             { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', description: 'Fast and efficient' },
         ];
+        if (!this.currentModel) {
+            this.currentModel = this.models[0].id;
+        }
         return this.models;
     }
 
@@ -437,5 +446,7 @@ class WebCLIAPI {
 }
 
 const api = new WebCLIAPI();
+
+
 
 

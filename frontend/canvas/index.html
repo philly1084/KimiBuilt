@@ -67,6 +67,12 @@
                 </div>
             </div>
             <div class="header-right">
+                <!-- Model Selector -->
+                <div class="model-selector">
+                    <select id="model-select" class="model-select" title="Select AI Model">
+                        <option value="">Loading models...</option>
+                    </select>
+                </div>
                 <button id="theme-toggle" class="icon-btn" title="Toggle Theme">
                     <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="5"></circle>
@@ -83,7 +89,7 @@
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                     </svg>
                 </button>
-                <button id="new-session-btn" class="icon-btn" title="New Session">
+                <button id="new-session-btn" class="icon-btn" title="New Session (Ctrl+N)">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -101,6 +107,37 @@
                     <div class="session-info">
                         <div class="session-label">Session ID</div>
                         <div class="session-id" id="session-id">New Session</div>
+                    </div>
+
+                    <!-- Quick Templates -->
+                    <div class="templates-section" id="templates-section">
+                        <label class="section-label">Quick Templates</label>
+                        <div class="template-chips">
+                            <button class="template-chip" data-prompt="Create a React component with props and TypeScript interfaces" data-type="code">
+                                <span class="chip-icon">⚛️</span>
+                                <span>React Component</span>
+                            </button>
+                            <button class="template-chip" data-prompt="Write a Python function with docstring and type hints" data-type="code">
+                                <span class="chip-icon">🐍</span>
+                                <span>Python Function</span>
+                            </button>
+                            <button class="template-chip" data-prompt="Create an API endpoint with Express.js including error handling" data-type="code">
+                                <span class="chip-icon">🌐</span>
+                                <span>API Endpoint</span>
+                            </button>
+                            <button class="template-chip" data-prompt="Write a comprehensive README.md for a project" data-type="document">
+                                <span class="chip-icon">📝</span>
+                                <span>README</span>
+                            </button>
+                            <button class="template-chip" data-prompt="Create a flowchart diagram showing user authentication flow" data-type="diagram">
+                                <span class="chip-icon">📊</span>
+                                <span>Auth Flow</span>
+                            </button>
+                            <button class="template-chip" data-prompt="Design a database schema with relationships" data-type="diagram">
+                                <span class="chip-icon">🗄️</span>
+                                <span>DB Schema</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Prompt Input -->

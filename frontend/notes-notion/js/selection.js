@@ -714,14 +714,34 @@ const Selection = (function() {
             const option = e.target.closest('.color-option');
             if (!option) return;
             
-            const color = option.dataset.color;
             const blockId = picker.dataset.blockId;
             
-            if (blockId && callbacks.onColorChange) {
-                callbacks.onColorChange(blockId, color === 'default' ? null : color);
+            // Handle text color selection
+            const textColor = option.dataset.textColor;
+            if (textColor !== undefined && blockId) {
+                if (callbacks.onTextColorChange) {
+                    callbacks.onTextColorChange(blockId, textColor === 'default' ? null : textColor);
+                }
+                picker.style.display = 'none';
+                return;
             }
             
-            picker.style.display = 'none';
+            // Handle background color selection
+            const bgColor = option.dataset.bgColor;
+            if (bgColor !== undefined && blockId) {
+                if (callbacks.onColorChange) {
+                    callbacks.onColorChange(blockId, bgColor === 'default' ? null : bgColor);
+                }
+                picker.style.display = 'none';
+                return;
+            }
+            
+            // Legacy fallback for old data-color attribute
+            const color = option.dataset.color;
+            if (color !== undefined && blockId && callbacks.onColorChange) {
+                callbacks.onColorChange(blockId, color === 'default' ? null : color);
+                picker.style.display = 'none';
+            }
         });
     }
     

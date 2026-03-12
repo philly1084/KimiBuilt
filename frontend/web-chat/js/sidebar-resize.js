@@ -137,7 +137,6 @@ class SidebarResizer {
       }
       
       .sidebar.collapsed .sidebar-btn-text,
-      .sidebar.collapsed #sidebar-status-text,
       .sidebar.collapsed .sidebar-session-info,
       .sidebar.collapsed .session-actions {
         display: none !important;
@@ -173,11 +172,6 @@ class SidebarResizer {
       
       .sidebar.collapsed .grid {
         grid-template-columns: 1fr;
-      }
-      
-      .sidebar.collapsed #sidebar-connection-status {
-        justify-content: center;
-        padding: 8px;
       }
       
       /* Icon-only mode for collapsed state */

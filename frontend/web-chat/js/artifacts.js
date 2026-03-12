@@ -358,8 +358,28 @@
         return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
     }
 
+    function shouldCollapseArtifactTranscript(artifact) {
+        const format = String(artifact?.format || '').toLowerCase();
+        const filename = String(artifact?.filename || '').toLowerCase();
+        const collapsibleFormats = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'power-query']);
+        const collapsibleExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.pq', '.m'];
+        return collapsibleFormats.has(format) || collapsibleExtensions.some((ext) => filename.endsWith(ext));
+    }
+
+    function buildArtifactSummary(artifacts) {
+        const files = (artifacts || []).filter(shouldCollapseArtifactTranscript);
+        if (files.length === 0) {
+            return '';
+        }
+
+        if (files.length === 1) {
+            return `Created ${files[0].filename}. Use Download below.`;
+        }
+
+        return `Created ${files.length} files. Use Download below.`;
+    }
+
     function renderGeneratedArtifacts(artifacts) {
-        if (!Array.isArray(artifacts) || artifacts.length === 0) return;
         const container = document.getElementById('messages-container');
         if (!container) return;
 
@@ -375,7 +395,7 @@
                 </div>
                 <h4>${escapeHtml(artifact.filename)}</h4>
                 <div class="file-meta">
-                    ${artifact.format?.toUpperCase() || 'FILE'} • ${formatFileSize(artifact.sizeBytes)}
+                    ${artifact.format?.toUpperCase() || 'FILE'} Ã¢â‚¬Â¢ ${formatFileSize(artifact.sizeBytes)}
                 </div>
                 <div class="file-actions">
                     <button class="primary" onclick="artifactManager.downloadArtifact('${artifact.id}', '${escapeHtml(artifact.filename)}')">
@@ -570,6 +590,19 @@
         window.chatApp.handleDone = function() {
             if (originalHandleDone) originalHandleDone();
             if (state.lastDone?.artifacts?.length) {
+                const artifactSummary = buildArtifactSummary(state.lastDone.artifacts);
+                if (artifactSummary && window.sessionManager?.currentSessionId) {
+                    const sessionId = window.sessionManager.currentSessionId;
+                    const messages = window.sessionManager.getMessages(sessionId) || [];
+                    const lastMessage = messages[messages.length - 1];
+                    if (lastMessage && lastMessage.role === 'assistant') {
+                        lastMessage.displayContent = artifactSummary;
+                        window.sessionManager.saveToStorage?.();
+                        if (lastMessage.id && window.uiHelpers?.updateMessageContent) {
+                            window.uiHelpers.updateMessageContent(lastMessage.id, artifactSummary, false);
+                        }
+                    }
+                }
                 renderGeneratedArtifacts(state.lastDone.artifacts);
                 state.artifacts = [...state.lastDone.artifacts, ...state.artifacts.filter((artifact) => !state.lastDone.artifacts.find((next) => next.id === artifact.id))];
                 state.selectedArtifactIds = [];
@@ -801,3 +834,4 @@
         }, 100);
     });
 })();
+

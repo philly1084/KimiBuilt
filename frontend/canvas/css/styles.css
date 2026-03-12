@@ -267,6 +267,40 @@ body {
     display: none;
 }
 
+/* Model Selector */
+.model-selector {
+    position: relative;
+}
+
+.model-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 13px;
+    padding: 6px 28px 6px 10px;
+    min-width: 140px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23858585' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+}
+
+.model-select:hover {
+    border-color: var(--border-light);
+}
+
+.model-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.model-select option {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
 /* ============================================
    Main Content
    ============================================ */
@@ -330,6 +364,41 @@ body {
     font-size: 12px;
     color: var(--text-secondary);
     word-break: break-all;
+}
+
+/* Templates Section */
+.templates-section {
+    margin-bottom: 8px;
+}
+
+.template-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.template-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.template-chip:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-light);
+    color: var(--text-primary);
+}
+
+.template-chip .chip-icon {
+    font-size: 14px;
 }
 
 /* Section Labels */

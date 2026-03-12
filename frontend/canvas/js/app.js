@@ -39,6 +39,8 @@ class CanvasApp {
         this.initializeEditor();
         this.setupEventListeners();
         this.setupHistoryListener();
+        this.setupTemplateChips();
+        this.loadModels();
         this.updateUI();
         
         // Try to connect WebSocket
@@ -52,6 +54,61 @@ class CanvasApp {
         });
 
         console.log('KimiBuilt Canvas initialized');
+    }
+    
+    /**
+     * Load available AI models
+     */
+    async loadModels() {
+        const modelSelect = document.getElementById('model-select');
+        if (!modelSelect) return;
+        
+        try {
+            const response = await fetch('/api/models');
+            const data = await response.json();
+            
+            if (data.models && data.models.length > 0) {
+                modelSelect.innerHTML = data.models.map(m => 
+                    `<option value="${m.id}" ${m.id === 'gpt-4o' ? 'selected' : ''}>${m.name}</option>`
+                ).join('');
+            } else {
+                modelSelect.innerHTML = `
+                    <option value="gpt-4o" selected>GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="o3-mini">o3-mini</option>
+                `;
+            }
+        } catch (err) {
+            console.log('Failed to load models, using defaults');
+            modelSelect.innerHTML = `
+                <option value="gpt-4o" selected>GPT-4o</option>
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="o3-mini">o3-mini</option>
+            `;
+        }
+    }
+    
+    /**
+     * Setup template chip click handlers
+     */
+    setupTemplateChips() {
+        const chips = document.querySelectorAll('.template-chip');
+        chips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                const prompt = chip.dataset.prompt;
+                const type = chip.dataset.type;
+                
+                // Set the prompt
+                const promptInput = document.getElementById('prompt-input');
+                promptInput.value = prompt;
+                promptInput.focus();
+                
+                // Switch canvas type if needed
+                if (type && type !== this.state.canvasType) {
+                    this.switchCanvasType(type);
+                }
+            });
+        });
     }
 
     /**
@@ -95,6 +152,15 @@ class CanvasApp {
         document.getElementById('theme-toggle').addEventListener('click', () => {
             this.toggleTheme();
         });
+        
+        // Model selector
+        const modelSelect = document.getElementById('model-select');
+        if (modelSelect) {
+            modelSelect.addEventListener('change', (e) => {
+                this.state.selectedModel = e.target.value;
+                console.log('Model changed to:', e.target.value);
+            });
+        }
 
         // Canvas type selector
         document.querySelectorAll('.type-btn').forEach(btn => {
@@ -380,6 +446,8 @@ class CanvasApp {
     async sendToAI() {
         const prompt = document.getElementById('prompt-input').value.trim();
         const context = document.getElementById('context-input').value.trim();
+        const modelSelect = document.getElementById('model-select');
+        const selectedModel = modelSelect ? modelSelect.value : this.state.selectedModel;
 
         if (!prompt) {
             this.showToast('Please enter a prompt', 'warning');
@@ -393,7 +461,8 @@ class CanvasApp {
                 message: prompt,
                 sessionId: this.state.sessionId,
                 canvasType: this.state.canvasType,
-                existingContent: context || this.editor.getValue()
+                existingContent: context || this.editor.getValue(),
+                model: selectedModel
             });
 
             this.handleAIResponse(response);

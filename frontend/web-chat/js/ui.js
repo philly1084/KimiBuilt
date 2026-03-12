@@ -192,9 +192,13 @@ class UIHelpers {
             `<div class="message-avatar user" aria-hidden="true"><i data-lucide="user" class="w-4 h-4"></i></div>` :
             `<div class="message-avatar assistant" aria-hidden="true"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
 
+        const renderedContent = isUser ? 
+            message.content :
+            (message.displayContent ?? message.content);
+
         const content = isUser ? 
-            this.renderUserMessage(message.content) :
-            this.renderAssistantMessage(message.content, isStreaming);
+            this.renderUserMessage(renderedContent) :
+            this.renderAssistantMessage(renderedContent, isStreaming);
 
         const time = this.formatTime(message.timestamp);
         const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
@@ -2548,4 +2552,5 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
+
 

@@ -145,6 +145,9 @@
             onColorChange: (blockId, color) => {
                 Editor.setBlockColor(blockId, color);
             },
+            onTextColorChange: (blockId, color) => {
+                Editor.setTextColor(blockId, color);
+            },
             onTurnInto: (blockId, type) => {
                 Editor.convertBlockType(blockId, type);
             }

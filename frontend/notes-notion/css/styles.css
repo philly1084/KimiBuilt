@@ -1759,7 +1759,7 @@ body {
     to { transform: rotate(360deg); }
 }
 
-/* Block Colors */
+/* Block Background Colors */
 .block.color-gray { background: var(--color-gray); }
 .block.color-brown { background: var(--color-brown); }
 .block.color-orange { background: var(--color-orange); }
@@ -1769,6 +1769,46 @@ body {
 .block.color-purple { background: var(--color-purple); }
 .block.color-pink { background: var(--color-pink); }
 .block.color-red { background: var(--color-red); }
+
+/* Text Colors within blocks */
+.block .block-input.text-color-gray,
+.block .text-color-gray { color: #6b6b6b; }
+.block .block-input.text-color-brown,
+.block .text-color-brown { color: #9d6b53; }
+.block .block-input.text-color-orange,
+.block .text-color-orange { color: #e07b39; }
+.block .block-input.text-color-yellow,
+.block .text-color-yellow { color: #c9a227; }
+.block .block-input.text-color-green,
+.block .text-color-green { color: #448361; }
+.block .block-input.text-color-blue,
+.block .text-color-blue { color: #337ea9; }
+.block .block-input.text-color-purple,
+.block .text-color-purple { color: #8b5a9f; }
+.block .block-input.text-color-pink,
+.block .text-color-pink { color: #c9558f; }
+.block .block-input.text-color-red,
+.block .text-color-red { color: #d44c47; }
+
+/* Dark mode text colors */
+[data-theme="dark"] .block .block-input.text-color-gray,
+[data-theme="dark"] .block .text-color-gray { color: #9ca3af; }
+[data-theme="dark"] .block .block-input.text-color-brown,
+[data-theme="dark"] .block .text-color-brown { color: #c4a484; }
+[data-theme="dark"] .block .block-input.text-color-orange,
+[data-theme="dark"] .block .text-color-orange { color: #f4a261; }
+[data-theme="dark"] .block .block-input.text-color-yellow,
+[data-theme="dark"] .block .text-color-yellow { color: #e9c46a; }
+[data-theme="dark"] .block .block-input.text-color-green,
+[data-theme="dark"] .block .text-color-green { color: #6dbf7e; }
+[data-theme="dark"] .block .block-input.text-color-blue,
+[data-theme="dark"] .block .text-color-blue { color: #6ab0de; }
+[data-theme="dark"] .block .block-input.text-color-purple,
+[data-theme="dark"] .block .text-color-purple { color: #b888c8; }
+[data-theme="dark"] .block .block-input.text-color-pink,
+[data-theme="dark"] .block .text-color-pink { color: #e888b8; }
+[data-theme="dark"] .block .block-input.text-color-red,
+[data-theme="dark"] .block .text-color-red { color: #e07a75; }
 
 /* Add Block Button (+) */
 .add-block-btn {
@@ -2013,7 +2053,7 @@ body {
 /* ===== Color Picker ===== */
 .color-picker {
     position: fixed;
-    width: 200px;
+    width: 220px;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -2022,8 +2062,16 @@ body {
     padding: 12px;
 }
 
+.color-section {
+    margin-bottom: 12px;
+}
+
+.color-section:last-child {
+    margin-bottom: 0;
+}
+
 .color-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-tertiary);
     margin-bottom: 8px;
@@ -2034,25 +2082,36 @@ body {
 .color-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 6px;
+    gap: 8px;
 }
 
 .color-option {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     cursor: pointer;
     border: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    transition: transform 0.15s, border-color 0.15s;
+    font-size: 14px;
+    font-weight: 600;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
 .color-option:hover {
-    transform: scale(1.1);
+    transform: scale(1.15);
     border-color: var(--text-secondary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.color-option.text-color-option {
+    font-family: Georgia, serif;
+    border: 2px solid transparent;
+}
+
+.color-option.text-color-option:hover {
+    border-color: var(--accent-color);
 }
 
 /* ===== AI Modal ===== */
