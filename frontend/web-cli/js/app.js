@@ -27,7 +27,7 @@ class CodeCLIApp {
         // Available commands for autocomplete
         this.commands = [
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
-            '/export', '/save', '/load', '/copy', '/image', '/unsplash', '/diagram',
+            '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
             '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health',
             '/files', '/ls', '/download', '/open'
         ];
@@ -293,6 +293,9 @@ class CodeCLIApp {
             case 'image':
                 await this.generateImage(args.join(' '));
                 break;
+            case 'image-models':
+                await this.listImageModels();
+                break;
             case 'unsplash':
                 await this.searchUnsplash(args.join(' '));
                 break;
@@ -501,8 +504,9 @@ Session Statistics:
   /model <name>      Change AI model
   /image <prompt>    Generate an image
                      Defaults to the backend image model (official OpenAI if configured)
-                     Options: --model gpt-image-1.5, --size 1024x1024
-                     --quality standard|hd, --style vivid|natural
+                     Options: --model gpt-image-1.5|gpt-image-1-mini|gpt-image-1
+                     --size 1024x1024 --quality standard|hd --style vivid|natural
+  /image-models      List available image models
   /unsplash <query>  Search Unsplash for stock images
                      Options: --orientation landscape|portrait|squarish
   /diagram <type>    Generate Mermaid diagram
@@ -702,11 +706,15 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     async listModels() {
         try {
             const models = await api.getModels();
-            this.printAI(`## Available Models\n\n${models.map(m => `  â€¢ ${m.id}`).join('\n')}`);
+            this.printAI(`## Available Models\n\n${models.map(m => `  ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${m.id}`).join('\n')}`);
         } catch (error) {
             this.printError('Failed to load models');
         }
     }
+    async listImageModels() {
+        this.printAI("## Available Image Models\n\n  - gpt-image-1.5\n  - gpt-image-1-mini\n  - gpt-image-1");
+    }
+
     
     updateModelInfo() {
         const model = api.currentModel || 'gpt-4o';
@@ -791,31 +799,14 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                 const image = response.data[0];
                 const imageUrl = image.url || image.b64_json;
                 
-                // Create image display with metadata
-                let output = `## Generated Image\n\n`;
-                output += `<div class="generated-image-container">`;
-                output += `<img src="${imageUrl}" alt="${this.escapeHtml(prompt)}" class="generated-image" style="max-width: 100%; border-radius: 8px; margin: 10px 0;" />`;
-                output += `</div>\n\n`;
-                
-                // Add metadata
-                output += `**Model:** ${response.model || options.model || 'gateway default'}\n`;
-                output += `**Size:** ${response.size || options.size || '1024x1024'}\n`;
-                output += `**Quality:** ${response.quality || options.quality || 'standard'}\n`;
-                if (image.revised_prompt) {
-                    output += `**Revised Prompt:** ${this.escapeHtml(image.revised_prompt)}\n`;
-                }
-                output += `**Created:** ${new Date(response.created * 1000).toLocaleString()}\n`;
-                
-                // Add download link
                 const fileId = this.addSessionFile(
                     `image-${Date.now()}.png`, 
                     imageUrl, 
                     'image/png', 
                     'image'
                 );
-                output += `**File ID:** #${fileId} (use /files to manage)`;
-                
-                this.printAI(output);
+                this.printSystem('Image generated with ' + (response.model || options.model || 'backend default') + ' (' + (response.size || options.size || '1024x1024') + ')');
+                this.printSystem('Image saved as file #' + fileId + '. Use /download ' + fileId + ' or /open.');
             } else {
                 this.printError('No image data received from API');
             }
@@ -1122,16 +1113,27 @@ ${diagramCode}
     printSessionInfo() {
         const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
         this.printSystem(`
-Session Information:
-  ID: ${api.sessionId || 'none'}
-  Model: ${api.currentModel || 'default'}
-  Duration: ${elapsed}s
-  Start Time: ${new Date(this.sessionStartTime).toLocaleString()}
-        `.trim());
+    downloadFile(content, filename, mimeType) {
+        const a = document.createElement('a');
+        let url = null;
+
+        if (typeof content === 'string' && /^(data:|blob:|https?:)/i.test(content)) {
+            url = content;
+        } else {
+            const blob = new Blob([content], { type: mimeType });
+            url = URL.createObjectURL(blob);
+        }
+
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        if (url.startsWith('blob:')) {
+            URL.revokeObjectURL(url);
+        }
     }
-    
-    saveConversation(name) {
-        const data = {
             history: this.history,
             timestamp: Date.now(),
             model: api.currentModel
@@ -1257,7 +1259,7 @@ Session Information:
             <div class="file-manager-content">
                 <div class="file-manager-header">
                     <h3>?? Session Files (${this.sessionFiles.length})</h3>
-                    <button class="file-manager-close" onclick="app.closeFileManager()">Ã—</button>
+                    <button class="file-manager-close" onclick="app.closeFileManager()">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â</button>
                 </div>
                 <div class="file-manager-body">
                     ${this.sessionFiles.length === 0 ? 
@@ -1266,7 +1268,7 @@ Session Information:
                             <div class="file-item" onclick="app.downloadFileById('${f.id}')">
                                 <span class="file-icon">${this.getFileIcon(f.filename)}</span>
                                 <span class="file-name">${f.filename}</span>
-                                <span class="file-meta">${this.formatFileSize(f.size)} â€¢ ${f.type}</span>
+                                <span class="file-meta">${this.formatFileSize(f.size)} ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ ${f.type}</span>
                                 <button class="file-download-btn" onclick="event.stopPropagation(); app.downloadFileById('${f.id}')">?</button>
                             </div>
                         `).join('')
