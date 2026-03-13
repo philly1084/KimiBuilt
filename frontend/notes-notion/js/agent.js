@@ -4,6 +4,10 @@
  */
 
 const Agent = (function() {
+    const SHARED_MODEL_STORAGE_KEY = 'kimibuilt_default_model';
+    const LEGACY_MODEL_STORAGE_KEY = 'notes_agent_model';
+    let initPromise = null;
+
     // ============================================
     // API Client Integration
     // ============================================
@@ -58,18 +62,77 @@ ${pageContext.outline.map(h => '- ' + h.content).join('\n')}
 
 When editing, reference block IDs. When adding content, suggest where to place it.`;
     }
+
+    function getStoredModelId() {
+        try {
+            return localStorage.getItem(SHARED_MODEL_STORAGE_KEY) ||
+                localStorage.getItem(LEGACY_MODEL_STORAGE_KEY) ||
+                'gpt-4o';
+        } catch (error) {
+            return 'gpt-4o';
+        }
+    }
+
+    function persistSelectedModel(modelId) {
+        try {
+            localStorage.setItem(SHARED_MODEL_STORAGE_KEY, modelId);
+            localStorage.setItem(LEGACY_MODEL_STORAGE_KEY, modelId);
+        } catch (error) {
+            console.warn('Failed to persist selected model:', error);
+        }
+    }
     
     // ============================================
     // State Management
     // ============================================
     const state = {
-        selectedModel: localStorage.getItem('notes_agent_model') || 'gpt-4o',
+        selectedModel: getStoredModelId(),
         isActive: false,
         messages: [],
         isProcessing: false,
         streamingEnabled: true,
         cachedModels: null,
         modelsCacheTime: null
+    };
+
+    const MODEL_DISPLAY_NAMES = {
+        'gpt-4o': 'GPT-4o',
+        'gpt-4o-mini': 'GPT-4o Mini',
+        'gpt-4-turbo': 'GPT-4 Turbo',
+        'gpt-4': 'GPT-4',
+        'gpt-3.5-turbo': 'GPT-3.5 Turbo',
+        'o1-preview': 'o1 Preview',
+        'o1-mini': 'o1 Mini',
+        'o3-mini': 'o3 Mini',
+        'o4-mini': 'o4 Mini',
+        'kimi-k2': 'Kimi K2',
+        'kimi-k2-mini': 'Kimi K2 Mini',
+        'claude-sonnet-4': 'Claude Sonnet 4',
+        'claude-haiku-4': 'Claude Haiku 4',
+        'claude-3-opus': 'Claude 3 Opus',
+        'claude-3-sonnet': 'Claude 3 Sonnet',
+        'claude-3-haiku': 'Claude 3 Haiku',
+        'claude-3-5-sonnet': 'Claude 3.5 Sonnet',
+        'claude-3.5-sonnet-latest': 'Claude 3.5 Sonnet Latest',
+    };
+
+    const MODEL_DESCRIPTIONS = {
+        'gpt-4o': 'Most capable multimodal model',
+        'gpt-4o-mini': 'Fast and affordable',
+        'gpt-4-turbo': 'Advanced reasoning',
+        'o1-preview': 'Reasoning-focused model',
+        'o1-mini': 'Fast reasoning model',
+        'o3-mini': 'Compact reasoning model',
+        'o4-mini': 'Fast multimodal reasoning',
+        'kimi-k2': 'Advanced reasoning and coding',
+        'kimi-k2-mini': 'Quick responses, everyday tasks',
+        'claude-sonnet-4': 'Balanced intelligence and speed',
+        'claude-haiku-4': 'Fast and lightweight',
+        'claude-3-opus': 'Powerful reasoning',
+        'claude-3-sonnet': 'Balanced performance',
+        'claude-3-haiku': 'Fast and efficient',
+        'claude-3-5-sonnet': 'Latest and most capable',
+        'claude-3.5-sonnet-latest': 'Latest and most capable',
     };
     
     // ============================================
@@ -113,6 +176,75 @@ When editing, reference block IDs. When adding content, suggest where to place i
             description: 'Fast and lightweight'
         }
     ];
+
+    function inferProvider(modelOrId) {
+        const provider = String(modelOrId?.provider || modelOrId?.owned_by || '').toLowerCase();
+        if (provider === 'openai' || provider === 'anthropic' || provider === 'google' ||
+            provider === 'meta' || provider === 'kimi' || provider === 'mistral') {
+            return provider;
+        }
+
+        const id = String(modelOrId?.id || modelOrId || '').toLowerCase();
+        if (id.includes('claude')) return 'anthropic';
+        if (id.includes('gpt') || id.includes('o1') || id.includes('o3') || id.includes('o4')) return 'openai';
+        if (id.includes('kimi')) return 'kimi';
+        if (id.includes('gemini') || id.includes('palm')) return 'google';
+        if (id.includes('llama') || id.includes('meta')) return 'meta';
+        if (id.includes('mistral')) return 'mistral';
+        return 'other';
+    }
+
+    function formatModelName(modelId) {
+        if (MODEL_DISPLAY_NAMES[modelId]) {
+            return MODEL_DISPLAY_NAMES[modelId];
+        }
+
+        return modelId
+            .split('-')
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+    }
+
+    function normalizeModel(model) {
+        const id = String(model?.id || '').trim();
+        if (!id) return null;
+
+        const provider = inferProvider(model);
+
+        return {
+            ...model,
+            id,
+            provider,
+            name: model.name || formatModelName(id),
+            description: model.description || MODEL_DESCRIPTIONS[id] || model.owned_by || 'AI model'
+        };
+    }
+
+    function normalizeModelsResponse(response) {
+        const apiClient = getAPIClient();
+        const rawModels = Array.isArray(response)
+            ? response
+            : Array.isArray(response?.data)
+                ? response.data
+                : [];
+
+        const filteredModels = apiClient?.filterChatModels
+            ? apiClient.filterChatModels(rawModels)
+            : rawModels;
+
+        const modelsToUse = filteredModels.length > 0 ? filteredModels : rawModels;
+        const uniqueModels = new Map();
+
+        modelsToUse.forEach((model) => {
+            const normalized = normalizeModel(model);
+            if (normalized && !uniqueModels.has(normalized.id)) {
+                uniqueModels.set(normalized.id, normalized);
+            }
+        });
+
+        return Array.from(uniqueModels.values());
+    }
     
     // ============================================
     // Response Templates for Stub Mode
@@ -174,32 +306,46 @@ When editing, reference block IDs. When adding content, suggest where to place i
     // Initialization
     // ============================================
     async function init() {
-        // Load conversation history from localStorage
-        const savedMessages = localStorage.getItem('notes_agent_messages');
-        if (savedMessages) {
+        if (initPromise) {
+            return initPromise;
+        }
+
+        initPromise = (async () => {
+            // Load conversation history from localStorage
+            let savedMessages = null;
             try {
-                state.messages = JSON.parse(savedMessages);
-            } catch (e) {
-                console.warn('Failed to load saved messages:', e);
-                state.messages = [];
+                savedMessages = localStorage.getItem('notes_agent_messages');
+            } catch (error) {
+                console.warn('Failed to read saved messages:', error);
             }
-        }
-        
-        // Try to fetch models from API first
-        try {
-            await refreshModelsFromAPI();
-        } catch (e) {
-            console.log('Using fallback models');
-        }
-        
-        // Validate selected model
-        const availableModels = state.cachedModels || FALLBACK_MODELS;
-        if (!availableModels.find(m => m.id === state.selectedModel)) {
-            state.selectedModel = availableModels[0]?.id || 'gpt-4o';
-            localStorage.setItem('notes_agent_model', state.selectedModel);
-        }
-        
-        console.log('Agent module initialized with model:', state.selectedModel);
+
+            if (savedMessages) {
+                try {
+                    state.messages = JSON.parse(savedMessages);
+                } catch (error) {
+                    console.warn('Failed to load saved messages:', error);
+                    state.messages = [];
+                }
+            }
+
+            // Try to fetch models from API first
+            try {
+                await refreshModelsFromAPI();
+            } catch (error) {
+                console.log('Using fallback models');
+            }
+
+            // Validate selected model
+            const availableModels = state.cachedModels || FALLBACK_MODELS;
+            if (!availableModels.find(m => m.id === state.selectedModel)) {
+                state.selectedModel = availableModels[0]?.id || 'gpt-4o';
+                persistSelectedModel(state.selectedModel);
+            }
+
+            console.log('Agent module initialized with model:', state.selectedModel);
+        })();
+
+        return initPromise;
     }
     
     // Fetch models from API with caching
@@ -215,8 +361,9 @@ When editing, reference block IDs. When adding content, suggest where to place i
         }
         
         try {
-            const models = await apiClient.getModels();
-            if (models && Array.isArray(models) && models.length > 0) {
+            const modelsResponse = await apiClient.getModels();
+            const models = normalizeModelsResponse(modelsResponse);
+            if (models.length > 0) {
                 state.cachedModels = models;
                 state.modelsCacheTime = Date.now();
                 return true;
@@ -251,7 +398,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         const model = availableModels.find(m => m.id === modelId);
         if (model) {
             state.selectedModel = modelId;
-            localStorage.setItem('notes_agent_model', modelId);
+            persistSelectedModel(modelId);
             return true;
         }
         return false;
@@ -500,7 +647,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         }
         
         if (messageLower.includes('summarize') || messageLower.includes('summary')) {
-            const summary = generateSummary(context);
+            const summary = buildSummaryText(context);
             return formatTemplate(pickRandom(RESPONSE_TEMPLATES.summarize), {
                 title: topic,
                 summary: summary
@@ -510,7 +657,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         if (messageLower.includes('outline') || messageLower.includes('structure')) {
             const match = userMessage.match(/(?:for|about|on)\s+(.+?)(?:\?|$)/i);
             const outlineTopic = match ? match[1] : topic;
-            const outline = generateOutline(outlineTopic);
+            const outline = buildOutlineText(outlineTopic);
             return formatTemplate(pickRandom(RESPONSE_TEMPLATES.outline), {
                 topic: outlineTopic,
                 outline: outline
@@ -522,7 +669,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         }
         
         if (messageLower.includes('continue') || messageLower.includes('expand') || messageLower.includes('more')) {
-            const continued = continueWriting(context);
+            const continued = buildContinuedText(context);
             return formatTemplate(pickRandom(RESPONSE_TEMPLATES.continue), {
                 content: continued
             });
@@ -563,7 +710,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         return obs;
     }
     
-    function generateSummary(context) {
+    function buildSummaryText(context) {
         if (!context || !context.blocks || context.blocks.length === 0) {
             return "The page is currently empty.";
         }
@@ -593,7 +740,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         return summary || "The page contains content ready for review.";
     }
     
-    function generateOutline(topic) {
+    function buildOutlineText(topic) {
         return [
             "1. **Introduction**",
             "   - Overview of " + topic,
@@ -621,7 +768,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         ].join('\n');
     }
     
-    function continueWriting(context) {
+    function buildContinuedText(context) {
         const lastTextBlock = context?.blocks?.slice().reverse().find(b => 
             b.type === 'text' && b.content
         );
@@ -712,75 +859,43 @@ When editing, reference block IDs. When adding content, suggest where to place i
         
         // Get current model
         const model = state.selectedModel;
-        
         let responseText = '';
-        
-        // Use streaming if enabled and callback provided
-        if (state.streamingEnabled && onChunk && apiClient.streamChat) {
-            await apiClient.streamChat(
-                messages,
-                {
-                    model: model,
-                    temperature: 0.7,
-                    max_tokens: 4000
-                },
-                {
-                    onChunk: (chunk) => {
-                        responseText += chunk;
-                        onChunk(chunk, responseText);
-                    },
-                    onComplete: (fullResponse) => {
-                        responseText = fullResponse;
-                        const assistantMessage = addMessage('assistant', responseText, {
-                            model: model,
-                            tokensUsed: estimateTokens(question + responseText),
-                            source: 'api'
-                        });
-                        state.isProcessing = false;
-                        if (onComplete) {
-                            onComplete(responseText, assistantMessage);
-                        }
-                    },
-                    onError: (error) => {
-                        state.isProcessing = false;
-                        console.error('Streaming error:', error);
-                        if (onError) onError(error);
+
+        if (state.streamingEnabled && apiClient.streamChat) {
+            for await (const chunk of apiClient.streamChat(messages, model)) {
+                if (chunk.type === 'delta' && chunk.content) {
+                    responseText += chunk.content;
+                    if (onChunk) {
+                        onChunk(chunk.content, responseText);
                     }
+                    continue;
                 }
-            );
+
+                if (chunk.type === 'error') {
+                    throw new Error(chunk.error || 'Streaming error');
+                }
+            }
         } else {
-            // Non-streaming fallback
-            const response = await apiClient.chat(messages, {
-                model: model,
-                temperature: 0.7,
-                max_tokens: 4000
-            });
-            
+            const response = await apiClient.chat(messages, model);
+            if (response?.error) {
+                throw new Error(response.content || 'API request failed');
+            }
+
             responseText = response.content || response.message || String(response);
-            
-            // Stream via callback if provided (simulate streaming)
-            if (onChunk) {
-                const chunks = simulateStreaming(responseText);
-                for (const chunk of chunks) {
-                    await delay(10);
-                    onChunk(chunk, responseText.substring(0, responseText.indexOf(chunk) + chunk.length));
-                }
-            }
-            
-            // Add assistant message
-            const assistantMessage = addMessage('assistant', responseText, {
-                model: model,
-                tokensUsed: estimateTokens(question + responseText),
-                source: 'api'
-            });
-            
-            state.isProcessing = false;
-            
-            if (onComplete) {
-                onComplete(responseText, assistantMessage);
-            }
         }
-        
+
+        const assistantMessage = addMessage('assistant', responseText, {
+            model: model,
+            tokensUsed: estimateTokens(question + responseText),
+            source: 'api'
+        });
+
+        state.isProcessing = false;
+
+        if (onComplete) {
+            onComplete(responseText, assistantMessage);
+        }
+
         return responseText;
     }
     
@@ -986,7 +1101,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
             
             await delay(1000);
             
-            const summary = generateSummary(context);
+            const summary = buildSummaryText(context);
             const response = formatTemplate(pickRandom(RESPONSE_TEMPLATES.summarize), {
                 title: context.title,
                 summary: summary
@@ -1076,7 +1191,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
             
             await delay(2000);
             
-            const continuedContent = continueWriting(context);
+            const continuedContent = buildContinuedText(context);
             
             // If no specific block ID, add at end
             const targetBlockId = insertAfterBlockId || context.blocks[context.blocks.length - 1]?.id;
@@ -1118,7 +1233,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
             await delay(1500);
             
             const outlineTopic = topic || getPageContext()?.title || 'this topic';
-            const outline = generateOutline(outlineTopic);
+            const outline = buildOutlineText(outlineTopic);
             
             const response = formatTemplate(pickRandom(RESPONSE_TEMPLATES.outline), {
                 topic: outlineTopic,

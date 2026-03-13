@@ -1,166 +1,119 @@
 /**
- * AgentUI - UI Controller for the AI Agent system
- * Handles all UI interactions and connects to the Agent module
+ * AgentUI - UI controller for the notes AI assistant
+ * Keeps the corner agent and model selector in sync with the Agent module.
  */
 const AgentUI = (function() {
-    // DOM element references
     let elements = {};
+    let initialized = false;
+    let streamState = {
+        active: false,
+        content: '',
+        error: null
+    };
 
-    /**
-     * Cache DOM elements
-     */
     function cacheElements() {
         elements = {
-            // Widget
             widgetBtn: document.getElementById('agent-widget-btn'),
-            
-            // Modal
             modal: document.getElementById('agent-chat-modal'),
-            modalContent: document.querySelector('.agent-modal-content'),
-            closeBtn: document.getElementById('agent-close-btn'),
-            
-            // Header
-            modelDisplay: document.getElementById('agent-model-display'),
-            modelDropdown: document.getElementById('agent-model-dropdown'),
-            
-            // Messages
-            messagesContainer: document.getElementById('agent-messages'),
-            
-            // Input
+            modalContent: document.querySelector('.agent-chat-container'),
+            closeBtn: document.querySelector('.agent-chat-close'),
+            messagesContainer: document.getElementById('agent-chat-messages'),
             input: document.getElementById('agent-chat-input'),
-            sendBtn: document.getElementById('agent-send-btn'),
-            
-            // Quick actions
-            quickActions: document.querySelectorAll('.agent-quick-action'),
-            
-            // Clear button
-            clearBtn: document.getElementById('agent-clear-btn'),
-            
-            // Model selector
+            sendBtn: document.getElementById('agent-chat-send'),
             modelSelectorDropdown: document.getElementById('model-selector-dropdown'),
             modelSelectorBtn: document.getElementById('model-selector-btn'),
             currentModelLabel: document.getElementById('current-model-label'),
-            modelList: document.getElementById('model-list')
+            modelList: document.getElementById('model-list'),
+            chatModelName: document.getElementById('agent-chat-model-name')
         };
     }
 
-    /**
-     * Initialize the UI
-     */
     function init() {
-        // Cache DOM elements
+        if (initialized) return;
+
         cacheElements();
-        
-        // Check if elements exist before setting up
-        if (!elements.modal) {
-            console.warn('AgentUI: Modal not found, skipping initialization');
+
+        if (!elements.modal || !elements.messagesContainer) {
+            console.warn('AgentUI: required chat elements not found, skipping initialization');
             return;
         }
-        
-        // Setup event listeners
+
         setupEventListeners();
-        
-        // Load saved agent model
-        loadSavedModel();
-        
-        // Render initial messages if any
-        renderMessages();
-        
-        // Initialize model UI
         updateModelUI();
-        
+        renderMessages();
+        initialized = true;
         console.log('AgentUI initialized');
     }
 
-    /**
-     * Setup all event listeners
-     */
     function setupEventListeners() {
-        // Widget button - open chat
         if (elements.widgetBtn) {
             elements.widgetBtn.addEventListener('click', openChat);
         }
-        
-        // Close button
+
         if (elements.closeBtn) {
             elements.closeBtn.addEventListener('click', closeChat);
         }
-        
-        // Close on overlay click
+
         if (elements.modal) {
-            elements.modal.addEventListener('click', (e) => {
-                if (e.target === elements.modal) {
+            elements.modal.addEventListener('click', (event) => {
+                if (event.target === elements.modal) {
                     closeChat();
                 }
             });
         }
-        
-        // Send button
+
         if (elements.sendBtn) {
             elements.sendBtn.addEventListener('click', sendMessage);
         }
-        
-        // Input enter key (Enter to send, Shift+Enter for new line)
+
         if (elements.input) {
-            elements.input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
+            elements.input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
                     sendMessage();
                 }
             });
-            
-            // Auto-resize textarea
-            elements.input.addEventListener('input', () => {
-                elements.input.style.height = 'auto';
-                elements.input.style.height = Math.min(elements.input.scrollHeight, 120) + 'px';
-            });
+
+            elements.input.addEventListener('input', autoResizeInput);
         }
-        
-        // Quick action buttons
-        if (elements.quickActions) {
-            elements.quickActions.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const action = btn.dataset.action;
-                    if (action) {
-                        quickAction(action);
-                    }
-                });
-            });
-        }
-        
-        // Clear button
-        if (elements.clearBtn) {
-            elements.clearBtn.addEventListener('click', clearChat);
-        }
-        
-        // Keyboard shortcut: Ctrl/Cmd + Shift + A to toggle chat
-        document.addEventListener('keydown', (e) => {
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-                e.preventDefault();
+
+        document.addEventListener('keydown', (event) => {
+            if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'a') {
+                event.preventDefault();
                 toggleChat();
             }
+
+            if (event.key === 'Escape') {
+                closeModelSelector();
+            }
         });
+
+        document.addEventListener('click', (event) => {
+            if (!elements.modelSelectorDropdown || !elements.modelSelectorBtn) return;
+
+            const clickedInsideDropdown = elements.modelSelectorDropdown.contains(event.target);
+            const clickedOnButton = elements.modelSelectorBtn.contains(event.target);
+
+            if (!clickedInsideDropdown && !clickedOnButton) {
+                closeModelSelector();
+            }
+        });
+
+        window.addEventListener('modelChanged', updateModelUI);
     }
 
-    /**
-     * Load saved model from localStorage
-     */
-    function loadSavedModel() {
-        if (!window.Agent) return;
-        
-        updateModelUI();
+    function autoResizeInput() {
+        if (!elements.input) return;
+
+        elements.input.style.height = 'auto';
+        elements.input.style.height = `${Math.min(elements.input.scrollHeight, 140)}px`;
     }
 
-    /**
-     * Open the chat modal
-     */
     function openChat() {
         if (!elements.modal) return;
-        
-        // Show modal
+
         elements.modal.style.display = 'flex';
-        
-        // Trigger animation
+
         requestAnimationFrame(() => {
             elements.modal.classList.add('active');
             if (elements.modalContent) {
@@ -168,44 +121,34 @@ const AgentUI = (function() {
                 elements.modalContent.style.transform = 'scale(1)';
             }
         });
-        
-        // Focus input
-        if (elements.input) {
-            setTimeout(() => elements.input.focus(), 100);
-        }
-        
-        // Render existing messages
+
         renderMessages();
+
+        if (elements.input) {
+            setTimeout(() => elements.input.focus(), 50);
+        }
     }
 
-    /**
-     * Close the chat modal
-     */
     function closeChat() {
         if (!elements.modal) return;
-        
-        // Animate out
+
         elements.modal.classList.remove('active');
         if (elements.modalContent) {
             elements.modalContent.style.opacity = '0';
-            elements.modalContent.style.transform = 'scale(0.95)';
+            elements.modalContent.style.transform = 'scale(0.98)';
         }
-        
-        // Hide after animation
+
         setTimeout(() => {
-            elements.modal.style.display = 'none';
-        }, 200);
+            if (elements.modal) {
+                elements.modal.style.display = 'none';
+            }
+        }, 180);
     }
 
-    /**
-     * Toggle chat open/closed
-     */
     function toggleChat() {
         if (!elements.modal) return;
-        
-        const isOpen = elements.modal.style.display === 'flex' || 
-                       elements.modal.classList.contains('active');
-        
+
+        const isOpen = elements.modal.style.display === 'flex' || elements.modal.classList.contains('active');
         if (isOpen) {
             closeChat();
         } else {
@@ -213,446 +156,354 @@ const AgentUI = (function() {
         }
     }
 
-    /**
-     * Send a message
-     */
-    function sendMessage() {
-        if (!window.Agent || !elements.input) return;
-        
+    async function sendMessage() {
+        if (!window.Agent || !elements.input || streamState.active) return;
+
         const text = elements.input.value.trim();
         if (!text) return;
-        
-        // Add user message to chat
-        window.Agent.addMessage('user', text);
-        
-        // Clear input and reset height
+
         elements.input.value = '';
         elements.input.style.height = 'auto';
-        
-        // Render messages
-        renderMessages();
-        
-        // Show typing indicator
-        showTypingIndicator();
-        
-        // Scroll to bottom
-        scrollToBottom();
-        
-        // Call Agent.ask with callbacks
-        window.Agent.ask(text, {
-            onChunk: (chunk) => {
-                // Optional: update message in real-time for streaming responses
-                // This would require the Agent module to support streaming
-            },
-            onComplete: (response) => {
-                hideTypingIndicator();
-                window.Agent.addMessage('agent', response);
-                renderMessages();
-                scrollToBottom();
-            },
-            onError: (error) => {
-                hideTypingIndicator();
-                window.Agent.addMessage('agent', `**Error:** ${error.message || 'Something went wrong. Please try again.'}`);
-                renderMessages();
-                scrollToBottom();
-            }
-        });
+
+        await runPrompt(text);
     }
 
-    /**
-     * Handle quick action buttons
-     * @param {string} action - The action to perform
-     */
-    function quickAction(action) {
-        if (!window.Agent) return;
-        
-        let promptText = '';
-        
-        switch (action) {
-            case 'summarize':
-                promptText = 'Summarize this page';
-                break;
-            case 'continue':
-                promptText = 'Continue writing';
-                break;
-            case 'outline':
-                const topic = prompt('What topic would you like an outline for?');
-                if (!topic) return;
-                
-                // Add user message
-                window.Agent.addMessage('user', `Create an outline for: ${topic}`);
-                renderMessages();
-                showTypingIndicator();
-                scrollToBottom();
-                
-                // Call generateOutline
-                window.Agent.generateOutline(topic).then(response => {
-                    hideTypingIndicator();
-                    window.Agent.addMessage('agent', response);
-                    renderMessages();
-                    scrollToBottom();
-                }).catch(error => {
-                    hideTypingIndicator();
-                    window.Agent.addMessage('agent', `**Error:** ${error.message || 'Failed to generate outline.'}`);
-                    renderMessages();
-                    scrollToBottom();
-                });
-                return;
-            
-            case 'improve':
-                promptText = 'Improve this writing';
-                break;
-            case 'explain':
-                promptText = 'Explain this';
-                break;
-            default:
-                return;
+    async function quickAction(action) {
+        if (!window.Agent || streamState.active) return;
+
+        const prompts = {
+            summarize: 'Summarize this page.',
+            continue: 'Continue writing from the current page content.',
+            improve: 'Improve the current writing.',
+            explain: 'Explain the current page content.'
+        };
+
+        if (action === 'outline') {
+            const topic = prompt('What topic should the outline cover?');
+            if (!topic) return;
+            await runPrompt(`Create an outline for: ${topic}`);
+            return;
         }
-        
-        // For summarize and continue actions
-        if (action === 'summarize') {
-            window.Agent.addMessage('user', promptText);
-            renderMessages();
-            showTypingIndicator();
-            scrollToBottom();
-            
-            window.Agent.summarize().then(response => {
-                hideTypingIndicator();
-                window.Agent.addMessage('agent', response);
-                renderMessages();
-                scrollToBottom();
-            }).catch(error => {
-                hideTypingIndicator();
-                window.Agent.addMessage('agent', `**Error:** ${error.message || 'Failed to summarize.'}`);
-                renderMessages();
-                scrollToBottom();
-            });
-        } else if (action === 'continue') {
-            window.Agent.addMessage('user', promptText);
-            renderMessages();
-            showTypingIndicator();
-            scrollToBottom();
-            
-            window.Agent.continueWriting().then(response => {
-                hideTypingIndicator();
-                window.Agent.addMessage('agent', response);
-                renderMessages();
-                scrollToBottom();
-            }).catch(error => {
-                hideTypingIndicator();
-                window.Agent.addMessage('agent', `**Error:** ${error.message || 'Failed to continue writing.'}`);
-                renderMessages();
-                scrollToBottom();
-            });
-        } else {
-            // For improve and explain, treat as regular ask
-            window.Agent.addMessage('user', promptText);
-            renderMessages();
-            showTypingIndicator();
-            scrollToBottom();
-            
-            window.Agent.ask(promptText, {
-                onComplete: (response) => {
-                    hideTypingIndicator();
-                    window.Agent.addMessage('agent', response);
+
+        const promptText = prompts[action];
+        if (!promptText) return;
+
+        await runPrompt(promptText);
+    }
+
+    async function runPrompt(promptText) {
+        if (!window.Agent) return;
+
+        setStreamState({ active: true, content: '', error: null });
+
+        try {
+            const request = window.Agent.ask(promptText, {
+                onChunk: (chunk, fullResponse) => {
+                    const nextContent = fullResponse || `${streamState.content}${chunk || ''}`;
+                    setStreamState({ active: true, content: nextContent, error: null });
+                    renderMessages();
+                    scrollToBottom();
+                },
+                onComplete: () => {
+                    setStreamState({ active: false, content: '', error: null });
                     renderMessages();
                     scrollToBottom();
                 },
                 onError: (error) => {
-                    hideTypingIndicator();
-                    window.Agent.addMessage('agent', `**Error:** ${error.message || 'Something went wrong.'}`);
+                    console.error('AgentUI request failed:', error);
+                    setStreamState({
+                        active: false,
+                        content: '',
+                        error: error?.message || 'Something went wrong. Please try again.'
+                    });
                     renderMessages();
                     scrollToBottom();
                 }
             });
+
+            renderMessages();
+            scrollToBottom();
+            await request;
+        } catch (error) {
+            console.error('AgentUI sendMessage error:', error);
+            setStreamState({
+                active: false,
+                content: '',
+                error: error?.message || 'Something went wrong. Please try again.'
+            });
+            renderMessages();
         }
     }
 
-    /**
-     * Render all messages
-     */
+    function setStreamState(nextState) {
+        streamState = {
+            ...streamState,
+            ...nextState
+        };
+    }
+
     function renderMessages() {
         if (!elements.messagesContainer || !window.Agent) return;
-        
+
         const messages = window.Agent.getMessages();
-        
-        // Clear container
         elements.messagesContainer.innerHTML = '';
-        
-        if (messages.length === 0) {
-            // Show empty state
+
+        if (messages.length === 0 && !streamState.active && !streamState.error) {
             elements.messagesContainer.innerHTML = `
                 <div class="agent-empty-state">
-                    <div class="agent-empty-icon">✨</div>
+                    <div class="agent-empty-icon">AI</div>
                     <p>Ask me anything about your notes</p>
-                    <p class="agent-empty-hint">I can summarize, continue writing, or help brainstorm ideas</p>
+                    <p class="agent-empty-hint">I can summarize, continue writing, or help restructure the page.</p>
                 </div>
             `;
             return;
         }
-        
-        // Render each message
-        messages.forEach(message => {
-            const messageEl = renderMessage(message);
-            elements.messagesContainer.appendChild(messageEl);
+
+        messages.forEach((message) => {
+            elements.messagesContainer.appendChild(renderMessage(message));
         });
-        
+
+        if (streamState.active) {
+            elements.messagesContainer.appendChild(renderStreamingMessage(streamState.content));
+        }
+
+        if (streamState.error) {
+            elements.messagesContainer.appendChild(renderMessage({
+                role: 'assistant',
+                content: `**Error:** ${streamState.error}`,
+                timestamp: Date.now(),
+                transient: true
+            }));
+        }
+
         scrollToBottom();
     }
 
-    /**
-     * Render a single message
-     * @param {Object} message - The message object
-     * @returns {HTMLElement} The message element
-     */
+    function renderStreamingMessage(content) {
+        const message = renderMessage({
+            role: 'assistant',
+            content: content || '...',
+            timestamp: Date.now()
+        });
+
+        message.classList.add('agent-message-streaming');
+        return message;
+    }
+
     function renderMessage(message) {
         const isUser = message.role === 'user';
         const div = document.createElement('div');
         div.className = `agent-message agent-message-${isUser ? 'user' : 'agent'}`;
-        
-        const avatar = isUser ? '👤' : '✨';
-        const content = markdownToHtml(message.content);
-        
-        let timestamp = '';
-        if (message.timestamp) {
-            const date = new Date(message.timestamp);
-            timestamp = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        }
-        
+
+        const avatar = isUser ? 'You' : 'AI';
+        const timestamp = message.timestamp
+            ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '';
+
         div.innerHTML = `
             <div class="agent-message-avatar">${avatar}</div>
             <div class="agent-message-content">
-                <div class="agent-message-text">${content}</div>
+                <div class="agent-message-text">${markdownToHtml(message.content)}</div>
                 ${timestamp ? `<div class="agent-message-time">${timestamp}</div>` : ''}
             </div>
         `;
-        
-        // Add action buttons if provided
-        if (message.actions && message.actions.length > 0) {
-            const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'agent-message-actions';
-            message.actions.forEach(action => {
-                const btn = document.createElement('button');
-                btn.className = 'agent-action-btn';
-                btn.textContent = action.label;
-                btn.addEventListener('click', action.handler);
-                actionsDiv.appendChild(btn);
-            });
-            div.querySelector('.agent-message-content').appendChild(actionsDiv);
-        }
-        
+
         return div;
     }
 
-    /**
-     * Scroll messages to bottom
-     */
     function scrollToBottom() {
         if (!elements.messagesContainer) return;
-        
         elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
     }
 
-    /**
-     * Show typing indicator
-     */
     function showTypingIndicator() {
-        if (!elements.messagesContainer) return;
-        
-        // Remove existing indicator
-        hideTypingIndicator();
-        
-        const indicator = document.createElement('div');
-        indicator.className = 'agent-message agent-message-agent agent-typing-indicator';
-        indicator.id = 'agent-typing-indicator';
-        indicator.innerHTML = `
-            <div class="agent-message-avatar">✨</div>
-            <div class="agent-message-content">
-                <div class="agent-typing">
-                    <div class="agent-typing-dot"></div>
-                    <div class="agent-typing-dot"></div>
-                    <div class="agent-typing-dot"></div>
-                </div>
-            </div>
-        `;
-        
-        elements.messagesContainer.appendChild(indicator);
-        scrollToBottom();
+        setStreamState({ active: true, content: '', error: null });
+        renderMessages();
     }
 
-    /**
-     * Hide typing indicator
-     */
     function hideTypingIndicator() {
-        const indicator = document.getElementById('agent-typing-indicator');
-        if (indicator) {
-            indicator.remove();
-        }
+        setStreamState({ active: false, content: '', error: null });
+        renderMessages();
     }
 
-    /**
-     * Clear chat history
-     */
     function clearChat() {
         if (!window.Agent) return;
-        
+
+        setStreamState({ active: false, content: '', error: null });
         window.Agent.clearConversation();
         renderMessages();
-        
-        // Show toast notification
-        showToast('Chat history cleared');
+        showToast('Chat history cleared', 'success');
     }
 
-    /**
-     * Update the model display in header
-     */
-    function updateModelDisplay() {
-        if (!window.Agent || !elements.modelDisplay) return;
-        
-        const modelId = window.Agent.getSelectedModel();
-        const modelNames = {
-            'gpt-4o': 'GPT-4o',
-            'gpt-4o-mini': 'GPT-4o Mini',
-            'o1-preview': 'o1 Preview',
-            'o1-mini': 'o1 Mini'
-        };
-        
-        elements.modelDisplay.textContent = modelNames[modelId] || modelId;
-        
-        // Update dropdown to match
-        if (elements.modelDropdown) {
-            elements.modelDropdown.value = modelId;
-        }
-    }
+    async function toggleModelSelector() {
+        if (!elements.modelSelectorDropdown) return;
 
-    // ============================================
-    // Model Selector
-    // ============================================
-
-    function toggleModelSelector() {
-        const dropdown = document.getElementById('model-selector-dropdown');
-        const btn = document.getElementById('model-selector-btn');
-        if (dropdown.style.display === 'none') {
-            openModelSelector();
-        } else {
+        if (elements.modelSelectorDropdown.style.display === 'flex') {
             closeModelSelector();
+            return;
         }
+
+        await openModelSelector();
     }
 
     async function openModelSelector() {
-        const dropdown = document.getElementById('model-selector-dropdown');
-        const btn = document.getElementById('model-selector-btn');
-        dropdown.style.display = 'flex';
-        if (btn) btn.classList.add('active');
-        
-        // Load models from API if available
-        if (Agent.getModelsAsync) {
-            try {
-                await Agent.getModelsAsync();
-            } catch (e) {
-                console.warn('Failed to load models from API:', e);
-            }
+        if (!elements.modelSelectorDropdown) return;
+
+        elements.modelSelectorDropdown.style.display = 'flex';
+        elements.modelSelectorBtn?.classList.add('active');
+
+        try {
+            await window.Agent?.getModelsAsync?.();
+        } catch (error) {
+            console.warn('AgentUI: failed to refresh models from API:', error);
         }
-        
+
         renderModelList();
     }
 
     function closeModelSelector() {
-        const dropdown = document.getElementById('model-selector-dropdown');
-        const btn = document.getElementById('model-selector-btn');
-        dropdown.style.display = 'none';
-        if (btn) btn.classList.remove('active');
+        if (!elements.modelSelectorDropdown) return;
+
+        elements.modelSelectorDropdown.style.display = 'none';
+        elements.modelSelectorBtn?.classList.remove('active');
     }
 
     function renderModelList() {
-        const listContainer = document.getElementById('model-list');
-        const currentModel = Agent.getSelectedModel();
-        const grouped = Agent.getModelsByProvider();
-        
-        const providerNames = {
-            'openai': 'OpenAI',
-            'anthropic': 'Anthropic',
-            'kimi': 'Kimi',
-            'google': 'Google',
-            'meta': 'Meta'
-        };
-        
-        const providerIcons = {
-            'openai': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle><line x1="12" y1="4" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="20"></line><line x1="4" y1="12" x2="2" y2="12"></line><line x1="22" y1="12" x2="20" y2="12"></line></svg>',
-            'anthropic': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>',
-            'kimi': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>',
-            'google': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>',
-            'meta': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>'
-        };
-        
-        // Check if we have any models to display
-        const hasModels = Object.keys(grouped).length > 0;
-        if (!hasModels) {
-            listContainer.innerHTML = `
+        if (!elements.modelList || !window.Agent) return;
+
+        const models = window.Agent.getModels();
+        if (!models.length) {
+            elements.modelList.innerHTML = `
                 <div class="model-group">
                     <div class="model-group-title">Loading...</div>
                 </div>
             `;
             return;
         }
-        
-        listContainer.innerHTML = Object.entries(grouped).map(([provider, models]) => `
+
+        const grouped = groupModelsByProvider(models);
+        elements.modelList.innerHTML = Object.entries(grouped).map(([provider, providerModels]) => `
             <div class="model-group">
-                <div class="model-group-title">${providerNames[provider] || provider}</div>
-                ${models.map(model => {
-                    const modelId = model.id;
-                    const modelName = model.name || modelId;
-                    const modelDesc = model.description || model.owned_by || 'AI Model';
-                    return `
-                    <div class="model-item ${modelId === currentModel ? 'active' : ''}" data-model-id="${modelId}">
-                        <div class="model-item-icon ${provider}">
-                            ${providerIcons[provider] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg>'}
-                        </div>
-                        <div class="model-item-info">
-                            <div class="model-item-name">${modelName}</div>
-                            <div class="model-item-desc">${modelDesc}</div>
-                        </div>
-                        <div class="model-item-check">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                        </div>
-                    </div>
-                    `;
-                }).join('')}
+                <div class="model-group-title">${provider}</div>
+                ${providerModels.map((model) => renderModelItem(model)).join('')}
             </div>
         `).join('');
-        
-        // Attach click handlers
-        listContainer.querySelectorAll('.model-item').forEach(item => {
+
+        elements.modelList.querySelectorAll('.model-item').forEach((item) => {
             item.addEventListener('click', () => {
-                const modelId = item.dataset.modelId;
-                selectModel(modelId);
+                selectModel(item.dataset.modelId);
             });
         });
     }
 
+    function renderModelItem(model) {
+        const isActive = model.id === window.Agent.getSelectedModel();
+        const provider = getModelProvider(model);
+        const displayName = getModelDisplayName(model);
+        const description = getModelDescription(model);
+
+        return `
+            <div class="model-item ${isActive ? 'active' : ''}" data-model-id="${escapeHtmlAttr(model.id)}" role="option" aria-selected="${isActive}">
+                <div class="model-item-icon ${provider}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                        <rect x="9" y="9" width="6" height="6"></rect>
+                    </svg>
+                </div>
+                <div class="model-item-info">
+                    <div class="model-item-name">${escapeHtml(displayName)}</div>
+                    <div class="model-item-desc">${escapeHtml(description)}</div>
+                </div>
+                <div class="model-item-check" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+            </div>
+        `;
+    }
+
+    function groupModelsByProvider(models) {
+        return models.reduce((grouped, model) => {
+            const providerName = getModelProviderName(model);
+            if (!grouped[providerName]) {
+                grouped[providerName] = [];
+            }
+            grouped[providerName].push(model);
+            return grouped;
+        }, {});
+    }
+
+    function getModelProvider(model) {
+        const provider = String(model.provider || '').toLowerCase();
+        if (provider) return provider;
+
+        const id = String(model.id || '').toLowerCase();
+        if (id.includes('claude')) return 'anthropic';
+        if (id.includes('gpt') || id.includes('o1') || id.includes('o3') || id.includes('o4')) return 'openai';
+        if (id.includes('kimi')) return 'kimi';
+        if (id.includes('gemini') || id.includes('palm')) return 'google';
+        if (id.includes('llama') || id.includes('meta')) return 'meta';
+        if (id.includes('mistral')) return 'mistral';
+        return 'other';
+    }
+
+    function getModelProviderName(model) {
+        const provider = getModelProvider(model);
+        const names = {
+            anthropic: 'Anthropic',
+            google: 'Google',
+            kimi: 'Kimi',
+            meta: 'Meta',
+            mistral: 'Mistral',
+            openai: 'OpenAI',
+            other: 'Other'
+        };
+
+        return names[provider] || 'Other';
+    }
+
+    function getModelDisplayName(model) {
+        return model.name || model.id;
+    }
+
+    function getModelDescription(model) {
+        return model.description || model.owned_by || 'AI model';
+    }
+
     function selectModel(modelId) {
-        Agent.setSelectedModel(modelId);
+        if (!window.Agent?.setSelectedModel(modelId)) {
+            showToast('Failed to change model', 'error');
+            return;
+        }
+
         updateModelUI();
         closeModelSelector();
-        showToast(`Model changed to ${Agent.getModel(modelId).name}`, 'success');
+        showToast(`Model changed to ${getModelDisplayName(window.Agent.getModel(modelId))}`, 'success');
+        window.dispatchEvent(new CustomEvent('modelChanged', { detail: { modelId } }));
     }
 
     function updateModelUI() {
-        const label = document.getElementById('current-model-label');
-        const model = Agent.getModel(Agent.getSelectedModel());
-        if (label) {
-            label.textContent = model.name;
+        if (!window.Agent) return;
+
+        const model = window.Agent.getModel(window.Agent.getSelectedModel());
+        const displayName = getModelDisplayName(model);
+
+        if (elements.currentModelLabel) {
+            elements.currentModelLabel.textContent = displayName;
+        }
+
+        if (elements.chatModelName) {
+            elements.chatModelName.textContent = `AI Assistant - ${displayName}`;
         }
     }
 
-    /**
-     * Show a toast notification
-     * @param {string} message - The message to show
-     */
-    function showToast(message) {
-        // Create toast element
+    function showToast(message, type = 'info') {
+        if (window.Sidebar?.showToast) {
+            window.Sidebar.showToast(message, type);
+            return;
+        }
+
         const toast = document.createElement('div');
         toast.className = 'agent-toast';
         toast.textContent = message;
@@ -671,16 +522,13 @@ const AgentUI = (function() {
             transform: translateY(20px);
             transition: all 0.3s ease;
         `;
-        
+
         document.body.appendChild(toast);
-        
-        // Animate in
         requestAnimationFrame(() => {
             toast.style.opacity = '1';
             toast.style.transform = 'translateY(0)';
         });
-        
-        // Remove after delay
+
         setTimeout(() => {
             toast.style.opacity = '0';
             toast.style.transform = 'translateY(20px)';
@@ -688,48 +536,46 @@ const AgentUI = (function() {
         }, 2500);
     }
 
-    /**
-     * Convert basic markdown to HTML
-     * @param {string} text - Markdown text
-     * @returns {string} HTML text
-     */
     function markdownToHtml(text) {
         if (!text) return '';
-        
+
         return text
-            // Escape HTML entities
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            // Code blocks (must be before inline code)
             .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-            // Inline code
             .replace(/`([^`]+)`/g, '<code>$1</code>')
-            // Bold
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-            // Italic
             .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-            // Headers
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h2>$1</h2>')
             .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-            // Lists - unordered
             .replace(/^(\s*)- (.+)$/gm, '$1<li>$2</li>')
-            // Lists - ordered
             .replace(/^(\s*)\d+\. (.+)$/gm, '$1<li>$2</li>')
-            // Blockquotes
             .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-            // Links
-            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-            // Line breaks
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
             .replace(/\n/g, '<br>')
-            // Wrap consecutive li elements in ul
             .replace(/(<li>.*<\/li>)(<br>\s*)*(<li>)/g, '$1$3')
-            // Fix multiple breaks
+            .replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>')
+            .replace(/(<\/ul>)<ul>/g, '')
             .replace(/(<br>){3,}/g, '<br><br>');
     }
 
-    // Public API
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    function escapeHtmlAttr(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
     return {
         init,
         openChat,
@@ -743,7 +589,6 @@ const AgentUI = (function() {
         scrollToBottom,
         showTypingIndicator,
         hideTypingIndicator,
-        // Model selector
         toggleModelSelector,
         openModelSelector,
         closeModelSelector,
@@ -752,7 +597,6 @@ const AgentUI = (function() {
     };
 })();
 
-// Expose to window
 window.AgentUI = {
     init: AgentUI.init,
     openChat: AgentUI.openChat,
@@ -761,7 +605,6 @@ window.AgentUI = {
     sendMessage: AgentUI.sendMessage,
     quickAction: AgentUI.quickAction,
     clearChat: AgentUI.clearChat,
-    // Model selector
     toggleModelSelector: AgentUI.toggleModelSelector,
     openModelSelector: AgentUI.openModelSelector,
     closeModelSelector: AgentUI.closeModelSelector,
@@ -769,10 +612,8 @@ window.AgentUI = {
     updateModelUI: AgentUI.updateModelUI
 };
 
-// Auto-initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', AgentUI.init);
 } else {
-    // DOM already loaded
     AgentUI.init();
 }
