@@ -40,27 +40,163 @@ const Agent = (function() {
         }
     }
     
+    function truncateText(text, maxLength = 240) {
+        const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!normalized) return '';
+        if (normalized.length <= maxLength) return normalized;
+        return `${normalized.slice(0, maxLength - 3)}...`;
+    }
+
+    function formatTimestamp(timestamp) {
+        if (!timestamp) return 'unknown';
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return 'unknown';
+        return date.toISOString();
+    }
+
+    function extractBlockTextValue(block) {
+        if (!block) return '';
+
+        const content = block.content;
+        if (typeof content === 'string') {
+            return content;
+        }
+
+        if (!content || typeof content !== 'object') {
+            return '';
+        }
+
+        switch (block.type) {
+            case 'todo': {
+                const checked = content.checked ? '[x]' : '[ ]';
+                return `${checked} ${content.text || ''}`.trim();
+            }
+            case 'code':
+                return content.text || '';
+            case 'mermaid':
+                return content.text ? `Mermaid ${content.diagramType || 'diagram'}: ${content.text}` : '';
+            case 'ai': {
+                const parts = [];
+                if (content.prompt) parts.push(`Prompt: ${content.prompt}`);
+                if (content.result) parts.push(`Result: ${content.result}`);
+                return parts.join('\n');
+            }
+            case 'image':
+            case 'ai_image':
+                return content.caption || content.alt || content.url || 'Image block';
+            case 'bookmark':
+                return content.title || content.description || content.url || 'Bookmark block';
+            case 'database': {
+                const columns = Array.isArray(content.columns) ? content.columns.length : 0;
+                const rows = Array.isArray(content.rows) ? content.rows.length : 0;
+                return `Database with ${columns} columns and ${rows} rows`;
+            }
+            case 'math':
+                return content.text || content.latex || '';
+            default:
+                return content.text ||
+                    content.prompt ||
+                    content.result ||
+                    content.url ||
+                    content.caption ||
+                    '';
+        }
+    }
+
+    function buildPageContentSnapshot(pageContext) {
+        if (!pageContext?.blocks?.length) {
+            return '(page is empty)';
+        }
+
+        return pageContext.blocks.map((block) => {
+            const indent = '  '.repeat(block.depth);
+            const prefix = `${indent}- [${block.id}] ${block.type}`;
+            const preview = truncateText(block.content, 220);
+            return preview ? `${prefix}: ${preview}` : prefix;
+        }).join('\n');
+    }
+
+    function getSelectionSnapshot(pageContext) {
+        const selectedBlockId = window.Selection?.getSelectedBlockId?.() || null;
+        const selectedText = truncateText(window.Selection?.getSelectedText?.() || '', 300);
+
+        if (!selectedBlockId && !selectedText) {
+            return {
+                selectedBlockSummary: 'No block is selected.',
+                selectedText: ''
+            };
+        }
+
+        const selectedBlock = pageContext?.blocks?.find((block) => block.id === selectedBlockId) || null;
+        const selectedBlockSummary = selectedBlock
+            ? `[${selectedBlock.id}] ${selectedBlock.type}: ${truncateText(selectedBlock.content, 220)}`
+            : (selectedBlockId ? `Selected block id: ${selectedBlockId}` : 'No block is selected.');
+
+        return {
+            selectedBlockSummary,
+            selectedText
+        };
+    }
+
+    function buildPageSetupSummary(pageContext) {
+        if (!pageContext) {
+            return 'No page is currently loaded.';
+        }
+
+        const selection = getSelectionSnapshot(pageContext);
+        const properties = Array.isArray(pageContext.properties) ? pageContext.properties.length : 0;
+        const outlineItems = pageContext.outline?.length || 0;
+        const setupLines = [
+            `Page title: ${pageContext.title || 'Untitled'}`,
+            `Page id: ${pageContext.pageId || 'unknown'}`,
+            `Block count: ${pageContext.blockCount}`,
+            `Word count: ${pageContext.wordCount}`,
+            `Reading time: ${pageContext.readingTime} min`,
+            `Default model: ${pageContext.defaultModel || state.selectedModel}`,
+            `Outline headings: ${outlineItems}`,
+            `Properties: ${properties}`,
+            `Last updated: ${formatTimestamp(pageContext.lastUpdated)}`,
+            `Selection: ${selection.selectedBlockSummary}`,
+        ];
+
+        if (selection.selectedText) {
+            setupLines.push(`Selected text: ${selection.selectedText}`);
+        }
+
+        return setupLines.join('\n');
+    }
+
     // Build system prompt with page context
     function buildSystemPrompt(pageContext) {
-        return `You are an AI assistant helping with a note-taking app. 
-You can see and edit the current page.
+        const pageSetup = buildPageSetupSummary(pageContext);
+        const blockMap = buildPageContentSnapshot(pageContext);
+        const pageContent = (getFullPageContent() || '').slice(0, 6000);
+        const outline = pageContext?.outline?.length
+            ? pageContext.outline.map((heading) => `- [${heading.id}] ${heading.content}`).join('\n')
+            : '- No headings yet';
 
-Current page info:
-- Title: ${pageContext.title || 'Untitled'}
-- Blocks: ${pageContext.blockCount}
-- Word count: ${pageContext.wordCount}
+        return `You are an AI assistant inside a block-based note editor.
+You can see the current page setup and should answer in a way that is useful for editing blocks.
 
-The user can ask you to:
-- Answer questions about the page content
-- Summarize the page
-- Edit specific blocks
-- Add new content
-- Continue writing
+Current page setup:
+${pageSetup}
 
-Page content outline:
-${pageContext.outline.map(h => '- ' + h.content).join('\n')}
+Outline:
+${outline}
 
-When editing, reference block IDs. When adding content, suggest where to place it.`;
+Block map:
+${blockMap}
+
+Page content snapshot:
+${pageContent || '(page is empty)'}
+
+Instructions:
+- Treat this as a live block editor, not a plain text document.
+- When referring to existing content, cite block ids when helpful.
+- When suggesting edits, say exactly which block to update or where to insert new content.
+- Keep answers concise unless the user asks for a long response.
+- If the user asks for Mermaid output, return clean Mermaid code in a single \`\`\`mermaid block unless they ask for explanation too.
+- Do not invent page structure that is not present in the block map.`;
     }
 
     function getStoredModelId() {
@@ -443,7 +579,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
                 result.push({
                     id: block.id,
                     type: block.type,
-                    content: extractBlockText(block),
+                    content: extractBlockTextValue(block),
                     depth: depth,
                     hasChildren: block.children && block.children.length > 0
                 });
@@ -452,20 +588,6 @@ When editing, reference block IDs. When adding content, suggest where to place i
                 }
             });
             return result;
-        }
-        
-        // Extract text from any block content type
-        function extractBlockText(block) {
-            if (!block.content) return '';
-            if (typeof block.content === 'string') return block.content;
-            if (typeof block.content === 'object') {
-                return block.content.text || 
-                       block.content.prompt || 
-                       block.content.result ||
-                       block.content.url ||
-                       JSON.stringify(block.content);
-            }
-            return String(block.content);
         }
         
         const allBlocks = flattenBlocks(page.blocks || []);
@@ -498,7 +620,7 @@ When editing, reference block IDs. When adding content, suggest where to place i
         };
     }
     
-    function getFullPageContent() {
+    function getFullPageContentLegacy() {
         const context = getPageContext();
         if (!context) return '';
         
@@ -550,6 +672,64 @@ When editing, reference block IDs. When adding content, suggest where to place i
         return content;
     }
     
+    function getFullPageContent() {
+        const context = getPageContext();
+        if (!context) return '';
+
+        let content = '';
+        if (context.icon) content += `${context.icon} `;
+        content += `# ${context.title}\n\n`;
+
+        context.blocks.forEach((block) => {
+            const indent = '  '.repeat(block.depth);
+            switch (block.type) {
+                case 'heading_1':
+                    content += `${indent}# ${block.content}\n\n`;
+                    break;
+                case 'heading_2':
+                    content += `${indent}## ${block.content}\n\n`;
+                    break;
+                case 'heading_3':
+                    content += `${indent}### ${block.content}\n\n`;
+                    break;
+                case 'text':
+                    content += `${indent}${block.content}\n\n`;
+                    break;
+                case 'bulleted_list':
+                    content += `${indent}- ${block.content}\n`;
+                    break;
+                case 'numbered_list':
+                    content += `${indent}1. ${block.content}\n`;
+                    break;
+                case 'todo':
+                    content += `${indent}- [ ] ${block.content}\n`;
+                    break;
+                case 'quote':
+                    content += `${indent}> ${block.content}\n\n`;
+                    break;
+                case 'code':
+                    content += `${indent}\`\`\`\n${block.content}\n\`\`\`\n\n`;
+                    break;
+                case 'divider':
+                    content += `${indent}---\n\n`;
+                    break;
+                case 'callout':
+                    content += `${indent}! ${block.content}\n\n`;
+                    break;
+                case 'mermaid':
+                    content += `${indent}\`\`\`mermaid\n${block.content}\n\`\`\`\n\n`;
+                    break;
+                case 'ai':
+                    content += `${indent}> AI block: ${block.content}\n\n`;
+                    break;
+                default:
+                    content += `${indent}${block.content}\n\n`;
+            }
+        });
+
+        return content;
+    }
+
     function getOutline() {
         const context = getPageContext();
         if (!context) return [];

@@ -24,7 +24,8 @@ const AgentUI = (function() {
             modelSelectorBtn: document.getElementById('model-selector-btn'),
             currentModelLabel: document.getElementById('current-model-label'),
             modelList: document.getElementById('model-list'),
-            chatModelName: document.getElementById('agent-chat-model-name')
+            chatModelName: document.getElementById('agent-chat-model-name'),
+            contextIndicator: document.querySelector('.context-indicator')
         };
     }
 
@@ -40,6 +41,7 @@ const AgentUI = (function() {
 
         setupEventListeners();
         updateModelUI();
+        updateContextIndicator();
         renderMessages();
         initialized = true;
         console.log('AgentUI initialized');
@@ -100,6 +102,8 @@ const AgentUI = (function() {
         });
 
         window.addEventListener('modelChanged', updateModelUI);
+        document.addEventListener('click', scheduleContextRefresh, true);
+        document.addEventListener('keyup', scheduleContextRefresh, true);
     }
 
     function autoResizeInput() {
@@ -122,6 +126,7 @@ const AgentUI = (function() {
             }
         });
 
+        updateContextIndicator();
         renderMessages();
 
         if (elements.input) {
@@ -233,6 +238,43 @@ const AgentUI = (function() {
             });
             renderMessages();
         }
+    }
+
+    async function openWithPrompt(promptText, options = {}) {
+        const { send = false } = options;
+
+        openChat();
+        if (!elements.input) return;
+
+        elements.input.value = promptText || '';
+        autoResizeInput();
+
+        if (send && promptText) {
+            await sendMessage();
+            return;
+        }
+
+        setTimeout(() => {
+            elements.input?.focus();
+        }, 0);
+    }
+
+    function scheduleContextRefresh() {
+        window.requestAnimationFrame(updateContextIndicator);
+    }
+
+    function updateContextIndicator() {
+        if (!elements.contextIndicator || !window.Agent?.getPageContext) return;
+
+        const pageContext = window.Agent.getPageContext();
+        if (!pageContext) {
+            elements.contextIndicator.textContent = 'No page loaded';
+            return;
+        }
+
+        const selectedBlockId = window.Selection?.getSelectedBlockId?.();
+        const selectedLabel = selectedBlockId ? `, selected ${selectedBlockId}` : '';
+        elements.contextIndicator.textContent = `${pageContext.title || 'Untitled'} - ${pageContext.blockCount} blocks${selectedLabel}`;
     }
 
     function setStreamState(nextState) {
@@ -593,7 +635,8 @@ const AgentUI = (function() {
         openModelSelector,
         closeModelSelector,
         selectModel,
-        updateModelUI
+        updateModelUI,
+        openWithPrompt
     };
 })();
 
@@ -605,6 +648,7 @@ window.AgentUI = {
     sendMessage: AgentUI.sendMessage,
     quickAction: AgentUI.quickAction,
     clearChat: AgentUI.clearChat,
+    openWithPrompt: AgentUI.openWithPrompt,
     toggleModelSelector: AgentUI.toggleModelSelector,
     openModelSelector: AgentUI.openModelSelector,
     closeModelSelector: AgentUI.closeModelSelector,

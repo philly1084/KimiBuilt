@@ -797,20 +797,29 @@ const Selection = (function() {
     function showBlockAIModal(blockId) {
         const block = document.querySelector(`.block[data-block-id="${blockId}"]`);
         if (!block) return;
-        
+
         const blockInput = block.querySelector('.block-input, [contenteditable="true"]');
         const blockContent = blockInput ? blockInput.textContent : '';
-        
-        // Use the existing AI integration modal
-        if (window.AIIntegration && window.AIIntegration.showBlockAIModal) {
-            window.AIIntegration.showBlockAIModal(blockId, blockContent);
-        } else {
-            // Fallback: Show a simple prompt
-            const prompt = prompt('Ask AI to transform this block:', '');
-            if (prompt && window.AIIntegration) {
-                window.AIIntegration.generateBlockContent(blockId, prompt);
-            }
+
+        const promptText = [
+            `Help me edit block ${blockId}.`,
+            'Use the current page context and suggest or draft improved content for this block.',
+            `Current block content: ${blockContent || '(empty)'}`
+        ].join('\n\n');
+
+        if (window.AgentUI?.openWithPrompt) {
+            window.AgentUI.openWithPrompt(promptText);
+            return;
         }
+
+        if (window.Agent?.ask) {
+            window.Agent.ask(promptText).catch((error) => {
+                console.error('Block AI request failed:', error);
+            });
+            return;
+        }
+
+        alert('AI assistant is not available right now.');
     }
     
     // Initialize context menus

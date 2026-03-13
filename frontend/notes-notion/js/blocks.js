@@ -1928,6 +1928,380 @@ const Blocks = (function() {
         return wrapper;
     }
     
+    function normalizeMermaidContentV2(content) {
+        const normalized = (content && typeof content === 'object')
+            ? { ...content }
+            : { text: typeof content === 'string' ? content : '', diagramType: 'flowchart' };
+
+        normalized.text = typeof normalized.text === 'string' ? normalized.text : '';
+        normalized.diagramType = normalized.diagramType || detectMermaidDiagramTypeV2(normalized.text);
+        normalized._showEditor = Boolean(normalized._showEditor);
+        return normalized;
+    }
+
+    function detectMermaidDiagramTypeV2(text = '') {
+        const firstLine = String(text || '').trim().split('\n')[0]?.toLowerCase() || '';
+        if (firstLine.startsWith('sequencediagram')) return 'sequence';
+        if (firstLine.startsWith('classdiagram')) return 'class';
+        if (firstLine.startsWith('statediagram')) return 'state';
+        if (firstLine.startsWith('erdiagram')) return 'er';
+        if (firstLine.startsWith('gantt')) return 'gantt';
+        if (firstLine.startsWith('pie')) return 'pie';
+        if (firstLine.startsWith('mindmap')) return 'mindmap';
+        if (firstLine.startsWith('gitgraph')) return 'gitgraph';
+        return 'flowchart';
+    }
+
+    function extractMermaidCodeV2(responseText, fallback = '') {
+        const text = extractResponseText(responseText).trim();
+        if (!text) return fallback;
+
+        const mermaidFence = text.match(/```mermaid\s*([\s\S]*?)```/i);
+        if (mermaidFence?.[1]) {
+            return mermaidFence[1].trim();
+        }
+
+        const genericFence = text.match(/```(?:\w+)?\s*([\s\S]*?)```/);
+        if (genericFence?.[1]) {
+            return genericFence[1].trim();
+        }
+
+        return text;
+    }
+
+    function showBlocksToastV2(message, type = 'info') {
+        if (window.Sidebar?.showToast) {
+            window.Sidebar.showToast(message, type);
+            return;
+        }
+
+        console.log(`[Blocks:${type}] ${message}`);
+    }
+
+    function replaceMermaidWrapperV2(wrapper, block, isEditable) {
+        const nextWrapper = renderMermaidBlock(block, isEditable);
+        wrapper.replaceWith(nextWrapper);
+        if (window.Editor?.savePage) {
+            window.Editor.savePage();
+        }
+        return nextWrapper;
+    }
+
+    function showMermaidStatusV2(wrapper, message) {
+        wrapper.innerHTML = `
+            <div class="ai-block-loading">
+                <div class="spinner"></div>
+                <span>${escapeHtml(message)}</span>
+            </div>
+        `;
+    }
+
+    function buildMermaidPromptV2({ diagramType, request, currentCode = '' }) {
+        const codeContext = currentCode.trim()
+            ? `Current Mermaid code:\n\`\`\`mermaid\n${currentCode.trim()}\n\`\`\``
+            : 'There is no current Mermaid code yet.';
+
+        return [
+            `You are editing a ${diagramType} Mermaid diagram in a block-based notes app.`,
+            request,
+            codeContext,
+            'Return only Mermaid code in a single ```mermaid fenced block.',
+            'Do not include explanation outside the code block unless the request explicitly asks for explanation.'
+        ].join('\n\n');
+    }
+
+    async function requestMermaidDiagramV2(block, wrapper, isEditable, options = {}) {
+        const { diagramType, request, currentCode = '' } = options;
+        if (!window.Agent?.ask) {
+            showBlocksToastV2('AI assistant is not available yet.', 'error');
+            return;
+        }
+
+        showMermaidStatusV2(wrapper, 'Generating Mermaid diagram...');
+
+        try {
+            const response = await window.Agent.ask(buildMermaidPromptV2({
+                diagramType,
+                request,
+                currentCode
+            }));
+            const diagramCode = extractMermaidCodeV2(response, currentCode).trim();
+
+            if (!diagramCode) {
+                throw new Error('The AI response did not include Mermaid code.');
+            }
+
+            block.content = {
+                ...normalizeMermaidContentV2(block.content),
+                text: diagramCode,
+                diagramType,
+                _showEditor: false
+            };
+
+            replaceMermaidWrapperV2(wrapper, block, isEditable);
+            window.AgentUI?.renderMessages?.();
+            showBlocksToastV2('Diagram updated', 'success');
+        } catch (error) {
+            console.error('Mermaid AI request failed:', error);
+            block.content = {
+                ...normalizeMermaidContentV2(block.content),
+                diagramType,
+                _showEditor: true
+            };
+            const nextWrapper = replaceMermaidWrapperV2(wrapper, block, isEditable);
+            const errorEl = document.createElement('div');
+            errorEl.className = 'mermaid-error';
+            errorEl.textContent = `Failed to generate Mermaid diagram: ${error.message}`;
+            nextWrapper.appendChild(errorEl);
+            showBlocksToastV2('Failed to generate Mermaid diagram', 'error');
+        }
+    }
+
+    async function renderMermaidPreviewV2(container, content) {
+        const diagramCode = String(content || '').trim();
+        if (!diagramCode) {
+            container.innerHTML = '<div class="mermaid-error">Add Mermaid code to preview the diagram.</div>';
+            return;
+        }
+
+        if (typeof mermaid === 'undefined') {
+            container.innerHTML = `
+                <pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(diagramCode)}</pre>
+                <div style="color: var(--text-muted); margin-top: 8px; font-size: 12px;">Mermaid library not loaded.</div>
+            `;
+            return;
+        }
+
+        const renderId = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+        try {
+            const result = await mermaid.render(renderId, diagramCode);
+            container.innerHTML = result.svg;
+            if (typeof result.bindFunctions === 'function') {
+                result.bindFunctions(container);
+            }
+        } catch (error) {
+            container.innerHTML = `
+                <div class="mermaid-error">Error rendering diagram: ${escapeHtml(error.message)}</div>
+                <pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 4px; overflow-x: auto;">${escapeHtml(diagramCode)}</pre>
+            `;
+        }
+    }
+
+    function renderMermaidBlock(block, isEditable = true) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'block-content mermaid-block';
+
+        const content = normalizeMermaidContentV2(block.content);
+        block.content = content;
+
+        const isEditing = isEditable && (content._showEditor || !content.text.trim());
+
+        if (isEditing) {
+            const editorCard = document.createElement('div');
+            editorCard.className = 'mermaid-empty-state';
+            editorCard.style.cssText = 'border: 2px dashed var(--border-color); border-radius: var(--radius-lg); padding: 20px; background: var(--bg-secondary);';
+
+            const header = document.createElement('div');
+            header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;';
+            header.innerHTML = '<strong>Create Mermaid Diagram</strong>';
+
+            const typeSelect = document.createElement('select');
+            typeSelect.className = 'mermaid-type-select';
+            typeSelect.innerHTML = `
+                <option value="flowchart">Flowchart</option>
+                <option value="sequence">Sequence Diagram</option>
+                <option value="class">Class Diagram</option>
+                <option value="state">State Diagram</option>
+                <option value="er">ER Diagram</option>
+                <option value="gantt">Gantt</option>
+                <option value="pie">Pie</option>
+                <option value="mindmap">Mindmap</option>
+                <option value="gitgraph">Git Graph</option>
+            `;
+            typeSelect.value = content.diagramType;
+            header.appendChild(typeSelect);
+            editorCard.appendChild(header);
+
+            const input = document.createElement('textarea');
+            input.className = 'mermaid-input';
+            input.value = content.text || '';
+            input.rows = Math.max(8, Math.min(18, (content.text || '').split('\n').length + 2));
+            input.placeholder = `Describe your ${content.diagramType} or paste Mermaid code here.\n\nTip: Ask AI to generate Mermaid code directly for this block.`;
+            input.style.cssText = 'width: 100%; min-height: 180px; resize: vertical;';
+            editorCard.appendChild(input);
+
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;';
+
+            const aiBtn = document.createElement('button');
+            aiBtn.className = 'mermaid-ai-btn';
+            aiBtn.textContent = 'AI Generate';
+            aiBtn.addEventListener('click', async () => {
+                const description = prompt('Describe the diagram you want to generate:', '');
+                if (!description) return;
+
+                await requestMermaidDiagramV2(block, wrapper, isEditable, {
+                    diagramType: typeSelect.value,
+                    currentCode: input.value,
+                    request: `Create a ${typeSelect.value} Mermaid diagram for this request: ${description}`
+                });
+            });
+
+            const templateBtn = document.createElement('button');
+            templateBtn.className = 'mermaid-action-btn';
+            templateBtn.textContent = 'Use Template';
+            templateBtn.addEventListener('click', () => {
+                input.value = getMermaidTemplate(typeSelect.value);
+                input.focus();
+            });
+
+            const saveBtn = document.createElement('button');
+            saveBtn.className = 'mermaid-action-btn';
+            saveBtn.textContent = 'Save Diagram';
+            saveBtn.addEventListener('click', () => {
+                block.content = {
+                    ...content,
+                    text: input.value.trim(),
+                    diagramType: typeSelect.value,
+                    _showEditor: false
+                };
+                replaceMermaidWrapperV2(wrapper, block, isEditable);
+            });
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'mermaid-action-btn';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                block.content = {
+                    ...content,
+                    diagramType: typeSelect.value,
+                    _showEditor: false
+                };
+                replaceMermaidWrapperV2(wrapper, block, isEditable);
+            });
+
+            actions.appendChild(aiBtn);
+            actions.appendChild(templateBtn);
+            actions.appendChild(saveBtn);
+            actions.appendChild(cancelBtn);
+            editorCard.appendChild(actions);
+            wrapper.appendChild(editorCard);
+
+            setTimeout(() => input.focus(), 0);
+            return wrapper;
+        }
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'mermaid-toolbar';
+        toolbar.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;';
+
+        const diagramLabel = document.createElement('span');
+        diagramLabel.className = 'mermaid-action-btn';
+        diagramLabel.textContent = `${content.diagramType} diagram`;
+        toolbar.appendChild(diagramLabel);
+
+        const improveBtn = document.createElement('button');
+        improveBtn.className = 'mermaid-action-btn';
+        improveBtn.textContent = 'Improve';
+        improveBtn.addEventListener('click', async () => {
+            await requestMermaidDiagramV2(block, wrapper, isEditable, {
+                diagramType: content.diagramType,
+                currentCode: content.text,
+                request: 'Improve this Mermaid diagram so it is clearer, cleaner, and more professional.'
+            });
+        });
+
+        const fixBtn = document.createElement('button');
+        fixBtn.className = 'mermaid-action-btn';
+        fixBtn.textContent = 'Fix';
+        fixBtn.addEventListener('click', async () => {
+            await requestMermaidDiagramV2(block, wrapper, isEditable, {
+                diagramType: content.diagramType,
+                currentCode: content.text,
+                request: 'Fix any Mermaid syntax or structural issues in this diagram.'
+            });
+        });
+
+        const expandBtn = document.createElement('button');
+        expandBtn.className = 'mermaid-action-btn';
+        expandBtn.textContent = 'Expand';
+        expandBtn.addEventListener('click', async () => {
+            await requestMermaidDiagramV2(block, wrapper, isEditable, {
+                diagramType: content.diagramType,
+                currentCode: content.text,
+                request: 'Expand this Mermaid diagram with more detail while keeping it valid and readable.'
+            });
+        });
+
+        const explainBtn = document.createElement('button');
+        explainBtn.className = 'mermaid-action-btn';
+        explainBtn.textContent = 'Explain';
+        explainBtn.addEventListener('click', async () => {
+            await askAIFromDiagram(
+                block,
+                content.diagramType,
+                content.text,
+                'Explain what this Mermaid diagram shows and how the flow is structured.'
+            );
+        });
+
+        toolbar.appendChild(improveBtn);
+        toolbar.appendChild(fixBtn);
+        toolbar.appendChild(expandBtn);
+        toolbar.appendChild(explainBtn);
+
+        if (isEditable) {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'mermaid-action-btn';
+            editBtn.textContent = 'Edit';
+            editBtn.addEventListener('click', () => {
+                block.content = { ...content, _showEditor: true };
+                replaceMermaidWrapperV2(wrapper, block, isEditable);
+            });
+            toolbar.appendChild(editBtn);
+        }
+
+        wrapper.appendChild(toolbar);
+
+        const diagramContainer = document.createElement('div');
+        diagramContainer.className = 'mermaid-diagram-container';
+        diagramContainer.style.cssText = 'background: var(--bg-secondary); padding: 16px; border-radius: var(--radius-md); overflow-x: auto;';
+        diagramContainer.innerHTML = '<div class="ai-block-loading"><div class="spinner"></div><span>Rendering diagram...</span></div>';
+        wrapper.appendChild(diagramContainer);
+
+        setTimeout(() => {
+            renderMermaidPreviewV2(diagramContainer, content.text);
+        }, 0);
+
+        return wrapper;
+    }
+
+    function askAIFromDiagram(block, diagramType, currentCode = '', customPrompt = '') {
+        const promptText = customPrompt
+            ? [
+                customPrompt,
+                'Use the current Mermaid diagram and page context in your answer.',
+                `Diagram type: ${diagramType}`,
+                `\`\`\`mermaid\n${currentCode || `[empty ${diagramType} diagram]`}\n\`\`\``
+            ].join('\n\n')
+            : `Help me create a ${diagramType} Mermaid diagram for this page. Return Mermaid code in a single \`\`\`mermaid block.`;
+
+        if (window.AgentUI?.openWithPrompt) {
+            window.AgentUI.openWithPrompt(promptText, { send: Boolean(customPrompt) });
+            return;
+        }
+
+        if (window.Agent?.ask) {
+            window.Agent.ask(promptText).then(() => {
+                window.AgentUI?.renderMessages?.();
+            });
+            return;
+        }
+
+        alert('AI assistant is not available right now.');
+    }
+
     /**
      * Format content with inline formatting
      */
