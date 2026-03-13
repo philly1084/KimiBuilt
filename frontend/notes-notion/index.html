@@ -84,8 +84,22 @@
                     </svg>
                     <span class="theme-text">Dark mode</span>
                 </button>
+                <div class="sidebar-agent-section">
+                    <div class="agent-status">
+                        <span class="agent-status-indicator"></span>
+                        <span class="agent-status-text">AI Ready</span>
+                    </div>
+                </div>
             </div>
         </aside>
+
+        <!-- Floating Agent Widget -->
+        <div id="agent-widget" class="agent-widget">
+            <button id="agent-widget-btn" class="agent-widget-btn" title="Ask AI about this page">
+                <span class="agent-avatar">✨</span>
+                <span class="agent-label">Ask AI</span>
+            </button>
+        </div>
 
         <!-- Sidebar Handle (visible when collapsed) -->
         <div class="sidebar-handle" onclick="Sidebar.toggle()" title="Show sidebar">
@@ -181,6 +195,16 @@
                                 <span>Plain Text (.txt)</span>
                             </div>
                         </div>
+                    </div>
+                    <!-- Model Selector -->
+                    <div class="model-selector-wrapper">
+                        <button id="model-selector-btn" class="model-selector-btn" onclick="AgentUI.toggleModelSelector()" title="Change AI model">
+                            <span class="model-icon">🤖</span>
+                            <span id="current-model-label">GPT-4o</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
@@ -494,6 +518,19 @@
         </div>
     </div>
 
+    <!-- Model Selector Dropdown -->
+    <div id="model-selector-dropdown" class="model-selector-dropdown" style="display: none;">
+        <div class="model-selector-dropdown-overlay" onclick="AgentUI.closeModelSelector()"></div>
+        <div class="model-selector-dropdown-content">
+            <div class="model-selector-header">
+                <span>Select Model</span>
+            </div>
+            <div id="model-list" class="model-list">
+                <!-- Models will be rendered here -->
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
 
@@ -526,6 +563,50 @@
     <script src="js/import-export.js"></script>
     <script src="js/editor.js"></script>
     <script src="js/sidebar.js"></script>
+    <script src="js/agent.js"></script>
+    <script src="js/agent-ui.js"></script>
     <script src="js/app.js"></script>
+
+    <!-- Agent Chat Modal -->
+    <div id="agent-chat-modal" class="agent-chat-modal" style="display: none;">
+        <div class="agent-chat-overlay" onclick="AgentUI.closeChat()"></div>
+        <div class="agent-chat-container">
+            <div class="agent-chat-header">
+                <div class="agent-chat-title">
+                    <span class="agent-avatar">✨</span>
+                    <span id="agent-chat-model-name">AI Assistant</span>
+                </div>
+                <button class="agent-chat-close" onclick="AgentUI.closeChat()">✕</button>
+            </div>
+            <div id="agent-chat-messages" class="agent-chat-messages">
+                <!-- Messages will be rendered here -->
+            </div>
+            <div class="agent-chat-input-area">
+                <div class="agent-chat-context">
+                    <span class="context-indicator">📄 Can see current page</span>
+                </div>
+                <div class="agent-chat-input-wrapper">
+                    <textarea 
+                        id="agent-chat-input" 
+                        class="agent-chat-input" 
+                        placeholder="Ask about this page or request edits..."
+                        rows="1"
+                    ></textarea>
+                    <button id="agent-chat-send" class="agent-chat-send" onclick="AgentUI.sendMessage()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+                <div class="agent-chat-actions">
+                    <button class="agent-action-btn" onclick="AgentUI.quickAction('summarize')">Summarize</button>
+                    <button class="agent-action-btn" onclick="AgentUI.quickAction('continue')">Continue writing</button>
+                    <button class="agent-action-btn" onclick="AgentUI.quickAction('outline')">Generate outline</button>
+                    <button class="agent-action-btn" onclick="AgentUI.clearChat()">Clear chat</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

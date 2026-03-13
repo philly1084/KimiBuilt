@@ -48,7 +48,7 @@
         // Show welcome toast
         setTimeout(() => {
             const mode = state.backendConnected ? 'connected' : 'offline';
-            Sidebar.showToast(`Welcome! (${mode} mode) Press "/" for commands`, 'info');
+            Sidebar.showToast(`Welcome! (${mode} mode) Press "/" for commands or ✨ for AI`, 'info');
         }, 1000);
     }
     
@@ -123,6 +123,18 @@
         
         // Initialize storage
         console.log('[Notes] Storage ready');
+        
+        // Initialize AI Agent
+        if (typeof Agent !== 'undefined') {
+            console.log('[Notes] Initializing AI Agent...');
+            Agent.init();
+        }
+        
+        // Initialize Agent UI
+        if (typeof AgentUI !== 'undefined') {
+            console.log('[Notes] Initializing Agent UI...');
+            AgentUI.init();
+        }
         
         // Initialize selection
         console.log('[Notes] Initializing selection...');
@@ -280,6 +292,12 @@
 - Select text to see "Ask AI" toolbar
 - Drag the block handle to reorder blocks
 - Click the block handle for the block menu
+
+## AI Agent
+- **Ctrl/Cmd + Shift + A** - Open AI Agent chat
+- Ask questions about your page
+- Request edits, summaries, or new content
+- Agent can see your entire page content
         `;
         
         const modal = document.createElement('div');
@@ -448,7 +466,18 @@
                 const newBlock = Editor.insertBlockAfter(lastBlock.id, 'text');
                 if (newBlock) Editor.focusBlock(newBlock.id);
             }
-        }}
+        }},
+        { 
+            id: 'ai-agent', 
+            name: 'Ask AI Agent', 
+            icon: '✨', 
+            shortcut: 'Ctrl+Shift+A', 
+            action: () => {
+                if (window.AgentUI) {
+                    window.AgentUI.openChat();
+                }
+            }
+        }
     ];
     
     function openCommandPalette() {
