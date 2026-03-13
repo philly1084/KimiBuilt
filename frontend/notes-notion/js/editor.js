@@ -96,58 +96,24 @@ const Editor = (function() {
         });
     }
 
-    function buildBlockTreeMetrics() {
+    function getOutlineHeadings() {
         const entries = getFlattenedBlocks({ includeCollapsed: true });
-        const headings = entries.filter((entry) => entry.block.type.startsWith('heading_'));
-        const words = entries
-            .map((entry) => extractBlockText(entry.block))
-            .join(' ')
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean).length;
-
-        return {
-            blockCount: entries.length,
-            headingCount: headings.length,
-            wordCount: words,
-            headings,
-        };
+        return entries.filter((entry) => entry.block.type.startsWith('heading_'));
     }
 
     function updateWorkspacePanel() {
-        const statsEl = document.getElementById('note-stats');
         const outlineEl = document.getElementById('page-outline-list');
-        const lastEditedEl = document.getElementById('note-last-edited');
-        if (!statsEl || !outlineEl) return;
+        if (!outlineEl) return;
 
-        const metrics = buildBlockTreeMetrics();
-        statsEl.innerHTML = `
-            <div class="note-stat">
-                <span class="note-stat-value">${metrics.wordCount}</span>
-                <span class="note-stat-label">Words</span>
-            </div>
-            <div class="note-stat">
-                <span class="note-stat-value">${metrics.blockCount}</span>
-                <span class="note-stat-label">Blocks</span>
-            </div>
-            <div class="note-stat">
-                <span class="note-stat-value">${metrics.headingCount}</span>
-                <span class="note-stat-label">Headings</span>
-            </div>
-        `;
+        const headings = getOutlineHeadings();
 
-        if (lastEditedEl) {
-            const updatedAt = currentPage?.updatedAt ? new Date(currentPage.updatedAt) : new Date();
-            lastEditedEl.textContent = `Saved ${updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
-        }
-
-        if (metrics.headings.length === 0) {
-            outlineEl.innerHTML = '<div class="outline-empty">Add headings to turn this note into a navigable document.</div>';
+        if (headings.length === 0) {
+            outlineEl.innerHTML = '<div class="outline-empty">Add headings to see an outline.</div>';
             return;
         }
 
         outlineEl.innerHTML = '';
-        metrics.headings.forEach((entry) => {
+        headings.forEach((entry) => {
             const level = parseInt(entry.block.type.split('_')[1] || '1', 10);
             const button = document.createElement('button');
             button.className = `outline-item outline-item-level-${level}`;
@@ -164,25 +130,6 @@ const Editor = (function() {
                 focusBlock(entry.block.id, 'start');
             });
             outlineEl.appendChild(button);
-        });
-    }
-
-    function setupWorkspacePanel() {
-        document.querySelectorAll('[data-note-ai-action]').forEach((button) => {
-            button.addEventListener('click', () => {
-                if (!window.AIAssistant) return;
-
-                const prompts = {
-                    page: 'Answer questions about this note and suggest the next concrete edits.',
-                    summary: 'Summarize this note into a tight set of key points and action items.',
-                    gaps: 'Review this note and point out missing details, weak sections, and follow-up questions.',
-                };
-
-                window.AIAssistant.restore();
-                window.AIAssistant.clearReferences();
-                window.AIAssistant.addCurrentPageContext();
-                window.AIAssistant.setPrompt(prompts[button.dataset.noteAiAction] || '');
-            });
         });
     }
 
@@ -206,7 +153,6 @@ const Editor = (function() {
         setupInlineToolbar();
         setupMentions();
         setupUndoRedo();
-        setupWorkspacePanel();
     }
     
     /**

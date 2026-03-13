@@ -25,80 +25,10 @@ const Sidebar = (function() {
         
         // Setup mobile toggle
         setupMobileToggle();
-        
-        // Load models from backend
-        await populateModelDropdown();
     }
     
     /**
-     * Fetch models from backend and populate dropdown
-     */
-    async function populateModelDropdown() {
-        const dropdown = document.getElementById('page-model-dropdown');
-        if (!dropdown) return;
-        
-        // Clear existing options
-        dropdown.innerHTML = '';
-        
-        // Add default option
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'Loading models...';
-        dropdown.appendChild(defaultOption);
-        
-        try {
-            const models = await API.getModels();
-            
-            // Clear loading option
-            dropdown.innerHTML = '';
-            
-            if (models.length === 0) {
-                // No models from backend - add custom input option
-                const customOption = document.createElement('option');
-                customOption.value = '';
-                customOption.textContent = 'Enter custom model...';
-                dropdown.appendChild(customOption);
-                
-                // Add input field for custom model
-                addCustomModelInput();
-            } else {
-                // Add default option
-                const defaultOpt = document.createElement('option');
-                defaultOpt.value = '';
-                defaultOpt.textContent = 'Use Global Default';
-                dropdown.appendChild(defaultOpt);
-                
-                // Add models from backend
-                models.forEach(model => {
-                    const option = document.createElement('option');
-                    option.value = model.id;
-                    option.textContent = model.name || model.id;
-                    dropdown.appendChild(option);
-                });
-                
-                // Add custom option at end
-                const customOpt = document.createElement('option');
-                customOpt.value = 'custom';
-                customOpt.textContent = 'Other (enter manually)...';
-                dropdown.appendChild(customOpt);
-            }
-            
-            console.log(`Loaded ${models.length} models from backend`);
-        } catch (error) {
-            console.error('Failed to load models:', error);
-            dropdown.innerHTML = '';
-            
-            const errorOption = document.createElement('option');
-            errorOption.value = '';
-            errorOption.textContent = 'Error loading models - enter manually';
-            dropdown.appendChild(errorOption);
-            
-            addCustomModelInput();
-        }
-    }
-    
-    /**
-     * Add custom model input field
+     * Add custom model input field (placeholder for future use)
      */
     function addCustomModelInput() {
         const container = document.querySelector('.model-selector-wrapper');

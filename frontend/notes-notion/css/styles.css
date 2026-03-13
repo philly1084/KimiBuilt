@@ -634,95 +634,6 @@ body {
     background: var(--bg-hover);
 }
 
-/* ===== Page Model Selector ===== */
-/* Connection Status */
-.connection-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    padding: 6px 12px;
-    background: var(--bg-hover);
-    border-radius: 6px;
-    font-size: 13px;
-    width: fit-content;
-}
-
-.connection-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #888;
-    transition: background 0.3s ease;
-}
-
-.connection-indicator.connected {
-    background: #3fb950;
-    box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.3);
-}
-
-.connection-indicator.disconnected {
-    background: #f85149;
-    box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.3);
-}
-
-.connection-indicator.checking {
-    background: #d29922;
-    animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-
-.connection-text {
-    color: var(--text-secondary);
-}
-
-.page-model-selector {
-    margin-bottom: 16px;
-    padding: 8px 0;
-}
-
-.model-selector-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.model-selector-label {
-    font-size: 13px;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-
-.model-selector-dropdown {
-    padding: 6px 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    color: var(--text-primary);
-    cursor: pointer;
-    outline: none;
-    transition: border-color 0.15s, background 0.15s;
-}
-
-.model-selector-dropdown:hover,
-.model-selector-dropdown:focus {
-    border-color: var(--border-hover);
-    background: var(--bg-hover);
-}
-
-.model-selector-hint {
-    font-size: 12px;
-    color: var(--text-muted);
-    width: 100%;
-    margin-top: 4px;
-}
-
 /* ===== Editor ===== */
 .editor {
     max-width: var(--content-max-width);
@@ -789,35 +700,6 @@ body {
 
 .outline-card-meta {
     font-size: 12px;
-    color: var(--text-muted);
-}
-
-.note-stats {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-}
-
-.note-stat {
-    padding: 10px;
-    border-radius: 10px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-}
-
-.note-stat-value {
-    display: block;
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text-primary);
-}
-
-.note-stat-label {
-    display: block;
-    margin-top: 2px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--text-muted);
 }
 
@@ -888,31 +770,6 @@ body {
     color: var(--text-muted);
     font-size: 13px;
     line-height: 1.5;
-}
-
-.outline-ai-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.outline-ai-btn {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
-}
-
-.outline-ai-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent-color);
-    transform: translateY(-1px);
 }
 
 /* Add Block Hint - At bottom of editor */
@@ -2535,33 +2392,6 @@ body {
     margin: 0 4px;
 }
 
-.toolbar-model-selector {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.toolbar-model-label {
-    font-size: 12px;
-    color: var(--text-muted);
-}
-
-.toolbar-model-dropdown {
-    padding: 4px 8px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    color: var(--text-primary);
-    cursor: pointer;
-    outline: none;
-}
-
-.toolbar-model-dropdown:hover,
-.toolbar-model-dropdown:focus {
-    border-color: var(--border-hover);
-}
-
 /* ===== Inline Formatting Toolbar ===== */
 .inline-toolbar {
     position: absolute;
@@ -3188,82 +3018,6 @@ body {
 }
 
 
-/* ===== Page AI Button ===== */
-.page-ai-actions {
-    position: relative;
-    margin-top: 12px;
-}
-
-.page-ai-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-}
-
-.page-ai-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-.page-ai-btn:active {
-    transform: translateY(0);
-}
-
-.page-ai-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 8px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    min-width: 220px;
-    z-index: 1000;
-    padding: 6px;
-}
-
-.ai-dropdown-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: 14px;
-    color: var(--text-primary);
-    transition: background 0.15s ease;
-}
-
-.ai-dropdown-item:hover {
-    background: var(--bg-hover);
-}
-
-.ai-dropdown-divider {
-    height: 1px;
-    background: var(--border-color);
-    margin: 6px 0;
-}
-
-/* ===== Block Context Menu Enhancements ===== */
-.context-menu-item[data-action="ask-ai"] {
-    color: var(--accent-color);
-    font-weight: 500;
-}
-
-.context-menu-item[data-action="ask-ai"] svg {
-    stroke: var(--accent-color);
-}
 /* ===== Import/Export Styles ===== */
 
 /* Import Button in Sidebar */

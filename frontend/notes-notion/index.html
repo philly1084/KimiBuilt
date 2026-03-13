@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Notes - Notion Style</title>
     <link rel="stylesheet" href="css/styles.css">
-    <link rel="stylesheet" href="css/ai-assistant.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -172,55 +171,7 @@
                     </div>
                 </div>
 
-                <!-- Connection Status -->
-                <div id="connection-status" class="connection-status" title="Backend connection status">
-                    <span class="connection-indicator" id="connection-indicator"></span>
-                    <span class="connection-text" id="connection-text">Checking...</span>
-                </div>
 
-                <!-- Model Selector -->
-                <div class="page-model-selector">
-                    <div class="model-selector-wrapper">
-                        <span class="model-selector-label">🤖 AI Model:</span>
-                        <select id="page-model-dropdown" class="model-selector-dropdown" title="Set default AI model for this page">
-                            <option value="">Loading models...</option>
-                        </select>
-                        <span class="model-selector-hint">This model will be used for all AI operations on this page</span>
-                    </div>
-                </div>
-
-                <!-- Page AI Actions -->
-                <div class="page-ai-actions">
-                    <button id="page-ai-btn" class="page-ai-btn" title="AI Actions for this page">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                            <path d="M2 17l10 5 10-5"></path>
-                            <path d="M2 12l10 5 10-5"></path>
-                        </svg>
-                        Ask AI ✨
-                    </button>
-                    <div id="page-ai-dropdown" class="page-ai-dropdown" style="display: none;">
-                        <div class="ai-dropdown-item" data-action="improve-page">
-                            <span>✨</span> Improve entire page
-                        </div>
-                        <div class="ai-dropdown-item" data-action="summarize">
-                            <span>📝</span> Summarize content
-                        </div>
-                        <div class="ai-dropdown-item" data-action="expand">
-                            <span>📖</span> Expand all sections
-                        </div>
-                        <div class="ai-dropdown-item" data-action="rewrite">
-                            <span>🔄</span> Rewrite in professional tone
-                        </div>
-                        <div class="ai-dropdown-item" data-action="generate-toc">
-                            <span>📑</span> Generate table of contents
-                        </div>
-                        <div class="ai-dropdown-divider"></div>
-                        <div class="ai-dropdown-item" data-action="custom">
-                            <span>💬</span> Custom prompt...
-                        </div>
-                    </div>
-                </div>
 
                 <!-- Add cover button (when no cover) -->
                 <button id="add-cover-btn" class="add-cover-btn" style="display: none;">
@@ -242,31 +193,16 @@
 
                     <!-- Empty state for new pages -->
                     <div id="empty-state" class="empty-state" style="display: none;">
-                        <p>Write something, or press '/' for AI and commands</p>
+                        <p>Write something, or press '/' for commands</p>
                     </div>
                 </div>
 
                 <aside id="page-outline-panel" class="page-outline-panel">
                     <div class="outline-card">
-                        <div class="outline-card-label">This note</div>
-                        <div id="note-stats" class="note-stats"></div>
-                    </div>
-
-                    <div class="outline-card">
                         <div class="outline-card-header">
                             <span class="outline-card-title">Outline</span>
-                            <span id="note-last-edited" class="outline-card-meta">Saved locally</span>
                         </div>
                         <div id="page-outline-list" class="page-outline-list"></div>
-                    </div>
-
-                    <div class="outline-card">
-                        <div class="outline-card-title">AI with this note</div>
-                        <div class="outline-ai-actions">
-                            <button class="outline-ai-btn" data-note-ai-action="page">Ask about page</button>
-                            <button class="outline-ai-btn" data-note-ai-action="summary">Summarize note</button>
-                            <button class="outline-ai-btn" data-note-ai-action="gaps">Find gaps</button>
-                        </div>
                     </div>
                 </aside>
             </div>
@@ -509,30 +445,7 @@
         </div>
     </div>
 
-    <!-- AI Prompt Modal -->
-    <div id="ai-modal" class="ai-modal" style="display: none;">
-        <div class="ai-modal-content">
-            <div class="ai-modal-header">
-                <span class="ai-icon">✨</span>
-                <span>Ask AI</span>
-            </div>
-            <div class="ai-prompt-area">
-                <textarea id="ai-prompt" placeholder="Ask AI to write, edit, or generate content..."></textarea>
-            </div>
-            <div class="ai-actions">
-                <button id="ai-generate" class="ai-btn primary">Generate</button>
-                <button id="ai-cancel" class="ai-btn">Cancel</button>
-            </div>
-            <div class="ai-suggestions">
-                <div class="ai-suggestion" data-prompt="Summarize this">Summarize</div>
-                <div class="ai-suggestion" data-prompt="Improve writing">Improve writing</div>
-                <div class="ai-suggestion" data-prompt="Fix spelling and grammar">Fix spelling & grammar</div>
-                <div class="ai-suggestion" data-prompt="Make shorter">Make shorter</div>
-                <div class="ai-suggestion" data-prompt="Make longer">Make longer</div>
-                <div class="ai-suggestion" data-prompt="Change tone to professional">Professional tone</div>
-            </div>
-        </div>
-    </div>
+
 
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
@@ -548,110 +461,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
     <!-- OpenAI SDK (optional - will use fetch fallback if blocked) -->
     <script src="https://unpkg.com/openai@4.82.0/dist/index.browser.js" crossorigin="anonymous" async></script>
-    <!-- Import/Export Libraries -->
-    <!-- AI Assistant Widget - Bottom Right -->
-    <div id="ai-assistant-widget" class="ai-assistant-widget">
-        <!-- Header - Click to collapse/expand -->
-        <div class="ai-assistant-header" onclick="AIAssistant.toggleCollapse()">
-            <div class="ai-assistant-title">
-                <span class="sparkle">✨</span>
-                <span class="title-text">Ask AI</span>
-            </div>
-            <div class="ai-assistant-actions">
-                <button class="ai-assistant-btn minimize-btn" onclick="event.stopPropagation(); AIAssistant.minimize()" title="Minimize">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 9l-7 7-7-7"/>
-                    </svg>
-                </button>
-            </div>
-        </div>
-        
-        <!-- Context References Bar -->
-        <div id="ai-context-references" class="ai-context-references" style="display: none;">
-            <!-- References will appear here -->
-        </div>
-        
-        <!-- Add Context Button & Model Indicator -->
-        <div class="ai-assistant-content" style="padding: 8px 12px; display: flex; gap: 8px; align-items: center;">
-            <button class="ai-add-context-btn" onclick="AIAssistant.showContextMenu()">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                Add Context
-            </button>
-            <span id="ai-model-indicator" class="ai-model-indicator" title="AI Model">--</span>
-        </div>
-        
-        <!-- Context Selector Menu (hidden by default) -->
-        <div id="ai-context-menu" class="ai-context-menu" style="display: none;">
-            <div class="ai-context-menu-header">Select Context Source</div>
-            
-            <div class="ai-context-menu-section">
-                <div class="ai-context-menu-item" onclick="AIAssistant.addCurrentPageContext()">
-                    <span class="icon">📄</span>
-                    <span>Current Page</span>
-                    <span class="check">✓</span>
-                </div>
-            </div>
-            
-            <div class="ai-context-menu-section" id="ai-context-pages-section">
-                <div class="ai-context-menu-header" style="font-size: 11px; padding: 8px 16px;">Other Pages</div>
-                <!-- Pages will be listed here -->
-            </div>
-            
-            <div class="ai-context-menu-section" id="ai-context-sections-section">
-                <div class="ai-context-menu-header" style="font-size: 11px; padding: 8px 16px;">Sections</div>
-                <!-- Sections will be listed here -->
-            </div>
-        </div>
-        
-        <!-- Response Area -->
-        <div id="ai-response-area" class="ai-response-area" style="display: none;">
-            <div id="ai-response" class="ai-response"></div>
-            <div class="ai-response-actions">
-                <button class="ai-response-btn" onclick="AIAssistant.insertBelow()">Insert Below</button>
-                <button class="ai-response-btn primary" onclick="AIAssistant.replaceSelected()">Replace</button>
-            </div>
-        </div>
-        
-        <!-- Processing State -->
-        <div id="ai-processing" class="ai-processing" style="display: none;">
-            <div class="spinner"></div>
-            <span id="ai-processing-text">Thinking...</span>
-        </div>
-        
-        <!-- Quick Actions -->
-        <div class="ai-quick-actions">
-            <button class="ai-quick-action" onclick="AIAssistant.quickAction('improve')">Improve</button>
-            <button class="ai-quick-action" onclick="AIAssistant.quickAction('expand')">Expand</button>
-            <button class="ai-quick-action" onclick="AIAssistant.quickAction('summarize')">Summarize</button>
-            <button class="ai-quick-action" onclick="AIAssistant.quickAction('fix')">Fix</button>
-        </div>
-        
-        <!-- Input -->
-        <div class="ai-assistant-input-area">
-            <div class="ai-assistant-input-wrapper">
-                <textarea 
-                    id="ai-assistant-input" 
-                    class="ai-assistant-input" 
-                    placeholder="Ask AI to edit, improve, or add content..."
-                    rows="1"
-                ></textarea>
-                <button class="ai-assistant-send" onclick="AIAssistant.send()" title="Send">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                </button>
-            </div>
-        </div>
-    </div>
 
-    <!-- AI Assistant Toggle Button (Floating, shown when minimized) -->
-    <button id="ai-assistant-toggle" class="ai-assistant-toggle" onclick="AIAssistant.restore()" title="Ask AI">
-        ✨
-    </button>
 
     <script src="https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js"></script>
     <script src="https://unpkg.com/docx@8.5.0/build/index.umd.min.js"></script>
@@ -669,8 +479,6 @@
     <script src="js/import-export.js"></script>
     <script src="js/editor.js"></script>
     <script src="js/sidebar.js"></script>
-    <script src="js/ai-integration.js"></script>
-    <script src="js/ai-assistant.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
