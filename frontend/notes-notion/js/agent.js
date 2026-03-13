@@ -5,6 +5,61 @@
 
 const Agent = (function() {
     // ============================================
+    // API Client Integration
+    // ============================================
+    
+    // Get or create API client
+    function getAPIClient() {
+        if (window.notesAPIClient) return window.notesAPIClient;
+        
+        // Create new client if not exists
+        if (typeof NotesAPIClient !== 'undefined') {
+            window.notesAPIClient = new NotesAPIClient();
+            return window.notesAPIClient;
+        }
+        
+        return null;
+    }
+    
+    // Check if backend is available
+    async function isBackendAvailable() {
+        const apiClient = getAPIClient();
+        if (!apiClient) return false;
+        
+        try {
+            // Try to fetch models as a health check
+            await apiClient.getModels();
+            return true;
+        } catch (error) {
+            console.log('Backend not available:', error.message);
+            return false;
+        }
+    }
+    
+    // Build system prompt with page context
+    function buildSystemPrompt(pageContext) {
+        return `You are an AI assistant helping with a note-taking app. 
+You can see and edit the current page.
+
+Current page info:
+- Title: ${pageContext.title || 'Untitled'}
+- Blocks: ${pageContext.blockCount}
+- Word count: ${pageContext.wordCount}
+
+The user can ask you to:
+- Answer questions about the page content
+- Summarize the page
+- Edit specific blocks
+- Add new content
+- Continue writing
+
+Page content outline:
+${pageContext.outline.map(h => '- ' + h.content).join('\n')}
+
+When editing, reference block IDs. When adding content, suggest where to place it.`;
+    }
+    
+    // ============================================
     // State Management
     // ============================================
     const state = {
@@ -12,13 +67,15 @@ const Agent = (function() {
         isActive: false,
         messages: [],
         isProcessing: false,
-        streamingEnabled: true
+        streamingEnabled: true,
+        cachedModels: null,
+        modelsCacheTime: null
     };
     
     // ============================================
-    // Model Definitions
+    // Model Definitions (Fallback when API unavailable)
     // ============================================
-    const MODELS = [
+    const FALLBACK_MODELS = [
         { 
             id: 'gpt-4o', 
             name: 'GPT-4o', 
@@ -116,7 +173,7 @@ const Agent = (function() {
     // ============================================
     // Initialization
     // ============================================
-    function init() {
+    async function init() {
         // Load conversation history from localStorage
         const savedMessages = localStorage.getItem('notes_agent_messages');
         if (savedMessages) {
@@ -128,20 +185,61 @@ const Agent = (function() {
             }
         }
         
+        // Try to fetch models from API first
+        try {
+            await refreshModelsFromAPI();
+        } catch (e) {
+            console.log('Using fallback models');
+        }
+        
         // Validate selected model
-        if (!MODELS.find(m => m.id === state.selectedModel)) {
-            state.selectedModel = 'gpt-4o';
+        const availableModels = state.cachedModels || FALLBACK_MODELS;
+        if (!availableModels.find(m => m.id === state.selectedModel)) {
+            state.selectedModel = availableModels[0]?.id || 'gpt-4o';
             localStorage.setItem('notes_agent_model', state.selectedModel);
         }
         
         console.log('Agent module initialized with model:', state.selectedModel);
     }
     
+    // Fetch models from API with caching
+    async function refreshModelsFromAPI() {
+        const apiClient = getAPIClient();
+        if (!apiClient) return false;
+        
+        // Check cache (cache for 5 minutes)
+        const cacheExpiry = 5 * 60 * 1000;
+        if (state.cachedModels && state.modelsCacheTime && 
+            (Date.now() - state.modelsCacheTime < cacheExpiry)) {
+            return true;
+        }
+        
+        try {
+            const models = await apiClient.getModels();
+            if (models && Array.isArray(models) && models.length > 0) {
+                state.cachedModels = models;
+                state.modelsCacheTime = Date.now();
+                return true;
+            }
+        } catch (error) {
+            console.warn('Failed to fetch models from API:', error);
+        }
+        
+        return false;
+    }
+    
     // ============================================
     // Model Management
     // ============================================
     function getModels() {
-        return MODELS;
+        // Return cached models from API if available, otherwise fallback
+        return state.cachedModels || FALLBACK_MODELS;
+    }
+    
+    async function getModelsAsync() {
+        // Try to refresh from API
+        await refreshModelsFromAPI();
+        return getModels();
     }
     
     function getSelectedModel() {
@@ -149,7 +247,8 @@ const Agent = (function() {
     }
     
     function setSelectedModel(modelId) {
-        const model = MODELS.find(m => m.id === modelId);
+        const availableModels = getModels();
+        const model = availableModels.find(m => m.id === modelId);
         if (model) {
             state.selectedModel = modelId;
             localStorage.setItem('notes_agent_model', modelId);
@@ -159,16 +258,19 @@ const Agent = (function() {
     }
     
     function getModelInfo(modelId) {
-        return MODELS.find(m => m.id === modelId) || MODELS[0];
+        const availableModels = getModels();
+        return availableModels.find(m => m.id === modelId) || availableModels[0];
     }
-    
+
     function getModel(modelId) {
-        return MODELS.find(m => m.id === modelId) || MODELS[0];
+        const availableModels = getModels();
+        return availableModels.find(m => m.id === modelId) || availableModels[0];
     }
 
     function getModelsByProvider() {
+        const availableModels = getModels();
         const grouped = {};
-        MODELS.forEach(model => {
+        availableModels.forEach(model => {
             const provider = model.provider || 'Other';
             if (!grouped[provider]) {
                 grouped[provider] = [];
@@ -559,38 +661,22 @@ const Agent = (function() {
         
         try {
             const context = getPageContext();
+            const apiClient = getAPIClient();
             
-            // Simulate processing delay
-            await delay(500 + Math.random() * 1000);
-            
-            // Generate response (stub mode)
-            const responseText = generateStubResponse(question, context);
-            
-            // Simulate streaming if enabled
-            if (state.streamingEnabled && onChunk) {
-                const chunks = simulateStreaming(responseText);
-                let fullResponse = '';
-                
-                for (const chunk of chunks) {
-                    await delay(30 + Math.random() * 50);
-                    fullResponse += chunk;
-                    onChunk(chunk, fullResponse);
+            // Check if we can use the real API
+            if (apiClient) {
+                try {
+                    const responseText = await askWithAPI(question, context, { onChunk, onComplete, onError });
+                    state.isProcessing = false;
+                    return responseText;
+                } catch (apiError) {
+                    console.warn('API call failed, falling back to stub mode:', apiError.message);
+                    // Fall through to stub mode
                 }
             }
             
-            // Add assistant message
-            const assistantMessage = addMessage('assistant', responseText, {
-                model: state.selectedModel,
-                tokensUsed: estimateTokens(question + responseText)
-            });
-            
-            state.isProcessing = false;
-            
-            if (onComplete) {
-                onComplete(responseText, assistantMessage);
-            }
-            
-            return responseText;
+            // Fallback to stub mode (offline/no API client)
+            return await askWithStub(question, context, { onChunk, onComplete, onError });
             
         } catch (error) {
             state.isProcessing = false;
@@ -604,6 +690,136 @@ const Agent = (function() {
             
             throw error;
         }
+    }
+    
+    // Call the real API with streaming support
+    async function askWithAPI(question, context, options) {
+        const { onChunk, onComplete, onError } = options;
+        const apiClient = getAPIClient();
+        
+        // Build messages array
+        const systemPrompt = buildSystemPrompt(context || {
+            title: 'Untitled',
+            blockCount: 0,
+            wordCount: 0,
+            outline: []
+        });
+        
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: question }
+        ];
+        
+        // Get current model
+        const model = state.selectedModel;
+        
+        let responseText = '';
+        
+        // Use streaming if enabled and callback provided
+        if (state.streamingEnabled && onChunk && apiClient.streamChat) {
+            await apiClient.streamChat(
+                messages,
+                {
+                    model: model,
+                    temperature: 0.7,
+                    max_tokens: 4000
+                },
+                {
+                    onChunk: (chunk) => {
+                        responseText += chunk;
+                        onChunk(chunk, responseText);
+                    },
+                    onComplete: (fullResponse) => {
+                        responseText = fullResponse;
+                        const assistantMessage = addMessage('assistant', responseText, {
+                            model: model,
+                            tokensUsed: estimateTokens(question + responseText),
+                            source: 'api'
+                        });
+                        state.isProcessing = false;
+                        if (onComplete) {
+                            onComplete(responseText, assistantMessage);
+                        }
+                    },
+                    onError: (error) => {
+                        state.isProcessing = false;
+                        console.error('Streaming error:', error);
+                        if (onError) onError(error);
+                    }
+                }
+            );
+        } else {
+            // Non-streaming fallback
+            const response = await apiClient.chat(messages, {
+                model: model,
+                temperature: 0.7,
+                max_tokens: 4000
+            });
+            
+            responseText = response.content || response.message || String(response);
+            
+            // Stream via callback if provided (simulate streaming)
+            if (onChunk) {
+                const chunks = simulateStreaming(responseText);
+                for (const chunk of chunks) {
+                    await delay(10);
+                    onChunk(chunk, responseText.substring(0, responseText.indexOf(chunk) + chunk.length));
+                }
+            }
+            
+            // Add assistant message
+            const assistantMessage = addMessage('assistant', responseText, {
+                model: model,
+                tokensUsed: estimateTokens(question + responseText),
+                source: 'api'
+            });
+            
+            state.isProcessing = false;
+            
+            if (onComplete) {
+                onComplete(responseText, assistantMessage);
+            }
+        }
+        
+        return responseText;
+    }
+    
+    // Stub mode for offline/no API
+    async function askWithStub(question, context, options) {
+        const { onChunk, onComplete, onError } = options;
+        
+        // Simulate processing delay
+        await delay(500 + Math.random() * 1000);
+        
+        // Generate response (stub mode)
+        const responseText = generateStubResponse(question, context);
+        
+        // Simulate streaming if enabled
+        if (state.streamingEnabled && onChunk) {
+            const chunks = simulateStreaming(responseText);
+            let fullResponse = '';
+            
+            for (const chunk of chunks) {
+                await delay(30 + Math.random() * 50);
+                fullResponse += chunk;
+                onChunk(chunk, fullResponse);
+            }
+        }
+        
+        // Add assistant message
+        const assistantMessage = addMessage('assistant', responseText, {
+            model: state.selectedModel,
+            tokensUsed: estimateTokens(question + responseText),
+            source: 'stub'
+        });
+        
+        state.isProcessing = false;
+        
+        if (onComplete) {
+            onComplete(responseText, assistantMessage);
+        }
+        
+        return responseText;
     }
     
     function simulateStreaming(text) {
@@ -1028,8 +1244,13 @@ const Agent = (function() {
         state,
         getStats,
         
+        // API Client
+        getAPIClient,
+        isBackendAvailable,
+        
         // Models
         getModels,
+        getModelsAsync,
         getSelectedModel,
         setSelectedModel,
         getModelInfo,
@@ -1069,7 +1290,8 @@ const Agent = (function() {
         
         // Internal utilities (exposed for testing/advanced use)
         _generateStubResponse: generateStubResponse,
-        _simulateStreaming: simulateStreaming
+        _simulateStreaming: simulateStreaming,
+        _buildSystemPrompt: buildSystemPrompt
     };
 })();
 

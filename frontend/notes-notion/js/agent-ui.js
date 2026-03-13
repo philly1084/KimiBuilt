@@ -539,11 +539,21 @@ const AgentUI = (function() {
         }
     }
 
-    function openModelSelector() {
+    async function openModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
         const btn = document.getElementById('model-selector-btn');
         dropdown.style.display = 'flex';
         if (btn) btn.classList.add('active');
+        
+        // Load models from API if available
+        if (Agent.getModelsAsync) {
+            try {
+                await Agent.getModelsAsync();
+            } catch (e) {
+                console.warn('Failed to load models from API:', e);
+            }
+        }
+        
         renderModelList();
     }
 
@@ -575,17 +585,32 @@ const AgentUI = (function() {
             'meta': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>'
         };
         
+        // Check if we have any models to display
+        const hasModels = Object.keys(grouped).length > 0;
+        if (!hasModels) {
+            listContainer.innerHTML = `
+                <div class="model-group">
+                    <div class="model-group-title">Loading...</div>
+                </div>
+            `;
+            return;
+        }
+        
         listContainer.innerHTML = Object.entries(grouped).map(([provider, models]) => `
             <div class="model-group">
                 <div class="model-group-title">${providerNames[provider] || provider}</div>
-                ${models.map(model => `
-                    <div class="model-item ${model.id === currentModel ? 'active' : ''}" data-model-id="${model.id}">
+                ${models.map(model => {
+                    const modelId = model.id;
+                    const modelName = model.name || modelId;
+                    const modelDesc = model.description || model.owned_by || 'AI Model';
+                    return `
+                    <div class="model-item ${modelId === currentModel ? 'active' : ''}" data-model-id="${modelId}">
                         <div class="model-item-icon ${provider}">
-                            ${providerIcons[provider] || '🤖'}
+                            ${providerIcons[provider] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg>'}
                         </div>
                         <div class="model-item-info">
-                            <div class="model-item-name">${model.name}</div>
-                            <div class="model-item-desc">${model.description}</div>
+                            <div class="model-item-name">${modelName}</div>
+                            <div class="model-item-desc">${modelDesc}</div>
                         </div>
                         <div class="model-item-check">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -593,7 +618,8 @@ const AgentUI = (function() {
                             </svg>
                         </div>
                     </div>
-                `).join('')}
+                    `;
+                }).join('')}
             </div>
         `).join('');
         
