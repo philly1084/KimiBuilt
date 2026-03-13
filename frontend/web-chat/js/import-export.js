@@ -357,7 +357,7 @@ class ImportExportManager {
     <div class="header">
         <h1>${this.escapeHtml(session?.title || 'Conversation')}</h1>
         <div class="meta">
-            Exported on ${date} • ${messages.length} messages
+            Exported on ${date} | ${messages.length} messages
         </div>
     </div>
     <div class="conversation">

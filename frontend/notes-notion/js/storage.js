@@ -20,7 +20,7 @@ const Storage = (function() {
             {
                 id: 'welcome',
                 title: 'Welcome to Notes',
-                icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹',
+                icon: 'note',
                 cover: null,
                 defaultModel: null,
                 properties: [],
@@ -64,7 +64,7 @@ const Storage = (function() {
                     {
                         id: 'block-5',
                         type: 'bulleted_list',
-                        content: 'Drag blocks using the ÃƒÂ¢Ã¢â‚¬Â¹Ã‚Â®ÃƒÂ¢Ã¢â‚¬Â¹Ã‚Â® handle to reorder',
+                        content: 'Drag blocks using the block handle to reorder',
                         children: [],
                         formatting: {},
                         color: null,
@@ -109,7 +109,7 @@ const Storage = (function() {
                     {
                         id: 'block-10',
                         type: 'callout',
-                        content: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¡ Tip: Select text and use the AI toolbar to transform it with different models. Each page can have its own default AI model!',
+                        content: 'Tip: Select text and use the AI toolbar to transform it with different models. Each page can have its own default AI model!',
                         children: [],
                         formatting: {},
                         color: null,
@@ -686,7 +686,7 @@ const Storage = (function() {
                         md += `${indent}---\n\n`;
                         break;
                     case 'callout':
-                        md += `${indent}> ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¡ ${block.content}\n\n`;
+                        md += `${indent}> Tip: ${block.content}\n\n`;
                         break;
                     case 'ai_image':
                         md += `${indent}![AI Image: ${block.content.prompt || ''}](${block.content.imageUrl || ''})\n\n`;

@@ -395,7 +395,7 @@
                 </div>
                 <h4>${escapeHtml(artifact.filename)}</h4>
                 <div class="file-meta">
-                    ${artifact.format?.toUpperCase() || 'FILE'} Ã¢â‚¬Â¢ ${formatFileSize(artifact.sizeBytes)}
+                    ${artifact.format?.toUpperCase() || 'FILE'} | ${formatFileSize(artifact.sizeBytes)}
                 </div>
                 <div class="file-actions">
                     <button class="primary" onclick="artifactManager.downloadArtifact('${artifact.id}', '${escapeHtml(artifact.filename)}')">

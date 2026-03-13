@@ -1197,7 +1197,7 @@ class UIHelpers {
                     <div class="session-info sidebar-session-info">
                         <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
                         <div class="session-meta">
-                            ${timeAgo} â€¢ ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                            ${timeAgo} | ${messageCount} message${messageCount !== 1 ? 's' : ''}
                         </div>
                     </div>
                     <div class="session-actions">
@@ -2094,7 +2094,7 @@ class UIHelpers {
         
         if (confirmBtn) {
             confirmBtn.disabled = true;
-            confirmBtn.innerHTML = '<span class="animate-spin inline-block mr-2">âŸ³</span> Importing...';
+            confirmBtn.innerHTML = '<span class="animate-spin inline-block mr-2">...</span> Importing...';
         }
         
         try {

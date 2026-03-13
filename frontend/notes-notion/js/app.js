@@ -18,7 +18,7 @@
     async function init() {
         if (state.initialized) return;
         
-        console.log('🚀 Initializing Notes - Notion Style');
+        console.log('[Notes] Initializing Notes - Notion Style');
         
         // Initialize connection status UI
         updateConnectionStatus('checking');
@@ -26,7 +26,7 @@
         // Check backend connection
         const health = await API.checkHealth();
         state.backendConnected = health.connected;
-        console.log(state.backendConnected ? '✅ Backend connected' : '⚠️ Backend offline - using local mode');
+        console.log(state.backendConnected ? '[Notes] Backend connected' : '[Notes] Backend offline - using local mode');
         
         // Update connection status UI
         updateConnectionStatus(state.backendConnected ? 'connected' : 'disconnected');
@@ -109,7 +109,7 @@
      */
     function initModules() {
         // Initialize blocks
-        console.log('📦 Initializing blocks...');
+        console.log('[Notes] Initializing blocks...');
         
         // Initialize Mermaid
         if (typeof mermaid !== 'undefined') {
@@ -118,14 +118,14 @@
                 theme: document.body.getAttribute('data-theme') === 'dark' ? 'dark' : 'default',
                 securityLevel: 'loose'
             });
-            console.log('📊 Mermaid diagrams ready');
+            console.log('[Notes] Mermaid diagrams ready');
         }
         
         // Initialize storage
-        console.log('💾 Storage ready');
+        console.log('[Notes] Storage ready');
         
         // Initialize selection
-        console.log('🎯 Initializing selection...');
+        console.log('[Notes] Initializing selection...');
         Selection.init({
             onSelect: (blockId) => {
                 // Block selected
@@ -154,19 +154,19 @@
         });
         
         // Initialize slash menu
-        console.log('⚡ Initializing slash menu...');
+        console.log('[Notes] Initializing slash menu...');
         SlashMenu.init();
         
         // Initialize editor
-        console.log('📝 Initializing editor...');
+        console.log('[Notes] Initializing editor...');
         Editor.init();
         
         // Initialize sidebar
-        console.log('📁 Initializing sidebar...');
+        console.log('[Notes] Initializing sidebar...');
         Sidebar.init();
         
         // Initialize AI integration
-        console.log('🤖 Initializing AI...');
+        console.log('[Notes] Initializing AI...');
         AIIntegration.init();
         
         // Initialize page AI button
@@ -475,8 +475,8 @@
 
 ## Selection
 - Select text to see "Ask AI" toolbar
-- Drag ⋮⋮ handle to reorder blocks
-- Click ⋮⋮ handle for block menu
+- Drag the block handle to reorder blocks
+- Click the block handle for the block menu
         `;
         
         const modal = document.createElement('div');
@@ -485,9 +485,9 @@
         modal.innerHTML = `
             <div class="ai-modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
                 <div class="ai-modal-header">
-                    <span>⌨️</span>
+                    <span>Keys</span>
                     <span>Keyboard Shortcuts</span>
-                    <button class="icon-btn" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer;">✕</button>
+                    <button class="icon-btn" style="margin-left: auto; background: transparent; border: none; color: white; cursor: pointer;">X</button>
                 </div>
                 <div style="padding: 20px; white-space: pre-wrap; font-family: var(--font-mono); font-size: 14px; line-height: 1.6;">
                     ${helpContent}
