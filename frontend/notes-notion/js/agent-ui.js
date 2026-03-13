@@ -531,6 +531,7 @@ const AgentUI = (function() {
 
     function toggleModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
+        const btn = document.getElementById('model-selector-btn');
         if (dropdown.style.display === 'none') {
             openModelSelector();
         } else {
@@ -540,13 +541,17 @@ const AgentUI = (function() {
 
     function openModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
+        const btn = document.getElementById('model-selector-btn');
         dropdown.style.display = 'flex';
+        if (btn) btn.classList.add('active');
         renderModelList();
     }
 
     function closeModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
+        const btn = document.getElementById('model-selector-btn');
         dropdown.style.display = 'none';
+        if (btn) btn.classList.remove('active');
     }
 
     function renderModelList() {
@@ -563,11 +568,11 @@ const AgentUI = (function() {
         };
         
         const providerIcons = {
-            'openai': '🤖',
-            'anthropic': '🧠',
-            'kimi': '✨',
-            'google': '🔍',
-            'meta': '👥'
+            'openai': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle><line x1="12" y1="4" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="20"></line><line x1="4" y1="12" x2="2" y2="12"></line><line x1="22" y1="12" x2="20" y2="12"></line></svg>',
+            'anthropic': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>',
+            'kimi': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>',
+            'google': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>',
+            'meta': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>'
         };
         
         listContainer.innerHTML = Object.entries(grouped).map(([provider, models]) => `
