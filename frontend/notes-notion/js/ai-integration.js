@@ -502,6 +502,15 @@ const AIIntegration = (function() {
         modal.style.display = 'flex';
         promptInput.focus();
     }
+
+    function showBlockAIModal(blockId, blockContent = '') {
+        showAIModal(blockContent);
+
+        const promptInput = document.getElementById('ai-prompt');
+        if (promptInput) {
+            promptInput.dataset.blockId = blockId;
+        }
+    }
     
     /**
      * Hide AI modal
@@ -520,6 +529,7 @@ const AIIntegration = (function() {
         const promptInput = document.getElementById('ai-prompt');
         const prompt = promptInput?.value?.trim();
         const selectedModel = promptInput?.dataset?.selectedModel;
+        const blockId = promptInput?.dataset?.blockId;
         
         if (!prompt || isGenerating) return;
         
@@ -542,12 +552,15 @@ const AIIntegration = (function() {
             
             // FIX: Use safe text extraction
             const generatedText = getResponseText(result);
-            
-            // Insert result as new block
-            const currentPage = window.Editor?.getCurrentPage?.();
-            if (currentPage && currentPage.blocks.length > 0) {
-                const lastBlock = currentPage.blocks[currentPage.blocks.length - 1];
-                window.Editor?.insertBlockAfter?.(lastBlock.id, 'text', generatedText);
+
+            if (blockId && window.Editor?.insertBlockAfter) {
+                window.Editor.insertBlockAfter(blockId, 'text', generatedText);
+            } else {
+                const currentPage = window.Editor?.getCurrentPage?.();
+                if (currentPage && currentPage.blocks.length > 0) {
+                    const lastBlock = currentPage.blocks[currentPage.blocks.length - 1];
+                    window.Editor?.insertBlockAfter?.(lastBlock.id, 'text', generatedText);
+                }
             }
             
             hideAIModal();
@@ -560,7 +573,19 @@ const AIIntegration = (function() {
                 generateBtn.textContent = originalText;
                 generateBtn.disabled = false;
             }
+
+            if (promptInput) {
+                delete promptInput.dataset.blockId;
+            }
         }
+    }
+
+    async function generateBlockContent(blockId, prompt, model = null) {
+        if (!window.Editor?.insertBlockAfter) return null;
+
+        const response = await API.generate(prompt, model || currentModel);
+        const generatedText = getResponseText(response);
+        return window.Editor.insertBlockAfter(blockId, 'text', generatedText);
     }
     
     /**
@@ -688,7 +713,9 @@ const AIIntegration = (function() {
     return {
         init,
         showAIModal,
+        showBlockAIModal,
         hideAIModal,
+        generateBlockContent,
         generateContent,
         continueWriting,
         summarize,

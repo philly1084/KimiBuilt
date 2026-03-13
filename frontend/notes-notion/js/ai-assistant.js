@@ -18,6 +18,7 @@ const AIAssistant = (function() {
     let references = []; // Current context references
     let lastResponse = '';
     let selectedText = null; // Currently highlighted text
+    let selectedRange = null;
     
     // DOM Elements
     let widget = null;
@@ -106,9 +107,21 @@ const AIAssistant = (function() {
      */
     function handleTextSelection() {
         const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+
+        const anchorNode = selection.anchorNode instanceof Element
+            ? selection.anchorNode
+            : selection.anchorNode?.parentElement;
+        if (!anchorNode?.closest('.editor, .page-title-wrapper, .properties-area')) {
+            selectedText = null;
+            selectedRange = null;
+            return;
+        }
+
         const text = selection.toString().trim();
         
         if (text && text.length > 10) {
+            selectedRange = selection.getRangeAt(0).cloneRange();
             selectedText = {
                 text: text,
                 preview: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
@@ -121,6 +134,7 @@ const AIAssistant = (function() {
             );
             
             if (!exists) {
+                references = references.filter(ref => ref.type !== 'highlight');
                 addReference({
                     type: 'highlight',
                     id: 'highlight-' + Date.now(),
@@ -129,6 +143,9 @@ const AIAssistant = (function() {
                     source: selectedText.source
                 });
             }
+        } else {
+            selectedText = null;
+            selectedRange = null;
         }
     }
     
@@ -262,7 +279,7 @@ const AIAssistant = (function() {
         
         // Try to get from Storage if available
         if (window.Storage) {
-            const allPages = window.Storage.getAllPages?.() || [];
+            const allPages = window.Storage.getAllPages?.() || window.Storage.getPages?.() || [];
             allPages.forEach(page => {
                 pages.push({
                     id: page.id,
@@ -404,7 +421,12 @@ const AIAssistant = (function() {
      * Remove a reference from context
      */
     function removeReference(refId) {
+        const removedRef = references.find(ref => ref.id === refId);
         references = references.filter(ref => ref.id !== refId);
+        if (removedRef?.type === 'highlight') {
+            selectedRange = null;
+            selectedText = null;
+        }
         updateReferencesDisplay();
     }
     
@@ -471,6 +493,7 @@ const AIAssistant = (function() {
     function clearReferences() {
         references = [];
         selectedText = null;
+        selectedRange = null;
         updateReferencesDisplay();
     }
     
@@ -608,7 +631,7 @@ Respond with the modified content only. When given context references, use them 
         if (window.Storage) {
             const page = window.Storage.getPage?.(pageId);
             if (page && page.blocks) {
-                return page.blocks.map(b => extractBlockContent(b)).join('\n\n');
+                return page.blocks.map(b => extractBlockContent(b)).filter(Boolean).join('\n\n');
             }
         }
         return '[Page content unavailable]';
@@ -618,10 +641,9 @@ Respond with the modified content only. When given context references, use them 
      * Get section content by block ID
      */
     function getSectionContent(blockId) {
-        const block = document.querySelector(`.block[data-block-id="${blockId}"]`);
+        const block = window.Editor?.getBlock?.(blockId);
         if (block) {
-            const input = block.querySelector('.block-input');
-            return input ? input.textContent : '';
+            return extractBlockContent(block);
         }
         return '[Section unavailable]';
     }
@@ -630,10 +652,21 @@ Respond with the modified content only. When given context references, use them 
      * Extract content from block object
      */
     function extractBlockContent(block) {
-        if (typeof block.content === 'object') {
-            return block.content.text || '';
+        if (!block) return '';
+
+        let content = '';
+        if (typeof block.content === 'object' && block.content !== null) {
+            content = block.content.text || block.content.prompt || block.content.result || block.content.url || '';
+        } else {
+            content = block.content || '';
         }
-        return block.content || '';
+
+        if (block.children?.length) {
+            const childContent = block.children.map(child => extractBlockContent(child)).filter(Boolean).join('\n');
+            return [content, childContent].filter(Boolean).join('\n');
+        }
+
+        return content;
     }
     
     /**
@@ -725,24 +758,38 @@ Respond with the modified content only. When given context references, use them 
         
         if (targetId) {
             const blocks = parseResponseToBlocks(lastResponse);
-            
-            if (blocks.length > 0) {
-                window.Editor.updateBlockContent?.(targetId, blocks[0].content);
-                
-                let lastId = targetId;
-                blocks.slice(1).forEach(block => {
-                    const newBlock = window.Editor.insertBlockAfter?.(lastId, block.type, block.content);
-                    if (newBlock) lastId = newBlock.id;
-                });
-            }
+            window.Editor.replaceBlockWithBlocks?.(targetId, blocks);
         } else if (highlightRef) {
-            // For highlighted text, we'd need to find and replace in the block
-            // This is simplified - in practice would need more precise text replacement
-            showResponse('Replace text: Please manually replace the highlighted text with the response above.');
-            return;
+            if (selectedRange) {
+                const range = selectedRange.cloneRange();
+                range.deleteContents();
+                const textNode = document.createTextNode(lastResponse);
+                range.insertNode(textNode);
+                range.setStartAfter(textNode);
+                range.collapse(true);
+
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+
+                const ownerBlock = range.commonAncestorContainer instanceof Element
+                    ? range.commonAncestorContainer.closest('.block')
+                    : range.commonAncestorContainer.parentElement?.closest('.block');
+                const blockId = ownerBlock?.dataset.blockId;
+                if (blockId) {
+                    const inputEl = ownerBlock.querySelector('.block-input, [contenteditable="true"]');
+                    if (inputEl) {
+                        window.Editor.updateBlockContent?.(blockId, inputEl);
+                    }
+                }
+            } else {
+                showResponse('Select text again, then use Replace to apply the AI output in-place.');
+                return;
+            }
         }
         
         clearResponse();
+        clearReferences();
     }
     
     /**

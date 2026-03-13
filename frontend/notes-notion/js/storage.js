@@ -747,6 +747,7 @@ const Storage = (function() {
         exportToFile,
         importFromFile,
         getPages,
+        getAllPages: getPages,
         getPage,
         createPage,
         updatePage,

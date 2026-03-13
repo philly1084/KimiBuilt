@@ -733,6 +733,188 @@ body {
     min-height: 0;
 }
 
+.page-workspace {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 0 32px 80px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 24px;
+    align-items: start;
+}
+
+.editor-column {
+    min-width: 0;
+}
+
+.page-outline-panel {
+    position: sticky;
+    top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 16px;
+}
+
+.outline-card {
+    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    box-shadow: var(--shadow-sm);
+    padding: 14px;
+}
+
+.outline-card-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-bottom: 10px;
+}
+
+.outline-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.outline-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.outline-card-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.note-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.note-stat {
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+}
+
+.note-stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.note-stat-label {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+.page-outline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.outline-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-secondary);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.outline-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.outline-item-level-2 {
+    margin-left: 12px;
+}
+
+.outline-item-level-3 {
+    margin-left: 24px;
+}
+
+.outline-item-level-4 {
+    margin-left: 36px;
+}
+
+.outline-item-badge {
+    flex-shrink: 0;
+    min-width: 26px;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.outline-item-text {
+    min-width: 0;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.outline-empty {
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.outline-ai-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.outline-ai-btn {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.outline-ai-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+}
+
 /* Add Block Hint - At bottom of editor */
 .add-block-hint {
     max-width: var(--content-max-width);
@@ -1039,6 +1221,12 @@ body {
 .toggle-children {
     margin-left: 28px;
     padding-left: 8px;
+    border-left: 1px solid var(--border-color);
+}
+
+.block-children {
+    margin-left: 28px;
+    padding-left: 12px;
     border-left: 1px solid var(--border-color);
 }
 
@@ -3534,6 +3722,17 @@ body {
 
 /* Responsive Adjustments */
 @media (max-width: 768px) {
+    .page-workspace {
+        grid-template-columns: 1fr;
+        padding: 0 0 48px;
+    }
+
+    .page-outline-panel {
+        position: static;
+        padding: 0 24px;
+        order: -1;
+    }
+
     .page-actions {
         position: static;
         margin-top: 16px;

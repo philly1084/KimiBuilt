@@ -18,6 +18,182 @@ const Editor = (function() {
         maxSize: 50,
         isUndoing: false
     };
+
+    function normalizeBlocks(blocks = []) {
+        return blocks.map((block) => ({
+            ...block,
+            children: normalizeBlocks(Array.isArray(block.children) ? block.children : []),
+            formatting: block.formatting || {},
+        }));
+    }
+
+    function extractBlockText(block) {
+        if (!block) return '';
+
+        if (typeof block.content === 'string') {
+            return block.content;
+        }
+
+        if (block.content && typeof block.content === 'object') {
+            if (typeof block.content.text === 'string') return block.content.text;
+            if (typeof block.content.prompt === 'string') return block.content.prompt;
+            if (typeof block.content.result === 'string') return block.content.result;
+            if (typeof block.content.url === 'string') return block.content.url;
+        }
+
+        return '';
+    }
+
+    function findBlockLocation(blockId, blocks = currentPage?.blocks || [], parent = null) {
+        for (let index = 0; index < blocks.length; index++) {
+            const block = blocks[index];
+            if (block.id === blockId) {
+                return { block, index, siblings: blocks, parent };
+            }
+
+            if (block.children?.length) {
+                const found = findBlockLocation(blockId, block.children, block);
+                if (found) return found;
+            }
+        }
+
+        return null;
+    }
+
+    function getFlattenedBlocks(options = {}) {
+        const { includeCollapsed = false } = options;
+        const entries = [];
+
+        function walk(blocks, parent = null, depth = 0) {
+            blocks.forEach((block) => {
+                entries.push({ block, parent, depth });
+
+                if (!block.children?.length) {
+                    return;
+                }
+
+                if (!includeCollapsed && block.type === 'toggle' && block.expanded === false) {
+                    return;
+                }
+
+                walk(block.children, block, depth + 1);
+            });
+        }
+
+        if (currentPage?.blocks?.length) {
+            walk(currentPage.blocks);
+        }
+
+        return entries;
+    }
+
+    function blockContainsDescendant(block, targetId) {
+        if (!block?.children?.length) return false;
+
+        return block.children.some((child) => {
+            if (child.id === targetId) return true;
+            return blockContainsDescendant(child, targetId);
+        });
+    }
+
+    function buildBlockTreeMetrics() {
+        const entries = getFlattenedBlocks({ includeCollapsed: true });
+        const headings = entries.filter((entry) => entry.block.type.startsWith('heading_'));
+        const words = entries
+            .map((entry) => extractBlockText(entry.block))
+            .join(' ')
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean).length;
+
+        return {
+            blockCount: entries.length,
+            headingCount: headings.length,
+            wordCount: words,
+            headings,
+        };
+    }
+
+    function updateWorkspacePanel() {
+        const statsEl = document.getElementById('note-stats');
+        const outlineEl = document.getElementById('page-outline-list');
+        const lastEditedEl = document.getElementById('note-last-edited');
+        if (!statsEl || !outlineEl) return;
+
+        const metrics = buildBlockTreeMetrics();
+        statsEl.innerHTML = `
+            <div class="note-stat">
+                <span class="note-stat-value">${metrics.wordCount}</span>
+                <span class="note-stat-label">Words</span>
+            </div>
+            <div class="note-stat">
+                <span class="note-stat-value">${metrics.blockCount}</span>
+                <span class="note-stat-label">Blocks</span>
+            </div>
+            <div class="note-stat">
+                <span class="note-stat-value">${metrics.headingCount}</span>
+                <span class="note-stat-label">Headings</span>
+            </div>
+        `;
+
+        if (lastEditedEl) {
+            const updatedAt = currentPage?.updatedAt ? new Date(currentPage.updatedAt) : new Date();
+            lastEditedEl.textContent = `Saved ${updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+        }
+
+        if (metrics.headings.length === 0) {
+            outlineEl.innerHTML = '<div class="outline-empty">Add headings to turn this note into a navigable document.</div>';
+            return;
+        }
+
+        outlineEl.innerHTML = '';
+        metrics.headings.forEach((entry) => {
+            const level = parseInt(entry.block.type.split('_')[1] || '1', 10);
+            const button = document.createElement('button');
+            button.className = `outline-item outline-item-level-${level}`;
+            button.dataset.blockId = entry.block.id;
+            button.innerHTML = `
+                <span class="outline-item-badge">H${level}</span>
+                <span class="outline-item-text">${escapeHtml(extractBlockText(entry.block) || 'Untitled section')}</span>
+            `;
+            button.addEventListener('click', () => {
+                const blockEl = document.querySelector(`.block[data-block-id="${entry.block.id}"]`);
+                if (blockEl) {
+                    blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                focusBlock(entry.block.id, 'start');
+            });
+            outlineEl.appendChild(button);
+        });
+    }
+
+    function setupWorkspacePanel() {
+        document.querySelectorAll('[data-note-ai-action]').forEach((button) => {
+            button.addEventListener('click', () => {
+                if (!window.AIAssistant) return;
+
+                const prompts = {
+                    page: 'Answer questions about this note and suggest the next concrete edits.',
+                    summary: 'Summarize this note into a tight set of key points and action items.',
+                    gaps: 'Review this note and point out missing details, weak sections, and follow-up questions.',
+                };
+
+                window.AIAssistant.restore();
+                window.AIAssistant.clearReferences();
+                window.AIAssistant.addCurrentPageContext();
+                window.AIAssistant.setPrompt(prompts[button.dataset.noteAiAction] || '');
+            });
+        });
+    }
+
+    function escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
     
     /**
      * Initialize the editor
@@ -30,6 +206,7 @@ const Editor = (function() {
         setupInlineToolbar();
         setupMentions();
         setupUndoRedo();
+        setupWorkspacePanel();
     }
     
     /**
@@ -413,25 +590,29 @@ const Editor = (function() {
      * Load a page into the editor
      */
     function loadPage(page) {
-        currentPage = page;
+        currentPage = {
+            ...page,
+            blocks: normalizeBlocks(page.blocks || []),
+        };
         editorContainer.innerHTML = '';
         
         // Save initial state to history
-        history.stack = [JSON.stringify(page)];
+        history.stack = [JSON.stringify(currentPage)];
         history.index = 0;
         
-        if (!page.blocks || page.blocks.length === 0) {
+        if (!currentPage.blocks || currentPage.blocks.length === 0) {
             // Create initial block
             const block = Blocks.createBlock('text', '');
-            page.blocks = [block];
+            currentPage.blocks = [block];
         }
         
-        page.blocks.forEach((block, index) => {
-            renderBlock(block, index);
+        currentPage.blocks.forEach((block, index) => {
+            renderBlock(block, editorContainer, 0, index);
         });
         
         // Update empty state visibility
         updateEmptyState();
+        updateWorkspacePanel();
         
         // Scroll to top
         const mainContent = document.querySelector('.main-content');
@@ -443,11 +624,13 @@ const Editor = (function() {
     /**
      * Render a single block
      */
-    function renderBlock(block, index) {
+    function renderBlock(block, container = editorContainer, depth = 0, index = 0) {
         const blockEl = document.createElement('div');
         blockEl.className = 'block';
         blockEl.dataset.blockId = block.id;
         blockEl.dataset.blockType = block.type;
+        blockEl.dataset.type = block.type;
+        blockEl.dataset.depth = String(depth);
         blockEl.draggable = true;
         
         if (block.color) {
@@ -461,15 +644,10 @@ const Editor = (function() {
         rowAddBtn.title = 'Add block below (click) / Drag to move';
         rowAddBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            insertBlockAfter(block.id, 'text');
-            // Focus the new block
-            setTimeout(() => {
-                const newBlockEl = editorContainer.querySelector(`[data-block-id="${block.id}"]`)?.nextElementSibling;
-                if (newBlockEl && newBlockEl.classList.contains('block')) {
-                    const input = newBlockEl.querySelector('.block-input');
-                    if (input) input.focus();
-                }
-            }, 50);
+            const newBlock = insertBlockAfter(block.id, 'text');
+            if (newBlock) {
+                setTimeout(() => focusBlock(newBlock.id), 0);
+            }
         });
         blockEl.appendChild(rowAddBtn);
         
@@ -484,26 +662,19 @@ const Editor = (function() {
         contentWrapper.className = 'block-content-wrapper';
         
         const renderFn = Blocks.render[block.type] || Blocks.render.text;
-        const content = renderFn(block, true);
+        const content = block.type === 'bulleted_list' || block.type === 'numbered_list'
+            ? renderFn(block, index, true)
+            : renderFn(block, true);
+
+        if (block.textColor) {
+            const textInput = content.querySelector('.block-input, [contenteditable="true"]');
+            if (textInput) {
+                textInput.classList.add(`text-color-${block.textColor}`);
+            }
+        }
         
         contentWrapper.appendChild(content);
         blockEl.appendChild(contentWrapper);
-        
-        // Toggle children container
-        if (block.type === 'toggle' && block.children && block.children.length > 0) {
-            const childrenContainer = document.createElement('div');
-            childrenContainer.className = 'toggle-children';
-            if (block.expanded === false) {
-                childrenContainer.classList.add('collapsed');
-            }
-            
-            block.children.forEach((child, childIndex) => {
-                const childEl = renderBlockElement(child);
-                childrenContainer.appendChild(childEl);
-            });
-            
-            blockEl.appendChild(childrenContainer);
-        }
         
         // Add block button (between blocks)
         const addBtn = document.createElement('div');
@@ -518,46 +689,24 @@ const Editor = (function() {
             });
         });
         
-        // Insert after this block in DOM
-        editorContainer.appendChild(blockEl);
-        editorContainer.appendChild(addBtn);
+        container.appendChild(blockEl);
+
+        if (block.children && block.children.length > 0) {
+            const childrenContainer = document.createElement('div');
+            childrenContainer.className = block.type === 'toggle' ? 'toggle-children block-children' : 'block-children';
+            if (block.type === 'toggle' && block.expanded === false) {
+                childrenContainer.classList.add('collapsed');
+            }
+
+            container.appendChild(childrenContainer);
+            block.children.forEach((child, childIndex) => {
+                renderBlock(child, childrenContainer, depth + 1, childIndex);
+            });
+        }
+
+        container.appendChild(addBtn);
         
         // Setup block interactions
-        setupBlockInteractions(blockEl, block);
-        
-        return blockEl;
-    }
-    
-    /**
-     * Render block element for reuse
-     */
-    function renderBlockElement(block) {
-        const blockEl = document.createElement('div');
-        blockEl.className = 'block';
-        blockEl.dataset.blockId = block.id;
-        blockEl.dataset.blockType = block.type;
-        
-        if (block.color) {
-            blockEl.classList.add(`color-${block.color}`);
-        }
-        
-        const handle = document.createElement('div');
-        handle.className = 'block-handle';
-        blockEl.appendChild(handle);
-        
-        const renderFn = Blocks.render[block.type] || Blocks.render.text;
-        const content = renderFn(block, true);
-        
-        // Apply text color if set
-        if (block.textColor) {
-            const input = content.querySelector('.block-input');
-            if (input) {
-                input.classList.add(`text-color-${block.textColor}`);
-            }
-        }
-        
-        blockEl.appendChild(content);
-        
         setupBlockInteractions(blockEl, block);
         
         return blockEl;
@@ -596,6 +745,7 @@ const Editor = (function() {
         // Input - auto-save and update placeholder visibility
         input.addEventListener('input', () => {
             autoSave();
+            updateWorkspacePanel();
             
             // Update placeholder visibility
             if (input.textContent.trim()) {
@@ -716,7 +866,7 @@ const Editor = (function() {
                         // Create new block with remaining text
                         if (afterText.trim()) {
                             setTimeout(() => {
-                                const newBlock = insertBlockAfter(block.id, 'text', afterText);
+                                const newBlock = insertBlockAfter(block.id, 'text', afterText, { skipHistory: true });
                                 focusBlock(newBlock.id);
                             }, 0);
                         }
@@ -728,7 +878,7 @@ const Editor = (function() {
                         // Create new block
                         const newBlockType = (block.type === 'heading_1' || 
                             block.type === 'heading_2' || block.type === 'heading_3') ? 'text' : block.type;
-                        const newBlock = insertBlockAfter(block.id, newBlockType, afterText);
+                        const newBlock = insertBlockAfter(block.id, newBlockType, afterText, { skipHistory: true });
                         focusBlock(newBlock.id);
                     }
                 }
@@ -868,18 +1018,24 @@ const Editor = (function() {
     /**
      * Insert a new block after specified block
      */
-    function insertBlockAfter(blockId, type = 'text', content = '') {
+    function insertBlockAfter(blockId, type = 'text', content = '', options = {}) {
         if (!currentPage) return null;
-        
-        const index = currentPage.blocks.findIndex(b => b.id === blockId);
-        if (index === -1) return null;
-        
+
+        const { skipHistory = false } = options;
+        const location = blockId ? findBlockLocation(blockId) : null;
+        if (blockId && !location) return null;
+        if (!skipHistory) {
+            saveToHistory();
+        }
+
         const newBlock = Blocks.createBlock(type, content);
-        currentPage.blocks.splice(index + 1, 0, newBlock);
+        if (!location) {
+            currentPage.blocks.push(newBlock);
+        } else {
+            location.siblings.splice(location.index + 1, 0, newBlock);
+        }
         
-        // Re-render from this point
         refreshEditor();
-        
         autoSave();
         
         return newBlock;
@@ -888,14 +1044,18 @@ const Editor = (function() {
     /**
      * Insert a block before specified block
      */
-    function insertBlockBefore(blockId, type = 'text', content = '') {
+    function insertBlockBefore(blockId, type = 'text', content = '', options = {}) {
         if (!currentPage) return null;
-        
-        const index = currentPage.blocks.findIndex(b => b.id === blockId);
-        if (index === -1) return null;
-        
+
+        const { skipHistory = false } = options;
+        const location = findBlockLocation(blockId);
+        if (!location) return null;
+        if (!skipHistory) {
+            saveToHistory();
+        }
+
         const newBlock = Blocks.createBlock(type, content);
-        currentPage.blocks.splice(index, 0, newBlock);
+        location.siblings.splice(location.index, 0, newBlock);
         
         refreshEditor();
         autoSave();
@@ -933,24 +1093,26 @@ const Editor = (function() {
         
         saveToHistory();
         
-        const index = currentPage.blocks.findIndex(b => b.id === blockId);
-        if (index === -1) return;
+        const location = findBlockLocation(blockId);
+        if (!location) return;
+        const visibleBlocks = getFlattenedBlocks();
+        const visibleIndex = visibleBlocks.findIndex((entry) => entry.block.id === blockId);
         
         // Don't delete the last block, convert to empty text instead
-        if (currentPage.blocks.length === 1) {
+        if (visibleBlocks.length === 1) {
             currentPage.blocks[0] = Blocks.createBlock('text', '');
         } else {
-            currentPage.blocks.splice(index, 1);
+            location.siblings.splice(location.index, 1);
         }
         
         refreshEditor();
         autoSave();
         
         // Focus previous or next block
-        const blocks = currentPage.blocks;
-        const focusIndex = Math.min(index, blocks.length - 1);
-        if (blocks[focusIndex]) {
-            focusBlock(blocks[focusIndex].id);
+        const updatedVisibleBlocks = getFlattenedBlocks();
+        const focusIndex = Math.min(visibleIndex, updatedVisibleBlocks.length - 1);
+        if (updatedVisibleBlocks[focusIndex]) {
+            focusBlock(updatedVisibleBlocks[focusIndex].block.id);
         }
     }
     
@@ -962,17 +1124,16 @@ const Editor = (function() {
         
         saveToHistory();
         
-        const block = currentPage.blocks.find(b => b.id === blockId);
-        if (!block) return;
-        
-        const index = currentPage.blocks.indexOf(block);
+        const location = findBlockLocation(blockId);
+        if (!location) return;
+
         const newBlock = {
-            ...JSON.parse(JSON.stringify(block)),
+            ...JSON.parse(JSON.stringify(location.block)),
             id: Storage.generateBlockId(),
             createdAt: Date.now()
         };
         
-        currentPage.blocks.splice(index + 1, 0, newBlock);
+        location.siblings.splice(location.index + 1, 0, newBlock);
         
         refreshEditor();
         autoSave();
@@ -986,8 +1147,9 @@ const Editor = (function() {
     function convertBlockType(blockId, newType, newContent = null) {
         if (!currentPage) return;
         
-        const block = currentPage.blocks.find(b => b.id === blockId);
-        if (!block) return;
+        const location = findBlockLocation(blockId);
+        if (!location) return;
+        const block = location.block;
         
         // Handle content conversion
         if (newContent !== null) {
@@ -1012,38 +1174,82 @@ const Editor = (function() {
     /**
      * Update block content from DOM
      */
-    function updateBlockContent(blockId, input) {
+    function updateBlockContent(blockId, inputOrContent) {
         if (!currentPage) return;
         
-        const block = currentPage.blocks.find(b => b.id === blockId);
-        if (!block) return;
-        
-        const text = input.textContent || '';
-        
+        const location = findBlockLocation(blockId);
+        if (!location) return;
+
+        const block = location.block;
+        const nextContent = inputOrContent && typeof inputOrContent === 'object' && 'textContent' in inputOrContent
+            ? inputOrContent.textContent || ''
+            : inputOrContent;
+
         if (block.type === 'todo' && typeof block.content === 'object') {
-            block.content.text = text;
+            block.content.text = typeof nextContent === 'string' ? nextContent : '';
         } else if (block.type === 'code' && typeof block.content === 'object') {
-            block.content.text = text;
-        } else {
-            block.content = text;
+            block.content.text = typeof nextContent === 'string' ? nextContent : '';
+        } else if (typeof nextContent === 'string' || typeof nextContent === 'object') {
+            block.content = nextContent;
         }
-        
+
         autoSave();
+        updateWorkspacePanel();
     }
     
     /**
      * Indent a block (make child of previous)
      */
     function indentBlock(blockId) {
-        // Simplified - in full implementation, this would create nested structure
-        console.log('Indent:', blockId);
+        if (!currentPage) return;
+
+        const visibleBlocks = getFlattenedBlocks();
+        const currentIndex = visibleBlocks.findIndex((entry) => entry.block.id === blockId);
+        if (currentIndex <= 0) return;
+
+        const location = findBlockLocation(blockId);
+        const previousEntry = visibleBlocks[currentIndex - 1];
+        if (!location || !previousEntry) return;
+
+        saveToHistory();
+
+        const [block] = location.siblings.splice(location.index, 1);
+        previousEntry.block.children = previousEntry.block.children || [];
+        if (blockContainsDescendant(block, previousEntry.block.id)) {
+            location.siblings.splice(location.index, 0, block);
+            return;
+        }
+        previousEntry.block.children.push(block);
+
+        if (previousEntry.block.type === 'toggle') {
+            previousEntry.block.expanded = true;
+        }
+
+        refreshEditor();
+        autoSave();
+        focusBlock(blockId);
     }
     
     /**
      * Unindent a block (move out of parent)
      */
     function unindentBlock(blockId) {
-        console.log('Unindent:', blockId);
+        if (!currentPage) return;
+
+        const location = findBlockLocation(blockId);
+        if (!location || !location.parent) return;
+
+        const parentLocation = findBlockLocation(location.parent.id);
+        if (!parentLocation) return;
+
+        saveToHistory();
+
+        const [block] = location.siblings.splice(location.index, 1);
+        parentLocation.siblings.splice(parentLocation.index + 1, 0, block);
+
+        refreshEditor();
+        autoSave();
+        focusBlock(blockId);
     }
     
     /**
@@ -1052,11 +1258,14 @@ const Editor = (function() {
     function mergeWithPrevious(blockId) {
         if (!currentPage) return;
         
-        const index = currentPage.blocks.findIndex(b => b.id === blockId);
-        if (index <= 0) return;
-        
-        const current = currentPage.blocks[index];
-        const previous = currentPage.blocks[index - 1];
+        const visibleBlocks = getFlattenedBlocks();
+        const visibleIndex = visibleBlocks.findIndex((entry) => entry.block.id === blockId);
+        if (visibleIndex <= 0) return;
+
+        const currentLocation = findBlockLocation(blockId);
+        const current = currentLocation?.block;
+        const previous = visibleBlocks[visibleIndex - 1]?.block;
+        if (!currentLocation || !current || !previous) return;
         
         // Get content
         let currentText = typeof current.content === 'object' ? current.content.text : current.content;
@@ -1072,7 +1281,7 @@ const Editor = (function() {
         }
         
         // Remove current
-        currentPage.blocks.splice(index, 1);
+        currentLocation.siblings.splice(currentLocation.index, 1);
         
         refreshEditor();
         autoSave();
@@ -1086,11 +1295,12 @@ const Editor = (function() {
      */
     function getPreviousBlock(blockId) {
         if (!currentPage) return null;
-        
-        const index = currentPage.blocks.findIndex(b => b.id === blockId);
+
+        const visibleBlocks = getFlattenedBlocks();
+        const index = visibleBlocks.findIndex((entry) => entry.block.id === blockId);
         if (index <= 0) return null;
-        
-        return currentPage.blocks[index - 1];
+
+        return visibleBlocks[index - 1].block;
     }
     
     /**
@@ -1098,11 +1308,12 @@ const Editor = (function() {
      */
     function getNextBlock(blockId) {
         if (!currentPage) return null;
-        
-        const index = currentPage.blocks.findIndex(b => b.id === blockId);
-        if (index === -1 || index >= currentPage.blocks.length - 1) return null;
-        
-        return currentPage.blocks[index + 1];
+
+        const visibleBlocks = getFlattenedBlocks();
+        const index = visibleBlocks.findIndex((entry) => entry.block.id === blockId);
+        if (index === -1 || index >= visibleBlocks.length - 1) return null;
+
+        return visibleBlocks[index + 1].block;
     }
     
     /**
@@ -1144,7 +1355,7 @@ const Editor = (function() {
         
         editorContainer.innerHTML = '';
         currentPage.blocks.forEach((block, index) => {
-            renderBlock(block, index);
+            renderBlock(block, editorContainer, 0, index);
         });
         
         // Restore focus
@@ -1153,6 +1364,7 @@ const Editor = (function() {
         }
         
         updateEmptyState();
+        updateWorkspacePanel();
     }
     
     /**
@@ -1202,11 +1414,39 @@ const Editor = (function() {
         currentPage.updatedAt = Date.now();
         
         Storage.updatePage(currentPage.id, currentPage);
+        updateWorkspacePanel();
         
         // Update sidebar
         if (window.Sidebar) {
             window.Sidebar.refreshPageTree();
         }
+    }
+
+    function getBlock(blockId) {
+        return findBlockLocation(blockId)?.block || null;
+    }
+
+    function replaceBlockWithBlocks(blockId, blocks = []) {
+        if (!currentPage) return [];
+
+        const location = findBlockLocation(blockId);
+        if (!location) return [];
+
+        saveToHistory();
+
+        const normalizedBlocks = blocks.map((block) => ({
+            ...JSON.parse(JSON.stringify(block)),
+            id: block.id || Storage.generateBlockId(),
+            children: normalizeBlocks(block.children || []),
+            createdAt: block.createdAt || Date.now(),
+        }));
+
+        location.siblings.splice(location.index, 1, ...normalizedBlocks);
+
+        refreshEditor();
+        autoSave();
+
+        return normalizedBlocks;
     }
     
     /**
@@ -1232,7 +1472,8 @@ const Editor = (function() {
         
         saveToHistory();
         
-        const block = currentPage.blocks.find(b => b.id === blockId);
+        const location = findBlockLocation(blockId);
+        const block = location?.block;
         if (!block) return;
         
         block.color = color;
@@ -1262,7 +1503,8 @@ const Editor = (function() {
         
         saveToHistory();
         
-        const block = currentPage.blocks.find(b => b.id === blockId);
+        const location = findBlockLocation(blockId);
+        const block = location?.block;
         if (!block) return;
         
         block.textColor = color;
@@ -1292,24 +1534,25 @@ const Editor = (function() {
      */
     function reorderBlocks(draggedId, targetId, position = 'after') {
         if (!currentPage || draggedId === targetId) return;
-        
+
         saveToHistory();
-        
-        const draggedIndex = currentPage.blocks.findIndex(b => b.id === draggedId);
-        const targetIndex = currentPage.blocks.findIndex(b => b.id === targetId);
-        
-        if (draggedIndex === -1 || targetIndex === -1) return;
-        
-        // Remove dragged block
-        const [draggedBlock] = currentPage.blocks.splice(draggedIndex, 1);
-        const adjustedTargetIndex = currentPage.blocks.findIndex(b => b.id === targetId);
-        if (!draggedBlock || adjustedTargetIndex === -1) return;
-        
+
+        const draggedLocation = findBlockLocation(draggedId);
+        const targetLocation = findBlockLocation(targetId);
+        if (!draggedLocation || !targetLocation) return;
+        if (blockContainsDescendant(draggedLocation.block, targetId)) return;
+
+        const [draggedBlock] = draggedLocation.siblings.splice(draggedLocation.index, 1);
+        if (!draggedBlock) return;
+
+        const refreshedTarget = findBlockLocation(targetId);
+        if (!refreshedTarget) return;
+
         const insertIndex = position === 'before'
-            ? adjustedTargetIndex
-            : adjustedTargetIndex + 1;
-        currentPage.blocks.splice(insertIndex, 0, draggedBlock);
-        
+            ? refreshedTarget.index
+            : refreshedTarget.index + 1;
+        refreshedTarget.siblings.splice(insertIndex, 0, draggedBlock);
+
         refreshEditor();
         autoSave();
     }
@@ -1406,9 +1649,7 @@ const Editor = (function() {
         const newBlock = Blocks.createBlock(type, content);
         currentPage.blocks.push(newBlock);
         
-        // Re-render
-        const blockEl = renderBlockElement(newBlock);
-        editorContainer.appendChild(blockEl);
+        refreshEditor();
         
         // Update empty state (will show hint again since we have blocks)
         updateEmptyState();
@@ -1455,6 +1696,8 @@ const Editor = (function() {
         deleteBlock,
         duplicateBlock,
         convertBlockType,
+        indentBlock,
+        unindentBlock,
         setBlockColor,
         setTextColor,
         reorderBlocks,
@@ -1463,6 +1706,7 @@ const Editor = (function() {
         undo,
         redo,
         getCurrentPage,
+        getBlock,
         exportToMarkdown,
         exportToHTML,
         exportToJSON,
@@ -1471,6 +1715,7 @@ const Editor = (function() {
         showInlineToolbar,
         hideInlineToolbar,
         updateBlockContent,
+        replaceBlockWithBlocks,
         addBlockAtEnd,
         getCurrentModel
     };

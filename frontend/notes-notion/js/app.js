@@ -142,6 +142,12 @@
             onDrop: (draggedId, targetId, position) => {
                 Editor.reorderBlocks(draggedId, targetId, position);
             },
+            onIndent: (blockId) => {
+                Editor.indentBlock(blockId);
+            },
+            onUnindent: (blockId) => {
+                Editor.unindentBlock(blockId);
+            },
             onColorChange: (blockId, color) => {
                 Editor.setBlockColor(blockId, color);
             },
@@ -356,8 +362,12 @@
             if (confirm('This will replace all content on the page. Are you sure?')) {
                 // Clear all blocks except the first one, update first with result
                 if (page.blocks.length > 0) {
-                    // Update first block
-                    Editor.updateBlockContent(page.blocks[0].id, result);
+                    Editor.replaceBlockWithBlocks(page.blocks[0].id, [{
+                        type: 'text',
+                        content: result,
+                        children: [],
+                        formatting: {},
+                    }]);
                     // Remove other blocks
                     for (let i = page.blocks.length - 1; i > 0; i--) {
                         Editor.deleteBlock(page.blocks[i].id);

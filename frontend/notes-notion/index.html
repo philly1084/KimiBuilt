@@ -233,14 +233,42 @@
                 </button>
             </div>
 
-            <!-- Block Editor -->
-            <div id="editor" class="editor">
-                <!-- Blocks will be rendered here -->
-            </div>
+            <div class="page-workspace">
+                <div class="editor-column">
+                    <!-- Block Editor -->
+                    <div id="editor" class="editor">
+                        <!-- Blocks will be rendered here -->
+                    </div>
 
-            <!-- Empty state for new pages -->
-            <div id="empty-state" class="empty-state" style="display: none;">
-                <p>Write something, or press '/' for AI and commands</p>
+                    <!-- Empty state for new pages -->
+                    <div id="empty-state" class="empty-state" style="display: none;">
+                        <p>Write something, or press '/' for AI and commands</p>
+                    </div>
+                </div>
+
+                <aside id="page-outline-panel" class="page-outline-panel">
+                    <div class="outline-card">
+                        <div class="outline-card-label">This note</div>
+                        <div id="note-stats" class="note-stats"></div>
+                    </div>
+
+                    <div class="outline-card">
+                        <div class="outline-card-header">
+                            <span class="outline-card-title">Outline</span>
+                            <span id="note-last-edited" class="outline-card-meta">Saved locally</span>
+                        </div>
+                        <div id="page-outline-list" class="page-outline-list"></div>
+                    </div>
+
+                    <div class="outline-card">
+                        <div class="outline-card-title">AI with this note</div>
+                        <div class="outline-ai-actions">
+                            <button class="outline-ai-btn" data-note-ai-action="page">Ask about page</button>
+                            <button class="outline-ai-btn" data-note-ai-action="summary">Summarize note</button>
+                            <button class="outline-ai-btn" data-note-ai-action="gaps">Find gaps</button>
+                        </div>
+                    </div>
+                </aside>
             </div>
         </main>
     </div>
