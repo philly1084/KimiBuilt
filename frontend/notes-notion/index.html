@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Notes - Notion Style</title>
     <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/notion-refinements.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -106,6 +107,18 @@
                     </svg>
                 </button>
             </div>
+
+            <!-- Breadcrumbs -->
+            <nav class="breadcrumbs" id="breadcrumbs">
+                <button class="breadcrumb-item" id="breadcrumb-root">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>
+                </button>
+                <span class="breadcrumb-separator">›</span>
+                <span class="breadcrumb-current" id="breadcrumb-current">Untitled</span>
+            </nav>
 
             <!-- Page Header -->
             <div class="page-header">
@@ -446,6 +459,40 @@
     </div>
 
 
+
+    <!-- Command Palette (Notion-style) -->
+    <div id="command-palette" class="command-palette" style="display: none;">
+        <div class="command-palette-overlay" onclick="closeCommandPalette()"></div>
+        <div class="command-palette-content">
+            <div class="command-palette-input-wrapper">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+                <input 
+                    type="text" 
+                    id="command-palette-input" 
+                    class="command-palette-input" 
+                    placeholder="Type a command or search..."
+                    autocomplete="off"
+                >
+            </div>
+            <div id="command-palette-results" class="command-palette-results">
+                <!-- Results will be populated here -->
+            </div>
+            <div class="command-palette-footer">
+                <span class="command-hint">
+                    <kbd>↑</kbd> <kbd>↓</kbd> to navigate
+                </span>
+                <span class="command-hint">
+                    <kbd>↵</kbd> to select
+                </span>
+                <span class="command-hint">
+                    <kbd>esc</kbd> to close
+                </span>
+            </div>
+        </div>
+    </div>
 
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>

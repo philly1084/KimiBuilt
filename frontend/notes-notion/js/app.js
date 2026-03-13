@@ -228,6 +228,12 @@
                 document.getElementById('sidebar-toggle')?.click();
             }
             
+            // Cmd/Ctrl + K: Command Palette
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                openCommandPalette();
+            }
+            
             // Cmd/Ctrl + /: Help
             if ((e.metaKey || e.ctrlKey) && e.key === '/') {
                 e.preventDefault();
@@ -417,6 +423,148 @@
         Editor.savePage();
     }
     
+    // ===== Command Palette =====
+    
+    let commandPaletteOpen = false;
+    let commandPaletteSelectedIndex = 0;
+    let commandPaletteItems = [];
+    
+    const commandPaletteCommands = [
+        { id: 'new-page', name: 'New page', icon: '📄', shortcut: 'Ctrl+P', action: () => Sidebar.createNewPage() },
+        { id: 'save', name: 'Save page', icon: '💾', shortcut: 'Ctrl+S', action: () => { Editor.savePage(); Sidebar.showToast('Page saved', 'success'); } },
+        { id: 'export-markdown', name: 'Export to Markdown', icon: '📝', shortcut: 'Ctrl+E', action: () => {
+            const markdown = Editor.exportToMarkdown();
+            const page = Editor.getCurrentPage();
+            downloadFile(markdown, `${page?.title || 'page'}.md`, 'text/markdown');
+            Sidebar.showToast('Exported to Markdown', 'success');
+        }},
+        { id: 'toggle-sidebar', name: 'Toggle sidebar', icon: '◫', shortcut: 'Ctrl+B', action: () => document.getElementById('sidebar-toggle')?.click() },
+        { id: 'help', name: 'Keyboard shortcuts', icon: '⌨️', shortcut: 'Ctrl+/', action: showHelp },
+        { id: 'focus-title', name: 'Focus title', icon: 'T', action: () => document.getElementById('page-title')?.focus() },
+        { id: 'new-block', name: 'New block below', icon: '➕', action: () => {
+            const page = Editor.getCurrentPage();
+            if (page?.blocks?.length > 0) {
+                const lastBlock = page.blocks[page.blocks.length - 1];
+                const newBlock = Editor.insertBlockAfter(lastBlock.id, 'text');
+                if (newBlock) Editor.focusBlock(newBlock.id);
+            }
+        }}
+    ];
+    
+    function openCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (!palette) return;
+        
+        commandPaletteOpen = true;
+        commandPaletteSelectedIndex = 0;
+        palette.style.display = 'flex';
+        
+        const input = document.getElementById('command-palette-input');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+        
+        renderCommandPaletteResults('');
+    }
+    
+    function closeCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (palette) {
+            palette.style.display = 'none';
+        }
+        commandPaletteOpen = false;
+    }
+    
+    function renderCommandPaletteResults(query) {
+        const resultsContainer = document.getElementById('command-palette-results');
+        if (!resultsContainer) return;
+        
+        const filtered = commandPaletteCommands.filter(cmd => 
+            cmd.name.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        commandPaletteItems = filtered;
+        
+        if (filtered.length === 0) {
+            resultsContainer.innerHTML = '<div class="command-palette-section"><div class="command-palette-section-title">No results</div></div>';
+            return;
+        }
+        
+        const html = filtered.map((cmd, index) => `
+            <div class="command-palette-item ${index === commandPaletteSelectedIndex ? 'selected' : ''}" data-index="${index}">
+                <div class="command-palette-item-icon">${cmd.icon}</div>
+                <div class="command-palette-item-info">
+                    <div class="command-palette-item-name">${cmd.name}</div>
+                </div>
+                ${cmd.shortcut ? `<span class="command-palette-item-shortcut">${cmd.shortcut}</span>` : ''}
+            </div>
+        `).join('');
+        
+        resultsContainer.innerHTML = `<div class="command-palette-section">${html}</div>`;
+        
+        // Add click handlers
+        resultsContainer.querySelectorAll('.command-palette-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const index = parseInt(item.dataset.index);
+                executeCommand(index);
+            });
+            item.addEventListener('mouseenter', () => {
+                commandPaletteSelectedIndex = parseInt(item.dataset.index);
+                renderCommandPaletteSelection();
+            });
+        });
+    }
+    
+    function renderCommandPaletteSelection() {
+        const items = document.querySelectorAll('.command-palette-item');
+        items.forEach((item, index) => {
+            item.classList.toggle('selected', index === commandPaletteSelectedIndex);
+        });
+    }
+    
+    function executeCommand(index) {
+        const cmd = commandPaletteItems[index];
+        if (cmd && cmd.action) {
+            closeCommandPalette();
+            cmd.action();
+        }
+    }
+    
+    // Command palette event listeners
+    document.addEventListener('DOMContentLoaded', () => {
+        const input = document.getElementById('command-palette-input');
+        if (input) {
+            input.addEventListener('input', (e) => {
+                commandPaletteSelectedIndex = 0;
+                renderCommandPaletteResults(e.target.value);
+            });
+            
+            input.addEventListener('keydown', (e) => {
+                switch (e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        commandPaletteSelectedIndex = Math.min(commandPaletteSelectedIndex + 1, commandPaletteItems.length - 1);
+                        renderCommandPaletteSelection();
+                        break;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        commandPaletteSelectedIndex = Math.max(commandPaletteSelectedIndex - 1, 0);
+                        renderCommandPaletteSelection();
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        executeCommand(commandPaletteSelectedIndex);
+                        break;
+                    case 'Escape':
+                        e.preventDefault();
+                        closeCommandPalette();
+                        break;
+                }
+            });
+        }
+    });
+    
     // Event listeners
     window.addEventListener('DOMContentLoaded', init);
     window.addEventListener('resize', debounce(handleResize, 100));
@@ -444,8 +592,13 @@
     window.NotesApp = {
         state,
         showHelp,
-        downloadFile
+        downloadFile,
+        openCommandPalette,
+        closeCommandPalette
     };
+    
+    // Expose closeCommandPalette globally for the onclick handler
+    window.closeCommandPalette = closeCommandPalette;
     
 })();
 

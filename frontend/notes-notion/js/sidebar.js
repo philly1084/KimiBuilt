@@ -136,7 +136,14 @@ const Sidebar = (function() {
                 if (window.Editor) {
                     window.Editor.savePage();
                 }
-            }, 500));
+                // Update breadcrumbs
+                const breadcrumbCurrent = document.getElementById('breadcrumb-current');
+                if (breadcrumbCurrent) {
+                    breadcrumbCurrent.textContent = pageTitleInput.value || 'Untitled';
+                }
+                // Update page title in sidebar tree
+                updatePageTitleInTree(window.Editor?.getCurrentPage?.()?.id, pageTitleInput.value);
+            }, 100));
         }
         
         // Page model selector
@@ -491,6 +498,12 @@ const Sidebar = (function() {
             titleInput.value = page.title || '';
         }
         
+        // Breadcrumbs
+        const breadcrumbCurrent = document.getElementById('breadcrumb-current');
+        if (breadcrumbCurrent) {
+            breadcrumbCurrent.textContent = page.title || 'Untitled';
+        }
+        
         // Icon
         const iconEl = document.getElementById('page-icon');
         const addIconHint = document.querySelector('.add-icon-hint');
@@ -537,6 +550,20 @@ const Sidebar = (function() {
         
         // Update document title
         document.title = page.title ? `${page.title} - Notes` : 'Notes - Notion Style';
+    }
+    
+    /**
+     * Update page title in the sidebar tree
+     */
+    function updatePageTitleInTree(pageId, title) {
+        if (!pageId) return;
+        const pageEl = document.querySelector(`.page-tree-item[data-page-id="${pageId}"]`);
+        if (pageEl) {
+            const titleEl = pageEl.querySelector('.page-title-text');
+            if (titleEl) {
+                titleEl.textContent = title || 'Untitled';
+            }
+        }
     }
     
     /**
