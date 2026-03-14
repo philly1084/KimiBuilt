@@ -35,6 +35,17 @@ const Editor = (function() {
         }
 
         if (block.content && typeof block.content === 'object') {
+            if (block.type === 'todo') return block.content.text || '';
+            if (block.type === 'ai') return block.content.prompt || block.content.result || '';
+            if (block.type === 'image' || block.type === 'ai_image') {
+                return block.content.caption || block.content.prompt || block.content.url || '';
+            }
+            if (block.type === 'bookmark') {
+                return block.content.title || block.content.description || block.content.url || '';
+            }
+            if (block.type === 'database' && Array.isArray(block.content.rows)) {
+                return block.content.rows.flat().join(' ');
+            }
             if (typeof block.content.text === 'string') return block.content.text;
             if (typeof block.content.prompt === 'string') return block.content.prompt;
             if (typeof block.content.result === 'string') return block.content.result;
@@ -42,6 +53,77 @@ const Editor = (function() {
         }
 
         return '';
+    }
+
+    function isLikelyUrl(value) {
+        return /^https?:\/\//i.test(String(value || '').trim());
+    }
+
+    function createContentForType(type, sourceText = '', existingContent = null) {
+        const text = typeof sourceText === 'string' ? sourceText : '';
+        const existing = existingContent && typeof existingContent === 'object' ? existingContent : null;
+
+        switch (type) {
+            case 'todo':
+                return {
+                    text,
+                    checked: Boolean(existing?.checked)
+                };
+            case 'code':
+                return {
+                    language: existing?.language || 'plain',
+                    text
+                };
+            case 'math':
+                return {
+                    text,
+                    displayMode: existing?.displayMode !== false
+                };
+            case 'mermaid':
+                return {
+                    text,
+                    diagramType: existing?.diagramType || 'flowchart',
+                    _showEditor: !text.trim()
+                };
+            case 'ai':
+                return {
+                    prompt: text,
+                    result: existing?.result || null,
+                    model: existing?.model || null
+                };
+            case 'image':
+                return {
+                    url: existing?.url || (isLikelyUrl(text) ? text : ''),
+                    caption: existing?.caption || (isLikelyUrl(text) ? '' : text)
+                };
+            case 'ai_image':
+                return {
+                    prompt: text,
+                    imageUrl: existing?.imageUrl || null,
+                    model: existing?.model || null,
+                    size: existing?.size || '1024x1024',
+                    quality: existing?.quality || 'standard'
+                };
+            case 'bookmark':
+                return {
+                    url: existing?.url || text,
+                    title: existing?.title || '',
+                    description: existing?.description || '',
+                    favicon: existing?.favicon || '',
+                    image: existing?.image || ''
+                };
+            case 'database':
+                return (Array.isArray(existing?.columns) || Array.isArray(existing?.rows)) ? existing : {
+                    columns: ['Name', 'Status', 'Notes'],
+                    rows: text.trim() ? [[text.trim(), '', '']] : [['', '', '']],
+                    sortColumn: null,
+                    sortDirection: 'asc'
+                };
+            case 'divider':
+                return '';
+            default:
+                return text;
+        }
     }
 
     function findBlockLocation(blockId, blocks = currentPage?.blocks || [], parent = null) {
@@ -1092,28 +1174,21 @@ const Editor = (function() {
      */
     function convertBlockType(blockId, newType, newContent = null) {
         if (!currentPage) return;
-        
+
         const location = findBlockLocation(blockId);
         if (!location) return;
+
+        saveToHistory();
         const block = location.block;
-        
-        // Handle content conversion
-        if (newContent !== null) {
-            block.content = newContent;
-        }
-        
-        // Special handling for certain types
-        if (newType === 'todo' && typeof block.content === 'string') {
-            block.content = { text: block.content, checked: false };
-        } else if (block.type === 'todo' && newType !== 'todo' && typeof block.content === 'object') {
-            block.content = block.content.text || '';
-        }
-        
+
+        const sourceText = newContent !== null ? newContent : extractBlockText(block);
+        const sourceContent = newContent !== null ? newContent : block.content;
+        block.content = createContentForType(newType, sourceText, sourceContent);
         block.type = newType;
-        
+
         refreshEditor();
         autoSave();
-        
+
         focusBlock(blockId);
     }
     
@@ -1668,4 +1743,3 @@ const Editor = (function() {
     
     return window.Editor;
 })();
-

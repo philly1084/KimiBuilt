@@ -30,6 +30,13 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     --shadow-lg: rgba(15, 15, 15, 0.05) 0px 0px 0px 1px, rgba(15, 15, 15, 0.1) 0px 3px 6px, rgba(15, 15, 15, 0.2) 0px 9px 24px;
+    --panel-surface: rgba(255, 255, 255, 0.94);
+    --panel-surface-muted: #f7f7f5;
+    --panel-outline: rgba(15, 23, 42, 0.08);
+    --overlay-scrim: rgba(15, 23, 42, 0.18);
+    --agent-accent-start: #1d4ed8;
+    --agent-accent-end: #0f766e;
+    --agent-accent-glow: rgba(29, 78, 216, 0.22);
     
     --radius-sm: 3px;
     --radius-md: 6px;
@@ -49,9 +56,9 @@
 
 /* Dark Theme */
 [data-theme="dark"] {
-    --bg-primary: #191919;
-    --bg-secondary: #202020;
-    --bg-tertiary: #262626;
+    --bg-primary: #0f141a;
+    --bg-secondary: #151c24;
+    --bg-tertiary: #1d2732;
     --bg-hover: rgba(255, 255, 255, 0.055);
     --bg-selected: rgba(35, 131, 226, 0.28);
     --bg-drag-over: rgba(35, 131, 226, 0.15);
@@ -61,18 +68,25 @@
     --text-tertiary: rgba(255, 255, 255, 0.4);
     --text-muted: rgba(255, 255, 255, 0.25);
     
-    --border-color: #2f2f2f;
-    --border-hover: #3f3f3f;
-    
-    --color-gray: #252525;
-    --color-brown: #2a1f1f;
-    --color-orange: #2d241b;
-    --color-yellow: #2e2a1b;
-    --color-green: #1f2a1f;
-    --color-blue: #1f2a33;
-    --color-purple: #2a1f2a;
-    --color-pink: #2d1f28;
-    --color-red: #2d1f1f;
+    --border-color: #273241;
+    --border-hover: #334155;
+    --panel-surface: rgba(12, 18, 24, 0.94);
+    --panel-surface-muted: #18212c;
+    --panel-outline: rgba(148, 163, 184, 0.16);
+    --overlay-scrim: rgba(2, 6, 23, 0.58);
+    --agent-accent-start: #38bdf8;
+    --agent-accent-end: #818cf8;
+    --agent-accent-glow: rgba(56, 189, 248, 0.26);
+
+    --color-gray: #293340;
+    --color-brown: #352821;
+    --color-orange: #402d1d;
+    --color-yellow: #41371b;
+    --color-green: #1f3629;
+    --color-blue: #1d3345;
+    --color-purple: #302545;
+    --color-pink: #3b2338;
+    --color-red: #402428;
 }
 
 /* ===== Reset & Base ===== */

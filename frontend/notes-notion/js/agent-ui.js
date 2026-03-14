@@ -3,8 +3,18 @@
  * Keeps the corner agent and model selector in sync with the Agent module.
  */
 const AgentUI = (function() {
+    const PROCESSING_STATES = [
+        { label: 'Running', hint: 'Running through the page setup', motion: 'running' },
+        { label: 'Jumping', hint: 'Jumping between related blocks', motion: 'jumping' },
+        { label: 'Skipping', hint: 'Skipping across structure and tone', motion: 'skipping' },
+        { label: 'Gliding', hint: 'Gliding through edits and context', motion: 'gliding' }
+    ];
+
     let elements = {};
     let initialized = false;
+    let processingTicker = null;
+    let processingFrame = 0;
+    let agentProcessing = false;
     let streamState = {
         active: false,
         content: '',
@@ -12,8 +22,21 @@ const AgentUI = (function() {
     };
 
     function cacheElements() {
+        const widgetBtn = document.getElementById('agent-widget-btn');
+        if (widgetBtn && !widgetBtn.querySelector('.agent-widget-copy')) {
+            widgetBtn.innerHTML = `
+                <span class="agent-avatar" aria-hidden="true"></span>
+                <span class="agent-widget-copy">
+                    <span class="agent-label">Ask AI</span>
+                    <span class="agent-motion-text">Ready to work this page</span>
+                </span>
+            `;
+        }
+
         elements = {
-            widgetBtn: document.getElementById('agent-widget-btn'),
+            widgetBtn,
+            widgetLabel: document.querySelector('#agent-widget-btn .agent-label'),
+            widgetMotionText: document.querySelector('#agent-widget-btn .agent-motion-text'),
             modal: document.getElementById('agent-chat-modal'),
             modalContent: document.querySelector('.agent-chat-container'),
             closeBtn: document.querySelector('.agent-chat-close'),
@@ -25,7 +48,9 @@ const AgentUI = (function() {
             currentModelLabel: document.getElementById('current-model-label'),
             modelList: document.getElementById('model-list'),
             chatModelName: document.getElementById('agent-chat-model-name'),
-            contextIndicator: document.querySelector('.context-indicator')
+            contextIndicator: document.querySelector('.context-indicator'),
+            agentStatus: document.querySelector('.agent-status'),
+            agentStatusText: document.querySelector('.agent-status-text')
         };
     }
 
@@ -43,6 +68,7 @@ const AgentUI = (function() {
         updateModelUI();
         updateContextIndicator();
         renderMessages();
+        syncProcessingUI();
         initialized = true;
         console.log('AgentUI initialized');
     }
@@ -102,6 +128,7 @@ const AgentUI = (function() {
         });
 
         window.addEventListener('modelChanged', updateModelUI);
+        window.addEventListener('notes-agent-processing', handleProcessingEvent);
         document.addEventListener('click', scheduleContextRefresh, true);
         document.addEventListener('keyup', scheduleContextRefresh, true);
     }
@@ -196,13 +223,14 @@ const AgentUI = (function() {
         await runPrompt(promptText);
     }
 
-    async function runPrompt(promptText) {
+    async function runPrompt(promptText, askOptions = {}) {
         if (!window.Agent) return;
 
         setStreamState({ active: true, content: '', error: null });
 
         try {
             const request = window.Agent.ask(promptText, {
+                ...askOptions,
                 onChunk: (chunk, fullResponse) => {
                     const nextContent = fullResponse || `${streamState.content}${chunk || ''}`;
                     setStreamState({ active: true, content: nextContent, error: null });
@@ -241,18 +269,27 @@ const AgentUI = (function() {
     }
 
     async function openWithPrompt(promptText, options = {}) {
-        const { send = false } = options;
+        const {
+            send = false,
+            hiddenUserMessage = false,
+            hiddenAssistantMessage = false
+        } = options;
 
         openChat();
         if (!elements.input) return;
 
-        elements.input.value = promptText || '';
-        autoResizeInput();
-
         if (send && promptText) {
-            await sendMessage();
+            elements.input.value = '';
+            autoResizeInput();
+            await runPrompt(promptText, {
+                hiddenUserMessage,
+                hiddenAssistantMessage
+            });
             return;
         }
+
+        elements.input.value = promptText || '';
+        autoResizeInput();
 
         setTimeout(() => {
             elements.input?.focus();
@@ -282,12 +319,14 @@ const AgentUI = (function() {
             ...streamState,
             ...nextState
         };
+
+        syncProcessingUI();
     }
 
     function renderMessages() {
         if (!elements.messagesContainer || !window.Agent) return;
 
-        const messages = window.Agent.getMessages();
+        const messages = window.Agent.getMessages().filter((message) => !message.hidden);
         elements.messagesContainer.innerHTML = '';
 
         if (messages.length === 0 && !streamState.active && !streamState.error) {
@@ -366,6 +405,70 @@ const AgentUI = (function() {
     function hideTypingIndicator() {
         setStreamState({ active: false, content: '', error: null });
         renderMessages();
+    }
+
+    function handleProcessingEvent(event) {
+        agentProcessing = Boolean(event?.detail?.isProcessing);
+        syncProcessingUI();
+    }
+
+    function syncProcessingUI() {
+        const processing = agentProcessing || streamState.active;
+
+        if (processing) {
+            startProcessingTicker();
+        } else {
+            stopProcessingTicker();
+        }
+    }
+
+    function startProcessingTicker() {
+        applyProcessingFrame(true);
+
+        if (processingTicker) return;
+
+        processingTicker = window.setInterval(() => {
+            processingFrame = (processingFrame + 1) % PROCESSING_STATES.length;
+            applyProcessingFrame(true);
+        }, 1200);
+    }
+
+    function stopProcessingTicker() {
+        if (processingTicker) {
+            window.clearInterval(processingTicker);
+            processingTicker = null;
+        }
+
+        processingFrame = 0;
+        applyProcessingFrame(false);
+    }
+
+    function applyProcessingFrame(processing) {
+        const frame = PROCESSING_STATES[processingFrame] || PROCESSING_STATES[0];
+
+        if (elements.agentStatus) {
+            elements.agentStatus.classList.toggle('processing', processing);
+            elements.agentStatus.dataset.motion = processing ? frame.motion : 'idle';
+            elements.agentStatus.style.setProperty('--agent-phase', String(processingFrame));
+        }
+
+        if (elements.agentStatusText) {
+            elements.agentStatusText.textContent = processing ? frame.hint : 'AI Ready on this page';
+        }
+
+        if (elements.widgetBtn) {
+            elements.widgetBtn.classList.toggle('processing', processing);
+            elements.widgetBtn.dataset.motion = processing ? frame.motion : 'idle';
+            elements.widgetBtn.style.setProperty('--agent-phase', String(processingFrame));
+        }
+
+        if (elements.widgetLabel) {
+            elements.widgetLabel.textContent = processing ? frame.label : 'Ask AI';
+        }
+
+        if (elements.widgetMotionText) {
+            elements.widgetMotionText.textContent = processing ? frame.hint : 'Ready to work this page';
+        }
     }
 
     function clearChat() {
@@ -636,7 +739,8 @@ const AgentUI = (function() {
         closeModelSelector,
         selectModel,
         updateModelUI,
-        openWithPrompt
+        openWithPrompt,
+        runPrompt
     };
 })();
 

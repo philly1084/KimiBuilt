@@ -231,6 +231,22 @@ Instructions:
         modelsCacheTime: null
     };
 
+    function setProcessingState(isProcessing, detail = {}) {
+        state.isProcessing = Boolean(isProcessing);
+
+        try {
+            window.dispatchEvent(new CustomEvent('notes-agent-processing', {
+                detail: {
+                    isProcessing: state.isProcessing,
+                    model: state.selectedModel,
+                    ...detail
+                }
+            }));
+        } catch (error) {
+            console.warn('Failed to dispatch agent processing event:', error);
+        }
+    }
+
     const MODEL_DISPLAY_NAMES = {
         'gpt-4o': 'GPT-4o',
         'gpt-4o-mini': 'GPT-4o Mini',
@@ -971,7 +987,13 @@ Instructions:
     // Core AI Actions
     // ============================================
     async function ask(question, options = {}) {
-        const { onChunk, onComplete, onError } = options;
+        const {
+            onChunk,
+            onComplete,
+            onError,
+            hiddenUserMessage = false,
+            hiddenAssistantMessage = false
+        } = options;
         
         // Validate
         if (!question || typeof question !== 'string') {
@@ -980,11 +1002,14 @@ Instructions:
             throw error;
         }
         
-        // Add user message
-        addMessage('user', question);
-        
+        if (!hiddenUserMessage) {
+            addMessage('user', question);
+        }
+
         // Set processing state
-        state.isProcessing = true;
+        setProcessingState(true, {
+            requestType: hiddenUserMessage || hiddenAssistantMessage ? 'internal' : 'chat'
+        });
         
         try {
             const context = getPageContext();
@@ -993,20 +1018,29 @@ Instructions:
             // Check if we can use the real API
             if (apiClient) {
                 try {
-                    const responseText = await askWithAPI(question, context, { onChunk, onComplete, onError });
-                    state.isProcessing = false;
+                    const responseText = await askWithAPI(question, context, {
+                        onChunk,
+                        onComplete,
+                        onError,
+                        hiddenAssistantMessage
+                    });
                     return responseText;
                 } catch (apiError) {
                     console.warn('API call failed, falling back to stub mode:', apiError.message);
                     // Fall through to stub mode
                 }
             }
-            
+
             // Fallback to stub mode (offline/no API client)
-            return await askWithStub(question, context, { onChunk, onComplete, onError });
-            
+            return await askWithStub(question, context, {
+                onChunk,
+                onComplete,
+                onError,
+                hiddenAssistantMessage
+            });
+
         } catch (error) {
-            state.isProcessing = false;
+            setProcessingState(false, { error: error.message });
             console.error('Agent ask error:', error);
             
             if (onError) {
@@ -1021,7 +1055,7 @@ Instructions:
     
     // Call the real API with streaming support
     async function askWithAPI(question, context, options) {
-        const { onChunk, onComplete, onError } = options;
+        const { onChunk, onComplete, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
         
         // Build messages array
@@ -1064,13 +1098,15 @@ Instructions:
             responseText = response.content || response.message || String(response);
         }
 
-        const assistantMessage = addMessage('assistant', responseText, {
-            model: model,
-            tokensUsed: estimateTokens(question + responseText),
-            source: 'api'
-        });
+        const assistantMessage = hiddenAssistantMessage
+            ? null
+            : addMessage('assistant', responseText, {
+                model: model,
+                tokensUsed: estimateTokens(question + responseText),
+                source: 'api'
+            });
 
-        state.isProcessing = false;
+        setProcessingState(false);
 
         if (onComplete) {
             onComplete(responseText, assistantMessage);
@@ -1081,7 +1117,7 @@ Instructions:
     
     // Stub mode for offline/no API
     async function askWithStub(question, context, options) {
-        const { onChunk, onComplete, onError } = options;
+        const { onChunk, onComplete, hiddenAssistantMessage = false } = options;
         
         // Simulate processing delay
         await delay(500 + Math.random() * 1000);
@@ -1102,13 +1138,15 @@ Instructions:
         }
         
         // Add assistant message
-        const assistantMessage = addMessage('assistant', responseText, {
-            model: state.selectedModel,
-            tokensUsed: estimateTokens(question + responseText),
-            source: 'stub'
-        });
-        
-        state.isProcessing = false;
+        const assistantMessage = hiddenAssistantMessage
+            ? null
+            : addMessage('assistant', responseText, {
+                model: state.selectedModel,
+                tokensUsed: estimateTokens(question + responseText),
+                source: 'stub'
+            });
+
+        setProcessingState(false);
         
         if (onComplete) {
             onComplete(responseText, assistantMessage);
@@ -1277,7 +1315,7 @@ Instructions:
                 throw new Error('No page is currently loaded');
             }
             
-            state.isProcessing = true;
+            setProcessingState(true, { requestType: 'summarize' });
             
             await delay(1000);
             
@@ -1292,12 +1330,12 @@ Instructions:
                 target: target
             });
             
-            state.isProcessing = false;
+            setProcessingState(false);
             
             return summary;
             
         } catch (error) {
-            state.isProcessing = false;
+            setProcessingState(false, { error: error.message });
             console.error('Summarize error:', error);
             throw error;
         }
@@ -1310,7 +1348,7 @@ Instructions:
                 throw new Error('Block not found');
             }
             
-            state.isProcessing = true;
+            setProcessingState(true, { requestType: 'improve' });
             
             await delay(1500);
             
@@ -1328,14 +1366,14 @@ Instructions:
                 blockId: blockId
             });
             
-            state.isProcessing = false;
+            setProcessingState(false);
             
             showToast('Writing improved', 'success');
             
             return improvedContent;
             
         } catch (error) {
-            state.isProcessing = false;
+            setProcessingState(false, { error: error.message });
             console.error('Improve writing error:', error);
             throw error;
         }
@@ -1367,7 +1405,7 @@ Instructions:
                 throw new Error('No page is currently loaded');
             }
             
-            state.isProcessing = true;
+            setProcessingState(true, { requestType: 'continue' });
             
             await delay(2000);
             
@@ -1393,14 +1431,14 @@ Instructions:
                 action: 'continue'
             });
             
-            state.isProcessing = false;
+            setProcessingState(false);
             
             showToast('Content added', 'success');
             
             return continuedContent;
             
         } catch (error) {
-            state.isProcessing = false;
+            setProcessingState(false, { error: error.message });
             console.error('Continue writing error:', error);
             throw error;
         }
@@ -1408,7 +1446,7 @@ Instructions:
     
     async function generateOutline(topic) {
         try {
-            state.isProcessing = true;
+            setProcessingState(true, { requestType: 'outline' });
             
             await delay(1500);
             
@@ -1425,12 +1463,12 @@ Instructions:
                 topic: outlineTopic
             });
             
-            state.isProcessing = false;
+            setProcessingState(false);
             
             return outline;
             
         } catch (error) {
-            state.isProcessing = false;
+            setProcessingState(false, { error: error.message });
             console.error('Generate outline error:', error);
             throw error;
         }

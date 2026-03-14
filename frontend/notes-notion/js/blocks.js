@@ -2024,7 +2024,10 @@ const Blocks = (function() {
                 diagramType,
                 request,
                 currentCode
-            }));
+            }), {
+                hiddenUserMessage: true,
+                hiddenAssistantMessage: true
+            });
             const diagramCode = extractMermaidCodeV2(response, currentCode).trim();
 
             if (!diagramCode) {
