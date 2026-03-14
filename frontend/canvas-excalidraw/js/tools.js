@@ -7,6 +7,21 @@
 class ToolManager {
     constructor() {
         this.currentTool = 'selection';
+        this.supportedTools = new Set([
+            'selection',
+            'rectangle',
+            'ellipse',
+            'diamond',
+            'line',
+            'arrow',
+            'freedraw',
+            'eraser',
+            'text',
+            'sticky',
+            'frame',
+            'image',
+            'ai-image',
+        ]);
         this.isDrawing = false;
         this.isMoving = false;
         this.isResizing = false;
@@ -82,6 +97,14 @@ class ToolManager {
         // Initialize resize handles
         this.initResizeHandles();
     }
+
+    getSupportedTools() {
+        return Array.from(this.supportedTools);
+    }
+
+    isSupportedTool(toolName) {
+        return this.supportedTools.has(toolName);
+    }
     
     initResizeHandles() {
         const selectionBox = document.getElementById('selectionBox');
@@ -103,6 +126,10 @@ class ToolManager {
     }
     
     setTool(toolName) {
+        if (!this.isSupportedTool(toolName)) {
+            toolName = 'selection';
+        }
+
         // Cancel any active operations
         if (this.isDrawing) {
             this.cancelDrawing();
@@ -218,7 +245,11 @@ class ToolManager {
     handleInputStart(clientX, clientY, originalEvent) {
         // Space+drag for panning - handled by canvas.js
         if (this.spacePressed) return;
-        
+
+        if (originalEvent?.cancelable) {
+            originalEvent.preventDefault();
+        }
+
         const canvas = window.infiniteCanvas;
         const rect = canvas.container.getBoundingClientRect();
         const x = clientX - rect.left;
@@ -232,6 +263,10 @@ class ToolManager {
         }
         
         this.startPos = worldPos;
+
+        if (!this.isSupportedTool(this.currentTool)) {
+            this.setTool('selection');
+        }
         
         switch (this.currentTool) {
             case 'selection':
@@ -359,6 +394,7 @@ class ToolManager {
     handleInputEnd() {
         const canvas = window.infiniteCanvas;
         let shapeTooSmall = false;
+        let completedElement = null;
         
         if (this.isDrawing && this.currentElement) {
             // Finalize element
@@ -405,6 +441,7 @@ class ToolManager {
                 
                 // Save to history
                 window.historyManager?.pushState(canvas.elements);
+                completedElement = el;
             }
             
             this.isDrawing = false;
@@ -431,6 +468,15 @@ class ToolManager {
         if (canvas.isSelecting) {
             canvas.endSelectionBox();
         }
+
+        if (completedElement && this.shouldAutoReturnToSelection(completedElement.type)) {
+            this.setTool('selection');
+            canvas.selectElement(completedElement);
+        }
+    }
+
+    shouldAutoReturnToSelection(elementType) {
+        return !['freedraw'].includes(elementType);
     }
     
     updateCursor(worldPos) {
@@ -1027,6 +1073,8 @@ class ToolManager {
                 };
                 canvas.addElement(element);
                 window.historyManager?.pushState(canvas.elements);
+                this.setTool('selection');
+                canvas.selectElement(element);
             }
             textEditor.style.display = 'none';
             textEditor.style.background = '';
@@ -1063,6 +1111,7 @@ class ToolManager {
         };
         canvas.addElement(element);
         window.historyManager?.pushState(canvas.elements);
+        this.setTool('selection');
         
         // Immediately start editing
         setTimeout(() => {

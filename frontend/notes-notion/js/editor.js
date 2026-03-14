@@ -126,6 +126,101 @@ const Editor = (function() {
         }
     }
 
+    function getBlockTypeLabel(type) {
+        const typeMeta = window.Blocks?.getBlockTypes?.()?.[type];
+        if (typeMeta?.name) {
+            return typeMeta.name;
+        }
+
+        return String(type || '')
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    function getBlockConversionInfo(blockId, newType, newContent = null) {
+        const block = getBlock(blockId);
+        if (!block || block.type === newType) {
+            return {
+                requiresConfirmation: false,
+                warnings: [],
+                message: ''
+            };
+        }
+
+        const sourceText = typeof newContent === 'string'
+            ? newContent
+            : extractBlockText(block);
+        const existing = block.content && typeof block.content === 'object' ? block.content : null;
+        const warnings = [];
+
+        if (newType === 'divider' && sourceText.trim()) {
+            warnings.push('the current text content');
+        }
+
+        switch (block.type) {
+            case 'todo':
+                if (newType !== 'todo' && existing?.checked) {
+                    warnings.push('the checkbox state');
+                }
+                break;
+            case 'code':
+                if (newType !== 'code' && existing?.language && existing.language !== 'plain') {
+                    warnings.push('the code language');
+                }
+                break;
+            case 'math':
+                if (newType !== 'math') {
+                    warnings.push('math formatting');
+                }
+                break;
+            case 'mermaid':
+                if (newType !== 'mermaid') {
+                    warnings.push('the diagram configuration');
+                }
+                break;
+            case 'ai':
+                if (newType !== 'ai') {
+                    if (existing?.prompt) warnings.push('the AI prompt');
+                    if (existing?.result) warnings.push('the generated result history');
+                }
+                break;
+            case 'image':
+                if (newType !== 'image') {
+                    if (existing?.url) warnings.push('the image source');
+                    if (existing?.caption) warnings.push('the image caption formatting');
+                }
+                break;
+            case 'ai_image':
+                if (newType !== 'ai_image') {
+                    warnings.push('the generated image asset and settings');
+                }
+                break;
+            case 'bookmark':
+                if (newType !== 'bookmark') {
+                    warnings.push('the bookmark metadata');
+                }
+                break;
+            case 'database':
+                if (newType !== 'database') {
+                    warnings.push('the database rows and columns');
+                }
+                break;
+            default:
+                break;
+        }
+
+        const uniqueWarnings = [...new Set(warnings)];
+        const targetLabel = getBlockTypeLabel(newType);
+
+        return {
+            requiresConfirmation: uniqueWarnings.length > 0,
+            warnings: uniqueWarnings,
+            message: uniqueWarnings.length
+                ? `Turn this block into ${targetLabel}? This will drop ${uniqueWarnings.join(', ')}. Plain text content will be kept where possible.`
+                : ''
+        };
+    }
+
     function findBlockLocation(blockId, blocks = currentPage?.blocks || [], parent = null) {
         for (let index = 0; index < blocks.length; index++) {
             const block = blocks[index];
@@ -1868,7 +1963,8 @@ const Editor = (function() {
         insertBlocksBefore,
         addBlockAtEnd,
         getCurrentModel,
-        refreshEditor
+        refreshEditor,
+        getBlockConversionInfo
     };
     
     return window.Editor;

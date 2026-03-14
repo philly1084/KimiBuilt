@@ -1620,6 +1620,22 @@ const Blocks = (function() {
         if (typeof block.content !== 'object') {
             block.content = content;
         }
+
+        const rerenderAIBlock = () => {
+            const fresh = renderAIBlock(block, isEditable);
+            if (wrapper.isConnected) {
+                wrapper.replaceWith(fresh);
+            }
+            return fresh;
+        };
+
+        const resetAIBlockPreview = () => {
+            block.content = {
+                prompt: content.prompt || '',
+                result: null,
+                model: content.model || null
+            };
+        };
         
         if (content.result) {
             // Show result
@@ -1669,30 +1685,50 @@ const Blocks = (function() {
                     content.model = model;
                     
                     // Re-render with result
-                    wrapper.innerHTML = '';
-                    const newContent = renderAIBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                    rerenderAIBlock();
                     
                     if (window.Editor) window.Editor.savePage();
                 } catch (err) {
                     content.result = 'Error: ' + err.message;
-                    wrapper.innerHTML = '';
-                    const newContent = renderAIBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                    rerenderAIBlock();
                 }
             });
             
+            const replaceBtn = document.createElement('button');
+            replaceBtn.className = 'ai-block-btn primary';
+            replaceBtn.textContent = 'Replace block';
+            replaceBtn.addEventListener('click', () => {
+                const resultText = extractResponseText(content.result);
+                if (!resultText.trim() || !window.Editor?.convertBlockType) {
+                    return;
+                }
+
+                window.Editor.convertBlockType(
+                    block.id,
+                    'text',
+                    resultText
+                );
+            });
+
             const insertBtn = document.createElement('button');
-            insertBtn.className = 'ai-block-btn primary';
-            insertBtn.textContent = 'Insert below';
+            insertBtn.className = 'ai-block-btn';
+            insertBtn.textContent = 'Add below';
             insertBtn.addEventListener('click', () => {
                 if (window.Editor && window.Editor.insertBlockAfter) {
                     const resultText = extractResponseText(content.result);
+                    if (!resultText.trim()) {
+                        return;
+                    }
+                    resetAIBlockPreview();
                     window.Editor.insertBlockAfter(block.id, 'text', resultText);
+                    if (window.Editor.savePage) {
+                        window.Editor.savePage();
+                    }
                 }
             });
             
             actions.appendChild(regenerateBtn);
+            actions.appendChild(replaceBtn);
             actions.appendChild(insertBtn);
             resultContainer.appendChild(actions);
             wrapper.appendChild(resultContainer);
@@ -1773,16 +1809,12 @@ const Blocks = (function() {
                     block.content.model = selectedModel;
                     
                     // Re-render with result
-                    wrapper.innerHTML = '';
-                    const newContent = renderAIBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                    rerenderAIBlock();
                     
                     if (window.Editor) window.Editor.savePage();
                 } catch (err) {
                     block.content.result = 'Error: ' + err.message;
-                    wrapper.innerHTML = '';
-                    const newContent = renderAIBlock(block, isEditable);
-                    wrapper.appendChild(newContent);
+                    rerenderAIBlock();
                 }
             });
             

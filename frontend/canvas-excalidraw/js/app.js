@@ -15,6 +15,7 @@ class App {
     init() {
         // Wait for all modules to load
         document.addEventListener('DOMContentLoaded', () => {
+            this.applyCoreWorkspaceMode();
             this.setupEventListeners();
             this.setupImageUpload();
             this.setupTheme();
@@ -51,6 +52,73 @@ class App {
             this.setupTouchHandling();
             
             console.log('Kimi Canvas initialized with OpenAI SDK');
+        });
+    }
+
+    applyCoreWorkspaceMode() {
+        const stableTools = new Set(
+            window.toolManager?.getSupportedTools?.() || [
+                'selection',
+                'rectangle',
+                'ellipse',
+                'diamond',
+                'line',
+                'arrow',
+                'freedraw',
+                'eraser',
+                'text',
+                'sticky',
+                'frame',
+                'image',
+                'ai-image',
+            ]
+        );
+
+        document.body.classList.add('canvas-core-mode');
+
+        document.querySelectorAll('.tool-btn[data-tool]').forEach((btn) => {
+            if (!stableTools.has(btn.dataset.tool)) {
+                btn.classList.add('core-hidden');
+                btn.setAttribute('aria-hidden', 'true');
+                btn.tabIndex = -1;
+            }
+        });
+
+        [
+            'menuBtn',
+            'themeDropdown',
+            'shareBtn',
+            'miniMapToggle',
+            'miniMap',
+            'layersPanel',
+            'stickersPanel',
+        ].forEach((id) => {
+            const node = document.getElementById(id);
+            if (node) {
+                node.classList.add('core-hidden');
+                node.setAttribute('aria-hidden', 'true');
+            }
+        });
+
+        ['roughnessPicker', 'edgesPicker', 'alignmentGroup'].forEach((id) => {
+            const node = document.getElementById(id);
+            const group = node?.closest('.property-group') || node;
+            if (group) {
+                group.classList.add('core-hidden');
+                group.setAttribute('aria-hidden', 'true');
+            }
+        });
+
+        document.querySelectorAll('.tool-category').forEach((category) => {
+            const visibleTools = Array.from(category.querySelectorAll('.tool-btn[data-tool]'))
+                .filter((btn) => !btn.classList.contains('core-hidden'));
+
+            if (visibleTools.length === 0 && !category.querySelector('#aiAssistantBtn')) {
+                category.classList.add('core-hidden');
+                return;
+            }
+
+            category.classList.add('expanded');
         });
     }
     
@@ -753,6 +821,7 @@ class App {
                 
                 // Reset tool to selection
                 window.toolManager.setTool('selection');
+                canvas.selectElement(element);
             };
             img.src = event.target.result;
         };
@@ -889,6 +958,11 @@ class App {
     }
     
     setupTheme() {
+        if (document.body.classList.contains('canvas-core-mode')) {
+            document.documentElement.removeAttribute('data-theme');
+            return;
+        }
+
         // Check for saved theme preference
         const savedTheme = localStorage.getItem('kimi-canvas-theme');
         if (savedTheme) {
@@ -902,6 +976,10 @@ class App {
     }
     
     setTheme(theme) {
+        if (document.body.classList.contains('canvas-core-mode')) {
+            return;
+        }
+
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('kimi-canvas-theme', theme);
         window.infiniteCanvas?.render();

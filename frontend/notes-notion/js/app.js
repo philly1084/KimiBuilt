@@ -170,6 +170,14 @@
                 Editor.setTextColor(blockId, color);
             },
             onTurnInto: (blockId, type) => {
+                const conversionInfo = Editor.getBlockConversionInfo?.(blockId, type);
+                if (conversionInfo?.requiresConfirmation) {
+                    const confirmed = window.confirm(conversionInfo.message || 'Convert this block and drop unsupported content?');
+                    if (!confirmed) {
+                        return;
+                    }
+                }
+
                 Editor.convertBlockType(blockId, type);
             }
         });
@@ -709,4 +717,3 @@
     }
     
 })();
-

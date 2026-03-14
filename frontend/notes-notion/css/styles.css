@@ -2144,6 +2144,24 @@ body {
     margin: 6px 0;
 }
 
+[data-theme="dark"] .block-context-menu {
+    background: #1f2937;
+    border-color: #374151;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .context-menu-item {
+    color: #f3f4f6;
+}
+
+[data-theme="dark"] .context-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .context-divider {
+    background: #374151;
+}
+
 /* ===== Color Picker ===== */
 .color-picker {
     position: fixed;
@@ -2207,6 +2225,36 @@ body {
 .color-option.text-color-option:hover {
     border-color: var(--accent-color);
 }
+
+[data-theme="dark"] .color-picker {
+    background: #111827;
+    border-color: #374151;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .color-title {
+    color: #9ca3af;
+}
+
+[data-theme="dark"] .color-option {
+    border-color: #4b5563;
+    color: #f9fafb;
+}
+
+[data-theme="dark"] .color-option:hover {
+    border-color: #d1d5db;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .color-option[data-bg-color="gray"] { background: #374151 !important; }
+[data-theme="dark"] .color-option[data-bg-color="brown"] { background: #4b3a32 !important; }
+[data-theme="dark"] .color-option[data-bg-color="orange"] { background: #5b3a22 !important; }
+[data-theme="dark"] .color-option[data-bg-color="yellow"] { background: #5a4a1f !important; }
+[data-theme="dark"] .color-option[data-bg-color="green"] { background: #1f4534 !important; }
+[data-theme="dark"] .color-option[data-bg-color="blue"] { background: #1f3f5b !important; }
+[data-theme="dark"] .color-option[data-bg-color="purple"] { background: #43305f !important; }
+[data-theme="dark"] .color-option[data-bg-color="pink"] { background: #5a2c47 !important; }
+[data-theme="dark"] .color-option[data-bg-color="red"] { background: #5a2a2a !important; }
 
 /* ===== AI Modal ===== */
 .ai-modal {

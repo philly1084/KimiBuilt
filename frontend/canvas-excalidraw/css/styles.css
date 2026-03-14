@@ -30,6 +30,142 @@
     --font-code: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
 }
 
+body.canvas-core-mode {
+    --bg-primary: #f4efe6;
+    --bg-secondary: #fcfaf6;
+    --bg-tertiary: #e3dacd;
+    --text-primary: #1f2b2a;
+    --text-secondary: #67706a;
+    --border-color: #d7cebf;
+    --accent-color: #0f766e;
+    --accent-hover: #115e59;
+    --selection-color: #0f766e;
+    --selection-bg: rgba(15, 118, 110, 0.12);
+    --toolbar-bg: rgba(252, 250, 246, 0.92);
+    --panel-bg: rgba(252, 250, 246, 0.96);
+    --canvas-bg: #efe7da;
+    --grid-color: #d4c6b2;
+    --grid-opacity: 0.38;
+    --shadow-sm: 0 10px 24px rgba(58, 47, 34, 0.08);
+    --shadow-md: 0 16px 40px rgba(58, 47, 34, 0.12);
+    --shadow-lg: 0 24px 64px rgba(58, 47, 34, 0.18);
+}
+
+.canvas-core-mode .core-hidden {
+    display: none !important;
+}
+
+.canvas-core-mode .top-bar {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    height: 56px;
+    border: 1px solid rgba(215, 206, 191, 0.9);
+    border-radius: 20px;
+    background: var(--toolbar-bg);
+    backdrop-filter: blur(16px);
+}
+
+.canvas-core-mode .logo {
+    font-size: 15px;
+    letter-spacing: 0.02em;
+}
+
+.canvas-core-mode .toolbar {
+    top: 84px;
+    left: 16px;
+    padding: 10px;
+    gap: 8px;
+    border: 1px solid rgba(215, 206, 191, 0.92);
+    background: var(--toolbar-bg);
+    backdrop-filter: blur(12px);
+}
+
+.canvas-core-mode .tool-category-content {
+    gap: 4px;
+}
+
+.canvas-core-mode .tool-category-header {
+    padding: 4px 8px;
+    color: var(--text-secondary);
+}
+
+.canvas-core-mode .tool-btn {
+    width: 42px;
+    height: 42px;
+}
+
+.canvas-core-mode .canvas-container {
+    top: 84px;
+    left: 0;
+    right: 344px;
+    bottom: 0;
+}
+
+.canvas-core-mode .properties-panel {
+    top: 84px;
+    right: 16px;
+    bottom: 16px;
+    width: 320px;
+    border: 1px solid rgba(215, 206, 191, 0.92);
+    border-radius: 24px;
+    background: var(--panel-bg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+.canvas-core-mode .panel-header {
+    padding: 18px 20px 14px;
+    background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(15, 118, 110, 0));
+}
+
+.canvas-core-mode .panel-content {
+    padding: 18px 20px 24px;
+    gap: 18px;
+}
+
+.canvas-core-mode .canvas-actions,
+.canvas-core-mode .model-selector {
+    border: 1px solid rgba(215, 206, 191, 0.9);
+    background: rgba(255, 255, 255, 0.56);
+}
+
+.canvas-core-mode .bottom-controls {
+    left: 16px;
+    right: 360px;
+    bottom: 16px;
+}
+
+.canvas-core-mode #strokeColorSection .color-tabs,
+.canvas-core-mode #strokeColorSection .color-tab-content,
+.canvas-core-mode #strokeColorSection .color-history,
+.canvas-core-mode #backgroundColorSection .color-tabs,
+.canvas-core-mode #backgroundColorSection .color-bg-tab-content:not([data-bg-tab="solid"]),
+.canvas-core-mode #backgroundColorSection .color-history,
+.canvas-core-mode #roughnessPicker,
+.canvas-core-mode #edgesPicker,
+.canvas-core-mode #alignmentGroup,
+.canvas-core-mode #fontSearchInput {
+    display: none !important;
+}
+
+.canvas-core-mode .color-section {
+    border-color: rgba(215, 206, 191, 0.92);
+}
+
+.canvas-core-mode .color-picker,
+.canvas-core-mode .stroke-width-picker,
+.canvas-core-mode .stroke-style-picker,
+.canvas-core-mode .font-size-picker {
+    gap: 8px;
+}
+
+.canvas-core-mode .action-btn {
+    justify-content: flex-start;
+    padding: 12px 14px;
+    font-weight: 600;
+}
+
 [data-theme="dark"] {
     --bg-primary: #1e1e1e;
     --bg-secondary: #2d2d2d;

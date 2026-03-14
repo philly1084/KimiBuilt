@@ -14,13 +14,8 @@ class SelectionManager {
     }
     
     init() {
-        // Selection box for multi-select
-        const container = document.getElementById('canvasContainer');
-        
-        // Handle resize handles
-        document.querySelectorAll('.resize-handle').forEach(handle => {
-            handle.addEventListener('mousedown', (e) => this.handleResizeStart(e, handle));
-        });
+        // Selection actions are handled here, but live resize interactions
+        // are delegated to ToolManager to keep a single drag pipeline.
     }
     
     handleResizeStart(e, handle) {
@@ -395,26 +390,3 @@ class SelectionManager {
 
 // Create global instance
 window.selectionManager = new SelectionManager();
-
-// Hook into tool manager mouse events after DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    // Wait for all modules to initialize
-    setTimeout(() => {
-        if (window.toolManager) {
-            const originalHandleMouseMove = window.toolManager.handleMouseMove;
-            window.toolManager.handleMouseMove = function(e) {
-                if (window.selectionManager.isResizing) {
-                    window.selectionManager.handleResizeMove(e);
-                    return;
-                }
-                return originalHandleMouseMove.call(this, e);
-            };
-            
-            const originalHandleMouseUp = window.toolManager.handleMouseUp;
-            window.toolManager.handleMouseUp = function(e) {
-                window.selectionManager.handleResizeEnd();
-                return originalHandleMouseUp.call(this, e);
-            };
-        }
-    }, 0);
-});

@@ -59,6 +59,9 @@ class Renderer {
             case 'frame':
                 this.drawFrame(ctx, rc, element, options);
                 break;
+            default:
+                this.drawFallbackElement(ctx, element);
+                break;
         }
         
         ctx.restore();
@@ -698,6 +701,46 @@ class Renderer {
             ctx.fillText(element.name, x + 10, y + titleHeight / 2);
         }
         
+        ctx.restore();
+    }
+
+    drawFallbackElement(ctx, element) {
+        if (element.points && element.points.length >= 2) {
+            ctx.save();
+            this.applyStrokeStyle(ctx, element);
+            ctx.beginPath();
+            ctx.moveTo(element.points[0].x, element.points[0].y);
+            for (let i = 1; i < element.points.length; i++) {
+                ctx.lineTo(element.points[i].x, element.points[i].y);
+            }
+            ctx.stroke();
+            ctx.restore();
+            return;
+        }
+
+        if (!element.width || !element.height) {
+            return;
+        }
+
+        const x = element.x - element.width / 2;
+        const y = element.y - element.height / 2;
+        const label = element.text || element.name || element.type;
+
+        ctx.save();
+        this.applyStrokeStyle(ctx, element);
+        ctx.setLineDash([8, 6]);
+        this.beginRoundedRect(ctx, x, y, element.width, element.height, 14);
+        if (this.applyFill(ctx, element, x, y, element.width, element.height)) {
+            ctx.fill();
+        }
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        ctx.fillStyle = element.strokeColor || '#000000';
+        ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, element.x, element.y);
         ctx.restore();
     }
     
