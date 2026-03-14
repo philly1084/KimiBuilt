@@ -425,6 +425,14 @@ class ChatApp {
         const content = this.messageInput.value.trim();
         
         if (!content || this.isProcessing) return;
+
+        if (await this.tryHandleToolCommand(content)) {
+            this.messageInput.value = '';
+            this.autoResize?.reset?.();
+            this.updateSendButton();
+            uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
+            return;
+        }
         
         // Handle slash commands
         if (content.startsWith('/')) {
@@ -544,6 +552,103 @@ class ChatApp {
         } finally {
             this.currentAbortController = null;
         }
+    }
+
+    async tryHandleToolCommand(content) {
+        const trimmed = String(content || '').trim();
+        const isListCommand = trimmed === '/tools' || trimmed.startsWith('/tools ');
+        const isInvokeCommand = trimmed.startsWith('/tool ');
+
+        if (!isListCommand && !isInvokeCommand) {
+            return false;
+        }
+
+        if (!sessionManager.currentSessionId) {
+            await this.createNewSession();
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+        uiHelpers.hideWelcomeMessage();
+
+        const userMessage = {
+            role: 'user',
+            content: trimmed,
+            timestamp: new Date().toISOString(),
+        };
+        sessionManager.addMessage(sessionId, userMessage);
+        this.messagesContainer.appendChild(uiHelpers.renderMessage(userMessage));
+
+        try {
+            let assistantContent = '';
+
+            if (isListCommand) {
+                const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
+                const tools = await apiClient.getAvailableTools(category || null);
+                assistantContent = this.formatToolsList(tools, category);
+            } else {
+                const match = trimmed.match(/^\/tool\s+([^\s]+)(?:\s+([\s\S]+))?$/i);
+                if (!match) {
+                    throw new Error('Usage: /tool <id> {"key":"value"}');
+                }
+
+                const toolId = match[1];
+                const rawParams = (match[2] || '').trim();
+                let params = {};
+
+                if (rawParams) {
+                    params = JSON.parse(rawParams);
+                }
+
+                const result = await apiClient.invokeTool(toolId, params);
+                assistantContent = `## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+            }
+
+            const assistantMessage = {
+                role: 'assistant',
+                content: assistantContent,
+                timestamp: new Date().toISOString(),
+            };
+            sessionManager.addMessage(sessionId, assistantMessage);
+            this.messagesContainer.appendChild(uiHelpers.renderMessage(assistantMessage));
+            uiHelpers.reinitializeIcons(this.messagesContainer);
+            uiHelpers.scrollToBottom();
+            this.updateSessionInfo();
+            return true;
+        } catch (error) {
+            const assistantMessage = {
+                role: 'assistant',
+                content: `**Tool error:** ${error.message}`,
+                timestamp: new Date().toISOString(),
+            };
+            sessionManager.addMessage(sessionId, assistantMessage);
+            this.messagesContainer.appendChild(uiHelpers.renderMessage(assistantMessage));
+            uiHelpers.scrollToBottom();
+            this.updateSessionInfo();
+            return true;
+        }
+    }
+
+    formatToolsList(tools, category = null) {
+        if (!Array.isArray(tools) || tools.length === 0) {
+            return category
+                ? `No frontend tools are available in category \`${category}\`.`
+                : 'No frontend tools are currently available.';
+        }
+
+        const lines = ['## Available Tools', ''];
+        tools.forEach((tool) => {
+            const params = Array.isArray(tool.parameters)
+                ? tool.parameters.map((param) => typeof param === 'string' ? param : param.name).filter(Boolean)
+                : Object.keys(tool.inputSchema?.properties || {});
+            lines.push(`- \`${tool.id}\` (${tool.category})`);
+            lines.push(`  ${tool.description || 'No description provided.'}`);
+            if (params.length) {
+                lines.push(`  Params: ${params.join(', ')}`);
+            }
+        });
+        lines.push('');
+        lines.push('Usage: `/tool <id> {"key":"value"}`');
+        return lines.join('\n');
     }
 
     /**
@@ -1487,7 +1592,5 @@ document.addEventListener('DOMContentLoaded', () => {
     window.chatApp = new ChatApp();
     window.app = window.chatApp; // Backward compatibility
 });
-
-
 
 

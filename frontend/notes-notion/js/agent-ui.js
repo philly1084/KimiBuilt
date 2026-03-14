@@ -354,7 +354,7 @@ const AgentUI = (function() {
                 <div class="agent-empty-state">
                     <div class="agent-empty-icon">AI</div>
                     <p>Ask me anything about your notes</p>
-                    <p class="agent-empty-hint">I can summarize, continue writing, or help restructure the page.</p>
+                    <p class="agent-empty-hint">I can summarize, continue writing, help restructure the page, or run /tools commands.</p>
                     <div class="agent-quick-actions">
                         <button class="agent-quick-action-btn" data-action="summarize" title="Summarize the entire page">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

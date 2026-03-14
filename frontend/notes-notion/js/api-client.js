@@ -603,6 +603,44 @@ class NotesAPIClient {
             return looksLikeChatModel && !looksUnsupportedForNotes;
         });
     }
+
+    async getAvailableTools(category = null) {
+        const params = new URLSearchParams();
+        if (category) {
+            params.set('category', category);
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to load tools: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || [];
+    }
+
+    async invokeTool(toolId, params = {}) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/invoke`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool: toolId,
+                params,
+                sessionId: this.currentSessionId,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Tool invocation failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data;
+    }
 }
 
 // ============================================

@@ -2026,10 +2026,25 @@ class UIHelpers {
                     </div>
                 </div>
             `;
+        } else if (command === 'tools' || command === 'tool') {
+            resultsContainer.innerHTML = `
+                <div class="command-group">
+                    <div class="command-group-title">Tools</div>
+                    <div class="command-item selected" data-action="insert-tool-command:${command === 'tool' ? '/tool ' : '/tools'}" role="option" tabindex="0">
+                        <div class="command-item-icon">
+                            <i data-lucide="wrench" class="w-4 h-4" aria-hidden="true"></i>
+                        </div>
+                        <div class="command-item-content">
+                            <div class="command-item-title">${command === 'tool' ? 'Invoke Tool Command' : 'List Available Tools'}</div>
+                            <div class="command-item-desc">${command === 'tool' ? 'Insert /tool <id> {json} into the chat input' : 'Insert /tools into the chat input'}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
         } else {
             resultsContainer.innerHTML = `
                 <div class="empty-state py-8">
-                    <p class="text-sm text-text-secondary">Unknown command. Try /model, /models, or /image</p>
+                    <p class="text-sm text-text-secondary">Unknown command. Try /model, /models, /image, or /tools</p>
                 </div>
             `;
         }
@@ -2091,6 +2106,7 @@ class UIHelpers {
             { category: 'Actions', icon: 'plus', title: 'New Chat', description: 'Start a new conversation', action: 'new-chat', shortcut: 'Ctrl+N' },
             { category: 'Actions', icon: 'image', title: 'Create Image', description: 'Generate AI images or search Unsplash', action: 'open-image-modal', shortcut: 'Ctrl+I' },
             { category: 'Actions', icon: 'camera', title: 'Search Unsplash', description: 'Find free stock photos', action: 'open-image-modal:unsplash' },
+            { category: 'Actions', icon: 'wrench', title: 'List Tools', description: 'Insert the /tools command into chat', action: 'insert-tool-command:/tools' },
             { category: 'Actions', icon: 'folder-open', title: 'Open File Manager', description: 'View and manage session files', action: 'open-file-manager', shortcut: 'Ctrl+Shift+F' },
             { category: 'Actions', icon: 'search', title: 'Search Messages', description: 'Search in current conversation', action: 'search', shortcut: 'Ctrl+F' },
             { category: 'Actions', icon: 'keyboard', title: 'Keyboard Shortcuts', description: 'View all keyboard shortcuts', action: 'show-shortcuts' },
@@ -2129,6 +2145,17 @@ class UIHelpers {
             const source = action.split(':')[1] || 'generate';
             this.openImageModal();
             this.setImageSource(source);
+            return;
+        }
+
+        if (action.startsWith('insert-tool-command:')) {
+            const command = action.slice('insert-tool-command:'.length);
+            const input = document.getElementById('message-input');
+            if (input) {
+                input.value = command;
+                input.focus();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
             return;
         }
         

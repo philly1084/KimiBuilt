@@ -7,6 +7,7 @@ const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 const API_BASE_URL = LOCAL_HOSTNAMES.has(window.location.hostname)
     ? 'http://localhost:3000/v1'
     : `${window.location.protocol}//${window.location.host}/v1`;
+const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 
 // Default request timeout in milliseconds
 const DEFAULT_TIMEOUT = 30000;
@@ -429,6 +430,52 @@ class WebCLIAPI {
             purpose: purpose,
             status: 'uploaded'
         };
+    }
+
+    async getAvailableTools(category = null) {
+        const params = new URLSearchParams();
+        if (category) {
+            params.set('category', category);
+        }
+
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Tool list failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || [];
+    }
+
+    async invokeTool(toolId, params = {}) {
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/tools/invoke`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool: toolId,
+                    params,
+                    sessionId: this.sessionId,
+                }),
+            },
+            120000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Tool invocation failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data;
     }
 
     setModel(model) {

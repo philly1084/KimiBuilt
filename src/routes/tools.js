@@ -10,12 +10,19 @@ const { getToolManager } = require('../agent-sdk/tools');
 
 const registry = getUnifiedRegistry();
 
+async function ensureToolManagerInitialized() {
+  const toolManager = getToolManager();
+  await toolManager.initialize();
+  return toolManager;
+}
+
 /**
  * GET /api/tools/available
  * Get all tools available to frontends
  */
-router.get('/available', (req, res) => {
+router.get('/available', async (req, res) => {
   try {
+    await ensureToolManagerInitialized();
     const { category } = req.query;
     
     let tools = registry.getFrontendTools();
@@ -42,8 +49,9 @@ router.get('/available', (req, res) => {
  * GET /api/tools/categories
  * Get tool categories with counts
  */
-router.get('/categories', (req, res) => {
+router.get('/categories', async (req, res) => {
   try {
+    await ensureToolManagerInitialized();
     const categories = registry.getCategories();
     const tools = registry.getFrontendTools();
     
@@ -62,11 +70,36 @@ router.get('/categories', (req, res) => {
 });
 
 /**
+ * GET /api/tools/stats
+ * Get tool usage statistics
+ */
+router.get('/stats', async (req, res) => {
+  try {
+    await ensureToolManagerInitialized();
+    const stats = registry.getAllSkills().map(skill => ({
+      id: skill.id,
+      name: skill.name,
+      category: skill.category,
+      invocations: skill.stats?.invocations || 0,
+      successRate: skill.stats?.successRate || 100,
+      avgDuration: skill.stats?.avgDuration || 0,
+      lastUsed: skill.stats?.lastUsed
+    }));
+    
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    console.error('Error getting tool stats:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/tools/:id
  * Get tool details
  */
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
+    await ensureToolManagerInitialized();
     const { id } = req.params;
     
     const tool = registry.getTool(id);
@@ -112,7 +145,7 @@ router.post('/invoke', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Tool ID is required' });
     }
     
-    const toolManager = getToolManager();
+    const toolManager = await ensureToolManagerInitialized();
     
     const result = await toolManager.executeTool(toolId, params, {
       sessionId,
@@ -136,7 +169,7 @@ router.post('/invoke/:id', async (req, res) => {
     const { id } = req.params;
     const params = req.body;
     
-    const toolManager = getToolManager();
+    const toolManager = await ensureToolManagerInitialized();
     
     const result = await toolManager.executeTool(id, params, {
       sessionId: req.body.sessionId,
@@ -146,29 +179,6 @@ router.post('/invoke/:id', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error invoking tool:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/**
- * GET /api/tools/stats
- * Get tool usage statistics
- */
-router.get('/stats', (req, res) => {
-  try {
-    const stats = registry.getAllSkills().map(skill => ({
-      id: skill.id,
-      name: skill.name,
-      category: skill.category,
-      invocations: skill.stats?.invocations || 0,
-      successRate: skill.stats?.successRate || 100,
-      avgDuration: skill.stats?.avgDuration || 0,
-      lastUsed: skill.stats?.lastUsed
-    }));
-    
-    res.json({ success: true, data: stats });
-  } catch (error) {
-    console.error('Error getting tool stats:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

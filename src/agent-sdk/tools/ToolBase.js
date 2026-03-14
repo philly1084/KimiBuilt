@@ -5,6 +5,8 @@
 
 class ToolBase {
   constructor(definition) {
+    const defaultHandler = typeof this.handler === 'function' ? this.handler.bind(this) : null;
+
     this.id = definition.id;
     this.name = definition.name || definition.id;
     this.description = definition.description || '';
@@ -12,7 +14,7 @@ class ToolBase {
     this.version = definition.version || '1.0.0';
     
     // Backend configuration
-    this.handler = definition.backend?.handler;
+    this.handler = definition.backend?.handler || defaultHandler;
     this.sideEffects = definition.backend?.sideEffects || [];
     this.sandbox = definition.backend?.sandbox || {};
     this.timeout = definition.backend?.timeout || 30000;

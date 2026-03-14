@@ -28,6 +28,7 @@ const toolsRouter = require('./routes/tools');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
+const { ToolDefinition, ToolSideEffect } = require('./agent-sdk/tools/ToolDefinition');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -40,6 +41,60 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+function mapToolSideEffects(sideEffects = []) {
+    const effectMap = {
+        read: ToolSideEffect.READ,
+        write: ToolSideEffect.WRITE,
+        network: ToolSideEffect.NETWORK,
+        execute: ToolSideEffect.EXECUTE,
+        none: ToolSideEffect.NONE,
+    };
+
+    return (Array.isArray(sideEffects) ? sideEffects : [])
+        .map((effect) => effectMap[String(effect || '').toLowerCase()])
+        .filter(Boolean);
+}
+
+function registerUnifiedToolsWithOrchestrator(orchestrator, toolManager) {
+    if (!orchestrator || !toolManager?.registry) {
+        return 0;
+    }
+
+    let registeredCount = 0;
+    const registryTools = toolManager.registry.getAllTools();
+
+    registryTools.forEach((tool) => {
+        if (!tool?.id || typeof tool?.backend?.handler !== 'function') {
+            return;
+        }
+
+        if (orchestrator.toolRegistry.has(tool.id)) {
+            return;
+        }
+
+        orchestrator.registerTool(new ToolDefinition({
+            id: tool.id,
+            name: tool.name || tool.id,
+            description: tool.description || '',
+            inputSchema: tool.inputSchema || { type: 'object', properties: {} },
+            outputSchema: tool.outputSchema || { type: 'object', properties: {} },
+            sideEffects: mapToolSideEffects(tool.backend.sideEffects),
+            handler: async (input, context = {}) => {
+                const result = await toolManager.executeTool(tool.id, input, context);
+                if (!result?.success) {
+                    throw new Error(result?.error || `Tool ${tool.id} failed`);
+                }
+                return result.data;
+            },
+            timeout: tool.backend.timeout || 30000,
+        }));
+
+        registeredCount += 1;
+    });
+
+    return registeredCount;
+}
 
 app.get('/health', async (_req, res) => {
     const checks = {
@@ -194,6 +249,12 @@ async function start() {
         console.log('[Boot] Initializing memory service...');
         await memoryService.initialize();
         console.log('[Boot] Memory service ready');
+
+        console.log('[Boot] Initializing tool platform...');
+        const toolManager = getToolManager();
+        await toolManager.initialize();
+        app.locals.toolManager = toolManager;
+        console.log(`[Boot] Tool platform ready (${toolManager.registry.getAllTools().length} tools)`);
         
         console.log('[Boot] Initializing document service...');
         // Create OpenAI-compatible client for document generation
@@ -232,7 +293,8 @@ async function start() {
                     enableSkills: true
                 }
             });
-            console.log('[Boot] Agent SDK ready');
+            const registeredTools = registerUnifiedToolsWithOrchestrator(agentOrchestrator, toolManager);
+            console.log(`[Boot] Agent SDK ready (${registeredTools} tools registered)`);
         } catch (sdkError) {
             console.warn('[Boot] Agent SDK disabled:', sdkError.message);
         }

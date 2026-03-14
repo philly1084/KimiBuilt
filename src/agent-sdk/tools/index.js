@@ -66,7 +66,10 @@ class ToolManager {
    */
   registerWebTools() {
     try {
-      registerWebTools();
+      const tools = registerWebTools();
+      tools.forEach(tool => {
+        this.loadedTools.set(tool.id, tool);
+      });
       console.log('[ToolManager] Web tools registered');
     } catch (error) {
       console.error('[ToolManager] Failed to register web tools:', error.message);
@@ -111,7 +114,10 @@ class ToolManager {
    */
   registerDesignTools() {
     try {
-      registerDesignTools();
+      const tools = registerDesignTools();
+      tools.forEach(tool => {
+        this.loadedTools.set(tool.id, tool);
+      });
       console.log('[ToolManager] Design tools registered');
     } catch (error) {
       console.error('[ToolManager] Failed to register design tools:', error.message);
@@ -123,7 +129,10 @@ class ToolManager {
    */
   registerDatabaseTools() {
     try {
-      registerDatabaseTools();
+      const tools = registerDatabaseTools();
+      tools.forEach(tool => {
+        this.loadedTools.set(tool.id, tool);
+      });
       console.log('[ToolManager] Database tools registered');
     } catch (error) {
       console.error('[ToolManager] Failed to register database tools:', error.message);
@@ -135,7 +144,10 @@ class ToolManager {
    */
   registerSandboxTools() {
     try {
-      registerSandboxTools();
+      const tools = registerSandboxTools();
+      tools.forEach(tool => {
+        this.loadedTools.set(tool.id, tool);
+      });
       console.log('[ToolManager] Sandbox tools registered');
     } catch (error) {
       console.error('[ToolManager] Failed to register sandbox tools:', error.message);
@@ -353,8 +365,33 @@ class ToolManager {
       throw new Error(`Tool ${id} is disabled`);
     }
 
-    // Execute
-    const result = await tool.execute(params, context);
+    // Execute either a ToolBase instance or a registry definition.
+    let result;
+    if (typeof tool.execute === 'function') {
+      result = await tool.execute(params, context);
+    } else if (typeof tool.backend?.handler === 'function') {
+      const startedAt = Date.now();
+      try {
+        const data = await tool.backend.handler(params, context);
+        result = {
+          success: true,
+          data,
+          duration: Date.now() - startedAt,
+          toolId: id,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (error) {
+        result = {
+          success: false,
+          error: error.message,
+          duration: Date.now() - startedAt,
+          toolId: id,
+          timestamp: new Date().toISOString(),
+        };
+      }
+    } else {
+      throw new Error(`Tool ${id} has no executable handler`);
+    }
     
     // Record stats
     this.registry.recordInvocation(id, result);

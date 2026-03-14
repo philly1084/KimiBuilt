@@ -28,7 +28,7 @@ class CodeCLIApp {
         this.commands = [
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
-            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health',
+            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool',
             '/files', '/ls', '/download', '/open'
         ];
         
@@ -329,6 +329,12 @@ class CodeCLIApp {
             case 'health':
                 await this.checkHealth();
                 break;
+            case 'tools':
+                await this.listTools(args[0] || null);
+                break;
+            case 'tool':
+                await this.invokeToolCommand(args);
+                break;
             case 'files':
             case 'ls':
                 this.listFiles();
@@ -522,6 +528,8 @@ Session Statistics:
 **AI Controls:**
   /models            List available AI models
   /model <name>      Change AI model
+  /tools [category]  List frontend-available tools
+  /tool <id> <json>  Invoke a tool with JSON params
   /image <prompt>    Generate an image
                      Defaults to the backend image model (official OpenAI if configured)
                      Options: --model gpt-image-1.5|gpt-image-1-mini|gpt-image-1
@@ -550,6 +558,69 @@ Session Statistics:
 
 Type any message to chat with the AI.
         `.trim());
+    }
+
+    async listTools(category = null) {
+        try {
+            const tools = await api.getAvailableTools(category);
+            if (!tools.length) {
+                this.printSystem(category ? `No tools available in category "${category}".` : 'No tools are currently available.');
+                return;
+            }
+
+            const lines = ['## Available Tools', ''];
+            tools.forEach((tool) => {
+                const params = Array.isArray(tool.parameters)
+                    ? tool.parameters
+                    : Object.keys(tool.inputSchema?.properties || {});
+                lines.push(`- \`${tool.id}\` (${tool.category})`);
+                lines.push(`  ${tool.description || 'No description provided.'}`);
+                if (params.length) {
+                    const paramNames = Array.isArray(params)
+                        ? params.map((param) => typeof param === 'string' ? param : param.name).filter(Boolean)
+                        : [];
+                    if (paramNames.length) {
+                        lines.push(`  Params: ${paramNames.join(', ')}`);
+                    }
+                }
+            });
+            lines.push('');
+            lines.push('Usage: /tool <id> {"key":"value"}');
+            this.printAI(lines.join('\n'));
+        } catch (error) {
+            this.printError(`Failed to load tools: ${error.message}`);
+        }
+    }
+
+    async invokeToolCommand(args) {
+        const [toolId, ...paramParts] = args;
+        if (!toolId) {
+            this.printError('Usage: /tool <id> {"key":"value"}');
+            return;
+        }
+
+        const rawParams = paramParts.join(' ').trim();
+        let params = {};
+
+        if (rawParams) {
+            try {
+                params = JSON.parse(rawParams);
+            } catch (error) {
+                this.printError(`Invalid JSON params: ${error.message}`);
+                return;
+            }
+        }
+
+        this.setStatus('thinking');
+        try {
+            const result = await api.invokeTool(toolId, params);
+            const serialized = JSON.stringify(result, null, 2);
+            this.printAI(`## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${serialized}\n\`\`\``);
+        } catch (error) {
+            this.printError(`Tool failed: ${error.message}`);
+        } finally {
+            this.setStatus('ready');
+        }
     }
     
     printDiagramHelp() {
@@ -1830,5 +1901,4 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
 }
 
 const app = new CodeCLIApp();
-
 

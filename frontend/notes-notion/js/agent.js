@@ -1674,6 +1674,86 @@ GUIDELINES:
     // ============================================
     // Core AI Actions
     // ============================================
+    function isToolCommand(question) {
+        const trimmed = String(question || '').trim();
+        return trimmed === '/tools' || trimmed.startsWith('/tools ') || trimmed.startsWith('/tool ');
+    }
+
+    function formatAvailableToolsResponse(tools, category = null) {
+        if (!Array.isArray(tools) || tools.length === 0) {
+            return category
+                ? `No frontend tools are available in category \`${category}\`.`
+                : 'No frontend tools are currently available.';
+        }
+
+        const lines = ['## Available Tools', ''];
+        tools.forEach((tool) => {
+            const params = Array.isArray(tool.parameters)
+                ? tool.parameters.map((param) => typeof param === 'string' ? param : param.name).filter(Boolean)
+                : Object.keys(tool.inputSchema?.properties || {});
+            lines.push(`- \`${tool.id}\` (${tool.category})`);
+            lines.push(`  ${tool.description || 'No description provided.'}`);
+            if (params.length) {
+                lines.push(`  Params: ${params.join(', ')}`);
+            }
+        });
+        lines.push('');
+        lines.push('Usage: `/tool <id> {"key":"value"}`');
+        return lines.join('\n');
+    }
+
+    async function handleToolCommand(question, options = {}) {
+        const {
+            onComplete,
+            hiddenAssistantMessage = false
+        } = options;
+        const apiClient = getAPIClient();
+
+        if (!apiClient) {
+            throw new Error('Tool commands require the backend API client.');
+        }
+
+        const trimmed = String(question || '').trim();
+        let responseText = '';
+
+        if (trimmed === '/tools' || trimmed.startsWith('/tools ')) {
+            const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
+            const tools = await apiClient.getAvailableTools(category || null);
+            responseText = formatAvailableToolsResponse(tools, category);
+        } else {
+            const match = trimmed.match(/^\/tool\s+([^\s]+)(?:\s+([\s\S]+))?$/i);
+            if (!match) {
+                throw new Error('Usage: /tool <id> {"key":"value"}');
+            }
+
+            const toolId = match[1];
+            const rawParams = (match[2] || '').trim();
+            let params = {};
+
+            if (rawParams) {
+                params = JSON.parse(rawParams);
+            }
+
+            const result = await apiClient.invokeTool(toolId, params);
+            responseText = `## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+        }
+
+        const assistantMessage = hiddenAssistantMessage
+            ? null
+            : addMessage('assistant', responseText, {
+                model: state.selectedModel,
+                source: 'tool-command'
+            });
+
+        setProcessingState(false);
+
+        if (onComplete) {
+            onComplete(responseText, assistantMessage);
+        }
+
+        return responseText;
+    }
+
     async function ask(question, options = {}) {
         const {
             onChunk,
@@ -1700,6 +1780,13 @@ GUIDELINES:
         });
         
         try {
+            if (isToolCommand(question)) {
+                return await handleToolCommand(question, {
+                    onComplete,
+                    hiddenAssistantMessage
+                });
+            }
+
             const context = getPageContext();
             const apiClient = getAPIClient();
             

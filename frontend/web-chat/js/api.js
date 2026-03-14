@@ -12,6 +12,7 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     ? 'http://localhost:3000/v1'
     : `${CURRENT_ORIGIN}/v1`;
 const API_KEY = 'any-key'; // Required by SDK but not validated by KimiBuilt
+const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -745,6 +746,45 @@ class OpenAIAPIClient extends EventTarget {
     async getImageModelsFromAPI() {
         const response = await this.getImageModels();
         return response.data.map((model) => model.metadata || { id: model.id, name: model.id || 'Gateway Default' });
+    }
+
+    async getAvailableTools(category = null) {
+        const params = new URLSearchParams();
+        if (category) {
+            params.set('category', category);
+        }
+
+        const url = `${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`;
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to load tools: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || [];
+    }
+
+    async invokeTool(toolId, params = {}) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/invoke`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tool: toolId,
+                params,
+                sessionId: this.currentSessionId,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Tool invocation failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data;
     }
 
     // ============================================
