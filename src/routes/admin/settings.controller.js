@@ -54,6 +54,10 @@ class SettingsController {
         allowedIPs: []
       }
     };
+
+    this.loadSettings().catch((error) => {
+      console.warn('[Settings] Using default dashboard settings:', error.message);
+    });
   }
 
   /**

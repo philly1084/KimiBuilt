@@ -1,169 +1,47 @@
 /**
  * Models Controller
- * Manages AI model configurations
+ * Exposes live model inventory from the configured OpenAI-compatible endpoint.
  */
 
+const { listModels } = require('../../openai-client');
+const settingsController = require('./settings.controller');
+const logsController = require('./logs.controller');
+
+const EXCLUDED_MODEL_TOKENS = [
+  'embed',
+  'embedding',
+  'image',
+  'tts',
+  'transcribe',
+  'audio',
+  'realtime',
+  'moderation',
+  'omni-moderation',
+  'whisper',
+];
+
 class ModelsController {
-  constructor() {
-    this.models = new Map();
-    this.loadDefaultModels();
-  }
-
-  loadDefaultModels() {
-    const defaultModels = [
-      {
-        id: 'gpt-4o',
-        name: 'GPT-4o',
-        provider: 'openai',
-        description: 'Most capable multimodal model',
-        config: {
-          temperature: 0.7,
-          maxTokens: 4096,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0
-        },
-        isDefault: true,
-        isActive: true,
-        capabilities: ['chat', 'vision', 'tools', 'json'],
-        pricing: { input: 2.50, output: 10.00 },
-        contextWindow: 128000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'gpt-4o-mini',
-        name: 'GPT-4o Mini',
-        provider: 'openai',
-        description: 'Fast, cost-effective model',
-        config: {
-          temperature: 0.7,
-          maxTokens: 4096,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0
-        },
-        isDefault: false,
-        isActive: true,
-        capabilities: ['chat', 'vision', 'tools', 'json'],
-        pricing: { input: 0.15, output: 0.60 },
-        contextWindow: 128000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'o1-preview',
-        name: 'o1 Preview',
-        provider: 'openai',
-        description: 'Reasoning model for complex tasks',
-        config: {
-          temperature: 1,
-          maxTokens: 32768,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0
-        },
-        isDefault: false,
-        isActive: false,
-        capabilities: ['chat', 'reasoning'],
-        pricing: { input: 15.00, output: 60.00 },
-        contextWindow: 128000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'o3-mini',
-        name: 'o3 Mini',
-        provider: 'openai',
-        description: 'Fast reasoning model',
-        config: {
-          temperature: 1,
-          maxTokens: 100000,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0
-        },
-        isDefault: false,
-        isActive: false,
-        capabilities: ['chat', 'reasoning', 'tools'],
-        pricing: { input: 1.10, output: 4.40 },
-        contextWindow: 200000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'claude-3-opus',
-        name: 'Claude 3 Opus',
-        provider: 'anthropic',
-        description: 'Most capable Claude model',
-        config: {
-          temperature: 0.7,
-          maxTokens: 4096,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0
-        },
-        isDefault: false,
-        isActive: false,
-        capabilities: ['chat', 'vision', 'tools'],
-        pricing: { input: 15.00, output: 75.00 },
-        contextWindow: 200000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'claude-3-sonnet',
-        name: 'Claude 3 Sonnet',
-        provider: 'anthropic',
-        description: 'Balanced performance and cost',
-        config: {
-          temperature: 0.7,
-          maxTokens: 4096,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0
-        },
-        isDefault: false,
-        isActive: false,
-        capabilities: ['chat', 'vision', 'tools'],
-        pricing: { input: 3.00, output: 15.00 },
-        contextWindow: 200000,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ];
-
-    defaultModels.forEach(model => {
-      this.models.set(model.id, model);
-    });
-  }
-
-  /**
-   * Get all models
-   */
   async getAll(req, res) {
     try {
-      const models = Array.from(this.models.values())
-        .sort((a, b) => {
-          if (a.isDefault) return -1;
-          if (b.isDefault) return 1;
-          return 0;
-        });
-
-      res.json({ success: true, data: models });
+      const models = await this.getLiveModels();
+      res.json({
+        success: true,
+        data: models,
+        meta: {
+          source: 'live-provider',
+          count: models.length,
+        },
+      });
     } catch (error) {
       console.error('Error getting models:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  /**
-   * Get model by ID
-   */
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const model = this.models.get(id);
+      const model = (await this.getLiveModels()).find((entry) => entry.id === id);
 
       if (!model) {
         return res.status(404).json({ success: false, error: 'Model not found' });
@@ -176,38 +54,32 @@ class ModelsController {
     }
   }
 
-  /**
-   * Update model configuration
-   */
   async update(req, res) {
     try {
       const { id } = req.params;
       const { config, isActive, description } = req.body;
 
-      const model = this.models.get(id);
+      const model = (await this.getLiveModels()).find((entry) => entry.id === id);
       if (!model) {
         return res.status(404).json({ success: false, error: 'Model not found' });
       }
 
-      const updated = {
-        ...model,
-        updatedAt: new Date().toISOString()
+      const settings = this.ensureModelSettings();
+      const catalog = settings.catalog || {};
+      const existing = catalog[id] || {};
+
+      catalog[id] = {
+        ...existing,
+        ...(config ? { config: { ...(existing.config || {}), ...config } } : {}),
+        ...(typeof isActive === 'boolean' ? { isActive } : {}),
+        ...(typeof description === 'string' ? { description } : {}),
+        updatedAt: new Date().toISOString(),
       };
 
-      if (config) {
-        updated.config = { ...model.config, ...config };
-      }
+      settings.catalog = catalog;
+      await settingsController.saveSettings();
 
-      if (typeof isActive === 'boolean') {
-        updated.isActive = isActive;
-      }
-
-      if (description) {
-        updated.description = description;
-      }
-
-      this.models.set(id, updated);
-
+      const updated = (await this.getLiveModels()).find((entry) => entry.id === id);
       res.json({ success: true, data: updated });
     } catch (error) {
       console.error('Error updating model:', error);
@@ -215,73 +87,196 @@ class ModelsController {
     }
   }
 
-  /**
-   * Set as default model
-   */
   async activate(req, res) {
     try {
       const { id } = req.params;
-      
-      const model = this.models.get(id);
+      const model = (await this.getLiveModels()).find((entry) => entry.id === id);
+
       if (!model) {
         return res.status(404).json({ success: false, error: 'Model not found' });
       }
 
-      // Remove default from others
-      this.models.forEach(m => {
-        m.isDefault = false;
-      });
+      const settings = this.ensureModelSettings();
+      settings.defaultModel = id;
+      settings.catalog = {
+        ...(settings.catalog || {}),
+        [id]: {
+          ...(settings.catalog?.[id] || {}),
+          isActive: true,
+          updatedAt: new Date().toISOString(),
+        },
+      };
 
-      model.isDefault = true;
-      model.isActive = true;
-      model.updatedAt = new Date().toISOString();
+      await settingsController.saveSettings();
 
-      res.json({ success: true, data: model });
+      const updated = (await this.getLiveModels()).find((entry) => entry.id === id);
+      res.json({ success: true, data: updated });
     } catch (error) {
       console.error('Error activating model:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  /**
-   * Get model usage statistics
-   */
   async getUsageStats(req, res) {
     try {
-      // This would typically aggregate from actual usage data
-      // For now, return mock stats based on configured models
-      const stats = Array.from(this.models.values()).map(model => ({
-        modelId: model.id,
-        modelName: model.name,
-        requests: Math.floor(Math.random() * 1000),
-        tokens: {
-          input: Math.floor(Math.random() * 100000),
-          output: Math.floor(Math.random() * 50000)
+      const models = await this.getLiveModels();
+      const usage = this.buildUsageStats(models);
+      res.json({
+        success: true,
+        data: usage,
+        meta: {
+          source: 'runtime-logs',
+          count: usage.length,
         },
-        cost: {
-          input: 0,
-          output: 0,
-          total: 0
-        },
-        avgResponseTime: Math.floor(Math.random() * 3000) + 500,
-        successRate: Math.floor(Math.random() * 20) + 80
-      }));
-
-      // Calculate costs
-      stats.forEach(stat => {
-        const model = this.models.get(stat.modelId);
-        if (model) {
-          stat.cost.input = (stat.tokens.input / 1000000) * model.pricing.input;
-          stat.cost.output = (stat.tokens.output / 1000000) * model.pricing.output;
-          stat.cost.total = stat.cost.input + stat.cost.output;
-        }
       });
-
-      res.json({ success: true, data: stats });
     } catch (error) {
       console.error('Error getting usage stats:', error);
       res.status(500).json({ success: false, error: error.message });
     }
+  }
+
+  async getLiveModels() {
+    const providerModels = await listModels();
+    const settings = this.ensureModelSettings();
+    const catalog = settings.catalog || {};
+
+    return providerModels
+      .filter((model) => this.isUsableChatModel(model))
+      .map((model) => this.normalizeLiveModel(model, settings, catalog[model.id] || {}))
+      .sort((a, b) => {
+        if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+        if (a.isFallback !== b.isFallback) return a.isFallback ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  }
+
+  isUsableChatModel(model = {}) {
+    const id = String(model.id || '').toLowerCase();
+    if (!id) return false;
+    return !EXCLUDED_MODEL_TOKENS.some((token) => id.includes(token));
+  }
+
+  normalizeLiveModel(model = {}, settings = {}, override = {}) {
+    const id = String(model.id || '').trim();
+    const lowerId = id.toLowerCase();
+    const provider = model.owned_by || 'unknown';
+    const mergedConfig = {
+      temperature: settings.temperature ?? 0.7,
+      maxTokens: settings.maxTokens ?? 4096,
+      topP: settings.topP ?? 1,
+      frequencyPenalty: settings.frequencyPenalty ?? 0,
+      presencePenalty: settings.presencePenalty ?? 0,
+      ...(override.config || {}),
+    };
+
+    return {
+      id,
+      name: this.humanizeModelName(id),
+      provider,
+      description: override.description || `Live model exposed by ${provider}`,
+      config: mergedConfig,
+      isDefault: id === settings.defaultModel,
+      isFallback: id === settings.fallbackModel,
+      isActive: typeof override.isActive === 'boolean'
+        ? override.isActive
+        : id === settings.defaultModel || id === settings.fallbackModel,
+      capabilities: this.inferCapabilities(lowerId),
+      pricing: override.pricing || null,
+      contextWindow: override.contextWindow || null,
+      createdAt: model.created ? new Date(model.created * 1000).toISOString() : null,
+      updatedAt: override.updatedAt || null,
+      raw: {
+        object: model.object || 'model',
+        owned_by: provider,
+      },
+    };
+  }
+
+  inferCapabilities(modelId = '') {
+    const capabilities = ['chat'];
+
+    if (/(4o|vision|omni|gemini|claude-3|claude-4)/.test(modelId)) {
+      capabilities.push('vision');
+    }
+    if (/(tool|function|4o|o3|o4|claude|gemini)/.test(modelId)) {
+      capabilities.push('tools');
+    }
+    if (/^(o1|o3|o4)|reason/.test(modelId)) {
+      capabilities.push('reasoning');
+    }
+    if (/(json|4o|o3|o4|gpt-5)/.test(modelId)) {
+      capabilities.push('json');
+    }
+
+    return [...new Set(capabilities)];
+  }
+
+  humanizeModelName(id = '') {
+    return String(id)
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  buildUsageStats(models = []) {
+    const usageByModel = new Map();
+
+    for (const log of logsController.logs || []) {
+      const modelId = String(log.model || '').trim();
+      if (!modelId) continue;
+
+      const current = usageByModel.get(modelId) || {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalLatency: 0,
+        successCount: 0,
+      };
+
+      current.requests += 1;
+      current.totalLatency += Number(log.latency || log.duration || 0);
+      current.inputTokens += Number(log.promptTokens || 0);
+      current.outputTokens += Number(log.completionTokens || log.tokens || 0);
+      current.successCount += log.status === 'error' ? 0 : 1;
+      usageByModel.set(modelId, current);
+    }
+
+    return models.map((model) => {
+      const usage = usageByModel.get(model.id) || {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalLatency: 0,
+        successCount: 0,
+      };
+
+      return {
+        modelId: model.id,
+        modelName: model.name,
+        requests: usage.requests,
+        tokens: {
+          input: usage.inputTokens,
+          output: usage.outputTokens,
+        },
+        cost: {
+          input: 0,
+          output: 0,
+          total: 0,
+        },
+        avgResponseTime: usage.requests > 0 ? Math.round(usage.totalLatency / usage.requests) : 0,
+        successRate: usage.requests > 0 ? Math.round((usage.successCount / usage.requests) * 100) : 0,
+        isDefault: model.isDefault,
+      };
+    });
+  }
+
+  ensureModelSettings() {
+    if (!settingsController.settings.models) {
+      settingsController.settings.models = {};
+    }
+    if (!settingsController.settings.models.catalog) {
+      settingsController.settings.models.catalog = {};
+    }
+    return settingsController.settings.models;
   }
 }
 

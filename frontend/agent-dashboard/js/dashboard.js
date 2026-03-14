@@ -686,6 +686,30 @@ class Dashboard {
     renderModels(models) {
         const container = document.getElementById('modelsGrid');
         if (!container) return;
+
+        if (!models.length) {
+            container.innerHTML = `
+                <div class="model-card">
+                    <div class="model-card-header">
+                        <div>
+                            <span class="model-name">No live models returned</span>
+                            <span class="model-provider">provider inventory</span>
+                        </div>
+                    </div>
+                    <div class="model-stats">
+                        <div class="model-stat">
+                            <span class="model-stat-value">0</span>
+                            <span class="model-stat-label">Models</span>
+                        </div>
+                        <div class="model-stat">
+                            <span class="model-stat-value">Live</span>
+                            <span class="model-stat-label">Source</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
         
         container.innerHTML = models.map(model => `
             <div class="model-card">
