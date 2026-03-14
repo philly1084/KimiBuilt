@@ -4,6 +4,26 @@
  */
 
 const { ToolBase } = require('../../ToolBase');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const { config } = require('../../../../config');
+
+const execFileAsync = promisify(execFile);
+const DEFAULT_BROWSER_CANDIDATES = [
+  config.artifacts.browserPath,
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/snap/bin/chromium',
+  'chromium',
+  'chromium-browser',
+  'google-chrome',
+  'google-chrome-stable',
+];
 
 class WebScrapeTool extends ToolBase {
   constructor() {
@@ -109,9 +129,12 @@ class WebScrapeTool extends ToolBase {
     let html;
     let finalUrl = url;
     
-    if (browser) {
-      // Would use Puppeteer here
-      throw new Error('Browser-based scraping requires Puppeteer installation');
+    if (browser || javascript) {
+      html = await this.fetchWithBrowser(url, {
+        timeout,
+        waitForSelector,
+      });
+      finalUrl = this.normalizeUrl(url);
     } else {
       // Static fetch
       const fetchTool = this.resolveFetchTool(context);
@@ -121,11 +144,19 @@ class WebScrapeTool extends ToolBase {
       
       const fetchResult = await fetchTool.execute({ url, timeout }, context);
       if (!fetchResult.success) {
-        throw new Error(`Failed to fetch: ${fetchResult.error}`);
+        if (this.shouldFallbackToBrowser(fetchResult.error)) {
+          html = await this.fetchWithBrowser(url, {
+            timeout,
+            waitForSelector,
+          });
+          finalUrl = this.normalizeUrl(url);
+        } else {
+          throw new Error(`Failed to fetch: ${fetchResult.error}`);
+        }
+      } else {
+        html = fetchResult.data.body;
+        finalUrl = fetchResult.data.url;
       }
-      
-      html = fetchResult.data.body;
-      finalUrl = fetchResult.data.url;
     }
 
     tracker.recordRead(url, { type: 'html', size: html.length });
@@ -140,7 +171,7 @@ class WebScrapeTool extends ToolBase {
     // CSS Selector extraction
     if (selectors) {
       extractedData = await this.extractWithSelectors(html, selectors);
-      method = 'css-selectors';
+      method = browser || javascript ? 'browser-css-selectors' : 'css-selectors';
     }
 
     // XPath extraction (if implemented)
@@ -200,6 +231,112 @@ class WebScrapeTool extends ToolBase {
       return new WebFetchTool();
     } catch (_error) {
       return null;
+    }
+  }
+
+  shouldFallbackToBrowser(errorMessage = '') {
+    const normalized = String(errorMessage || '').toLowerCase();
+    return [
+      'unable_to_get_issuer_cert_locally',
+      'self signed certificate',
+      'certificate',
+      'ssl',
+      'tls',
+    ].some((token) => normalized.includes(token));
+  }
+
+  async fetchWithBrowser(url, options = {}) {
+    const browserPath = await this.resolveBrowserPath();
+    if (!browserPath) {
+      throw new Error('Headless browser is not installed in the backend container');
+    }
+
+    const normalizedUrl = this.normalizeUrl(url);
+    const timeout = options.timeout || 30000;
+    const virtualTimeBudget = Math.min(Math.max(timeout, 3000), 45000);
+    const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-browser-'));
+
+    try {
+      const { stdout, stderr } = await execFileAsync(browserPath, [
+        '--headless',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-background-networking',
+        '--disable-features=Translate,BackForwardCache',
+        '--allow-running-insecure-content',
+        '--ignore-certificate-errors',
+        '--user-data-dir=' + userDataDir,
+        `--virtual-time-budget=${virtualTimeBudget}`,
+        '--dump-dom',
+        normalizedUrl,
+      ], {
+        timeout,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+
+      const html = String(stdout || '').trim();
+      if (!html) {
+        const detail = String(stderr || '').trim();
+        throw new Error(detail || `Browser returned empty DOM for ${normalizedUrl}`);
+      }
+
+      if (options.waitForSelector) {
+        this.assertSelectorPresent(html, options.waitForSelector);
+      }
+
+      return html;
+    } catch (error) {
+      const detail = String(error.stderr || error.stdout || error.message || '').trim();
+      throw new Error(`Browser fetch failed for ${normalizedUrl}: ${detail}`);
+    } finally {
+      await fs.rm(userDataDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async resolveBrowserPath() {
+    for (const candidate of DEFAULT_BROWSER_CANDIDATES) {
+      if (!candidate) continue;
+
+      if (candidate.includes(path.sep)) {
+        try {
+          await fs.access(candidate);
+          return candidate;
+        } catch {
+          continue;
+        }
+      }
+
+      return candidate;
+    }
+
+    return null;
+  }
+
+  normalizeUrl(url) {
+    const value = String(url || '').trim();
+    if (!value) {
+      throw new Error('URL is required');
+    }
+
+    const withScheme = /^[a-z]+:\/\//i.test(value) ? value : `https://${value}`;
+
+    try {
+      const parsed = new URL(withScheme);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+      }
+      return parsed.toString();
+    } catch (error) {
+      throw new Error(`Invalid URL '${value}': ${error.message}`);
+    }
+  }
+
+  assertSelectorPresent(html, selector) {
+    const regex = this.selectorToRegex(selector);
+    if (!regex.test(html)) {
+      throw new Error(`Selector '${selector}' was not found in the rendered page`);
     }
   }
 
