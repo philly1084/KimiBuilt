@@ -50,10 +50,13 @@ router.get('/logs/export/:format', callController(logsController, 'export'));
 
 // Skills
 router.get('/skills', callController(skillsController, 'getAll'));
+router.get('/skills/categories/list', callController(skillsController, 'getCategories'));
+router.get('/skills/stats/overview', callController(skillsController, 'getStats'));
 router.get('/skills/:id', callController(skillsController, 'getById'));
 router.put('/skills/:id', callController(skillsController, 'update'));
 router.post('/skills/:id/enable', callController(skillsController, 'enable'));
 router.post('/skills/:id/disable', callController(skillsController, 'disable'));
+router.post('/skills/:id/execute', callController(skillsController, 'execute'));
 router.delete('/skills/:id', callController(skillsController, 'remove'));
 router.get('/skills/search/query', callController(skillsController, 'search'));
 

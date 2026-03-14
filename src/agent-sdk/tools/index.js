@@ -1,81 +1,405 @@
 /**
- * @fileoverview Agent SDK Tool Registry
- * 
- * This module provides the core tooling infrastructure for the OpenAI Agent SDK,
- * including tool definitions, a central registry, and side effect tracking.
- * 
- * @module @agent-sdk/tools
- * @example
- * const { ToolRegistry, ToolDefinition, SideEffectTracker } = require('@agent-sdk/tools');
- * 
- * // Create a registry
- * const registry = new ToolRegistry();
- * 
- * // Define a tool
- * const calculator = new ToolDefinition({
- *   id: 'calculator',
- *   name: 'Calculator',
- *   description: 'Performs arithmetic operations',
- *   inputSchema: {
- *     type: 'object',
- *     properties: {
- *       operation: { type: 'string', enum: ['add', 'subtract', 'multiply', 'divide'] },
- *       a: { type: 'number' },
- *       b: { type: 'number' }
- *     },
- *     required: ['operation', 'a', 'b']
- *   },
- *   handler: async ({ operation, a, b }) => {
- *     switch (operation) {
- *       case 'add': return a + b;
- *       case 'subtract': return a - b;
- *       case 'multiply': return a * b;
- *       case 'divide': return a / b;
- *     }
- *   }
- * });
- * 
- * // Register and execute
- * registry.register(calculator);
- * const result = await registry.execute('calculator', { operation: 'add', a: 5, b: 3 });
+ * Agent SDK Tools - Main Entry Point
+ * Loads and registers all tool categories
  */
 
-// Tool Definition
-const { 
-  ToolDefinition, 
-  ToolSideEffect 
-} = require('./ToolDefinition');
+const { getUnifiedRegistry } = require('../registry/UnifiedRegistry');
+const { getAgentBus } = require('../agents/AgentBus');
 
-// Tool Registry
-const { 
-  ToolRegistry, 
-  ToolNotFoundError, 
-  ToolRegistrationError 
-} = require('./ToolRegistry');
+// Tool categories
+const { registerWebTools } = require('./categories/web');
+const { registerDesignTools } = require('./categories/design');
+const { registerDatabaseTools } = require('./categories/database');
+const { registerSandboxTools } = require('./categories/sandbox');
+// SSH tools
+const { SSHExecuteTool } = require('./categories/ssh/SSHExecuteTool');
+const { DockerExecTool } = require('./categories/ssh/DockerExecTool');
 
-// Side Effect Tracking
-const { 
-  SideEffect, 
-  SideEffectTracker, 
-  SideEffectType 
-} = require('./SideEffectTracker');
+class ToolManager {
+  constructor() {
+    this.registry = getUnifiedRegistry();
+    this.agentBus = getAgentBus();
+    this.loadedTools = new Map();
+    this.initialized = false;
+  }
 
-module.exports = {
-  // Core Classes
-  ToolDefinition,
-  ToolRegistry,
-  SideEffect,
-  SideEffectTracker,
-  
-  // Enums
-  ToolSideEffect,
-  SideEffectType,
-  
-  // Errors
-  ToolNotFoundError,
-  ToolRegistrationError
-};
+  /**
+   * Initialize all tools
+   */
+  async initialize() {
+    if (this.initialized) {
+      return;
+    }
 
-/**
- * @typedef {import('./ToolDefinition').ToolExecutionResult} ToolExecutionResult
- */
+    console.log('[ToolManager] Initializing tools...');
+
+    // Register web tools
+    this.registerWebTools();
+    
+    // Register SSH tools
+    this.registerSSHTools();
+    
+    // Register design tools
+    this.registerDesignTools();
+    
+    // Register database tools
+    this.registerDatabaseTools();
+    
+    // Register sandbox tools
+    this.registerSandboxTools();
+    
+    // Register system tools
+    this.registerSystemTools();
+
+    // Set up event listeners
+    this.setupEventListeners();
+
+    this.initialized = true;
+    
+    console.log(`[ToolManager] Initialized ${this.registry.getAllTools().length} tools`);
+    
+    return this;
+  }
+
+  /**
+   * Register web scraping tools
+   */
+  registerWebTools() {
+    try {
+      registerWebTools();
+      console.log('[ToolManager] Web tools registered');
+    } catch (error) {
+      console.error('[ToolManager] Failed to register web tools:', error.message);
+    }
+  }
+
+  /**
+   * Register SSH/remote tools
+   */
+  registerSSHTools() {
+    try {
+      const tools = [
+        new SSHExecuteTool(),
+        new DockerExecTool()
+      ];
+
+      tools.forEach(tool => {
+        const definition = this.createToolDefinition(tool, {
+          frontend: {
+            exposeToFrontend: true,
+            icon: 'terminal',
+            requiresSetup: true // SSH needs key configuration
+          },
+          skill: {
+            triggerPatterns: this.getSSHTriggerPatterns(tool.id),
+            requiresConfirmation: true
+          }
+        });
+        
+        this.registry.register(definition);
+        this.loadedTools.set(tool.id, tool);
+      });
+
+      console.log('[ToolManager] SSH tools registered');
+    } catch (error) {
+      console.error('[ToolManager] Failed to register SSH tools:', error.message);
+    }
+  }
+
+  /**
+   * Register design tools
+   */
+  registerDesignTools() {
+    try {
+      registerDesignTools();
+      console.log('[ToolManager] Design tools registered');
+    } catch (error) {
+      console.error('[ToolManager] Failed to register design tools:', error.message);
+    }
+  }
+
+  /**
+   * Register database tools
+   */
+  registerDatabaseTools() {
+    try {
+      registerDatabaseTools();
+      console.log('[ToolManager] Database tools registered');
+    } catch (error) {
+      console.error('[ToolManager] Failed to register database tools:', error.message);
+    }
+  }
+
+  /**
+   * Register sandbox tools
+   */
+  registerSandboxTools() {
+    try {
+      registerSandboxTools();
+      console.log('[ToolManager] Sandbox tools registered');
+    } catch (error) {
+      console.error('[ToolManager] Failed to register sandbox tools:', error.message);
+    }
+  }
+
+  /**
+   * Register system tools
+   */
+  registerSystemTools() {
+    // File system tools
+    const fileTools = [
+      {
+        id: 'file-read',
+        name: 'File Reader',
+        category: 'system',
+        description: 'Read file contents',
+        backend: {
+          handler: async (params) => {
+            const fs = require('fs').promises;
+            const content = await fs.readFile(params.path, 'utf8');
+            return { content, path: params.path };
+          },
+          sideEffects: ['read'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: { type: 'string' },
+            encoding: { type: 'string', default: 'utf8' }
+          }
+        }
+      },
+      {
+        id: 'file-write',
+        name: 'File Writer',
+        category: 'system',
+        description: 'Write content to files',
+        backend: {
+          handler: async (params) => {
+            const fs = require('fs').promises;
+            await fs.writeFile(params.path, params.content);
+            return { path: params.path, bytesWritten: params.content.length };
+          },
+          sideEffects: ['write'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['path', 'content'],
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' }
+          }
+        }
+      },
+      {
+        id: 'file-search',
+        name: 'File Search',
+        category: 'system',
+        description: 'Search for files by pattern',
+        backend: {
+          handler: async (params) => {
+            const { glob } = require('glob');
+            const files = await glob(params.pattern, { cwd: params.cwd });
+            return { files, pattern: params.pattern };
+          },
+          sideEffects: ['read'],
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['pattern'],
+          properties: {
+            pattern: { type: 'string' },
+            cwd: { type: 'string' }
+          }
+        }
+      }
+    ];
+
+    // Code execution tools
+    const codeTools = [
+      {
+        id: 'code-execute',
+        name: 'Code Executor',
+        category: 'system',
+        description: 'Execute code in sandboxed environment',
+        backend: {
+          handler: async (params) => {
+            // Would use sandboxed execution
+            return { 
+              note: 'Sandboxed execution not implemented',
+              language: params.language,
+              code: params.code.substring(0, 100) + '...'
+            };
+          },
+          sideEffects: ['execute'],
+          sandbox: { network: false, filesystem: 'readonly' },
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['language', 'code'],
+          properties: {
+            language: { 
+              type: 'string',
+              enum: ['javascript', 'python', 'bash', 'sql']
+            },
+            code: { type: 'string' },
+            timeout: { type: 'integer', default: 30000 }
+          }
+        },
+        skill: {
+          triggerPatterns: ['run code', 'execute', 'run script', 'test code'],
+          requiresConfirmation: true
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'code',
+          uiComponent: 'CodeExecutorPanel'
+        }
+      }
+    ];
+
+    // Register all system tools
+    [...fileTools, ...codeTools].forEach(def => {
+      this.registry.register({
+        ...def,
+        version: '1.0.0',
+        skill: def.skill || {
+          triggerPatterns: [def.name.toLowerCase(), def.id.replace(/-/g, ' ')],
+          autoApply: false
+        },
+        frontend: def.frontend || {
+          exposeToFrontend: true,
+          icon: 'settings'
+        }
+      });
+    });
+
+    console.log('[ToolManager] System tools registered');
+  }
+
+  /**
+   * Create tool definition with defaults
+   */
+  createToolDefinition(tool, overrides = {}) {
+    const base = tool.toDefinition();
+    
+    return {
+      ...base,
+      skill: {
+        triggerPatterns: [tool.name.toLowerCase()],
+        autoApply: false,
+        requiresConfirmation: false,
+        ...overrides.skill
+      },
+      frontend: {
+        exposeToFrontend: true,
+        icon: 'tool',
+        ...overrides.frontend
+      }
+    };
+  }
+
+  /**
+   * Get trigger patterns for SSH tools
+   */
+  getSSHTriggerPatterns(toolId) {
+    const patterns = {
+      'ssh-execute': ['ssh', 'remote command', 'execute on server', 'run on host'],
+      'docker-exec': ['docker', 'container', 'run in container', 'docker exec']
+    };
+    return patterns[toolId] || [toolId];
+  }
+
+  /**
+   * Set up event listeners
+   */
+  setupEventListeners() {
+    // Listen for tool invocations
+    this.registry.on('tool:registered', ({ id }) => {
+      console.log(`[ToolManager] Tool registered: ${id}`);
+    });
+
+    // Listen for skill updates
+    this.registry.on('skill:updated', ({ id, skill }) => {
+      console.log(`[ToolManager] Skill updated: ${id} (enabled: ${skill.enabled})`);
+    });
+  }
+
+  /**
+   * Get a tool instance
+   */
+  getTool(id) {
+    return this.loadedTools.get(id) || this.registry.getTool(id);
+  }
+
+  /**
+   * Execute a tool
+   */
+  async executeTool(id, params, context = {}) {
+    const tool = this.getTool(id);
+    
+    if (!tool) {
+      throw new Error(`Tool not found: ${id}`);
+    }
+
+    // Check if skill is enabled
+    const skill = this.registry.getSkill(id);
+    if (skill && !skill.enabled) {
+      throw new Error(`Tool ${id} is disabled`);
+    }
+
+    // Execute
+    const result = await tool.execute(params, context);
+    
+    // Record stats
+    this.registry.recordInvocation(id, result);
+    
+    return result;
+  }
+
+  /**
+   * Get all available tools for frontend
+   */
+  getFrontendTools() {
+    return this.registry.getFrontendTools();
+  }
+
+  /**
+   * Get all skills for admin
+   */
+  getAdminSkills() {
+    return this.registry.getAllSkills();
+  }
+
+  /**
+   * Get registry stats
+   */
+  getStats() {
+    return {
+      tools: this.registry.getAllTools().length,
+      skills: this.registry.getAllSkills().length,
+      categories: this.registry.getCategories(),
+      byCategory: this.registry.getCategories().map(cat => ({
+        name: cat,
+        count: this.registry.getToolsByCategory(cat).length
+      }))
+    };
+  }
+}
+
+// Singleton
+let instance = null;
+
+function getToolManager() {
+  if (!instance) {
+    instance = new ToolManager();
+  }
+  return instance;
+}
+
+module.exports = { ToolManager, getToolManager };

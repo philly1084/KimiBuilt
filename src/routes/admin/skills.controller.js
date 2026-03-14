@@ -1,140 +1,61 @@
 /**
  * Skills Controller
- * Manages learned/reusable skills
+ * Manages skills via the Unified Registry
+ * Skills are automatically created when tools are registered
  */
 
-const { v4: uuidv4 } = require('uuid');
+const { getUnifiedRegistry } = require('../../agent-sdk/registry/UnifiedRegistry');
+const { getToolManager } = require('../../agent-sdk/tools');
 
 class SkillsController {
   constructor() {
-    this.skills = new Map();
-    this.loadDefaultSkills();
-  }
-
-  loadDefaultSkills() {
-    const defaultSkills = [
-      {
-        id: 'skill-1',
-        name: 'Code Review Pattern',
-        description: 'Reviews code for best practices and potential issues',
-        category: 'coding',
-        triggerPattern: 'review.*code|code.*review',
-        implementation: {
-          type: 'prompt',
-          content: 'Review this code for:\n1. Best practices\n2. Potential bugs\n3. Performance issues\n4. Security concerns\n\nCode:\n{{code}}'
-        },
-        stats: {
-          usageCount: 156,
-          successRate: 94,
-          avgExecutionTime: 2340
-        },
-        isEnabled: true,
-        isLearned: true,
-        sourceTask: 'task-abc-123',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'skill-2',
-        name: 'Documentation Generator',
-        description: 'Generates comprehensive documentation from code',
-        category: 'writing',
-        triggerPattern: 'document.*code|generate.*docs',
-        implementation: {
-          type: 'prompt',
-          content: 'Generate documentation for this code:\n\n{{code}}\n\nInclude:\n- Function descriptions\n- Parameter explanations\n- Return value details\n- Usage examples'
-        },
-        stats: {
-          usageCount: 89,
-          successRate: 91,
-          avgExecutionTime: 3450
-        },
-        isEnabled: true,
-        isLearned: true,
-        sourceTask: 'task-def-456',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'skill-3',
-        name: 'API Endpoint Creator',
-        description: 'Creates REST API endpoints with proper structure',
-        category: 'coding',
-        triggerPattern: 'create.*api|api.*endpoint',
-        implementation: {
-          type: 'prompt',
-          content: 'Create a REST API endpoint for:\n\nRequirements: {{requirements}}\n\nInclude:\n- Route definition\n- Request validation\n- Response format\n- Error handling'
-        },
-        stats: {
-          usageCount: 67,
-          successRate: 88,
-          avgExecutionTime: 2890
-        },
-        isEnabled: true,
-        isLearned: true,
-        sourceTask: 'task-ghi-789',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'skill-4',
-        name: 'Data Analysis Report',
-        description: 'Analyzes data and generates insights report',
-        category: 'analysis',
-        triggerPattern: 'analyze.*data|data.*analysis',
-        implementation: {
-          type: 'prompt',
-          content: 'Analyze this data and provide insights:\n\nData: {{data}}\n\nInclude:\n- Key trends\n- Statistical summary\n- Anomalies\n- Recommendations'
-        },
-        stats: {
-          usageCount: 45,
-          successRate: 96,
-          avgExecutionTime: 4120
-        },
-        isEnabled: false,
-        isLearned: true,
-        sourceTask: 'task-jkl-012',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ];
-
-    defaultSkills.forEach(skill => {
-      this.skills.set(skill.id, skill);
-    });
+    this.registry = getUnifiedRegistry();
   }
 
   /**
-   * Get all skills
+   * Get all skills from unified registry
    */
   async getAll(req, res) {
     try {
       const { category = 'all', status = 'all', search = '' } = req.query;
 
-      let skills = Array.from(this.skills.values());
+      // Get skills from unified registry
+      let skills = this.registry.getAllSkills();
 
+      // Apply category filter
       if (category && category !== 'all') {
         skills = skills.filter(s => s.category === category);
       }
 
+      // Apply status filter
       if (status === 'enabled') {
-        skills = skills.filter(s => s.isEnabled);
+        skills = skills.filter(s => s.enabled);
       } else if (status === 'disabled') {
-        skills = skills.filter(s => !s.isEnabled);
+        skills = skills.filter(s => !s.enabled);
       }
 
+      // Apply search filter
       if (search) {
         const searchLower = search.toLowerCase();
         skills = skills.filter(s =>
           s.name.toLowerCase().includes(searchLower) ||
           s.description.toLowerCase().includes(searchLower) ||
-          s.category.toLowerCase().includes(searchLower)
+          s.category.toLowerCase().includes(searchLower) ||
+          s.triggerPatterns?.some(p => p.toLowerCase().includes(searchLower))
         );
       }
 
+      // Sort by usage count
+      skills.sort((a, b) => (b.stats?.usageCount || 0) - (a.stats?.usageCount || 0));
+
       res.json({
         success: true,
-        data: skills.sort((a, b) => b.stats.usageCount - a.stats.usageCount)
+        data: skills,
+        meta: {
+          total: skills.length,
+          categories: this.registry.getCategories(),
+          byCategory: this.getStatsByCategory(skills)
+        }
       });
     } catch (error) {
       console.error('Error getting skills:', error);
@@ -148,13 +69,30 @@ class SkillsController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const skill = this.skills.get(id);
+      const skill = this.registry.getSkill(id);
 
       if (!skill) {
         return res.status(404).json({ success: false, error: 'Skill not found' });
       }
 
-      res.json({ success: true, data: skill });
+      // Add tool details
+      const tool = this.registry.getTool(id);
+      const manifest = this.registry.getManifest(id);
+      const stats = this.registry.getStats(id);
+
+      res.json({
+        success: true,
+        data: {
+          ...skill,
+          tool: tool ? {
+            sideEffects: tool.backend?.sideEffects,
+            sandbox: tool.backend?.sandbox,
+            timeout: tool.backend?.timeout
+          } : null,
+          manifest: manifest || null,
+          stats: stats || null
+        }
+      });
     } catch (error) {
       console.error('Error getting skill:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -162,25 +100,20 @@ class SkillsController {
   }
 
   /**
-   * Update skill
+   * Update skill configuration
    */
   async update(req, res) {
     try {
       const { id } = req.params;
       const updates = req.body;
 
-      const skill = this.skills.get(id);
+      const skill = this.registry.getSkill(id);
       if (!skill) {
         return res.status(404).json({ success: false, error: 'Skill not found' });
       }
 
-      const updated = {
-        ...skill,
-        ...updates,
-        updatedAt: new Date().toISOString()
-      };
-
-      this.skills.set(id, updated);
+      // Update via registry
+      const updated = this.registry.updateSkillConfig(id, updates);
 
       res.json({ success: true, data: updated });
     } catch (error) {
@@ -195,15 +128,13 @@ class SkillsController {
   async enable(req, res) {
     try {
       const { id } = req.params;
-      const skill = this.skills.get(id);
-
-      if (!skill) {
+      
+      const success = this.registry.setSkillEnabled(id, true);
+      if (!success) {
         return res.status(404).json({ success: false, error: 'Skill not found' });
       }
 
-      skill.isEnabled = true;
-      skill.updatedAt = new Date().toISOString();
-
+      const skill = this.registry.getSkill(id);
       res.json({ success: true, data: skill });
     } catch (error) {
       console.error('Error enabling skill:', error);
@@ -217,15 +148,13 @@ class SkillsController {
   async disable(req, res) {
     try {
       const { id } = req.params;
-      const skill = this.skills.get(id);
-
-      if (!skill) {
+      
+      const success = this.registry.setSkillEnabled(id, false);
+      if (!success) {
         return res.status(404).json({ success: false, error: 'Skill not found' });
       }
 
-      skill.isEnabled = false;
-      skill.updatedAt = new Date().toISOString();
-
+      const skill = this.registry.getSkill(id);
       res.json({ success: true, data: skill });
     } catch (error) {
       console.error('Error disabling skill:', error);
@@ -234,17 +163,18 @@ class SkillsController {
   }
 
   /**
-   * Delete skill
+   * Delete skill (unregisters tool)
    */
   async remove(req, res) {
     try {
       const { id } = req.params;
 
-      if (!this.skills.has(id)) {
+      if (!this.registry.getSkill(id)) {
         return res.status(404).json({ success: false, error: 'Skill not found' });
       }
 
-      this.skills.delete(id);
+      // Unregister the tool (removes skill, tool, and manifest)
+      this.registry.unregister(id);
 
       res.json({ success: true, data: { id, deleted: true } });
     } catch (error) {
@@ -264,18 +194,115 @@ class SkillsController {
         return res.json({ success: true, data: [] });
       }
 
-      const searchLower = q.toLowerCase();
-      const results = Array.from(this.skills.values()).filter(skill =>
-        skill.name.toLowerCase().includes(searchLower) ||
-        skill.description.toLowerCase().includes(searchLower) ||
-        skill.triggerPattern?.toLowerCase().includes(searchLower)
-      );
+      const results = this.registry.search(q);
 
-      res.json({ success: true, data: results });
+      res.json({
+        success: true,
+        data: {
+          skills: results.skills,
+          tools: results.tools
+        }
+      });
     } catch (error) {
       console.error('Error searching skills:', error);
       res.status(500).json({ success: false, error: error.message });
     }
+  }
+
+  /**
+   * Get tool categories
+   */
+  async getCategories(req, res) {
+    try {
+      const categories = this.registry.getCategories();
+      
+      // Add counts
+      const categoriesWithCounts = categories.map(cat => ({
+        name: cat,
+        count: this.registry.getSkillsByCategory(cat).length
+      }));
+
+      res.json({
+        success: true,
+        data: categoriesWithCounts
+      });
+    } catch (error) {
+      console.error('Error getting categories:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * Get registry statistics
+   */
+  async getStats(req, res) {
+    try {
+      const skills = this.registry.getAllSkills();
+      
+      res.json({
+        success: true,
+        data: {
+          total: skills.length,
+          enabled: skills.filter(s => s.enabled).length,
+          disabled: skills.filter(s => !s.enabled).length,
+          byCategory: this.getStatsByCategory(skills),
+          totalInvocations: skills.reduce((sum, s) => sum + (s.stats?.usageCount || 0), 0)
+        }
+      });
+    } catch (error) {
+      console.error('Error getting stats:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * Execute a skill (invoke its tool)
+   */
+  async execute(req, res) {
+    try {
+      const { id } = req.params;
+      const params = req.body;
+
+      const skill = this.registry.getSkill(id);
+      if (!skill) {
+        return res.status(404).json({ success: false, error: 'Skill not found' });
+      }
+
+      if (!skill.enabled) {
+        return res.status(400).json({ success: false, error: 'Skill is disabled' });
+      }
+
+      // Get tool manager and execute
+      const toolManager = getToolManager();
+      const result = await toolManager.executeTool(id, params, {
+        sessionId: req.body.sessionId,
+        userId: req.user?.id
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('Error executing skill:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // Helper methods
+
+  getStatsByCategory(skills) {
+    const byCategory = {};
+    
+    skills.forEach(skill => {
+      const cat = skill.category || 'uncategorized';
+      if (!byCategory[cat]) {
+        byCategory[cat] = { count: 0, enabled: 0 };
+      }
+      byCategory[cat].count++;
+      if (skill.enabled) {
+        byCategory[cat].enabled++;
+      }
+    });
+
+    return byCategory;
   }
 }
 

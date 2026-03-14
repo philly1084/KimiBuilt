@@ -24,7 +24,9 @@ const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
 const unsplashRouter = require('./routes/unsplash');
 const adminRouter = require('./routes/admin');
+const toolsRouter = require('./routes/tools');
 const DashboardController = require('./routes/admin/dashboard.controller');
+const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
 
 // Document Service
@@ -169,6 +171,7 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/tools', toolsRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend')));
 
