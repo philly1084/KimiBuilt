@@ -285,7 +285,7 @@ class ArtifactService {
             return `${base}\n\nReturn valid XML only. No markdown fences.`;
         }
         if (normalizedFormat === 'mermaid') {
-            return `${base}\n\nReturn Mermaid source only. No markdown fences.`;
+            return `${base}\n\nReturn Mermaid v10-compatible source only. No markdown fences. Put each statement on its own line. Do not collapse the diagram into a single line.`;
         }
         if (normalizedFormat === 'power-query') {
             return `${base}\n\nReturn valid Power Query M script only. No markdown fences.`;

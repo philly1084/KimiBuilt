@@ -561,6 +561,68 @@ Generate Mermaid diagrams using the AI or templates.
 The AI will generate appropriate Mermaid syntax. If AI is unavailable, a template will be used.
         `.trim());
     }
+
+    sanitizeMermaidCode(text, type = '') {
+        let source = String(text || '')
+            .replace(/\r\n?/g, '\n')
+            .trim();
+
+        if (!source) {
+            return '';
+        }
+
+        source = source.replace(/^```mermaid\s*/i, '');
+        source = source.replace(/^```\s*/i, '');
+        source = source.replace(/```\s*$/i, '');
+
+        const normalizedType = String(type || '').toLowerCase();
+        const whitespaceSensitive = normalizedType === 'mindmap';
+
+        if (!source.includes('\n') && !whitespaceSensitive && /\s{2,}/.test(source)) {
+            source = source
+                .split(/\s{2,}/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .join('\n');
+        }
+
+        source = source
+            .replace(/^(flowchart|graph)\s+([A-Za-z]{2})\s+(?=\S)/i, '$1 $2\n')
+            .replace(/^(sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|gitGraph|journey|timeline)\s+(?=\S)/i, '$1\n');
+
+        if (!whitespaceSensitive) {
+            source = source.replace(
+                /\s+(?=(?:style|classDef|class|linkStyle|click|subgraph|end|section|participant|actor|note|title|accTitle|accDescr)\b)/g,
+                '\n',
+            );
+        }
+
+        return source
+            .split('\n')
+            .flatMap((line) => (
+                !whitespaceSensitive && /\s{2,}/.test(line) && !/^\s/.test(line)
+                    ? line.split(/\s{2,}/)
+                    : [line]
+            ))
+            .map((line) => line.trimEnd())
+            .filter((line, index, lines) => line.trim() || (index > 0 && lines[index - 1].trim()))
+            .join('\n')
+            .trim();
+    }
+
+    async validateMermaidCode(source) {
+        if (typeof mermaid === 'undefined' || typeof mermaid.parse !== 'function') {
+            return true;
+        }
+
+        try {
+            await mermaid.parse(source);
+            return true;
+        } catch (error) {
+            console.warn('[CLI] Mermaid validation failed:', error);
+            return false;
+        }
+    }
     
     // ==================== Helper Methods ====================
     
@@ -571,7 +633,9 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         // Code blocks (including mermaid)
         html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             const language = lang || 'text';
-            const trimmedCode = code.trim();
+            const trimmedCode = language === 'mermaid'
+                ? this.sanitizeMermaidCode(code)
+                : code.trim();
             
             // Special handling for mermaid diagrams
             if (language === 'mermaid') {
@@ -954,18 +1018,22 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             // Try to get AI-generated diagram code
             const diagramPrompt = `Create a ${type} diagram for: ${description || 'a simple process'}
             
-Return ONLY valid Mermaid syntax code, no explanations, no markdown code blocks.`;
+Return ONLY Mermaid v10.9.5 compatible syntax code.
+Use newline-separated statements.
+Do not wrap the answer in markdown code fences.
+Do not put the entire diagram on one line.`;
             
             const response = await api.sendMessage(diagramPrompt);
-            let diagramCode = response.content || '';
-            
-            // Clean up the code - remove markdown code blocks if present
-            diagramCode = diagramCode.replace(/^```mermaid\n?/i, '');
-            diagramCode = diagramCode.replace(/```\s*$/i, '');
-            diagramCode = diagramCode.trim();
+            let diagramCode = this.sanitizeMermaidCode(response.content || '', type);
             
             // If no valid code returned, use template
             if (!diagramCode || diagramCode.length < 10) {
+                diagramCode = this.getMermaidTemplate(type, description);
+            }
+
+            const isValid = await this.validateMermaidCode(diagramCode);
+            if (!isValid) {
+                this.printWarning('AI-generated Mermaid was invalid for v10.9.5. Using a safe template instead.');
                 diagramCode = this.getMermaidTemplate(type, description);
             }
             

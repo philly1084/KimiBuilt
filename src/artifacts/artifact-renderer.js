@@ -23,6 +23,74 @@ const DEFAULT_BROWSER_CANDIDATES = [
     'google-chrome-stable',
 ];
 
+function detectMermaidDiagramType(text = '') {
+    const source = String(text || '').trim();
+    const detectors = [
+        ['flowchart', /^(?:flowchart|graph)\b/i],
+        ['sequence', /^sequenceDiagram\b/i],
+        ['class', /^classDiagram\b/i],
+        ['er', /^erDiagram\b/i],
+        ['state', /^stateDiagram(?:-v2)?\b/i],
+        ['gantt', /^gantt\b/i],
+        ['pie', /^pie\b/i],
+        ['journey', /^journey\b/i],
+        ['timeline', /^timeline\b/i],
+        ['mindmap', /^mindmap\b/i],
+        ['gitgraph', /^gitGraph\b/i],
+    ];
+
+    return detectors.find(([, pattern]) => pattern.test(source))?.[0] || 'unknown';
+}
+
+function normalizeMermaidSource(text = '') {
+    let source = String(text || '')
+        .replace(/\r\n?/g, '\n')
+        .trim();
+
+    if (!source) {
+        return '';
+    }
+
+    const fenced = source.match(/^```(?:mermaid)?\s*([\s\S]*?)```$/i);
+    if (fenced) {
+        source = fenced[1].trim();
+    }
+
+    const diagramType = detectMermaidDiagramType(source);
+    const canRecoverFromInlineSpacing = diagramType !== 'mindmap';
+
+    if (!source.includes('\n') && canRecoverFromInlineSpacing && /\s{2,}/.test(source)) {
+        source = source
+            .split(/\s{2,}/)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .join('\n');
+    }
+
+    source = source
+        .replace(/^(flowchart|graph)\s+([A-Za-z]{2})\s+(?=\S)/i, '$1 $2\n')
+        .replace(/^(sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|gitGraph|journey|timeline)\s+(?=\S)/i, '$1\n');
+
+    if (canRecoverFromInlineSpacing) {
+        source = source.replace(
+            /\s+(?=(?:style|classDef|class|linkStyle|click|subgraph|end|section|participant|actor|note|title|accTitle|accDescr)\b)/g,
+            '\n',
+        );
+    }
+
+    return source
+        .split('\n')
+        .flatMap((line) => (
+            canRecoverFromInlineSpacing && /\s{2,}/.test(line) && !/^\s/.test(line)
+                ? line.split(/\s{2,}/)
+                : [line]
+        ))
+        .map((line) => line.trimEnd())
+        .filter((line, index, lines) => line.trim() || (index > 0 && lines[index - 1].trim()))
+        .join('\n')
+        .trim();
+}
+
 function ensureHtmlDocument(bodyHtml, title = 'Document') {
     const content = String(bodyHtml || '').trim();
     if (/<!doctype html>/i.test(content)) {
@@ -431,20 +499,24 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
     }
 
     const textContent = String(content || '');
+    const normalizedTextContent = normalizedFormat === 'mermaid'
+        ? normalizeMermaidSource(textContent)
+        : textContent;
     return {
         filename,
         format: normalizedFormat,
         mimeType,
-        buffer: Buffer.from(textContent, 'utf8'),
+        buffer: Buffer.from(normalizedTextContent, 'utf8'),
         previewHtml: normalizedFormat === 'xml' || normalizedFormat === 'mermaid' || normalizedFormat === 'power-query'
-            ? `<pre>${escapeHtml(textContent)}</pre>`
+            ? `<pre>${escapeHtml(normalizedTextContent)}</pre>`
             : '',
-        extractedText: textContent,
+        extractedText: normalizedTextContent,
         metadata: { title },
     };
 }
 
 module.exports = {
     ensureHtmlDocument,
+    normalizeMermaidSource,
     renderArtifact,
 };

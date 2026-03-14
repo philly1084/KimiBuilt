@@ -183,6 +183,32 @@ const Editor = (function() {
         return entries.filter((entry) => entry.block.type.startsWith('heading_'));
     }
 
+    function getEditableBlockInput(blockEl) {
+        if (!blockEl) return null;
+        return blockEl.querySelector('.block-input, [contenteditable="true"]');
+    }
+
+    function syncBlockInput(blockId, input, options = {}) {
+        if (!input || !input.isConnected) return;
+
+        const blockEl = input.closest('.block');
+        if (!blockEl || blockEl.dataset.blockId !== blockId) return;
+
+        updateBlockContent(blockId, input, options);
+    }
+
+    function flushActiveBlockContent(options = {}) {
+        const activeElement = document.activeElement;
+        if (!activeElement) return;
+
+        const blockEl = activeElement.closest?.('.block');
+        const input = getEditableBlockInput(blockEl);
+        const blockId = blockEl?.dataset?.blockId;
+
+        if (!blockId || !input) return;
+        syncBlockInput(blockId, input, options);
+    }
+
     function updateWorkspacePanel() {
         const outlineEl = document.getElementById('page-outline-list');
         if (!outlineEl) return;
@@ -618,6 +644,11 @@ const Editor = (function() {
      * Load a page into the editor
      */
     function loadPage(page) {
+        if (currentPage && currentPage.id !== page?.id) {
+            flushActiveBlockContent({ scheduleSave: false });
+            savePage();
+        }
+
         currentPage = {
             ...page,
             blocks: normalizeBlocks(page.blocks || []),
@@ -761,7 +792,7 @@ const Editor = (function() {
         
         // Blur - save content
         input.addEventListener('blur', () => {
-            updateBlockContent(block.id, input);
+            syncBlockInput(block.id, input);
             // Don't hide toolbar immediately to allow clicking it
             setTimeout(() => {
                 if (!document.activeElement?.closest('.inline-toolbar')) {
@@ -772,8 +803,7 @@ const Editor = (function() {
         
         // Input - auto-save and update placeholder visibility
         input.addEventListener('input', () => {
-            autoSave();
-            updateWorkspacePanel();
+            syncBlockInput(block.id, input);
             
             // Update placeholder visibility
             if (input.textContent.trim()) {
@@ -1195,7 +1225,7 @@ const Editor = (function() {
     /**
      * Update block content from DOM
      */
-    function updateBlockContent(blockId, inputOrContent) {
+    function updateBlockContent(blockId, inputOrContent, options = {}) {
         if (!currentPage) return;
         
         const location = findBlockLocation(blockId);
@@ -1214,8 +1244,13 @@ const Editor = (function() {
             block.content = nextContent;
         }
 
-        autoSave();
-        updateWorkspacePanel();
+        if (options.scheduleSave !== false) {
+            autoSave();
+        }
+
+        if (options.updateWorkspace !== false) {
+            updateWorkspacePanel();
+        }
     }
     
     /**
@@ -1370,6 +1405,8 @@ const Editor = (function() {
      */
     function refreshEditor() {
         if (!currentPage) return;
+
+        flushActiveBlockContent({ scheduleSave: false });
         
         // Remember focused block
         const focusedBlockId = document.activeElement?.closest('.block')?.dataset.blockId;
@@ -1419,6 +1456,8 @@ const Editor = (function() {
      */
     function savePage() {
         if (!currentPage) return;
+
+        flushActiveBlockContent({ scheduleSave: false });
         
         // Update page title from input
         const titleInput = document.getElementById('page-title');
