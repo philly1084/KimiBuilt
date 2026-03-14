@@ -1797,3 +1797,63 @@ button:focus-visible,
 .agent-action-toast.error {
     border-left-color: #ef4444;
 }
+
+
+/* ============================================
+   Agent Trace Panel
+   ============================================ */
+
+.agent-trace-panel {
+  position: fixed;
+  bottom: 80px;
+  right: 24px;
+  width: 480px;
+  max-height: 60vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  display: none;
+  overflow: hidden;
+}
+
+.agent-trace-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.agent-trace-panel__header button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.agent-trace-panel__content {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: calc(60vh - 50px);
+}
+
+.agent-trace-loading {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 24px;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .agent-trace-panel {
+    left: 16px;
+    right: 16px;
+    width: auto;
+    bottom: 16px;
+  }
+}

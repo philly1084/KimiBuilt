@@ -1,0 +1,653 @@
+/**
+ * Trace Timeline CSS
+ * 
+ * Dark theme (default) and light theme styles for the agent trace timeline.
+ * Includes responsive design, animations, and accessibility features.
+ */
+
+/* ============================================
+   CSS Variables / Design Tokens
+   ============================================ */
+
+.trace-timeline-container {
+  /* Dark theme (default) */
+  --trace-bg-primary: #1a1a2e;
+  --trace-bg-secondary: #16213e;
+  --trace-bg-tertiary: #0f3460;
+  --trace-bg-hover: #252547;
+  --trace-bg-selected: #2a2a5a;
+  
+  --trace-text-primary: #eaeaea;
+  --trace-text-secondary: #a0a0b0;
+  --trace-text-muted: #6c6c80;
+  
+  --trace-border-color: #2d2d4a;
+  --trace-border-subtle: #252540;
+  
+  --trace-accent-primary: #4a9eff;
+  --trace-accent-secondary: #6c5ce7;
+  --trace-accent-success: #00d9a3;
+  --trace-accent-warning: #ffa94d;
+  --trace-accent-error: #ff6b6b;
+  --trace-accent-info: #4a9eff;
+  
+  --trace-spacing-xs: 4px;
+  --trace-spacing-sm: 8px;
+  --trace-spacing-md: 12px;
+  --trace-spacing-lg: 16px;
+  --trace-spacing-xl: 24px;
+  
+  --trace-radius-sm: 4px;
+  --trace-radius-md: 6px;
+  --trace-radius-lg: 8px;
+  
+  --trace-font-mono: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  --trace-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  --trace-transition-fast: 150ms ease;
+  --trace-transition-normal: 250ms ease;
+}
+
+/* Light theme override */
+.trace-timeline--light {
+  --trace-bg-primary: #ffffff;
+  --trace-bg-secondary: #f8f9fa;
+  --trace-bg-tertiary: #e9ecef;
+  --trace-bg-hover: #f1f3f5;
+  --trace-bg-selected: #e7f5ff;
+  
+  --trace-text-primary: #212529;
+  --trace-text-secondary: #495057;
+  --trace-text-muted: #868e96;
+  
+  --trace-border-color: #dee2e6;
+  --trace-border-subtle: #e9ecef;
+  
+  --trace-accent-primary: #228be6;
+  --trace-accent-secondary: #7950f2;
+  --trace-accent-success: #40c057;
+  --trace-accent-warning: #fab005;
+  --trace-accent-error: #fa5252;
+  --trace-accent-info: #228be6;
+}
+
+/* ============================================
+   Main Container
+   ============================================ */
+
+.trace-timeline {
+  font-family: var(--trace-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--trace-text-primary);
+  background: var(--trace-bg-primary);
+  border: 1px solid var(--trace-border-color);
+  border-radius: var(--trace-radius-lg);
+  overflow: hidden;
+}
+
+/* ============================================
+   Header & Metrics
+   ============================================ */
+
+.trace-timeline__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--trace-spacing-md) var(--trace-spacing-lg);
+  background: var(--trace-bg-secondary);
+  border-bottom: 1px solid var(--trace-border-color);
+  gap: var(--trace-spacing-md);
+  flex-wrap: wrap;
+}
+
+.trace-timeline__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--trace-spacing-lg);
+  flex-wrap: wrap;
+}
+
+.trace-timeline__metric {
+  display: flex;
+  align-items: center;
+  gap: var(--trace-spacing-xs);
+  color: var(--trace-text-secondary);
+  font-size: 13px;
+}
+
+.trace-timeline__metric-label {
+  color: var(--trace-text-muted);
+}
+
+.trace-timeline__metric-value {
+  color: var(--trace-text-primary);
+  font-weight: 500;
+}
+
+.trace-timeline__metric-value small {
+  color: var(--trace-text-muted);
+  font-weight: normal;
+  font-size: 11px;
+}
+
+.trace-timeline__icon {
+  color: var(--trace-text-muted);
+  flex-shrink: 0;
+}
+
+/* ============================================
+   Actions & Buttons
+   ============================================ */
+
+.trace-timeline__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--trace-spacing-sm);
+}
+
+.trace-timeline__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--trace-spacing-xs);
+  padding: var(--trace-spacing-sm) var(--trace-spacing-md);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--trace-text-secondary);
+  background: var(--trace-bg-primary);
+  border: 1px solid var(--trace-border-color);
+  border-radius: var(--trace-radius-sm);
+  cursor: pointer;
+  transition: all var(--trace-transition-fast);
+}
+
+.trace-timeline__btn:hover {
+  background: var(--trace-bg-hover);
+  color: var(--trace-text-primary);
+  border-color: var(--trace-border-subtle);
+}
+
+.trace-timeline__btn:active {
+  transform: translateY(1px);
+}
+
+.trace-timeline__btn svg {
+  flex-shrink: 0;
+}
+
+/* ============================================
+   Steps Container
+   ============================================ */
+
+.trace-timeline__steps {
+  padding: var(--trace-spacing-sm) 0;
+}
+
+/* ============================================
+   Individual Step
+   ============================================ */
+
+.trace-timeline__step {
+  position: relative;
+}
+
+.trace-timeline__step-header {
+  display: flex;
+  align-items: center;
+  gap: var(--trace-spacing-sm);
+  padding: var(--trace-spacing-sm) var(--trace-spacing-md);
+  cursor: pointer;
+  transition: background var(--trace-transition-fast);
+  min-height: 36px;
+  user-select: none;
+}
+
+.trace-timeline__step-header:hover {
+  background: var(--trace-bg-hover);
+}
+
+.trace-timeline__step-header:focus-visible {
+  outline: 2px solid var(--trace-accent-primary);
+  outline-offset: -2px;
+}
+
+/* Toggle Button */
+.trace-timeline__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--trace-radius-sm);
+  cursor: pointer;
+  color: var(--trace-text-muted);
+  transition: all var(--trace-transition-fast);
+  flex-shrink: 0;
+}
+
+.trace-timeline__toggle:hover {
+  background: var(--trace-bg-tertiary);
+  color: var(--trace-text-primary);
+}
+
+.trace-timeline__toggle svg {
+  transition: transform var(--trace-transition-fast);
+}
+
+.trace-timeline__toggle.expanded svg {
+  transform: rotate(90deg);
+}
+
+.trace-timeline__toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trace-timeline__spacer {
+  width: 20px;
+  flex-shrink: 0;
+}
+
+/* Step Icon */
+.trace-timeline__step-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* Step Type Badge */
+.trace-timeline__step-type {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  background: var(--trace-bg-tertiary);
+  color: var(--trace-text-secondary);
+  border-radius: var(--trace-radius-sm);
+  flex-shrink: 0;
+}
+
+/* Step Description */
+.trace-timeline__step-description {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--trace-text-primary);
+}
+
+/* Step Duration */
+.trace-timeline__step-duration {
+  font-family: var(--trace-font-mono);
+  font-size: 12px;
+  color: var(--trace-text-muted);
+  flex-shrink: 0;
+}
+
+/* Step Tokens */
+.trace-timeline__step-tokens {
+  font-family: var(--trace-font-mono);
+  font-size: 11px;
+  color: var(--trace-text-muted);
+  flex-shrink: 0;
+}
+
+/* Step Error Indicator */
+.trace-timeline__step-error {
+  display: flex;
+  align-items: center;
+  color: var(--trace-accent-error);
+  flex-shrink: 0;
+}
+
+/* ============================================
+   Step Type Colors
+   ============================================ */
+
+.trace-timeline__step--plan .trace-timeline__step-type {
+  background: rgba(74, 158, 255, 0.15);
+  color: var(--trace-accent-primary);
+}
+
+.trace-timeline__step--llm-call .trace-timeline__step-type {
+  background: rgba(108, 92, 231, 0.15);
+  color: var(--trace-accent-secondary);
+}
+
+.trace-timeline__step--tool-call .trace-timeline__step-type {
+  background: rgba(0, 217, 163, 0.15);
+  color: var(--trace-accent-success);
+}
+
+.trace-timeline__step--verify .trace-timeline__step-type,
+.trace-timeline__step--validate .trace-timeline__step-type {
+  background: rgba(255, 169, 77, 0.15);
+  color: var(--trace-accent-warning);
+}
+
+.trace-timeline__step--error .trace-timeline__step-type {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--trace-accent-error);
+}
+
+.trace-timeline__step--retry .trace-timeline__step-type {
+  background: rgba(255, 169, 77, 0.2);
+  color: var(--trace-accent-warning);
+}
+
+.trace-timeline__step--cache-hit .trace-timeline__step-type {
+  background: rgba(0, 217, 163, 0.2);
+  color: var(--trace-accent-success);
+}
+
+.trace-timeline__step--skill-apply .trace-timeline__step-type,
+.trace-timeline__step--skill-capture .trace-timeline__step-type {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+/* ============================================
+   Step Details (Expanded)
+   ============================================ */
+
+.trace-timeline__step-details {
+  padding: var(--trace-spacing-md) var(--trace-spacing-lg);
+  padding-left: calc(var(--trace-spacing-lg) + 48px);
+  background: var(--trace-bg-secondary);
+  border-top: 1px solid var(--trace-border-subtle);
+  animation: trace-fade-in var(--trace-transition-normal);
+}
+
+@keyframes trace-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.trace-timeline__detail-section {
+  margin-bottom: var(--trace-spacing-md);
+}
+
+.trace-timeline__detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.trace-timeline__detail-title {
+  display: flex;
+  align-items: center;
+  gap: var(--trace-spacing-xs);
+  margin: 0 0 var(--trace-spacing-sm) 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--trace-text-muted);
+}
+
+.trace-timeline__detail-section--input .trace-timeline__detail-title {
+  color: var(--trace-accent-primary);
+}
+
+.trace-timeline__detail-section--output .trace-timeline__detail-title {
+  color: var(--trace-accent-success);
+}
+
+.trace-timeline__detail-section--error .trace-timeline__detail-title {
+  color: var(--trace-accent-error);
+}
+
+.trace-timeline__detail-empty {
+  padding: var(--trace-spacing-lg);
+  text-align: center;
+  color: var(--trace-text-muted);
+  font-style: italic;
+}
+
+/* ============================================
+   Code Blocks
+   ============================================ */
+
+.trace-timeline__code {
+  margin: 0;
+  padding: var(--trace-spacing-md);
+  font-family: var(--trace-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--trace-text-primary);
+  background: var(--trace-bg-primary);
+  border: 1px solid var(--trace-border-color);
+  border-radius: var(--trace-radius-md);
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.trace-timeline__code code {
+  font-family: inherit;
+}
+
+.trace-timeline__code--error {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.3);
+  color: var(--trace-accent-error);
+}
+
+/* Custom scrollbar */
+.trace-timeline__code::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.trace-timeline__code::-webkit-scrollbar-track {
+  background: var(--trace-bg-secondary);
+  border-radius: var(--trace-radius-sm);
+}
+
+.trace-timeline__code::-webkit-scrollbar-thumb {
+  background: var(--trace-border-color);
+  border-radius: var(--trace-radius-sm);
+}
+
+.trace-timeline__code::-webkit-scrollbar-thumb:hover {
+  background: var(--trace-text-muted);
+}
+
+/* ============================================
+   Substeps
+   ============================================ */
+
+.trace-timeline__substeps {
+  position: relative;
+}
+
+.trace-timeline__substeps::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: calc(var(--trace-spacing-md) + 10px);
+  bottom: 0;
+  width: 1px;
+  background: var(--trace-border-subtle);
+}
+
+/* ============================================
+   Error State
+   ============================================ */
+
+.trace-timeline--error {
+  border-color: var(--trace-accent-error);
+}
+
+.trace-timeline__error {
+  display: flex;
+  align-items: center;
+  gap: var(--trace-spacing-sm);
+  padding: var(--trace-spacing-lg);
+  color: var(--trace-accent-error);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+/* ============================================
+   Max Depth Warning
+   ============================================ */
+
+.trace-timeline__step--max-depth {
+  opacity: 0.7;
+}
+
+.trace-timeline__step--max-depth .trace-timeline__step-header::after {
+  content: '...';
+  margin-left: var(--trace-spacing-sm);
+  color: var(--trace-text-muted);
+  font-style: italic;
+}
+
+/* ============================================
+   Screen Reader Only
+   ============================================ */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================
+   Responsive Design
+   ============================================ */
+
+@media (max-width: 768px) {
+  .trace-timeline__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .trace-timeline__summary {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .trace-timeline__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  
+  .trace-timeline__step-description {
+    max-width: 150px;
+  }
+  
+  .trace-timeline__step-details {
+    padding-left: var(--trace-spacing-md);
+  }
+  
+  .trace-timeline__substeps::before {
+    left: calc(var(--trace-spacing-sm) + 8px);
+  }
+}
+
+@media (max-width: 480px) {
+  .trace-timeline__metric-value small {
+    display: none;
+  }
+  
+  .trace-timeline__btn {
+    padding: var(--trace-spacing-xs);
+  }
+  
+  .trace-timeline__btn span {
+    display: none;
+  }
+  
+  .trace-timeline__step-header {
+    flex-wrap: wrap;
+    gap: var(--trace-spacing-xs);
+  }
+  
+  .trace-timeline__step-type {
+    font-size: 9px;
+    padding: 1px 4px;
+  }
+  
+  .trace-timeline__step-description {
+    width: 100%;
+    order: 99;
+    max-width: none;
+    margin-top: var(--trace-spacing-xs);
+  }
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+
+@media print {
+  .trace-timeline {
+    border: 1px solid #ccc;
+    box-shadow: none;
+  }
+  
+  .trace-timeline__btn,
+  .trace-timeline__toggle {
+    display: none;
+  }
+  
+  .trace-timeline__step-details {
+    display: block !important;
+  }
+  
+  .trace-timeline__code {
+    max-height: none;
+    overflow: visible;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-timeline__step-details {
+    animation: none;
+  }
+  
+  .trace-timeline__toggle svg,
+  .trace-timeline__btn {
+    transition: none;
+  }
+}
+
+/* ============================================
+   High Contrast Mode
+   ============================================ */
+
+@media (prefers-contrast: high) {
+  .trace-timeline {
+    --trace-border-color: currentColor;
+    --trace-text-muted: currentColor;
+  }
+  
+  .trace-timeline__step-header:focus-visible {
+    outline-width: 3px;
+  }
+}
