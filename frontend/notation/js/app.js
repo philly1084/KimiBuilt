@@ -10,8 +10,9 @@
     const App = {
         currentMode: 'expand',
         isProcessing: false,
-        sidebarOpen: true,
+        sidebarOpen: false,
         currentTemplateCategory: 'all',
+        resizeToast: null,
 
         // DOM Element references
         elements: {},
@@ -26,6 +27,7 @@
             this._renderTemplates();
             this._renderHistory();
             this._checkConnection();
+            this._initKeyboardShortcuts();
 
             console.log('Notation Helper initialized');
         },
@@ -37,15 +39,19 @@
         _cacheElements() {
             this.elements = {
                 // Header
+                sidebarToggle: document.getElementById('sidebarToggle'),
                 themeToggle: document.getElementById('themeToggle'),
-                settingsBtn: document.getElementById('settingsBtn'),
+                keyboardShortcutsBtn: document.getElementById('keyboardShortcutsBtn'),
                 connectionStatus: document.getElementById('connectionStatus'),
                 modeBtns: document.querySelectorAll('.mode-btn'),
 
                 // Sidebar
                 sidebar: document.getElementById('sidebar'),
+                sidebarBackdrop: document.getElementById('sidebarBackdrop'),
                 sidebarTabs: document.querySelectorAll('.sidebar-tab'),
                 templateList: document.getElementById('templateList'),
+                templateLoading: document.getElementById('templateLoading'),
+                templateCategories: document.getElementById('templateCategories'),
                 historyList: document.getElementById('historyList'),
                 categoryBtns: document.querySelectorAll('.category-btn'),
                 clearHistoryBtn: document.getElementById('clearHistoryBtn'),
@@ -71,11 +77,13 @@
                 modeBadge: document.getElementById('modeBadge'),
                 suggestionsPanel: document.getElementById('suggestionsPanel'),
                 suggestionsList: document.getElementById('suggestionsList'),
+                annotationBadge: document.getElementById('annotationBadge'),
 
                 // Annotations
                 annotationsPanel: document.getElementById('annotationsPanel'),
                 annotationsList: document.getElementById('annotationsList'),
                 toggleAnnotations: document.getElementById('toggleAnnotations'),
+                toggleAnnotationsBtn: document.getElementById('toggleAnnotationsBtn'),
 
                 // Export
                 copyResult: document.getElementById('copyResult'),
@@ -91,7 +99,12 @@
                 // Resize
                 resizeHandle: document.getElementById('resizeHandle'),
                 inputPane: document.querySelector('.input-pane'),
-                dualPane: document.getElementById('dualPane')
+                dualPane: document.getElementById('dualPane'),
+
+                // Modal
+                shortcutsModal: document.getElementById('shortcutsModal'),
+                shortcutsOverlay: document.getElementById('shortcutsOverlay'),
+                closeShortcutsModal: document.getElementById('closeShortcutsModal')
             };
         },
 
@@ -133,14 +146,15 @@
                 });
             }
 
-            // Initialize API
+            // Initialize API with callbacks
             if (window.NotationAPI) {
                 NotationAPI.init({}, {
                     onConnect: () => this._updateConnectionStatus('connected'),
                     onDisconnect: () => this._updateConnectionStatus('disconnected'),
                     onError: (err) => this._handleError(err),
                     onMessage: (data) => this._handleResponse(data),
-                    onStatusChange: (status) => this._handleStatusChange(status)
+                    onStatusChange: (status) => this._handleStatusChange(status),
+                    onReconnecting: (attempt) => this._handleReconnecting(attempt)
                 });
             }
         },
@@ -150,6 +164,16 @@
          * @private
          */
         _bindEvents() {
+            // Sidebar toggle
+            if (this.elements.sidebarToggle) {
+                this.elements.sidebarToggle.addEventListener('click', () => this._toggleSidebar());
+            }
+
+            // Sidebar backdrop
+            if (this.elements.sidebarBackdrop) {
+                this.elements.sidebarBackdrop.addEventListener('click', () => this._closeSidebar());
+            }
+
             // Mode selector
             this.elements.modeBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -159,6 +183,17 @@
 
             // Theme toggle
             this.elements.themeToggle.addEventListener('click', () => this._toggleTheme());
+
+            // Keyboard shortcuts modal
+            if (this.elements.keyboardShortcutsBtn) {
+                this.elements.keyboardShortcutsBtn.addEventListener('click', () => this._showShortcutsModal());
+            }
+            if (this.elements.closeShortcutsModal) {
+                this.elements.closeShortcutsModal.addEventListener('click', () => this._hideShortcutsModal());
+            }
+            if (this.elements.shortcutsOverlay) {
+                this.elements.shortcutsOverlay.addEventListener('click', () => this._hideShortcutsModal());
+            }
 
             // Sidebar tabs
             this.elements.sidebarTabs.forEach(tab => {
@@ -194,9 +229,19 @@
             this.elements.exportMd.addEventListener('click', () => this._exportMarkdown());
             this.elements.exportAnnotations.addEventListener('click', () => this._exportAnnotations());
 
+            // Toggle annotations from header button
+            if (this.elements.toggleAnnotationsBtn) {
+                this.elements.toggleAnnotationsBtn.addEventListener('click', () => {
+                    if (window.AnnotationsManager) {
+                        AnnotationsManager.toggle();
+                    }
+                });
+            }
+
             // Load template button
             this.elements.loadTemplateBtn.addEventListener('click', () => {
                 this._switchSidebarTab('templates');
+                this._openSidebar();
             });
 
             // Template loaded event
@@ -205,6 +250,7 @@
                     this._setMode(e.detail.mode);
                 }
                 this._showToast('Template loaded', 'success');
+                this._hideTemplateLoading();
             });
 
             // Pane resize
@@ -212,6 +258,76 @@
 
             // Window resize for responsive
             window.addEventListener('resize', () => this._handleResize());
+        },
+
+        /**
+         * Initialize keyboard shortcuts
+         * @private
+         */
+        _initKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                // Show shortcuts modal on '?' key
+                if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    // Don't trigger if typing in an input/textarea
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                        return;
+                    }
+                    e.preventDefault();
+                    this._showShortcutsModal();
+                }
+
+                // Close modal on Escape
+                if (e.key === 'Escape') {
+                    this._hideShortcutsModal();
+                }
+            });
+        },
+
+        /**
+         * Toggle sidebar visibility (mobile)
+         * @private
+         */
+        _toggleSidebar() {
+            this.elements.sidebar.classList.toggle('open');
+            this.sidebarOpen = this.elements.sidebar.classList.contains('open');
+        },
+
+        /**
+         * Open sidebar (mobile)
+         * @private
+         */
+        _openSidebar() {
+            this.elements.sidebar.classList.add('open');
+            this.sidebarOpen = true;
+        },
+
+        /**
+         * Close sidebar (mobile)
+         * @private
+         */
+        _closeSidebar() {
+            this.elements.sidebar.classList.remove('open');
+            this.sidebarOpen = false;
+        },
+
+        /**
+         * Show keyboard shortcuts modal
+         * @private
+         */
+        _showShortcutsModal() {
+            if (this.elements.shortcutsModal) {
+                this.elements.shortcutsModal.classList.remove('hidden');
+            }
+        },
+
+        /**
+         * Hide keyboard shortcuts modal
+         * @private
+         */
+        _hideShortcutsModal() {
+            if (this.elements.shortcutsModal) {
+                this.elements.shortcutsModal.classList.add('hidden');
+            }
         },
 
         /**
@@ -286,6 +402,46 @@
         },
 
         /**
+         * Show template loading state
+         * @private
+         */
+        _showTemplateLoading() {
+            if (this.elements.templateLoading) {
+                this.elements.templateLoading.classList.remove('hidden');
+            }
+            if (this.elements.templateList) {
+                this.elements.templateList.classList.add('loading');
+            }
+            // Disable all template items
+            if (this.elements.templateList) {
+                this.elements.templateList.querySelectorAll('.template-item').forEach(item => {
+                    item.style.pointerEvents = 'none';
+                    item.style.opacity = '0.5';
+                });
+            }
+        },
+
+        /**
+         * Hide template loading state
+         * @private
+         */
+        _hideTemplateLoading() {
+            if (this.elements.templateLoading) {
+                this.elements.templateLoading.classList.add('hidden');
+            }
+            if (this.elements.templateList) {
+                this.elements.templateList.classList.remove('loading');
+            }
+            // Re-enable all template items
+            if (this.elements.templateList) {
+                this.elements.templateList.querySelectorAll('.template-item').forEach(item => {
+                    item.style.pointerEvents = '';
+                    item.style.opacity = '';
+                });
+            }
+        },
+
+        /**
          * Render templates list
          * @private
          */
@@ -308,10 +464,14 @@
             // Bind click events
             this.elements.templateList.querySelectorAll('.template-item').forEach(item => {
                 item.addEventListener('click', () => {
-                    const template = NotationTemplates.getById(item.dataset.id);
-                    if (template && window.EditorManager) {
-                        EditorManager.loadTemplate(template);
-                    }
+                    this._showTemplateLoading();
+                    // Small delay to show loading state
+                    setTimeout(() => {
+                        const template = NotationTemplates.getById(item.dataset.id);
+                        if (template && window.EditorManager) {
+                            EditorManager.loadTemplate(template);
+                        }
+                    }, 50);
                 });
             });
         },
@@ -337,21 +497,48 @@
 
             this.elements.historyList.innerHTML = history.map(h => `
                 <div class="history-item" data-id="${h.id}">
+                    <button class="history-delete" data-id="${h.id}" title="Delete this item">
+                        <i class="fas fa-times"></i>
+                    </button>
                     <span class="history-mode mode-${h.mode}">${h.mode}</span>
                     <div class="history-preview">${NotationHistory.getPreview(h.notation)}</div>
                     <div class="history-time">${NotationHistory.formatDate(h.timestamp)}</div>
                 </div>
             `).join('');
 
-            // Bind click events
+            // Bind click events for history items
             this.elements.historyList.querySelectorAll('.history-item').forEach(item => {
-                item.addEventListener('click', () => {
+                item.addEventListener('click', (e) => {
+                    // Don't load if delete button was clicked
+                    if (e.target.closest('.history-delete')) return;
+                    
                     const historyItem = NotationHistory.getById(item.dataset.id);
                     if (historyItem) {
                         this._loadHistoryItem(historyItem);
                     }
                 });
             });
+
+            // Bind delete events
+            this.elements.historyList.querySelectorAll('.history-delete').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._deleteHistoryItem(btn.dataset.id);
+                });
+            });
+        },
+
+        /**
+         * Delete a single history item
+         * @param {string} id - History item ID
+         * @private
+         */
+        _deleteHistoryItem(id) {
+            if (confirm('Delete this history item?')) {
+                NotationHistory.delete(id);
+                this._renderHistory();
+                this._showToast('History item deleted', 'info');
+            }
         },
 
         /**
@@ -382,7 +569,24 @@
                 });
             }
 
+            // Update annotation badge
+            this._updateAnnotationBadge(item.annotations || []);
+
             this._showToast('History item loaded', 'info');
+        },
+
+        /**
+         * Update annotation badge count
+         * @param {Array} annotations - Array of annotations
+         * @private
+         */
+        _updateAnnotationBadge(annotations) {
+            if (this.elements.annotationBadge) {
+                const count = annotations ? annotations.length : 0;
+                this.elements.annotationBadge.textContent = count;
+                this.elements.annotationBadge.dataset.count = count;
+                this.elements.annotationBadge.style.display = count > 0 ? 'flex' : 'none';
+            }
         },
 
         /**
@@ -471,6 +675,14 @@
                 });
             }
 
+            // Update annotation badge
+            this._updateAnnotationBadge(content.annotations || []);
+
+            // Set annotations
+            if (window.AnnotationsManager) {
+                AnnotationsManager.setAnnotations(content.annotations || []);
+            }
+
             // Save to history
             if (window.NotationHistory && window.EditorManager) {
                 NotationHistory.add({
@@ -522,6 +734,39 @@
         },
 
         /**
+         * Handle WebSocket reconnection attempts
+         * @param {number} attempt - Reconnection attempt number
+         * @private
+         */
+        _handleReconnecting(attempt) {
+            // Show persistent toast for reconnection
+            if (this.resizeToast) {
+                this.resizeToast.remove();
+            }
+
+            const toast = document.createElement('div');
+            toast.className = 'toast warning reconnecting';
+            toast.innerHTML = `
+                <i class="fas fa-sync-alt fa-spin"></i>
+                <span>Reconnecting... (attempt ${attempt})</span>
+            `;
+            
+            this.elements.toastContainer.appendChild(toast);
+            this.resizeToast = toast;
+
+            // Remove after 5 seconds unless reconnected
+            setTimeout(() => {
+                if (this.resizeToast === toast) {
+                    toast.classList.add('removing');
+                    setTimeout(() => {
+                        toast.remove();
+                        this.resizeToast = null;
+                    }, 300);
+                }
+            }, 5000);
+        },
+
+        /**
          * Update connection status UI
          * @param {string} status - Status string
          * @private
@@ -537,6 +782,11 @@
                 case 'connected':
                     this.elements.connectionStatus.classList.add('connected');
                     if (statusText) statusText.textContent = 'Connected';
+                    // Clear reconnecting toast if exists
+                    if (this.resizeToast) {
+                        this.resizeToast.remove();
+                        this.resizeToast = null;
+                    }
                     break;
                 case 'error':
                 case 'failed':
@@ -646,6 +896,7 @@
             let isResizing = false;
             let startX, startWidth;
 
+            // Mouse events
             this.elements.resizeHandle.addEventListener('mousedown', (e) => {
                 isResizing = true;
                 startX = e.clientX;
@@ -676,6 +927,31 @@
                     document.body.style.userSelect = '';
                 }
             });
+
+            // Keyboard support for resize handle
+            this.elements.resizeHandle.addEventListener('keydown', (e) => {
+                if (!e.shiftKey) return;
+
+                const containerWidth = this.elements.dualPane.offsetWidth;
+                const currentWidth = this.elements.inputPane.offsetWidth;
+                const step = 20; // pixels per keypress
+                const minWidth = 300;
+                const maxWidth = containerWidth - minWidth;
+
+                let newWidth = currentWidth;
+
+                if (e.key === 'ArrowLeft') {
+                    newWidth = Math.max(minWidth, currentWidth - step);
+                } else if (e.key === 'ArrowRight') {
+                    newWidth = Math.min(maxWidth, currentWidth + step);
+                } else {
+                    return; // Not a resize key
+                }
+
+                e.preventDefault();
+                const percentage = (newWidth / containerWidth) * 100;
+                this.elements.inputPane.style.width = `${percentage}%`;
+            });
         },
 
         /**
@@ -688,6 +964,11 @@
                 if (this.elements.inputPane) {
                     this.elements.inputPane.style.width = '';
                 }
+            }
+
+            // Close sidebar on desktop when going to larger screens
+            if (window.innerWidth > 1024) {
+                this._closeSidebar();
             }
         }
     };

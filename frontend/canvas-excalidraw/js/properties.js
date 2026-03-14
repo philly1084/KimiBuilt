@@ -738,6 +738,44 @@ class PropertiesManager {
         activeBtn.classList.add('active');
     }
     
+    // Filter fonts based on search query
+    filterFonts(query) {
+        const fontList = document.getElementById('fontList');
+        if (!fontList) return;
+        
+        const normalizedQuery = query.toLowerCase().trim();
+        const fontItems = fontList.querySelectorAll('.font-item');
+        
+        fontItems.forEach(item => {
+            const fontName = item.dataset.font?.toLowerCase() || '';
+            const fontFamily = item.style.fontFamily?.toLowerCase() || '';
+            
+            if (normalizedQuery === '' || 
+                fontName.includes(normalizedQuery) || 
+                fontFamily.includes(normalizedQuery)) {
+                item.style.display = 'flex';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+        
+        // Show "no results" message if all fonts are hidden
+        const visibleItems = fontList.querySelectorAll('.font-item:not([style*="display: none"])');
+        const noResultsMsg = fontList.querySelector('.no-results-message');
+        
+        if (visibleItems.length === 0) {
+            if (!noResultsMsg) {
+                const msg = document.createElement('div');
+                msg.className = 'no-results-message';
+                msg.textContent = 'No fonts found';
+                msg.style.cssText = 'padding: 12px; text-align: center; color: var(--text-secondary); font-style: italic;';
+                fontList.appendChild(msg);
+            }
+        } else if (noResultsMsg) {
+            noResultsMsg.remove();
+        }
+    }
+    
     // Update color history UI
     updateColorHistoryUI() {
         if (!window.ColorSystem) return;

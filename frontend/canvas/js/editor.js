@@ -25,6 +25,9 @@ class EditorManager {
             ? 'dracula' 
             : 'eclipse';
 
+        // Detect touch device
+        const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
         const config = {
             mode: options.mode || this.currentMode,
             theme: theme,
@@ -37,6 +40,14 @@ class EditorManager {
             tabSize: options.tabSize || 2,
             indentWithTabs: false,
             electricChars: true,
+            // Touch optimizations
+            dragDrop: !isTouchDevice, // Disable drag-drop on touch
+            inputStyle: isTouchDevice ? 'contenteditable' : 'textarea',
+            // Wider gutter on touch devices
+            ...(isTouchDevice && {
+                lineNumberFormatter: (line) => line,
+                gutters: ['CodeMirror-linenumbers'],
+            }),
             extraKeys: {
                 'Ctrl-S': () => this._triggerSave(),
                 'Cmd-S': () => this._triggerSave(),
@@ -73,12 +84,64 @@ class EditorManager {
             this._notifyCursorActivity();
         });
 
+        // Enable touch scroll for CodeMirror
+        this.enableTouchScroll();
+
         // Refresh after a short delay to ensure proper sizing
         setTimeout(() => {
             this.editor.refresh();
         }, 100);
 
         return this.editor;
+    }
+
+    /**
+     * Enable touch scroll for CodeMirror
+     */
+    enableTouchScroll() {
+        const cm = this.editor;
+        if (!cm) return;
+
+        const scroller = cm.getWrapperElement().querySelector('.CodeMirror-scroll');
+        if (scroller) {
+            scroller.style.overflow = 'auto';
+            scroller.style.webkitOverflowScrolling = 'touch';
+        }
+    }
+
+    /**
+     * Set gutter markers for syntax errors (diagram mode)
+     * @param {Array} errors - Array of {line, message} objects
+     */
+    setErrorMarkers(errors) {
+        if (!this.editor) return;
+
+        // Clear existing markers
+        this.editor.clearGutter('error-gutter');
+
+        if (!errors || errors.length === 0) return;
+
+        // Add gutter if not exists
+        if (!this.editor.getOption('gutters').includes('error-gutter')) {
+            this.editor.setOption('gutters', ['CodeMirror-linenumbers', 'error-gutter']);
+        }
+
+        errors.forEach(error => {
+            const marker = document.createElement('div');
+            marker.className = 'error-marker';
+            marker.style.cssText = 'color: var(--accent-error); font-weight: bold; padding: 0 4px;';
+            marker.innerHTML = '⚠';
+            marker.title = error.message;
+            this.editor.setGutterMarker(error.line - 1, 'error-gutter', marker);
+        });
+    }
+
+    /**
+     * Clear all error markers
+     */
+    clearErrorMarkers() {
+        if (!this.editor) return;
+        this.editor.clearGutter('error-gutter');
     }
 
     /**
@@ -311,6 +374,7 @@ class EditorManager {
     refresh() {
         if (this.editor) {
             this.editor.refresh();
+            this.enableTouchScroll();
         }
     }
 
@@ -319,6 +383,24 @@ class EditorManager {
      */
     resize() {
         this.refresh();
+    }
+
+    /**
+     * Debounce helper function
+     * @param {Function} func 
+     * @param {number} wait 
+     * @returns {Function}
+     */
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
     }
 
     /**

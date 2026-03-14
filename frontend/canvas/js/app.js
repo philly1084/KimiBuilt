@@ -49,11 +49,217 @@ class CanvasApp {
         });
 
         // Setup WebSocket callbacks
+        this.setupWebSocketListeners();
+
+        // Setup keyboard shortcuts
+        this.setupKeyboardShortcuts();
+
+        // Setup help modal
+        this.setupHelpModal();
+
+        console.log('KimiBuilt Canvas initialized');
+    }
+
+    /**
+     * Setup WebSocket event listeners
+     */
+    setupWebSocketListeners() {
+        // Handle incoming messages
         this.api.on('done', (data) => {
             this.handleAIResponse(data);
         });
 
-        console.log('KimiBuilt Canvas initialized');
+        // Handle connection open
+        this.api.on('open', () => {
+            this.hideWebSocketDisconnectBanner();
+        });
+
+        // Handle connection close
+        this.api.on('close', (event) => {
+            if (!event.wasClean) {
+                this.showWebSocketDisconnectBanner();
+            }
+        });
+
+        // Handle errors
+        this.api.on('error', () => {
+            this.showWebSocketDisconnectBanner();
+        });
+    }
+
+    /**
+     * Show WebSocket disconnect banner
+     */
+    showWebSocketDisconnectBanner() {
+        const banner = document.getElementById('ws-disconnect-banner');
+        if (banner) {
+            banner.classList.remove('hidden');
+            // Adjust app padding for banner
+            document.getElementById('app').style.paddingTop = '48px';
+        }
+    }
+
+    /**
+     * Hide WebSocket disconnect banner
+     */
+    hideWebSocketDisconnectBanner() {
+        const banner = document.getElementById('ws-disconnect-banner');
+        if (banner) {
+            banner.classList.add('hidden');
+            // Reset app padding
+            document.getElementById('app').style.paddingTop = '0';
+        }
+    }
+
+    /**
+     * Reconnect WebSocket
+     */
+    async reconnectWebSocket() {
+        const reconnectBtn = document.getElementById('ws-reconnect-btn');
+        if (reconnectBtn) {
+            reconnectBtn.disabled = true;
+            reconnectBtn.innerHTML = '<span class="loading-spinner" style="width:14px;height:14px;"></span> Connecting...';
+        }
+
+        try {
+            await this.api.connectWebSocket();
+            this.hideWebSocketDisconnectBanner();
+            this.showToast('Reconnected successfully', 'success');
+        } catch (error) {
+            console.error('WebSocket reconnect failed:', error);
+            this.showToast('Failed to reconnect', 'error');
+        } finally {
+            if (reconnectBtn) {
+                reconnectBtn.disabled = false;
+                reconnectBtn.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    Reconnect
+                `;
+            }
+        }
+    }
+
+    /**
+     * Setup keyboard shortcuts
+     */
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Don't trigger shortcuts when typing in inputs
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                // Allow Ctrl+Enter in textareas
+                if (e.target.id === 'prompt-input' && e.ctrlKey && e.key === 'Enter') {
+                    e.preventDefault();
+                    this.sendToAI();
+                }
+                return;
+            }
+
+            // ? - Show help modal
+            if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                e.preventDefault();
+                this.showHelpModal();
+            }
+
+            // Ctrl/Cmd + P - Toggle preview
+            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+                e.preventDefault();
+                this.togglePreview();
+            }
+
+            // Ctrl/Cmd + \ - Toggle split view
+            if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+                e.preventDefault();
+                this.toggleSplitView();
+            }
+
+            // Ctrl/Cmd + Enter - Send to AI (from anywhere)
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                this.sendToAI();
+            }
+
+            // Escape - Close modals and sidebar
+            if (e.key === 'Escape') {
+                this.closeHelpModal();
+                this.closeSidebar();
+            }
+        });
+    }
+
+    /**
+     * Setup help modal
+     */
+    setupHelpModal() {
+        const closeBtn = document.getElementById('help-modal-close');
+        const overlay = document.querySelector('.help-modal-overlay');
+        
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.closeHelpModal());
+        }
+        
+        if (overlay) {
+            overlay.addEventListener('click', () => this.closeHelpModal());
+        }
+
+        // Reconnect button
+        const reconnectBtn = document.getElementById('ws-reconnect-btn');
+        if (reconnectBtn) {
+            reconnectBtn.addEventListener('click', () => this.reconnectWebSocket());
+        }
+    }
+
+    /**
+     * Show help modal
+     */
+    showHelpModal() {
+        const modal = document.getElementById('help-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Close help modal
+     */
+    closeHelpModal() {
+        const modal = document.getElementById('help-modal');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Close sidebar (mobile)
+     */
+    closeSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        if (sidebar) {
+            sidebar.classList.remove('open');
+        }
+        if (backdrop) {
+            backdrop.classList.remove('visible');
+        }
+    }
+
+    /**
+     * Toggle sidebar with backdrop
+     */
+    toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        const isOpen = sidebar.classList.contains('open');
+        
+        if (isOpen) {
+            sidebar.classList.remove('open');
+            backdrop.classList.remove('visible');
+        } else {
+            sidebar.classList.add('open');
+            backdrop.classList.add('visible');
+        }
     }
     
     /**
@@ -122,11 +328,17 @@ class CanvasApp {
             value: this.state.content || handler.getDefaultContent()
         });
 
-        // Subscribe to editor changes for auto-save
+        // Subscribe to editor changes for auto-save and diagram auto-render
         this.editor.onChange((value) => {
             this.state.content = value;
             this.scheduleAutoSave();
             this.updateStatusBar();
+            
+            // Auto-render diagram with debounce
+            if (this.state.canvasType === 'diagram' && (this.state.isPreviewMode || this.state.isSplitView)) {
+                const handler = this.typeManager.getHandler('diagram');
+                handler.scheduleAutoRender(value, 'diagram-output');
+            }
         });
 
         // Subscribe to cursor activity
@@ -143,9 +355,14 @@ class CanvasApp {
      * Setup all event listeners
      */
     setupEventListeners() {
-        // Sidebar toggle
+        // Sidebar toggle with backdrop
         document.getElementById('sidebar-toggle').addEventListener('click', () => {
-            document.getElementById('sidebar').classList.toggle('open');
+            this.toggleSidebar();
+        });
+
+        // Sidebar backdrop click
+        document.getElementById('sidebar-backdrop').addEventListener('click', () => {
+            this.closeSidebar();
         });
 
         // Theme toggle
@@ -223,6 +440,31 @@ class CanvasApp {
         // Download
         document.getElementById('download-btn').addEventListener('click', () => {
             this.downloadFile();
+        });
+
+        // Diagram zoom controls
+        document.getElementById('diagram-zoom-in')?.addEventListener('click', () => {
+            this.typeManager.getHandler('diagram').zoomIn();
+        });
+
+        document.getElementById('diagram-zoom-out')?.addEventListener('click', () => {
+            this.typeManager.getHandler('diagram').zoomOut();
+        });
+
+        document.getElementById('diagram-zoom-reset')?.addEventListener('click', () => {
+            this.typeManager.getHandler('diagram').resetZoom();
+        });
+
+        // Mouse wheel zoom for diagram
+        document.getElementById('diagram-wrapper')?.addEventListener('wheel', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                if (e.deltaY < 0) {
+                    this.typeManager.getHandler('diagram').zoomIn();
+                } else {
+                    this.typeManager.getHandler('diagram').zoomOut();
+                }
+            }
         });
 
         // Keyboard shortcuts
@@ -436,8 +678,34 @@ class CanvasApp {
             const html = handler.renderMarkdown(content);
             document.getElementById('preview-content').innerHTML = html;
         } else if (this.state.canvasType === 'diagram') {
+            // Reset zoom when manually rendering
+            handler.resetZoom();
             await handler.renderDiagram(content, 'diagram-output');
         }
+    }
+
+    /**
+     * Validate current diagram syntax
+     */
+    validateDiagramSyntax() {
+        if (this.state.canvasType !== 'diagram') return;
+
+        const content = this.editor.getValue();
+        const handler = this.typeManager.getHandler('diagram');
+        const validation = handler.validateSyntax(content);
+
+        if (!validation.isValid && validation.errors.length > 0) {
+            // Convert errors to format expected by editor
+            const markers = validation.errors.map(err => ({
+                line: err.line,
+                message: err.message
+            }));
+            this.editor.setErrorMarkers(markers);
+        } else {
+            this.editor.clearErrorMarkers();
+        }
+
+        return validation;
     }
 
     /**
@@ -679,11 +947,17 @@ class CanvasApp {
      * Copy content to clipboard
      */
     async copyToClipboard() {
-        const success = await this.exportManager.copyToClipboard(this.editor.getValue());
+        const content = this.editor.getValue();
+        if (!content.trim()) {
+            this.showToast('Nothing to copy', 'warning');
+            return;
+        }
+
+        const success = await this.exportManager.copyToClipboard(content);
         if (success) {
-            this.showToast('Copied to clipboard', 'success');
+            this.showToast('Copied to clipboard!', 'success');
         } else {
-            this.showToast('Failed to copy', 'error');
+            this.showToast('Failed to copy to clipboard', 'error');
         }
     }
 
@@ -696,23 +970,33 @@ class CanvasApp {
         const language = this.state.metadata?.language || '';
         const title = this.state.metadata?.title || '';
 
-        if (this.state.canvasType === 'diagram') {
-            // For diagrams, offer SVG/PNG export
-            const svgElement = document.querySelector('#diagram-output svg');
-            if (svgElement) {
-                this.showDiagramExportOptions(svgElement);
-                return;
-            }
+        if (!content.trim()) {
+            this.showToast('Nothing to download', 'warning');
+            return;
         }
 
-        this.exportManager.downloadFile(
-            content,
-            this.state.canvasType,
-            language,
-            title
-        );
+        try {
+            if (this.state.canvasType === 'diagram') {
+                // For diagrams, offer SVG/PNG export
+                const svgElement = document.querySelector('#diagram-output svg');
+                if (svgElement) {
+                    this.showDiagramExportOptions(svgElement);
+                    return;
+                }
+            }
 
-        this.showToast('File downloaded', 'success');
+            this.exportManager.downloadFile(
+                content,
+                this.state.canvasType,
+                language,
+                title
+            );
+
+            this.showToast('File downloaded successfully!', 'success');
+        } catch (error) {
+            console.error('Download failed:', error);
+            this.showToast('Failed to download file', 'error');
+        }
     }
 
     /**
@@ -891,12 +1175,33 @@ class CanvasApp {
     }
 
     /**
-     * Show/hide loading overlay
+     * Show/hide loading overlay with progress bar
      * @param {boolean} show 
      */
     showLoading(show) {
         const overlay = document.getElementById('loading-overlay');
-        overlay.classList.toggle('hidden', !show);
+        const progressBar = document.getElementById('loading-progress-bar');
+        
+        if (show) {
+            overlay.classList.remove('hidden');
+            // Animate progress bar
+            if (progressBar) {
+                progressBar.style.width = '0%';
+                setTimeout(() => { progressBar.style.width = '30%'; }, 100);
+                setTimeout(() => { progressBar.style.width = '60%'; }, 500);
+                setTimeout(() => { progressBar.style.width = '85%'; }, 1000);
+            }
+        } else {
+            if (progressBar) {
+                progressBar.style.width = '100%';
+            }
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                if (progressBar) {
+                    progressBar.style.width = '0%';
+                }
+            }, 300);
+        }
     }
 
     /**

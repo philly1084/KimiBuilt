@@ -113,30 +113,45 @@
                     <div class="templates-section" id="templates-section">
                         <label class="section-label">Quick Templates</label>
                         <div class="template-chips">
-                            <button class="template-chip" data-prompt="Create a React component with props and TypeScript interfaces" data-type="code">
-                                <span class="chip-icon">⚛️</span>
-                                <span>React Component</span>
-                            </button>
-                            <button class="template-chip" data-prompt="Write a Python function with docstring and type hints" data-type="code">
-                                <span class="chip-icon">🐍</span>
-                                <span>Python Function</span>
-                            </button>
-                            <button class="template-chip" data-prompt="Create an API endpoint with Express.js including error handling" data-type="code">
-                                <span class="chip-icon">🌐</span>
-                                <span>API Endpoint</span>
-                            </button>
-                            <button class="template-chip" data-prompt="Write a comprehensive README.md for a project" data-type="document">
-                                <span class="chip-icon">📝</span>
-                                <span>README</span>
-                            </button>
-                            <button class="template-chip" data-prompt="Create a flowchart diagram showing user authentication flow" data-type="diagram">
-                                <span class="chip-icon">📊</span>
-                                <span>Auth Flow</span>
-                            </button>
-                            <button class="template-chip" data-prompt="Design a database schema with relationships" data-type="diagram">
-                                <span class="chip-icon">🗄️</span>
-                                <span>DB Schema</span>
-                            </button>
+                            <div class="template-category">
+                                <span class="category-badge code">Code</span>
+                                <div class="category-chips">
+                                    <button class="template-chip" data-prompt="Create a React component with props and TypeScript interfaces" data-type="code">
+                                        <span class="chip-icon">⚛️</span>
+                                        <span>React Component</span>
+                                    </button>
+                                    <button class="template-chip" data-prompt="Write a Python function with docstring and type hints" data-type="code">
+                                        <span class="chip-icon">🐍</span>
+                                        <span>Python Function</span>
+                                    </button>
+                                    <button class="template-chip" data-prompt="Create an API endpoint with Express.js including error handling" data-type="code">
+                                        <span class="chip-icon">🌐</span>
+                                        <span>API Endpoint</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="template-category">
+                                <span class="category-badge document">Doc</span>
+                                <div class="category-chips">
+                                    <button class="template-chip" data-prompt="Write a comprehensive README.md for a project" data-type="document">
+                                        <span class="chip-icon">📝</span>
+                                        <span>README</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="template-category">
+                                <span class="category-badge diagram">Diagram</span>
+                                <div class="category-chips">
+                                    <button class="template-chip" data-prompt="Create a flowchart diagram showing user authentication flow" data-type="diagram">
+                                        <span class="chip-icon">📊</span>
+                                        <span>Auth Flow</span>
+                                    </button>
+                                    <button class="template-chip" data-prompt="Design a database schema with relationships" data-type="diagram">
+                                        <span class="chip-icon">🗄️</span>
+                                        <span>DB Schema</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -150,7 +165,13 @@
                     <div class="context-section">
                         <label class="section-label">
                             Context (Optional)
-                            <button id="use-current-content" class="link-btn">Use current content</button>
+                            <button id="use-current-content" class="link-btn">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                                </svg>
+                                Use current content
+                            </button>
                         </label>
                         <textarea id="context-input" class="context-textarea" placeholder="Add context or existing content..."></textarea>
                     </div>
@@ -290,7 +311,115 @@
         <!-- Loading Overlay -->
         <div id="loading-overlay" class="loading-overlay hidden">
             <div class="loading-spinner"></div>
-            <span>Processing...</span>
+            <div class="loading-content">
+                <span class="loading-text">Processing...</span>
+                <div class="loading-progress">
+                    <div class="loading-progress-bar" id="loading-progress-bar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WebSocket Disconnect Banner -->
+        <div id="ws-disconnect-banner" class="ws-disconnect-banner hidden">
+            <div class="ws-disconnect-content">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span>Connection lost. Real-time updates unavailable.</span>
+            </div>
+            <button id="ws-reconnect-btn" class="btn btn-small btn-accent">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                </svg>
+                Reconnect
+            </button>
+        </div>
+
+        <!-- Mobile Sidebar Backdrop -->
+        <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+        <!-- Help Modal -->
+        <div id="help-modal" class="help-modal hidden">
+            <div class="help-modal-overlay"></div>
+            <div class="help-modal-content">
+                <div class="help-modal-header">
+                    <h2>Keyboard Shortcuts</h2>
+                    <button id="help-modal-close" class="icon-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="help-modal-body">
+                    <div class="shortcut-section">
+                        <h3>General</h3>
+                        <div class="shortcut-list">
+                            <div class="shortcut-item">
+                                <kbd>?</kbd>
+                                <span>Show this help</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>N</kbd>
+                                <span>New session</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>S</kbd>
+                                <span>Save to localStorage</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="shortcut-section">
+                        <h3>Editor</h3>
+                        <div class="shortcut-list">
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>Z</kbd>
+                                <span>Undo</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>Y</kbd>
+                                <span>Redo</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>
+                                <span>Redo</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>/</kbd>
+                                <span>Toggle comment</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Tab</kbd>
+                                <span>Indent / Emmet expand</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Shift</kbd> + <kbd>Tab</kbd>
+                                <span>Outdent</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="shortcut-section">
+                        <h3>Canvas</h3>
+                        <div class="shortcut-list">
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+                                <span>Send to AI</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>P</kbd>
+                                <span>Toggle preview</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <kbd>Ctrl</kbd> + <kbd>\</kbd>
+                                <span>Toggle split view</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

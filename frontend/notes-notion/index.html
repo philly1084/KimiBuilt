@@ -20,7 +20,7 @@
                     <div class="workspace-avatar">KB</div>
                     <span class="workspace-name">KimiBuilt</span>
                 </div>
-                <button id="sidebar-toggle" class="icon-btn" title="Collapse sidebar">
+                <button id="sidebar-toggle" class="icon-btn" title="Collapse sidebar" aria-label="Toggle sidebar">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
                     </svg>
@@ -102,7 +102,7 @@
         </div>
 
         <!-- Sidebar Handle (visible when collapsed) -->
-        <div class="sidebar-handle" onclick="Sidebar.toggle()" title="Show sidebar">
+        <div class="sidebar-handle" onclick="Sidebar.toggle()" title="Show sidebar" role="button" aria-label="Show sidebar" tabindex="0">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
             </svg>
@@ -113,8 +113,8 @@
             <!-- Cover Image -->
             <div id="cover-area" class="cover-area" style="display: none;">
                 <div id="cover-image" class="cover-image"></div>
-                <button id="cover-change-btn" class="cover-change-btn">Change cover</button>
-                <button id="cover-remove-btn" class="cover-remove-btn">
+                <button id="cover-change-btn" class="cover-change-btn" aria-label="Change cover image">Change cover</button>
+                <button id="cover-remove-btn" class="cover-remove-btn" aria-label="Remove cover image">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -124,7 +124,7 @@
 
             <!-- Breadcrumbs -->
             <nav class="breadcrumbs" id="breadcrumbs">
-                <button class="breadcrumb-item" id="breadcrumb-root">
+                <button class="breadcrumb-item" id="breadcrumb-root" aria-label="Go to home">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
                         <polyline points="9 22 9 12 15 12 15 22"></polyline>
@@ -134,7 +134,7 @@
                 <span class="breadcrumb-current" id="breadcrumb-current">Untitled</span>
                 <!-- Model Selector (inline with breadcrumbs) -->
                 <div class="breadcrumb-model-selector">
-                    <button id="model-selector-btn" class="model-selector-btn" onclick="AgentUI.toggleModelSelector()" title="Change AI model">
+                    <button id="model-selector-btn" class="model-selector-btn" onclick="AgentUI.toggleModelSelector()" title="Change AI model" aria-label="Change AI model" aria-haspopup="listbox" aria-expanded="false">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="model-icon-svg">
                             <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
                             <rect x="9" y="9" width="6" height="6"></rect>
@@ -155,7 +155,7 @@
             <!-- Page Header -->
             <div class="page-header">
                 <div class="page-icon-wrapper">
-                    <button id="page-icon-btn" class="page-icon-btn" title="Add icon">
+                    <button id="page-icon-btn" class="page-icon-btn" title="Add icon" aria-label="Add page icon">
                         <span id="page-icon" class="page-icon">📝</span>
                         <span class="add-icon-hint">Add icon</span>
                     </button>
@@ -179,7 +179,7 @@
                 <!-- Page Actions -->
                 <div class="page-actions">
                     <div class="export-dropdown">
-                        <button id="export-btn" class="export-btn" title="Export page">
+                        <button id="export-btn" class="export-btn" title="Export page" aria-label="Export page">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                 <polyline points="7 10 12 15 17 10"></polyline>
@@ -255,136 +255,136 @@
     </div>
 
     <!-- Slash Command Menu -->
-    <div id="slash-menu" class="slash-menu" style="display: none;">
+    <div id="slash-menu" class="slash-menu" style="display: none;" role="listbox" aria-label="Block type menu">
         <div class="slash-menu-header">Basic blocks</div>
         <div class="slash-menu-items">
-            <div class="slash-item" data-type="text">
+            <div class="slash-item" data-type="text" role="option" tabindex="0">
                 <div class="slash-item-icon">📝</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Text</div>
                     <div class="slash-item-hint">Just start writing with plain text</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="heading_1">
+            <div class="slash-item" data-type="heading_1" role="option" tabindex="0">
                 <div class="slash-item-icon">H1</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Heading 1</div>
                     <div class="slash-item-hint">Big section heading</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="heading_2">
+            <div class="slash-item" data-type="heading_2" role="option" tabindex="0">
                 <div class="slash-item-icon">H2</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Heading 2</div>
                     <div class="slash-item-hint">Medium section heading</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="heading_3">
+            <div class="slash-item" data-type="heading_3" role="option" tabindex="0">
                 <div class="slash-item-icon">H3</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Heading 3</div>
                     <div class="slash-item-hint">Small section heading</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="todo">
+            <div class="slash-item" data-type="todo" role="option" tabindex="0">
                 <div class="slash-item-icon">☐</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">To-do list</div>
                     <div class="slash-item-hint">Track tasks with a to-do list</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="bulleted_list">
+            <div class="slash-item" data-type="bulleted_list" role="option" tabindex="0">
                 <div class="slash-item-icon">•</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Bulleted list</div>
                     <div class="slash-item-hint">Create a simple bulleted list</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="numbered_list">
+            <div class="slash-item" data-type="numbered_list" role="option" tabindex="0">
                 <div class="slash-item-icon">1.</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Numbered list</div>
                     <div class="slash-item-hint">Create a list with numbering</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="toggle">
+            <div class="slash-item" data-type="toggle" role="option" tabindex="0">
                 <div class="slash-item-icon">▶</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Toggle list</div>
                     <div class="slash-item-hint">Toggles can hide and show content inside</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="quote">
+            <div class="slash-item" data-type="quote" role="option" tabindex="0">
                 <div class="slash-item-icon">"</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Quote</div>
                     <div class="slash-item-hint">Capture a quote</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="divider">
+            <div class="slash-item" data-type="divider" role="option" tabindex="0">
                 <div class="slash-item-icon">—</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Divider</div>
                     <div class="slash-item-hint">Visually divide blocks</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="callout">
+            <div class="slash-item" data-type="callout" role="option" tabindex="0">
                 <div class="slash-item-icon">💡</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Callout</div>
                     <div class="slash-item-hint">Make writing stand out</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="code">
+            <div class="slash-item" data-type="code" role="option" tabindex="0">
                 <div class="slash-item-icon"></></div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Code</div>
                     <div class="slash-item-hint">Capture a code snippet</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="math">
+            <div class="slash-item" data-type="math" role="option" tabindex="0">
                 <div class="slash-item-icon">∑</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Math Equation</div>
                     <div class="slash-item-hint">Type LaTeX math equations</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="mermaid">
+            <div class="slash-item" data-type="mermaid" role="option" tabindex="0">
                 <div class="slash-item-icon">📊</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Mermaid Diagram</div>
                     <div class="slash-item-hint">Create flowcharts, sequence diagrams, and more</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="image">
+            <div class="slash-item" data-type="image" role="option" tabindex="0">
                 <div class="slash-item-icon">🖼</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Image</div>
                     <div class="slash-item-hint">Upload or embed with a link</div>
                 </div>
             </div>
-            <div class="slash-item slash-item-ai" data-type="ai_image">
+            <div class="slash-item slash-item-ai" data-type="ai_image" role="option" tabindex="0">
                 <div class="slash-item-icon">🎨</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">AI Image</div>
                     <div class="slash-item-hint">Generate an image using DALL-E</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="bookmark">
+            <div class="slash-item" data-type="bookmark" role="option" tabindex="0">
                 <div class="slash-item-icon">🔗</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Bookmark</div>
                     <div class="slash-item-hint">Save a link as a visual bookmark</div>
                 </div>
             </div>
-            <div class="slash-item" data-type="database">
+            <div class="slash-item" data-type="database" role="option" tabindex="0">
                 <div class="slash-item-icon">📊</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">Database</div>
                     <div class="slash-item-hint">Simple table view for tracking items</div>
                 </div>
             </div>
-            <div class="slash-item slash-item-ai" data-type="ai">
+            <div class="slash-item slash-item-ai" data-type="ai" role="option" tabindex="0">
                 <div class="slash-item-icon">✨</div>
                 <div class="slash-item-info">
                     <div class="slash-item-name">AI Assistant</div>

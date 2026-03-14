@@ -538,7 +538,7 @@ class FileHandler {
         `;
         container.appendChild(actions);
         
-        this.app.outputArea.appendChild(container);
+        this.app.terminalOutput.appendChild(container);
         this.app.scrollToBottom();
         
         // Store for later use
@@ -616,8 +616,8 @@ class FileHandler {
             conversationHistory: this.app.conversationHistory,
         };
         
-        const outputArea = document.getElementById('outputArea');
-        const content = outputArea.innerText;
+        const terminalOutput = document.getElementById('terminalOutput');
+        const content = terminalOutput.innerText;
         
         switch (format.toLowerCase()) {
             case 'txt':
@@ -702,7 +702,7 @@ ${content}`;
      */
     exportAsHtml(session, content) {
         const timestamp = new Date().toLocaleString();
-        const outputArea = document.getElementById('outputArea');
+        const terminalOutput = document.getElementById('terminalOutput');
         
         const html = `<!DOCTYPE html>
 <html lang="en">
@@ -790,7 +790,7 @@ ${content}`;
         </div>
     </div>
     <div class="content">
-        ${outputArea.innerHTML}
+        ${terminalOutput.innerHTML}
     </div>
 </body>
 </html>`;
@@ -846,7 +846,7 @@ ${content}`;
     exportAsPdf(session, content) {
         // Open a new window with formatted content for printing to PDF
         const timestamp = new Date().toLocaleString();
-        const outputArea = document.getElementById('outputArea');
+        const terminalOutput = document.getElementById('terminalOutput');
         
         const printWindow = window.open('', '_blank');
         printWindow.document.write(`
@@ -904,7 +904,7 @@ ${content}`;
         <hr style="margin: 20px 0;">
     </div>
     <div class="content">
-        ${outputArea.innerText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+        ${terminalOutput.innerText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
     </div>
 </body>
 </html>`);

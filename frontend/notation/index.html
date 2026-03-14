@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Notation Helper | KimiBuilt AI</title>
     
-    <!-- CodeMirror 6 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/dracula.min.css">
+    <!-- CodeMirror 5 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,6 +24,10 @@
     <!-- Header -->
     <header class="app-header">
         <div class="header-left">
+            <!-- Sidebar Toggle Button (Mobile) -->
+            <button class="icon-btn sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+                <i class="fas fa-bars"></i>
+            </button>
             <div class="logo">
                 <i class="fas fa-shapes"></i>
                 <span>Notation Helper</span>
@@ -47,8 +51,8 @@
             <button class="icon-btn" id="themeToggle" title="Toggle theme">
                 <i class="fas fa-moon"></i>
             </button>
-            <button class="icon-btn" id="settingsBtn" title="Settings">
-                <i class="fas fa-cog"></i>
+            <button class="icon-btn" id="keyboardShortcutsBtn" title="Keyboard shortcuts (Press ?)">
+                <i class="fas fa-keyboard"></i>
             </button>
             <div class="connection-status" id="connectionStatus">
                 <span class="status-dot"></span>
@@ -76,7 +80,7 @@
             <div class="sidebar-panel active" id="templatesPanel">
                 <div class="panel-header">
                     <h3>Notation Templates</h3>
-                    <div class="template-categories">
+                    <div class="template-categories" id="templateCategories">
                         <button class="category-btn active" data-category="all">All</button>
                         <button class="category-btn" data-category="system">System</button>
                         <button class="category-btn" data-category="flowchart">Flow</button>
@@ -86,6 +90,11 @@
                 </div>
                 <div class="template-list" id="templateList">
                     <!-- Templates loaded by JS -->
+                </div>
+                <!-- Template Loading Spinner -->
+                <div class="template-loading hidden" id="templateLoading">
+                    <div class="spinner-ring small"></div>
+                    <span>Loading template...</span>
                 </div>
             </div>
             
@@ -107,13 +116,17 @@
             </div>
         </aside>
 
+        <!-- Sidebar Backdrop (Mobile) -->
+        <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
         <!-- Editor Area -->
         <main class="editor-area">
             <!-- Context Bar -->
             <div class="context-bar" id="contextBar">
-                <button class="toggle-context" id="toggleContext">
+                <button class="toggle-context" id="toggleContext" title="Add optional context to help the AI understand your notation">
                     <i class="fas fa-chevron-right"></i>
-                    <span>Context</span>
+                    <span>Add Context (Optional)</span>
+                    <span class="context-placeholder">Add context (optional) to help the AI understand your notation better...</span>
                 </button>
                 <div class="context-content" id="contextContent">
                     <textarea 
@@ -173,7 +186,7 @@ Examples:
                 </div>
 
                 <!-- Resize Handle -->
-                <div class="resize-handle" id="resizeHandle">
+                <div class="resize-handle" id="resizeHandle" tabindex="0" role="separator" aria-label="Resize panes" title="Drag to resize, or use Shift+Left/Right arrows">
                     <div class="handle-indicator">
                         <i class="fas fa-grip-lines-vertical"></i>
                     </div>
@@ -188,6 +201,10 @@ Examples:
                             <span class="mode-badge" id="modeBadge">expand</span>
                         </div>
                         <div class="pane-actions">
+                            <button class="icon-btn small" id="toggleAnnotationsBtn" title="Toggle Annotations & Notes">
+                                <i class="fas fa-sticky-note"></i>
+                                <span class="annotation-badge" id="annotationBadge">0</span>
+                            </button>
                             <button class="icon-btn small" id="copyResult" title="Copy to clipboard">
                                 <i class="fas fa-copy"></i>
                             </button>
@@ -206,7 +223,11 @@ Examples:
                                     <i class="fas fa-magic"></i>
                                 </div>
                                 <h3>Ready to Process</h3>
-                                <p>Enter your notation and click Process to see the result</p>
+                                <p>Enter notation in the left panel and click 'Process' to see results</p>
+                                <div class="empty-cta">
+                                    <i class="fas fa-arrow-left"></i>
+                                    <span>Start by typing in the editor</span>
+                                </div>
                             </div>
                             <div class="output-content hidden" id="outputContent">
                                 <div class="output-rendered" id="outputRendered"></div>
@@ -248,9 +269,50 @@ Examples:
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- Keyboard Shortcuts Modal -->
+    <div class="modal hidden" id="shortcutsModal">
+        <div class="modal-overlay" id="shortcutsOverlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-keyboard"></i> Keyboard Shortcuts</h3>
+                <button class="icon-btn" id="closeShortcutsModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcuts-grid">
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+                        <span>Process notation</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd>
+                        <span>Process with context</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>/</kbd>
+                        <span>Toggle comment</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>?</kbd>
+                        <span>Show this help</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd>
+                        <span>Resize panes (when handle focused)</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Esc</kbd>
+                        <span>Close modals / Cancel</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
     <!-- Application Scripts -->
@@ -264,5 +326,3 @@ Examples:
     <script src="js/artifacts.js"></script>
 </body>
 </html>
-
-

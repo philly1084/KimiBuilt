@@ -100,6 +100,11 @@ const AgentUI = (function() {
                     event.preventDefault();
                     sendMessage();
                 }
+                // Escape key closes chat modal
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeChat();
+                }
             });
 
             elements.input.addEventListener('input', autoResizeInput);
@@ -111,8 +116,20 @@ const AgentUI = (function() {
                 toggleChat();
             }
 
+            // Global Escape key handler
             if (event.key === 'Escape') {
-                closeModelSelector();
+                // Close model selector if open
+                if (elements.modelSelectorDropdown?.style.display === 'flex') {
+                    event.preventDefault();
+                    closeModelSelector();
+                    return;
+                }
+                // Close chat if open
+                if (elements.modal?.style.display === 'flex') {
+                    event.preventDefault();
+                    closeChat();
+                    return;
+                }
             }
         });
 
@@ -540,6 +557,7 @@ const AgentUI = (function() {
 
         elements.modelSelectorDropdown.style.display = 'flex';
         elements.modelSelectorBtn?.classList.add('active');
+        elements.modelSelectorBtn?.setAttribute('aria-expanded', 'true');
 
         try {
             await window.Agent?.getModelsAsync?.();
@@ -555,6 +573,7 @@ const AgentUI = (function() {
 
         elements.modelSelectorDropdown.style.display = 'none';
         elements.modelSelectorBtn?.classList.remove('active');
+        elements.modelSelectorBtn?.setAttribute('aria-expanded', 'false');
     }
 
     function renderModelList() {
@@ -562,9 +581,19 @@ const AgentUI = (function() {
 
         const models = window.Agent.getModels();
         if (!models.length) {
+            // Show skeleton loading state
             elements.modelList.innerHTML = `
                 <div class="model-group">
-                    <div class="model-group-title">Loading...</div>
+                    <div class="model-group-title">Loading models...</div>
+                    ${Array(3).fill(0).map(() => `
+                        <div class="model-item skeleton">
+                            <div class="model-item-icon skeleton-icon"></div>
+                            <div class="model-item-info">
+                                <div class="model-item-name skeleton-text" style="width: 120px;"></div>
+                                <div class="model-item-desc skeleton-text" style="width: 180px;"></div>
+                            </div>
+                        </div>
+                    `).join('')}
                 </div>
             `;
             return;

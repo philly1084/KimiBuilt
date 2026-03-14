@@ -204,6 +204,8 @@ body {
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
 }
 
 .type-btn:hover {
@@ -214,6 +216,19 @@ body {
 .type-btn.active {
     color: var(--text-active);
     background: var(--accent-secondary);
+    font-weight: 600;
+}
+
+/* Prominent active state with colored underline */
+.type-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: var(--accent-primary);
+    border-radius: 2px 2px 0 0;
 }
 
 .type-btn svg {
@@ -238,6 +253,19 @@ body {
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 0.2s ease;
+}
+
+/* Touch device optimization - 44px minimum */
+@media (pointer: coarse) {
+    .icon-btn {
+        width: 44px;
+        height: 44px;
+    }
+    
+    .icon-btn svg {
+        width: 24px;
+        height: 24px;
+    }
 }
 
 .icon-btn:hover {
@@ -373,8 +401,51 @@ body {
 
 .template-chips {
     display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.template-category {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.category-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    width: fit-content;
+}
+
+.category-badge.code {
+    background: rgba(0, 122, 204, 0.2);
+    color: var(--accent-info);
+    border: 1px solid rgba(0, 122, 204, 0.3);
+}
+
+.category-badge.document {
+    background: rgba(137, 209, 133, 0.2);
+    color: var(--accent-success);
+    border: 1px solid rgba(137, 209, 133, 0.3);
+}
+
+.category-badge.diagram {
+    background: rgba(204, 167, 0, 0.2);
+    color: var(--accent-warning);
+    border: 1px solid rgba(204, 167, 0, 0.3);
+}
+
+.category-chips {
+    display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    padding-left: 4px;
 }
 
 .template-chip {
@@ -412,19 +483,29 @@ body {
     margin-bottom: 8px;
 }
 
+/* Enhanced Link Button */
 .link-btn {
-    padding: 2px 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
     border: none;
-    background: transparent;
+    background: rgba(79, 193, 255, 0.1);
     color: var(--text-link);
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
     border-radius: var(--radius-sm);
+    transition: all 0.2s ease;
 }
 
 .link-btn:hover {
-    background: var(--bg-hover);
-    text-decoration: underline;
+    background: rgba(79, 193, 255, 0.2);
+    text-decoration: none;
+}
+
+.link-btn svg {
+    opacity: 0.7;
 }
 
 /* Textareas */
@@ -556,12 +637,45 @@ body {
     width: 4px;
     background: var(--border-color);
     cursor: col-resize;
-    transition: background 0.2s ease;
+    transition: background 0.2s ease, width 0.2s ease;
+    position: relative;
 }
 
 .resizer:hover,
 .resizer.resizing {
     background: var(--accent-primary);
+}
+
+/* Touch device - wider resizer with visual indicator */
+@media (pointer: coarse) {
+    .resizer {
+        width: 16px;
+        background: var(--border-color);
+    }
+    
+    .resizer::before {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 4px;
+        height: 40px;
+        background: var(--text-muted);
+        border-radius: 2px;
+        opacity: 0.5;
+    }
+    
+    .resizer:hover,
+    .resizer.resizing {
+        background: var(--accent-primary);
+    }
+    
+    .resizer:hover::before,
+    .resizer.resizing::before {
+        background: white;
+        opacity: 1;
+    }
 }
 
 /* ============================================
@@ -608,9 +722,22 @@ body {
     background: var(--bg-primary);
 }
 
+/* Tab dirty indicator with pulse animation */
 .tab-dirty {
     color: var(--accent-warning);
-    font-size: 8px;
+    font-size: 10px;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.6;
+        transform: scale(1.2);
+    }
 }
 
 .tab-actions {
@@ -663,6 +790,17 @@ body {
 
 .CodeMirror-activeline-background {
     background: rgba(255, 255, 255, 0.03);
+}
+
+/* Error markers in gutter */
+.error-marker {
+    color: var(--accent-error);
+    font-weight: bold;
+    cursor: help;
+}
+
+.CodeMirror-gutter.error-gutter {
+    width: 20px;
 }
 
 /* Preview Wrapper */
@@ -798,16 +936,97 @@ body {
 /* Diagram Wrapper */
 .diagram-wrapper {
     flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    position: relative;
+}
+
+/* Diagram Controls */
+.diagram-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    z-index: 10;
+}
+
+.diagram-control-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.diagram-control-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-light);
+}
+
+@media (pointer: coarse) {
+    .diagram-control-btn {
+        width: 44px;
+        height: 44px;
+    }
+}
+
+.diagram-zoom-level {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 4px;
+    min-width: 40px;
+    text-align: center;
+}
+
+/* Diagram Canvas Container */
+.diagram-canvas-container {
+    flex: 1;
     overflow: auto;
     padding: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg-primary);
+    position: relative;
+}
+
+/* Diagram Loading State */
+.diagram-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(30, 30, 30, 0.8);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 5;
+    color: white;
+}
+
+.diagram-loading.hidden {
+    display: none;
 }
 
 .diagram-output {
     text-align: center;
+    transform-origin: center center;
+    transition: transform 0.2s ease;
 }
 
 .diagram-output svg {
@@ -822,6 +1041,44 @@ body {
     border-radius: var(--radius-md);
     font-family: var(--font-mono);
     font-size: 13px;
+}
+
+/* Diagram Syntax Error Indicators */
+.diagram-error-panel {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    max-height: 150px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-error);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    z-index: 10;
+}
+
+.diagram-error-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-error);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.diagram-error-item:last-child {
+    border-bottom: none;
+}
+
+.diagram-error-line {
+    background: rgba(244, 135, 113, 0.2);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* Split View Mode */
@@ -1027,7 +1284,7 @@ body {
 }
 
 /* ============================================
-   Loading Overlay
+   Loading Overlay with Progress Bar
    ============================================ */
 
 .loading-overlay {
@@ -1065,6 +1322,46 @@ body {
     }
 }
 
+.loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    min-width: 200px;
+}
+
+.loading-text {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.loading-progress {
+    width: 100%;
+    max-width: 200px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.loading-progress-bar {
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s ease;
+    animation: progress-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes progress-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
 /* ============================================
    Utilities
    ============================================ */
@@ -1073,15 +1370,21 @@ body {
     display: none !important;
 }
 
-/* Responsive Design */
+/* ============================================
+   Responsive Design
+   ============================================ */
+
 @media (max-width: 768px) {
     .sidebar {
-        position: absolute;
+        position: fixed;
         left: 0;
         top: var(--header-height);
         bottom: 0;
         z-index: 100;
         transform: translateX(-100%);
+        width: 85%;
+        max-width: 320px;
+        box-shadow: var(--shadow-lg);
     }
     
     .sidebar.open {
@@ -1105,7 +1408,12 @@ body {
     }
     
     .type-btn {
-        padding: 6px;
+        padding: 10px;
+    }
+    
+    .type-btn.active::after {
+        left: 6px;
+        right: 6px;
     }
     
     .editor-container.split {
@@ -1122,6 +1430,79 @@ body {
     .editor-container.split .editor-wrapper {
         border-right: none;
         border-bottom: 1px solid var(--border-color);
+    }
+    
+    /* Toast positioning for mobile */
+    .toast-container {
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+    }
+    
+    .toast {
+        width: 100%;
+    }
+    
+    /* Diagram controls on mobile */
+    .diagram-controls {
+        padding: 12px;
+    }
+    
+    /* Model selector on mobile */
+    .model-select {
+        min-width: 100px;
+        font-size: 12px;
+        padding: 8px 24px 8px 10px;
+    }
+    
+    .header-right {
+        gap: 8px;
+    }
+}
+
+/* Touch device specific optimizations */
+@media (pointer: coarse) {
+    /* Increase touch targets */
+    .template-chip {
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+    
+    .btn {
+        padding: 12px 18px;
+        font-size: 14px;
+    }
+    
+    .suggestion-chip {
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+    
+    /* Larger textareas for touch */
+    .prompt-textarea,
+    .context-textarea {
+        min-height: 120px;
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+    
+    /* Status bar buttons */
+    .status-btn {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+    
+    /* CodeMirror touch optimizations */
+    .CodeMirror {
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+    
+    .CodeMirror-linenumber {
+        font-size: 14px;
+    }
+    
+    /* Wider gutter for touch */
+    .CodeMirror-linenumbers {
+        min-width: 45px;
     }
 }
 

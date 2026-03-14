@@ -244,17 +244,71 @@ class ChatApp {
                 uiHelpers.toggleInputArea();
             }
             
-            // Close search/command palette on Escape
+            // Escape handling with priority: Modal > Command Palette > Search > Streaming
             if (e.key === 'Escape') {
-                if (!document.getElementById('search-bar').classList.contains('hidden')) {
-                    this.closeSearch();
-                }
-                // Cancel current streaming if active
-                if (this.isProcessing && this.currentAbortController) {
-                    this.cancelCurrentRequest();
-                }
+                this.handleEscapeKey();
             }
         });
+    }
+    
+    /**
+     * Handle Escape key with proper priority:
+     * 1. Close any open modal
+     * 2. Close command palette
+     * 3. Close search
+     * 4. Cancel streaming
+     */
+    handleEscapeKey() {
+        // Priority 1: Check for any open modals (export, import, image, shortcuts)
+        const openModals = document.querySelectorAll('.modal:not(.hidden)');
+        if (openModals.length > 0) {
+            // Close the last opened modal
+            const lastModal = openModals[openModals.length - 1];
+            const modalId = lastModal.id;
+            
+            if (modalId === 'export-modal') {
+                uiHelpers.closeExportModal();
+            } else if (modalId === 'import-modal') {
+                uiHelpers.closeImportModal();
+            } else if (modalId === 'image-modal') {
+                uiHelpers.closeImageModal();
+            } else if (modalId === 'shortcuts-modal') {
+                uiHelpers.closeShortcutsModal();
+            } else if (modalId === 'image-lightbox') {
+                uiHelpers.closeImageLightbox();
+            } else {
+                // Generic modal close
+                lastModal.classList.add('hidden');
+                lastModal.setAttribute('aria-hidden', 'true');
+            }
+            return;
+        }
+        
+        // Priority 2: Check for model selector dropdown
+        const modelDropdown = document.getElementById('model-selector-dropdown');
+        if (modelDropdown && !modelDropdown.classList.contains('hidden')) {
+            uiHelpers.closeModelSelector();
+            return;
+        }
+        
+        // Priority 3: Check for command palette
+        const commandPalette = document.getElementById('command-palette');
+        if (commandPalette && !commandPalette.classList.contains('hidden')) {
+            uiHelpers.closeCommandPalette();
+            return;
+        }
+        
+        // Priority 4: Check for search
+        const searchBar = document.getElementById('search-bar');
+        if (searchBar && !searchBar.classList.contains('hidden')) {
+            this.closeSearch();
+            return;
+        }
+        
+        // Priority 5: Cancel current streaming if active
+        if (this.isProcessing && this.currentAbortController) {
+            this.cancelCurrentRequest();
+        }
     }
 
     setupConnectivityListeners() {

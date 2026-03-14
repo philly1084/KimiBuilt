@@ -1,6 +1,7 @@
 /**
  * Tools Module - Tool definitions and behaviors
  * Fixed: Proper resize handles, move logic, double-click text editing, multi-select, copy/paste
+ * Enhanced: Small shape feedback, touch handling
  */
 
 class ToolManager {
@@ -57,8 +58,13 @@ class ToolManager {
         // Canvas interactions
         const canvas = document.getElementById('canvasContainer');
         canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+        
         window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        window.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+        
         window.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+        window.addEventListener('touchend', (e) => this.handleTouchEnd(e));
         
         // Double-click for text editing
         canvas.addEventListener('dblclick', (e) => this.handleDoubleClick(e));
@@ -85,6 +91,13 @@ class ToolManager {
                     e.stopPropagation();
                     this.startResize(e, handle);
                 });
+                
+                // Touch support for resize handles
+                handle.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    this.startResize(e.touches[0], handle);
+                }, { passive: false });
             });
         }
     }
@@ -158,6 +171,11 @@ class ToolManager {
         if (textEditor && textEditor.style.display === 'block') {
             textEditor.blur();
         }
+        
+        // Close mobile toolbar after selection on mobile
+        if (window.matchMedia('(max-width: 768px)').matches) {
+            document.getElementById('toolbar')?.classList.remove('active');
+        }
     }
     
     cancelDrawing() {
@@ -186,15 +204,25 @@ class ToolManager {
     }
     
     handleMouseDown(e) {
-        if (e.button !== 0) return; // Only left click
-        
+        if (e.button !== 0) return;
+        this.handleInputStart(e.clientX, e.clientY, e);
+    }
+    
+    handleTouchStart(e) {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        this.handleInputStart(touch.clientX, touch.clientY, e);
+    }
+    
+    handleInputStart(clientX, clientY, originalEvent) {
         // Space+drag for panning - handled by canvas.js
         if (this.spacePressed) return;
         
         const canvas = window.infiniteCanvas;
         const rect = canvas.container.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
         const worldPos = canvas.screenToWorld(x, y);
         
         // Snap to grid if enabled
@@ -207,7 +235,7 @@ class ToolManager {
         
         switch (this.currentTool) {
             case 'selection':
-                this.handleSelectionStart(e, worldPos);
+                this.handleSelectionStart(originalEvent, worldPos);
                 break;
             case 'rectangle':
                 this.startShape('rectangle', worldPos);
@@ -282,10 +310,21 @@ class ToolManager {
     }
     
     handleMouseMove(e) {
+        this.handleInputMove(e.clientX, e.clientY, e);
+    }
+    
+    handleTouchMove(e) {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        this.handleInputMove(touch.clientX, touch.clientY, e);
+    }
+    
+    handleInputMove(clientX, clientY, originalEvent) {
         const canvas = window.infiniteCanvas;
         const rect = canvas.container.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
         const worldPos = canvas.screenToWorld(x, y);
         
         // Snap to grid if enabled
@@ -298,19 +337,28 @@ class ToolManager {
         this.updateCursor(worldPos);
         
         if (this.isDrawing && this.currentElement) {
-            this.updateElement(worldPos, e.shiftKey);
+            this.updateElement(worldPos, originalEvent.shiftKey);
             canvas.render();
         } else if (this.isMoving && canvas.selectedElements.length > 0) {
             this.moveElements(worldPos);
         } else if (this.isResizing && canvas.selectedElements.length > 0) {
-            this.resizeElement(worldPos, e.shiftKey);
+            this.resizeElement(worldPos, originalEvent.shiftKey);
         } else if (canvas.isSelecting) {
             canvas.updateSelectionBox(worldPos.x, worldPos.y);
         }
     }
     
     handleMouseUp(e) {
+        this.handleInputEnd();
+    }
+    
+    handleTouchEnd(e) {
+        this.handleInputEnd();
+    }
+    
+    handleInputEnd() {
         const canvas = window.infiniteCanvas;
+        let shapeTooSmall = false;
         
         if (this.isDrawing && this.currentElement) {
             // Finalize element
@@ -318,26 +366,27 @@ class ToolManager {
             const minSize = 5;
             const minPoints = 3; // Minimum points for freedraw
             
-            let tooSmall = false;
-            
             if (el.type === 'freedraw') {
                 // For freedraw, check number of points
-                tooSmall = !el.points || el.points.length < minPoints;
+                shapeTooSmall = !el.points || el.points.length < minPoints;
             } else if (el.type === 'line' || el.type === 'arrow') {
                 // For lines, check if there's actual length
-                tooSmall = !el.points || el.points.length < 2 || 
+                shapeTooSmall = !el.points || el.points.length < 2 || 
                           (Math.abs(el.points[1].x - el.points[0].x) < minSize && 
                            Math.abs(el.points[1].y - el.points[0].y) < minSize);
             } else {
                 // For shapes, check dimensions
-                tooSmall = el.width < minSize && el.height < minSize;
+                shapeTooSmall = el.width < minSize && el.height < minSize;
             }
             
-            if (tooSmall) {
-                // Too small, remove it
+            if (shapeTooSmall) {
+                // Too small, remove it and show toast
                 canvas.elements = canvas.elements.filter(
                     existingEl => existingEl.id !== this.currentElement.id
                 );
+                
+                // Show toast notification
+                window.app?.showToast?.('Shape too small', 'error', 2000);
             } else {
                 // Ensure freedraw has valid bounding box
                 if (el.type === 'freedraw' && el.points && el.points.length > 0) {
@@ -461,8 +510,11 @@ class ToolManager {
         if (canvas.selectedElements.length !== 1) return null;
         
         const el = canvas.selectedElements[0];
-        const handleSize = 10 / canvas.scale;
-        const padding = 4;
+        
+        // Use larger handle size on touch devices
+        const isTouch = window.matchMedia('(pointer: coarse)').matches;
+        const handleSize = (isTouch ? 20 : 10) / canvas.scale;
+        const padding = isTouch ? 8 : 4;
         
         // Get element bounds
         let bounds;
@@ -1373,6 +1425,27 @@ class ToolManager {
                     break;
                 case 'k':
                     this.setTool('stickers');
+                    break;
+                case 'z':
+                    this.setTool('ai-assistant');
+                    if (window.aiAssistant) {
+                        window.aiAssistant.showPanel();
+                    }
+                    break;
+                case 'h':
+                    this.setTool('heart');
+                    break;
+                case 'c':
+                    this.setTool('cloud');
+                    break;
+                case 'y':
+                    this.setTool('cylinder');
+                    break;
+                case 'b':
+                    this.setTool('cube');
+                    break;
+                case 'u':
+                    this.setTool('speechBubble');
                     break;
             }
         }

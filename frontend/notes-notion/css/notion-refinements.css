@@ -652,10 +652,26 @@
     background: rgba(35, 131, 226, 0.2);
 }
 
-/* Focus States */
+/* Focus States - 3px outline with 3:1 contrast */
 *:focus-visible {
-    outline: 2px solid var(--accent-color);
-    outline-offset: -2px;
+    outline: 3px solid var(--accent-color);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+/* High contrast focus for better accessibility */
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible {
+    outline: 3px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+/* Focus within for container elements */
+.slash-item:focus-visible {
+    background: rgba(55, 53, 47, 0.08);
+    outline: 3px solid var(--accent-color);
+    outline-offset: -3px;
 }
 
 /* Scrollbar Styling */
@@ -697,8 +713,116 @@
         margin: 0 16px;
     }
     
+    /* Block Handles - Always visible on mobile with 44px touch target */
     .block-handle {
+        display: flex;
+        opacity: 1 !important;
+        width: 44px;
+        height: 44px;
+        left: -44px;
+        top: 0;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .block-handle::before {
+        width: 6px;
+        height: 18px;
+        background-size: 6px 6px;
+    }
+    
+    /* Block add button - larger touch target */
+    .block-add-btn {
+        width: 44px;
+        height: 44px;
+        left: -44px;
+        font-size: 20px;
+    }
+    
+    /* Adjust editor padding for mobile handles */
+    .editor {
+        padding-left: 48px;
+    }
+    
+    /* Model Selector - Full screen modal on mobile */
+    .model-selector-dropdown {
+        padding-top: 0;
+        align-items: flex-end;
+    }
+    
+    .model-selector-dropdown-content {
+        max-width: 100%;
+        max-height: 80vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        animation: modelSelectorSlideUp 0.2s ease;
+    }
+    
+    @keyframes modelSelectorSlideUp {
+        from {
+            transform: translateY(100%);
+        }
+        to {
+            transform: translateY(0);
+        }
+    }
+    
+    /* AI Widget - Auto hide on small screens */
+    .agent-widget {
+        bottom: 16px;
+        right: 16px;
+    }
+    
+    .agent-widget-btn {
+        padding: 12px;
+        min-width: auto;
+        border-radius: 50%;
+    }
+    
+    .agent-label {
         display: none;
+    }
+    
+    .agent-motion-text {
+        display: none;
+    }
+    
+    .agent-avatar {
+        width: 44px;
+        height: 44px;
+    }
+    
+    /* Sidebar - Proper off-canvas behavior */
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 100vh;
+        z-index: 500;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+    }
+    
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    
+    .sidebar-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 400;
+        display: none;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    
+    .sidebar.open + .sidebar-backdrop,
+    .sidebar-backdrop.active {
+        display: block;
+        opacity: 1;
     }
 }
 
@@ -1351,6 +1475,59 @@
     background: color-mix(in srgb, var(--agent-accent-start) 74%, #0f172a);
 }
 
+/* ============================================
+   Skeleton Loading States
+   ============================================ */
+
+.skeleton {
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+    pointer-events: none;
+}
+
+.skeleton-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+}
+
+.skeleton-text {
+    height: 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    margin-bottom: 6px;
+}
+
+.skeleton-text:last-child {
+    margin-bottom: 0;
+    opacity: 0.6;
+}
+
+@keyframes skeleton-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Model list skeleton specific styles */
+.model-item.skeleton {
+    cursor: default;
+}
+
+.model-item.skeleton .model-item-icon {
+    background: var(--bg-tertiary);
+}
+
+.model-item.skeleton .model-item-name,
+.model-item.skeleton .model-item-desc {
+    background: var(--bg-tertiary);
+    height: 14px;
+    border-radius: var(--radius-sm);
+}
+
 /* Typing indicator */
 .agent-typing {
     display: flex;
@@ -1381,6 +1558,24 @@
 
 .sidebar.collapsed ~ #agent-chat-modal .agent-chat-container {
     margin-right: 0;
+}
+
+/* Toast action button styles */
+.toast-action {
+    transition: background 0.15s ease;
+}
+
+.toast-action:hover {
+    background: var(--bg-hover) !important;
+}
+
+.toast-close {
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.toast-close:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
 }
 
 /* Mobile adjustments */

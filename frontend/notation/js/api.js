@@ -44,7 +44,8 @@ const NotationAPI = {
         onDisconnect: null,
         onError: null,
         onMessage: null,
-        onStatusChange: null
+        onStatusChange: null,
+        onReconnecting: null
     },
 
     /**
@@ -313,7 +314,8 @@ const NotationAPI = {
                         responseId: data.responseId,
                         helperMode: data.helperMode,
                         content: content,
-                        artifacts: data.artifacts || []
+                        annotations: data.annotations || [],
+                        suggestions: data.suggestions || []
                     });
                 }
                 break;
@@ -355,6 +357,11 @@ const NotationAPI = {
         console.log(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`);
         this._notifyStatus('reconnecting');
 
+        // Notify UI about reconnection attempt
+        if (this.callbacks.onReconnecting) {
+            this.callbacks.onReconnecting(this.reconnectAttempts);
+        }
+
         setTimeout(() => {
             this.connectWebSocket();
         }, delay);
@@ -388,5 +395,3 @@ window.NotationAPI = NotationAPI;
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = NotationAPI;
 }
-
-

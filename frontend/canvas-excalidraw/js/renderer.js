@@ -765,14 +765,38 @@ class Renderer {
         ];
         
         ctx.save();
+        
+        // Draw shadow/glow for visibility on light backgrounds
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        ctx.shadowBlur = 4 / scale;
+        ctx.shadowOffsetX = 1 / scale;
+        ctx.shadowOffsetY = 1 / scale;
+        
+        // Draw handles with shadow
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#a8a5ff';
-        ctx.lineWidth = 1 / scale;
+        ctx.lineWidth = 2 / scale;
         
         for (const handle of handles) {
             ctx.beginPath();
             ctx.rect(handle.x - handleOffset, handle.y - handleOffset, handleSize, handleSize);
             ctx.fill();
+            ctx.stroke();
+        }
+        
+        // Reset shadow and draw outline for additional visibility
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        
+        // Draw dark outline
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.lineWidth = 0.5 / scale;
+        
+        for (const handle of handles) {
+            ctx.beginPath();
+            ctx.rect(handle.x - handleOffset, handle.y - handleOffset, handleSize, handleSize);
             ctx.stroke();
         }
         

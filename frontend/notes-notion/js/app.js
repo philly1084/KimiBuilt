@@ -121,6 +121,9 @@
             console.log('[Notes] Mermaid diagrams ready');
         }
         
+        // Setup Mermaid lazy loading observer
+        setupMermaidLazyLoading();
+        
         // Initialize storage
         console.log('[Notes] Storage ready');
         
@@ -212,6 +215,40 @@
      */
     function setupGlobalShortcuts() {
         document.addEventListener('keydown', (e) => {
+            // Escape key closes all modals and pickers
+            if (e.key === 'Escape') {
+                // Close emoji picker
+                const emojiPicker = document.getElementById('emoji-picker');
+                if (emojiPicker && emojiPicker.style.display !== 'none') {
+                    e.preventDefault();
+                    emojiPicker.style.display = 'none';
+                    return;
+                }
+                
+                // Close color picker
+                const colorPicker = document.getElementById('color-picker');
+                if (colorPicker && colorPicker.style.display !== 'none') {
+                    e.preventDefault();
+                    colorPicker.style.display = 'none';
+                    return;
+                }
+                
+                // Close block context menu
+                const contextMenu = document.getElementById('block-context-menu');
+                if (contextMenu && contextMenu.style.display !== 'none') {
+                    e.preventDefault();
+                    contextMenu.style.display = 'none';
+                    return;
+                }
+                
+                // Close slash menu
+                if (SlashMenu.isOpen()) {
+                    e.preventDefault();
+                    SlashMenu.hide();
+                    return;
+                }
+            }
+            
             // Cmd/Ctrl + P: New page
             if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
                 e.preventDefault();
@@ -628,6 +665,48 @@
     
     // Expose closeCommandPalette globally for the onclick handler
     window.closeCommandPalette = closeCommandPalette;
+    
+    /**
+     * Setup Mermaid lazy loading - only render diagrams when they come into view
+     */
+    function setupMermaidLazyLoading() {
+        if (typeof IntersectionObserver === 'undefined') return;
+        
+        // Create a single observer for all mermaid diagrams
+        const mermaidObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const mermaidEl = entry.target;
+                    
+                    // Skip if already rendered
+                    if (mermaidEl.dataset.rendered === 'true') return;
+                    mermaidEl.dataset.rendered = 'true';
+                    
+                    // Stop observing this element
+                    mermaidObserver.unobserve(mermaidEl);
+                    
+                    // Render this specific diagram
+                    if (typeof mermaid !== 'undefined') {
+                        try {
+                            mermaid.run({ querySelector: '#' + mermaidEl.id });
+                        } catch (err) {
+                            console.warn('Failed to render mermaid diagram:', err);
+                        }
+                    }
+                }
+            });
+        }, {
+            rootMargin: '100px', // Start rendering 100px before coming into view
+            threshold: 0.1
+        });
+        
+        // Expose function to observe new mermaid elements
+        window.observeMermaidElement = (element) => {
+            if (element && element.classList.contains('mermaid')) {
+                mermaidObserver.observe(element);
+            }
+        };
+    }
     
 })();
 

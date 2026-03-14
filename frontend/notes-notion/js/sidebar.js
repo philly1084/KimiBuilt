@@ -166,38 +166,88 @@ const Sidebar = (function() {
     function setupMobileToggle() {
         // Create mobile toggle button if on mobile
         if (window.innerWidth <= 768) {
-            let mobileToggle = document.querySelector('.mobile-menu-toggle');
-            if (!mobileToggle) {
-                mobileToggle = document.createElement('button');
-                mobileToggle.className = 'mobile-menu-toggle';
-                mobileToggle.innerHTML = `
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="3" y1="12" x2="21" y2="12"></line>
-                        <line x1="3" y1="6" x2="21" y2="6"></line>
-                        <line x1="3" y1="18" x2="21" y2="18"></line>
-                    </svg>
-                `;
-                mobileToggle.addEventListener('click', () => {
-                    sidebarEl.classList.toggle('open');
-                    
-                    // Create/remove backdrop
-                    let backdrop = document.querySelector('.sidebar-backdrop');
-                    if (sidebarEl.classList.contains('open')) {
-                        if (!backdrop) {
-                            backdrop = document.createElement('div');
-                            backdrop.className = 'sidebar-backdrop';
-                            backdrop.addEventListener('click', () => {
-                                sidebarEl.classList.remove('open');
-                                backdrop.remove();
-                            });
-                            document.body.appendChild(backdrop);
-                        }
-                    } else if (backdrop) {
-                        backdrop.remove();
-                    }
-                });
-                document.body.appendChild(mobileToggle);
+            createMobileToggleButton();
+        }
+        
+        // Listen for resize to add/remove mobile toggle
+        window.addEventListener('resize', debounce(() => {
+            if (window.innerWidth <= 768) {
+                createMobileToggleButton();
+            } else {
+                removeMobileToggleButton();
             }
+        }, 100));
+    }
+    
+    /**
+     * Create mobile toggle button
+     */
+    function createMobileToggleButton() {
+        let mobileToggle = document.querySelector('.mobile-menu-toggle');
+        if (mobileToggle) return;
+        
+        mobileToggle = document.createElement('button');
+        mobileToggle.className = 'mobile-menu-toggle';
+        mobileToggle.setAttribute('aria-label', 'Toggle menu');
+        mobileToggle.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        `;
+        mobileToggle.addEventListener('click', toggleMobileSidebar);
+        document.body.appendChild(mobileToggle);
+    }
+    
+    /**
+     * Remove mobile toggle button
+     */
+    function removeMobileToggleButton() {
+        const mobileToggle = document.querySelector('.mobile-menu-toggle');
+        if (mobileToggle) {
+            mobileToggle.remove();
+        }
+        // Also close sidebar and remove backdrop
+        if (sidebarEl) {
+            sidebarEl.classList.remove('open');
+        }
+        const backdrop = document.querySelector('.sidebar-backdrop');
+        if (backdrop) {
+            backdrop.remove();
+        }
+    }
+    
+    /**
+     * Toggle mobile sidebar with backdrop
+     */
+    function toggleMobileSidebar() {
+        if (!sidebarEl) return;
+        
+        const isOpen = sidebarEl.classList.toggle('open');
+        
+        // Create/remove backdrop
+        let backdrop = document.querySelector('.sidebar-backdrop');
+        if (isOpen) {
+            if (!backdrop) {
+                backdrop = document.createElement('div');
+                backdrop.className = 'sidebar-backdrop';
+                backdrop.setAttribute('role', 'button');
+                backdrop.setAttribute('aria-label', 'Close sidebar');
+                backdrop.addEventListener('click', () => {
+                    sidebarEl.classList.remove('open');
+                    backdrop.classList.remove('active');
+                    setTimeout(() => backdrop.remove(), 300);
+                });
+                document.body.appendChild(backdrop);
+                // Trigger animation
+                requestAnimationFrame(() => {
+                    backdrop.classList.add('active');
+                });
+            }
+        } else if (backdrop) {
+            backdrop.classList.remove('active');
+            setTimeout(() => backdrop.remove(), 300);
         }
     }
     
@@ -2115,22 +2165,127 @@ const Sidebar = (function() {
         URL.revokeObjectURL(url);
     }
     
+    // Toast management
+    const toastQueue = [];
+    const MAX_TOASTS = 3;
+    const TOAST_DURATION = 5000;
+    
     /**
-     * Show toast notification
+     * Show toast notification with stacking and auto-dismiss
      */
-    function showToast(message, type = 'info') {
+    function showToast(message, type = 'info', options = {}) {
         const container = document.getElementById('toast-container');
         if (!container) return;
         
+        const { 
+            duration = TOAST_DURATION, 
+            action = null,  // { label: string, callback: function }
+            onClose = null 
+        } = options;
+        
+        // Remove oldest toast if at max
+        if (toastQueue.length >= MAX_TOASTS) {
+            const oldest = toastQueue.shift();
+            if (oldest && oldest.element) {
+                oldest.element.remove();
+            }
+        }
+        
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        toast.textContent = message;
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        
+        // Build toast content
+        let content = `<span>${escapeHtml(message)}</span>`;
+        
+        if (action) {
+            content += `<button class="toast-action" style="margin-left: auto; background: transparent; border: none; color: var(--accent-color); cursor: pointer; font-weight: 500; padding: 4px 8px; border-radius: var(--radius-sm);">${escapeHtml(action.label)}</button>`;
+        }
+        
+        content += `<button class="toast-close" aria-label="Close notification" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; margin-left: ${action ? '8px' : 'auto'}; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;">✕</button>`;
+        
+        toast.innerHTML = content;
+        
+        // Add close button handler
+        const closeBtn = toast.querySelector('.toast-close');
+        closeBtn.addEventListener('click', () => {
+            removeToast(toastItem);
+            if (onClose) onClose();
+        });
+        
+        // Add action button handler
+        if (action) {
+            const actionBtn = toast.querySelector('.toast-action');
+            actionBtn.addEventListener('click', () => {
+                action.callback();
+                removeToast(toastItem);
+            });
+        }
         
         container.appendChild(toast);
         
-        setTimeout(() => {
-            toast.remove();
-        }, 3000);
+        const toastItem = {
+            element: toast,
+            timeout: setTimeout(() => {
+                removeToast(toastItem);
+                if (onClose) onClose();
+            }, duration)
+        };
+        
+        toastQueue.push(toastItem);
+        
+        // Animate in
+        requestAnimationFrame(() => {
+            toast.style.animation = 'slideIn 0.3s ease';
+        });
+    }
+    
+    /**
+     * Remove a toast from the queue and DOM
+     */
+    function removeToast(toastItem) {
+        const index = toastQueue.indexOf(toastItem);
+        if (index > -1) {
+            toastQueue.splice(index, 1);
+        }
+        
+        if (toastItem.element) {
+            toastItem.element.style.opacity = '0';
+            toastItem.element.style.transform = 'translateX(100%)';
+            toastItem.element.style.transition = 'all 0.3s ease';
+            setTimeout(() => {
+                toastItem.element.remove();
+            }, 300);
+        }
+        
+        if (toastItem.timeout) {
+            clearTimeout(toastItem.timeout);
+        }
+    }
+    
+    /**
+     * Show undo toast for block deletion
+     */
+    function showUndoToast(message, undoCallback) {
+        let undoPerformed = false;
+        
+        showToast(message, 'info', {
+            duration: 5000,
+            action: {
+                label: 'Undo',
+                callback: () => {
+                    undoPerformed = true;
+                    undoCallback();
+                }
+            },
+            onClose: () => {
+                // Toast closed without undo - finalize deletion
+                if (!undoPerformed) {
+                    // Optional: perform permanent cleanup
+                }
+            }
+        });
     }
     
     /**
@@ -2369,10 +2524,12 @@ const Sidebar = (function() {
         createNewPage,
         showTemplateModal,
         showToast,
+        showUndoToast,
         showSearchModal,
         showImportModal,
         exportCurrentPage,
-        showExportAllModal
+        showExportAllModal,
+        toggle: toggleSidebar
     };
     
     return window.Sidebar;

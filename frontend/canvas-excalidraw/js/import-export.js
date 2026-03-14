@@ -138,6 +138,7 @@ class ImportExportManager {
         const scaledHeight = bounds.height * scale;
         const cols = Math.ceil(scaledWidth / contentWidth);
         const rows = Math.ceil(scaledHeight / contentHeight);
+        const totalPages = cols * rows;
         
         const pdf = new jsPDF({
             orientation: scaledWidth > scaledHeight ? 'landscape' : 'portrait',
@@ -157,8 +158,16 @@ class ImportExportManager {
         exportCanvas.width = tileWidth * exportScale;
         exportCanvas.height = tileHeight * exportScale;
 
+        let currentPage = 0;
+
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
+                currentPage++;
+                
+                // Update progress
+                const progress = Math.round((currentPage / totalPages) * 100);
+                window.app?.updateExportProgress?.(progress, `Page ${currentPage} of ${totalPages}`);
+                
                 if (row > 0 || col > 0) {
                     pdf.addPage();
                 }
@@ -198,6 +207,9 @@ class ImportExportManager {
             }
         }
 
+        // Final progress update
+        window.app?.updateExportProgress?.(100, 'Finalizing...');
+        
         pdf.save(`${filename}.pdf`);
     }
 

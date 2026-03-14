@@ -400,6 +400,13 @@ class DiagramHandler extends CanvasTypeHandler {
     constructor() {
         super();
         this.mermaidInitialized = false;
+        this.zoomLevel = 1;
+        this.minZoom = 0.25;
+        this.maxZoom = 3;
+        this.zoomStep = 0.25;
+        this.autoRenderTimer = null;
+        this.lastContent = '';
+        this.renderDebounceMs = 500;
     }
 
     async initializeMermaid() {
@@ -440,6 +447,46 @@ class DiagramHandler extends CanvasTypeHandler {
     }
 
     /**
+     * Debounced auto-render for diagram
+     * @param {string} content 
+     * @param {string} elementId 
+     */
+    scheduleAutoRender(content, elementId) {
+        // Clear existing timer
+        if (this.autoRenderTimer) {
+            clearTimeout(this.autoRenderTimer);
+        }
+
+        // Skip if content hasn't changed
+        if (content === this.lastContent) return;
+
+        // Schedule new render
+        this.autoRenderTimer = setTimeout(() => {
+            this.renderDiagram(content, elementId);
+        }, this.renderDebounceMs);
+    }
+
+    /**
+     * Show loading state
+     */
+    showLoading() {
+        const loadingEl = document.getElementById('diagram-loading');
+        const outputEl = document.getElementById('diagram-output');
+        if (loadingEl) loadingEl.classList.remove('hidden');
+        if (outputEl) outputEl.style.opacity = '0.5';
+    }
+
+    /**
+     * Hide loading state
+     */
+    hideLoading() {
+        const loadingEl = document.getElementById('diagram-loading');
+        const outputEl = document.getElementById('diagram-output');
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (outputEl) outputEl.style.opacity = '1';
+    }
+
+    /**
      * Render Mermaid diagram
      * @param {string} content 
      * @param {string} elementId 
@@ -459,6 +506,13 @@ class DiagramHandler extends CanvasTypeHandler {
             return false;
         }
 
+        // Show loading
+        this.showLoading();
+        this.lastContent = content;
+
+        // Clear previous errors
+        this.clearErrorPanel();
+
         try {
             // Clear previous content
             element.innerHTML = '';
@@ -470,16 +524,89 @@ class DiagramHandler extends CanvasTypeHandler {
             const { svg } = await mermaid.render(uniqueId, content);
             element.innerHTML = svg;
 
+            // Apply current zoom
+            this.applyZoom();
+
+            this.hideLoading();
             return true;
         } catch (error) {
             console.error('Mermaid render error:', error);
+            this.hideLoading();
+            
+            // Parse error for line number
+            const errorInfo = this.parseError(error, content);
+            
             element.innerHTML = `
                 <div class="error">
                     <strong>Diagram Error:</strong><br>
-                    ${this.escapeHtml(error.message || 'Failed to render diagram')}
+                    ${this.escapeHtml(errorInfo.message || 'Failed to render diagram')}
+                    ${errorInfo.line ? `<br><small>Line ${errorInfo.line}</small>` : ''}
                 </div>
             `;
+
+            // Show error panel
+            this.showErrorPanel([errorInfo]);
+
             return false;
+        }
+    }
+
+    /**
+     * Parse Mermaid error for line number
+     * @param {Error} error 
+     * @param {string} content 
+     * @returns {Object}
+     */
+    parseError(error, content) {
+        const message = error.message || error.toString();
+        let line = null;
+
+        // Try to extract line number from error message
+        const lineMatch = message.match(/line\s+(\d+)/i) || 
+                          message.match(/at\s+line\s+(\d+)/i) ||
+                          message.match(/\((\d+):\d+\)/);
+        
+        if (lineMatch) {
+            line = parseInt(lineMatch[1], 10);
+        }
+
+        return {
+            message: message,
+            line: line,
+            content: content
+        };
+    }
+
+    /**
+     * Show error panel with inline indicators
+     * @param {Array} errors 
+     */
+    showErrorPanel(errors) {
+        // Create error panel if not exists
+        let panel = document.querySelector('.diagram-error-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'diagram-error-panel';
+            document.querySelector('.diagram-canvas-container')?.appendChild(panel);
+        }
+
+        panel.innerHTML = errors.map(err => `
+            <div class="diagram-error-item">
+                ${err.line ? `<span class="diagram-error-line">Line ${err.line}</span>` : ''}
+                <span>${this.escapeHtml(err.message)}</span>
+            </div>
+        `).join('');
+
+        panel.classList.remove('hidden');
+    }
+
+    /**
+     * Clear error panel
+     */
+    clearErrorPanel() {
+        const panel = document.querySelector('.diagram-error-panel');
+        if (panel) {
+            panel.remove();
         }
     }
 
@@ -504,10 +631,18 @@ class DiagramHandler extends CanvasTypeHandler {
             firstLine.startsWith(type.toLowerCase())
         );
 
+        const errors = [];
+        if (!detectedType) {
+            errors.push({
+                line: 1,
+                message: 'Invalid diagram type. Must start with a valid type like graph, flowchart, sequenceDiagram, etc.'
+            });
+        }
+
         return {
             isValid: detectedType !== undefined,
             type: detectedType,
-            errors: detectedType ? [] : ['Invalid diagram type. Must start with a valid type like graph, flowchart, sequenceDiagram, etc.']
+            errors: errors
         };
     }
 
@@ -542,6 +677,58 @@ class DiagramHandler extends CanvasTypeHandler {
                 theme: theme === 'dark' ? 'dark' : 'default'
             });
         }
+    }
+
+    /**
+     * Zoom in
+     */
+    zoomIn() {
+        if (this.zoomLevel < this.maxZoom) {
+            this.zoomLevel = Math.min(this.maxZoom, this.zoomLevel + this.zoomStep);
+            this.applyZoom();
+        }
+    }
+
+    /**
+     * Zoom out
+     */
+    zoomOut() {
+        if (this.zoomLevel > this.minZoom) {
+            this.zoomLevel = Math.max(this.minZoom, this.zoomLevel - this.zoomStep);
+            this.applyZoom();
+        }
+    }
+
+    /**
+     * Reset zoom
+     */
+    resetZoom() {
+        this.zoomLevel = 1;
+        this.applyZoom();
+    }
+
+    /**
+     * Apply current zoom level to diagram
+     */
+    applyZoom() {
+        const output = document.getElementById('diagram-output');
+        const levelDisplay = document.getElementById('diagram-zoom-level');
+        
+        if (output) {
+            output.style.transform = `scale(${this.zoomLevel})`;
+        }
+        
+        if (levelDisplay) {
+            levelDisplay.textContent = `${Math.round(this.zoomLevel * 100)}%`;
+        }
+    }
+
+    /**
+     * Get current zoom level
+     * @returns {number}
+     */
+    getZoomLevel() {
+        return this.zoomLevel;
     }
 
     getFileExtension() {

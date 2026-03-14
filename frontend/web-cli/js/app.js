@@ -46,9 +46,11 @@ class CodeCLIApp {
         this.shortcutsModal = document.getElementById('shortcutsModal');
         this.cliStatus = document.getElementById('cliStatus');
         this.queueIndicator = document.getElementById('queueIndicator');
-        this.queueSection = document.getElementById('queueSection');
-        this.queueList = document.getElementById('queueList');
-        this.queueCount = document.getElementById('queueCount');
+        // Queue elements removed - using inline status only
+        this.queueSection = null;
+        this.queueList = null;
+        this.queueCount = null;
+        this.dragEnterCounter = 0;  // For reliable drag overlay
         
         this.setupEventListeners();
         this.applyTheme(this.theme);
@@ -101,8 +103,12 @@ class CodeCLIApp {
                 e.preventDefault();
                 this.clearOutput();
             } else if (e.ctrlKey && e.key === 'c') {
-                e.preventDefault();
-                this.copyLastOutput();
+                // Only intercept if no text is selected (allow normal copy)
+                const selection = window.getSelection().toString();
+                if (!selection) {
+                    e.preventDefault();
+                    this.copyLastOutput();
+                }
             } else if (e.key === 'Escape') {
                 this.hideAutocomplete();
                 this.closeShortcuts();
@@ -141,9 +147,11 @@ class CodeCLIApp {
         
         // File drop handling
         this.dragOverlay = document.getElementById('dragOverlay');
+        this.dragEnterCounter = 0;
         
         document.addEventListener('dragenter', (e) => {
             e.preventDefault();
+            this.dragEnterCounter++;
             if (this.dragOverlay) {
                 this.dragOverlay.classList.add('active');
             }
@@ -155,19 +163,29 @@ class CodeCLIApp {
         
         document.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            if (e.relatedTarget === null && this.dragOverlay) {
+            this.dragEnterCounter--;
+            if (this.dragEnterCounter <= 0 && this.dragOverlay) {
+                this.dragEnterCounter = 0;
                 this.dragOverlay.classList.remove('active');
             }
         });
         
         document.addEventListener('drop', (e) => {
             e.preventDefault();
+            this.dragEnterCounter = 0;
             if (this.dragOverlay) {
                 this.dragOverlay.classList.remove('active');
             }
             
             const files = Array.from(e.dataTransfer.files);
             files.forEach(file => this.handleFile(file));
+        });
+        
+        // Cancel drag when pressing Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.dragOverlay && this.dragOverlay.classList.contains('active')) {
+                this.cancelDrag();
+            }
         });
     }
     
@@ -229,23 +247,10 @@ class CodeCLIApp {
     updateQueueDisplay() {
         const count = this.commandQueue.length;
         
-        // Update indicator
+        // Update indicator only (side panel removed)
         if (this.queueIndicator) {
             this.queueIndicator.textContent = count;
             this.queueIndicator.classList.toggle('hidden', count === 0);
-        }
-        
-        // Update side panel
-        if (this.queueSection) {
-            this.queueSection.style.display = count > 0 ? 'block' : 'none';
-        }
-        if (this.queueCount) {
-            this.queueCount.textContent = count;
-        }
-        if (this.queueList) {
-            this.queueList.innerHTML = this.commandQueue.map(cmd => 
-                `<div class="queue-item">${this.escapeHtml(cmd.substring(0, 40))}${cmd.length > 40 ? '...' : ''}</div>`
-            ).join('');
         }
     }
     
@@ -269,6 +274,8 @@ class CodeCLIApp {
             case 'model':
                 if (args[0]) {
                     api.setModel(args[0]);
+                    // Reload models to update dropdown then sync selection
+                    await this.loadModels();
                     this.updateModelInfo();
                     this.printSystem(`Model set to: ${args[0]}`);
                 } else {
@@ -370,8 +377,9 @@ class CodeCLIApp {
             // Print response
             this.printAI(response.content || 'No response');
             
-            // Update status
+            // Update status and session info
             this.setStatus('ready');
+            this.updateSessionInfo();
             
             // Add to conversation
             this.lastResponse = response.content;
@@ -424,16 +432,25 @@ class CodeCLIApp {
 Session Statistics:
   Duration: ${elapsed}s
   Model: ${api.currentModel || 'default'}
+  Session: ${api.sessionId || 'none'}
         `.trim());
+    }
+    
+    updateSessionInfo() {
+        if (this.sessionInfo && api.sessionId) {
+            const shortId = api.sessionId.slice(0, 8);
+            this.sessionInfo.textContent = `Session: ${shortId}...`;
+            this.sessionInfo.title = `Full session ID: ${api.sessionId}`;
+        }
     }
     
     // ==================== Output Methods ====================
     
     printInput(text) {
         const line = document.createElement('div');
-        line.className = 'line line-input';
+        line.className = 'line line-input user-message';
         line.innerHTML = `
-            <span class="prompt">?</span>
+            <span class="prompt">❯</span>
             <span class="input-text">${this.escapeHtml(text)}</span>
         `;
         this.terminalOutput.appendChild(line);
@@ -520,7 +537,7 @@ Session Statistics:
   /stats             Show session statistics
   /save <name>       Save conversation
   /load <name>       Load conversation
-  /export            Export conversation to file
+  /export            Export session to JSON file
   /copy              Copy last response to clipboard
 
 **Files:**
@@ -651,7 +668,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                             <div class="code-header">
                                 <span>mermaid</span>
                                 <div class="code-actions">
-                                    <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
+                                    <button class="code-action-btn" onclick="app.copyCode(this)" aria-label="Copy code">Copy</button>
                                 </div>
                             </div>
                             <pre><code class="language-mermaid nohighlight">${escapedCode}</code></pre>
@@ -669,7 +686,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                     <div class="code-header">
                         <span>${language}</span>
                         <div class="code-actions">
-                            <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
+                            <button class="code-action-btn" onclick="app.copyCode(this)" aria-label="Copy code">Copy</button>
                         </div>
                     </div>
                     <pre><code class="language-${language}">${escapedCode}</code></pre>
@@ -727,6 +744,17 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     scrollToBottom() {
         this.terminalOutput.scrollTop = this.terminalOutput.scrollHeight;
+        this.enforceScrollbackLimit();
+    }
+    
+    enforceScrollbackLimit(maxLines = 1000) {
+        const lines = this.terminalOutput.querySelectorAll('.line, .imported-file');
+        if (lines.length > maxLines) {
+            const toRemove = lines.length - maxLines;
+            for (let i = 0; i < toRemove; i++) {
+                lines[i].remove();
+            }
+        }
     }
     
     // ==================== API Methods ====================
@@ -1343,7 +1371,7 @@ ${diagramCode}
             <div class="file-manager-content">
                 <div class="file-manager-header">
                     <h3>Session Files (${this.sessionFiles.length})</h3>
-                    <button class="file-manager-close" onclick="app.closeFileManager()">Close</button>
+                    <button class="file-manager-close" onclick="app.closeFileManager()" aria-label="Close file manager">&times;</button>
                 </div>
                 <div class="file-manager-body">
                     ${this.sessionFiles.length === 0 ? 
@@ -1359,8 +1387,8 @@ ${diagramCode}
                     }
                 </div>
                 <div class="file-manager-footer">
-                    <button class="ai-image-btn" onclick="app.closeFileManager()">Close</button>
-                    <button class="ai-image-btn primary" onclick="app.downloadAllFiles()">Download All (ZIP)</button>
+                    <button class="btn" onclick="app.closeFileManager()">Close</button>
+                    <button class="btn" onclick="app.downloadAllFiles()">Download All</button>
                 </div>
             </div>
         `;
@@ -1374,6 +1402,13 @@ ${diagramCode}
     closeFileManager() {
         const modal = document.getElementById('file-manager-modal');
         if (modal) modal.remove();
+    }
+    
+    cancelDrag() {
+        this.dragEnterCounter = 0;
+        if (this.dragOverlay) {
+            this.dragOverlay.classList.remove('active');
+        }
     }
     
     /**
@@ -1448,8 +1483,9 @@ ${diagramCode}
     copyCode(btn) {
         const code = btn.closest('.code-block').querySelector('code').textContent;
         navigator.clipboard.writeText(code);
+        const originalText = btn.textContent;
         btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = 'Copy', 2000);
+        setTimeout(() => btn.textContent = originalText, 2000);
     }
     
     showShortcuts() {

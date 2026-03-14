@@ -1144,17 +1144,21 @@ const Editor = (function() {
     }
     
     /**
-     * Delete a block
+     * Delete a block with undo support
      */
     function deleteBlock(blockId) {
         if (!currentPage) return;
         
-        saveToHistory();
-        
         const location = findBlockLocation(blockId);
         if (!location) return;
+        
         const visibleBlocks = getFlattenedBlocks();
         const visibleIndex = visibleBlocks.findIndex((entry) => entry.block.id === blockId);
+        const deletedBlock = location.block;
+        const blockContent = extractBlockText(deletedBlock) || deletedBlock.type;
+        
+        // Save to history for undo
+        saveToHistory();
         
         // Don't delete the last block, convert to empty text instead
         if (visibleBlocks.length === 1) {
@@ -1172,6 +1176,34 @@ const Editor = (function() {
         if (updatedVisibleBlocks[focusIndex]) {
             focusBlock(updatedVisibleBlocks[focusIndex].block.id);
         }
+        
+        // Show undo toast
+        if (window.Sidebar?.showUndoToast) {
+            window.Sidebar.showUndoToast(`Deleted "${blockContent.substring(0, 30)}${blockContent.length > 30 ? '...' : ''}"`, () => {
+                // Undo callback - restore the block
+                restoreDeletedBlock(deletedBlock, location);
+            });
+        }
+    }
+    
+    /**
+     * Restore a deleted block
+     */
+    function restoreDeletedBlock(block, originalLocation) {
+        if (!currentPage) return;
+        
+        saveToHistory();
+        
+        // Restore the block at its original position
+        originalLocation.siblings.splice(originalLocation.index, 0, block);
+        
+        refreshEditor();
+        autoSave();
+        
+        // Focus the restored block
+        focusBlock(block.id);
+        
+        showToast('Block restored', 'success');
     }
     
     /**

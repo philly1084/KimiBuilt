@@ -12,7 +12,8 @@ const AnnotationsManager = {
         panel: null,
         list: null,
         toggle: null,
-        output: null
+        output: null,
+        badge: null
     },
 
     /**
@@ -24,7 +25,8 @@ const AnnotationsManager = {
             panel: elements.panel || document.getElementById('annotationsPanel'),
             list: elements.list || document.getElementById('annotationsList'),
             toggle: elements.toggle || document.getElementById('toggleAnnotations'),
-            output: elements.output || document.getElementById('outputRendered')
+            output: elements.output || document.getElementById('outputRendered'),
+            badge: elements.badge || document.getElementById('annotationBadge')
         };
 
         // Bind toggle button
@@ -43,6 +45,7 @@ const AnnotationsManager = {
         this.annotations = annotations || [];
         this.render();
         this.highlightLines();
+        this._updateBadge();
     },
 
     /**
@@ -52,6 +55,7 @@ const AnnotationsManager = {
         this.annotations = [];
         this.render();
         this.clearHighlights();
+        this._updateBadge();
     },
 
     /**
@@ -329,6 +333,26 @@ const AnnotationsManager = {
         });
 
         return summary;
+    },
+
+    /**
+     * Update badge with current annotation count
+     * @private
+     */
+    _updateBadge() {
+        if (!this.elements.badge) return;
+
+        const count = this.annotations.length;
+        this.elements.badge.textContent = count;
+        this.elements.badge.dataset.count = count;
+        
+        // Show/hide badge based on count
+        if (count > 0) {
+            this.elements.badge.style.display = 'flex';
+            this.elements.badge.title = `${count} annotation${count !== 1 ? 's' : ''}`;
+        } else {
+            this.elements.badge.style.display = 'none';
+        }
     }
 };
 

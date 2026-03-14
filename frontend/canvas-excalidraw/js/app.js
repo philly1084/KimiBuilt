@@ -1,11 +1,14 @@
 /**
  * Main App Controller - Event coordination and app initialization
  * Enhanced: Uses OpenAI SDK for API communication
+ * Fixed: Share functionality, mobile controls, export/import improvements
  */
 
 class App {
     constructor() {
         this.currentTool = 'selection';
+        this.aiTooltipTimeout = null;
+        this.lastImport = null; // For undo import functionality
         this.init();
     }
     
@@ -18,6 +21,11 @@ class App {
             this.setupExport();
             this.setupKeyboardShortcuts();
             this.setupAutoSave();
+            this.setupMobileControls();
+            this.setupMiniMap();
+            this.setupAITooltip();
+            this.setupFontSearch();
+            this.setupOpacitySlider();
             
             // Note: WebSocket not used with OpenAI SDK mode
             console.log('OpenAI SDK mode: WebSocket not used');
@@ -38,6 +46,9 @@ class App {
             
             // Setup tooltips
             this.setupTooltips();
+            
+            // Setup touch/long-press for mobile
+            this.setupTouchHandling();
             
             console.log('Kimi Canvas initialized with OpenAI SDK');
         });
@@ -97,7 +108,6 @@ class App {
             const canvas = window.infiniteCanvas;
             if (!canvas) return;
             
-            // Ask user if they want to restore (if elements exist and saved data is newer)
             const savedTime = new Date(data.timestamp).toLocaleString();
             
             // Load elements
@@ -164,7 +174,6 @@ class App {
         
         exportBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            // Toggle dropdown if present, otherwise show export dialog
             if (exportDropdown) {
                 exportDropdown.classList.toggle('active');
             } else {
@@ -172,12 +181,24 @@ class App {
             }
         });
         
-        // Export dropdown items
+        // Export dropdown items - auto-close on selection
         document.querySelectorAll('[data-export]').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const format = btn.dataset.export;
-                window.importExportManager?.export(format);
+                
+                // Show progress modal for PDF export
+                if (format === 'pdf') {
+                    this.showExportProgress();
+                }
+                
+                await window.importExportManager?.export(format);
+                
+                // Hide progress modal
+                if (format === 'pdf') {
+                    this.hideExportProgress();
+                }
+                
                 if (exportDropdown) {
                     exportDropdown.classList.remove('active');
                 }
@@ -196,12 +217,23 @@ class App {
             window.importExportManager?.showImportDialog();
         });
         
+        // File import input
+        const fileImportInput = document.getElementById('fileImportInput');
+        fileImportInput?.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                await window.importExportManager?.importFiles(files);
+            }
+            // Reset input
+            e.target.value = '';
+        });
+        
         // Help button
         document.getElementById('helpBtn')?.addEventListener('click', () => {
             this.showHelpModal();
         });
         
-        // Share button
+        // Share button - implement share functionality
         document.getElementById('shareBtn')?.addEventListener('click', () => {
             this.shareCanvas();
         });
@@ -279,14 +311,14 @@ class App {
             e.preventDefault();
         });
         
-        document.addEventListener('drop', (e) => {
+        document.addEventListener('drop', async (e) => {
             e.preventDefault();
             dragCounter = 0;
             if (fileDropOverlay) {
                 fileDropOverlay.classList.remove('active');
             }
             document.body.classList.remove('drag-over');
-            this.handleFileDrop(e);
+            await this.handleFileDrop(e);
         });
         
         // Prevent leaving page with unsaved changes
@@ -297,6 +329,223 @@ class App {
                 e.returnValue = '';
             }
         });
+    }
+    
+    setupMobileControls() {
+        // Mobile toolbar toggle
+        const mobileToolbarToggle = document.getElementById('mobileToolbarToggle');
+        const toolbar = document.getElementById('toolbar');
+        const mobileToolbarClose = document.getElementById('mobileToolbarClose');
+        
+        mobileToolbarToggle?.addEventListener('click', () => {
+            toolbar?.classList.add('active');
+        });
+        
+        mobileToolbarClose?.addEventListener('click', () => {
+            toolbar?.classList.remove('active');
+        });
+        
+        // Mobile properties panel toggle
+        const mobilePropertiesToggle = document.getElementById('mobilePropertiesToggle');
+        const propertiesPanel = document.getElementById('propertiesPanel');
+        const mobilePropertiesClose = document.getElementById('mobilePropertiesClose');
+        
+        mobilePropertiesToggle?.addEventListener('click', () => {
+            propertiesPanel?.classList.add('active');
+        });
+        
+        mobilePropertiesClose?.addEventListener('click', () => {
+            propertiesPanel?.classList.remove('active');
+        });
+    }
+    
+    setupMiniMap() {
+        const miniMapToggle = document.getElementById('miniMapToggle');
+        const miniMap = document.getElementById('miniMap');
+        
+        miniMapToggle?.addEventListener('click', () => {
+            const isVisible = miniMap?.style.display !== 'none';
+            if (miniMap) {
+                miniMap.style.display = isVisible ? 'none' : 'block';
+            }
+            miniMapToggle?.classList.toggle('active', !isVisible);
+            
+            if (!isVisible) {
+                this.updateMiniMap();
+            }
+        });
+        
+        // Update mini map on canvas changes
+        window.infiniteCanvas?.canvas?.addEventListener('change', () => {
+            if (miniMap?.style.display !== 'none') {
+                this.updateMiniMap();
+            }
+        });
+    }
+    
+    updateMiniMap() {
+        const miniMapCanvas = document.getElementById('miniMapCanvas');
+        const miniMapViewport = document.getElementById('miniMapViewport');
+        if (!miniMapCanvas || !window.infiniteCanvas) return;
+        
+        const canvas = window.infiniteCanvas;
+        const ctx = miniMapCanvas.getContext('2d');
+        
+        // Get canvas bounds
+        const bounds = canvas.getBounds();
+        const padding = 50;
+        
+        // Set mini map dimensions
+        const scale = Math.min(
+            miniMapCanvas.width / (bounds.width + padding * 2),
+            miniMapCanvas.height / (bounds.height + padding * 2)
+        );
+        
+        // Clear mini map
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--canvas-bg');
+        ctx.fillRect(0, 0, miniMapCanvas.width, miniMapCanvas.height);
+        
+        // Draw elements
+        ctx.save();
+        ctx.translate(
+            miniMapCanvas.width / 2 - (bounds.x + bounds.width / 2) * scale,
+            miniMapCanvas.height / 2 - (bounds.y + bounds.height / 2) * scale
+        );
+        ctx.scale(scale, scale);
+        
+        for (const element of canvas.elements) {
+            window.renderer?.drawElement(ctx, element);
+        }
+        
+        ctx.restore();
+        
+        // Update viewport indicator
+        if (miniMapViewport) {
+            const viewportWidth = canvas.canvas.width / canvas.scale * scale;
+            const viewportHeight = canvas.canvas.height / canvas.scale * scale;
+            miniMapViewport.style.width = `${viewportWidth}px`;
+            miniMapViewport.style.height = `${viewportHeight}px`;
+            miniMapViewport.style.left = `${miniMapCanvas.width / 2 - viewportWidth / 2}px`;
+            miniMapViewport.style.top = `${miniMapCanvas.height / 2 - viewportHeight / 2}px`;
+        }
+    }
+    
+    setupAITooltip() {
+        const aiTooltip = document.getElementById('aiImageTooltip');
+        const aiTooltipClose = document.getElementById('aiTooltipClose');
+        
+        // Close button handler
+        aiTooltipClose?.addEventListener('click', () => {
+            if (aiTooltip) {
+                aiTooltip.style.display = 'none';
+            }
+            if (this.aiTooltipTimeout) {
+                clearTimeout(this.aiTooltipTimeout);
+            }
+        });
+        
+        // Auto-hide after 3 seconds when shown
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                    if (aiTooltip?.style.display === 'block') {
+                        if (this.aiTooltipTimeout) {
+                            clearTimeout(this.aiTooltipTimeout);
+                        }
+                        this.aiTooltipTimeout = setTimeout(() => {
+                            if (aiTooltip) {
+                                aiTooltip.style.display = 'none';
+                            }
+                        }, 3000);
+                    }
+                }
+            });
+        });
+        
+        if (aiTooltip) {
+            observer.observe(aiTooltip, { attributes: true });
+        }
+        
+        // Hide on click elsewhere
+        document.addEventListener('click', (e) => {
+            if (aiTooltip && !aiTooltip.contains(e.target) && 
+                !e.target.closest('[data-tool="ai-image"]')) {
+                aiTooltip.style.display = 'none';
+            }
+        });
+    }
+    
+    setupFontSearch() {
+        const fontSearchInput = document.getElementById('fontSearchInput');
+        if (!fontSearchInput) return;
+        
+        let debounceTimer;
+        
+        fontSearchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                window.propertiesManager?.filterFonts(e.target.value);
+            }, 300);
+        });
+    }
+    
+    setupOpacitySlider() {
+        const opacitySlider = document.getElementById('opacitySlider');
+        const opacityValue = document.getElementById('opacityValue');
+        const opacityPreview = document.getElementById('opacityPreview');
+        
+        if (!opacitySlider) return;
+        
+        const updateOpacity = () => {
+            const value = opacitySlider.value;
+            if (opacityValue) {
+                opacityValue.textContent = `${value}%`;
+            }
+            if (opacityPreview) {
+                opacityPreview.style.width = `${value}%`;
+            }
+            
+            // Update selected elements in real-time
+            const canvas = window.infiniteCanvas;
+            if (canvas?.selectedElements.length > 0) {
+                for (const el of canvas.selectedElements) {
+                    el.opacity = value / 100;
+                }
+                canvas.render();
+            }
+            
+            // Update default properties
+            window.toolManager?.updateDefaultProperties({ opacity: value / 100 });
+        };
+        
+        opacitySlider.addEventListener('input', updateOpacity);
+        
+        // Initial update
+        updateOpacity();
+    }
+    
+    showExportProgress() {
+        const modal = document.getElementById('exportProgressModal');
+        if (modal) {
+            modal.style.display = 'flex';
+        }
+    }
+    
+    hideExportProgress() {
+        const modal = document.getElementById('exportProgressModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    updateExportProgress(progress, page = '') {
+        const fill = document.getElementById('exportProgressFill');
+        const text = document.getElementById('exportProgressText');
+        const pageText = document.getElementById('exportProgressPage');
+        
+        if (fill) fill.style.width = `${progress}%`;
+        if (text) text.textContent = progress < 100 ? 'Exporting...' : 'Complete!';
+        if (pageText && page) pageText.textContent = page;
     }
     
     setupKeyboardShortcuts() {
@@ -330,14 +579,24 @@ class App {
                 document.getElementById('layersPanel')?.classList.toggle('active');
             }
             
+            // Mini map toggle (M)
+            if (e.key.toLowerCase() === 'm' && !isInputActive && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                document.getElementById('miniMapToggle')?.click();
+            }
+            
             // Escape to close modals and deselect
             if (e.key === 'Escape') {
                 // First check if text editor is open
                 const textEditor = document.getElementById('textEditor');
                 if (textEditor && textEditor.style.display === 'block') {
-                    textEditor.blur(); // Will trigger save/cancel
+                    textEditor.blur();
                     return;
                 }
+                
+                // Close mobile panels
+                document.getElementById('toolbar')?.classList.remove('active');
+                document.getElementById('propertiesPanel')?.classList.remove('active');
+                
                 this.hideExportModal();
                 this.hideHelpModal();
                 window.aiAssistant?.hidePanel();
@@ -406,6 +665,32 @@ class App {
                 }
             }
         });
+    }
+    
+    setupTouchHandling() {
+        // Long-press tooltips for mobile
+        if (window.matchMedia('(pointer: coarse)').matches) {
+            document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+                let pressTimer;
+                
+                btn.addEventListener('touchstart', (e) => {
+                    pressTimer = setTimeout(() => {
+                        btn.classList.add('show-tooltip');
+                        setTimeout(() => {
+                            btn.classList.remove('show-tooltip');
+                        }, 1500);
+                    }, 500);
+                });
+                
+                btn.addEventListener('touchend', () => {
+                    clearTimeout(pressTimer);
+                });
+                
+                btn.addEventListener('touchmove', () => {
+                    clearTimeout(pressTimer);
+                });
+            });
+        }
     }
     
     setupImageUpload() {
@@ -486,17 +771,57 @@ class App {
             const y = e.clientY - rect.top;
             const worldPos = canvas.screenToWorld(x, y);
             
+            // Store current state for undo
+            const previousElements = [...canvas.elements];
+            const importSummary = {
+                count: 0,
+                files: [],
+                errors: []
+            };
+            
             // Process each file
             for (const file of files) {
-                // Check if it's an image type
-                const isImage = file.type.startsWith('image/') || 
-                    /\.(png|jpg|jpeg|gif|svg|webp)$/i.test(file.name);
-                
-                if (isImage) {
-                    await window.importExportManager.importImage(file, worldPos);
-                } else {
-                    await window.importExportManager.importFile(file);
+                try {
+                    // Check if it's an image type
+                    const isImage = file.type.startsWith('image/') || 
+                        /\.(png|jpg|jpeg|gif|svg|webp)$/i.test(file.name);
+                    
+                    if (isImage) {
+                        await window.importExportManager.importImage(file, worldPos);
+                        importSummary.count++;
+                        importSummary.files.push(file.name);
+                    } else {
+                        await window.importExportManager.importFile(file);
+                        importSummary.count++;
+                        importSummary.files.push(file.name);
+                    }
+                } catch (error) {
+                    // Map technical errors to user-friendly messages
+                    const errorMessage = this.getUserFriendlyError(error, file.name);
+                    importSummary.errors.push({ file: file.name, error: errorMessage });
                 }
+            }
+            
+            // Store import data for undo
+            this.lastImport = {
+                previousElements,
+                newElements: canvas.elements.filter(el => !previousElements.includes(el)),
+                summary: importSummary
+            };
+            
+            // Show appropriate toast
+            if (importSummary.count > 0) {
+                this.showToast(`Imported ${importSummary.count} file(s)`);
+                
+                // Show undo option
+                if (importSummary.count > 1) {
+                    this.showUndoImportToast(importSummary);
+                }
+            }
+            
+            if (importSummary.errors.length > 0) {
+                console.error('Import errors:', importSummary.errors);
+                this.showToast(`${importSummary.errors.length} file(s) failed to import`, 'error');
             }
         } else {
             // Fallback to legacy import
@@ -511,6 +836,56 @@ class App {
                 }
             }
         }
+    }
+    
+    getUserFriendlyError(error, filename) {
+        const errorMap = {
+            'Invalid JSON': `The file "${filename}" is not a valid JSON file.`,
+            'Failed to read file': `Could not read "${filename}". The file may be corrupted.`,
+            'Failed to load image': `Could not load "${filename}" as an image.`,
+            'Unsupported file type': `"${filename}" has an unsupported file format.`
+        };
+        
+        for (const [key, message] of Object.entries(errorMap)) {
+            if (error.message?.includes(key)) {
+                return message;
+            }
+        }
+        
+        return `Failed to import "${filename}": ${error.message || 'Unknown error'}`;
+    }
+    
+    showUndoImportToast(summary) {
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.innerHTML = `
+            <div>Imported ${summary.count} items</div>
+            <button class="undo-btn" style="margin-left: 12px; padding: 4px 8px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer;">Undo</button>
+        `;
+        
+        toast.querySelector('.undo-btn')?.addEventListener('click', () => {
+            this.undoLastImport();
+            toast.remove();
+        });
+        
+        document.getElementById('toastContainer')?.appendChild(toast);
+        
+        setTimeout(() => toast.remove(), 5000);
+    }
+    
+    undoLastImport() {
+        if (!this.lastImport) return;
+        
+        const canvas = window.infiniteCanvas;
+        if (!canvas) return;
+        
+        // Restore previous elements
+        canvas.elements = this.lastImport.previousElements;
+        canvas.render();
+        window.historyManager?.pushState(canvas.elements);
+        
+        this.showToast('Import undone');
+        this.lastImport = null;
     }
     
     setupTheme() {
@@ -1063,10 +1438,31 @@ class App {
     
     async shareCanvas() {
         const canvas = window.infiniteCanvas;
-        const json = JSON.stringify(canvas.elements);
         
         try {
+            // Try Web Share API first (for mobile)
+            if (navigator.share && navigator.canShare) {
+                // Export as PNG blob
+                const dataURL = canvas.exportToDataURL('image/png');
+                const response = await fetch(dataURL);
+                const blob = await response.blob();
+                const file = new File([blob], 'canvas.png', { type: 'image/png' });
+                
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: 'My Kimi Canvas',
+                        text: 'Check out my canvas!',
+                        files: [file]
+                    });
+                    this.showToast('Shared successfully!');
+                    return;
+                }
+            }
+            
+            // Fallback to clipboard
             if (navigator.clipboard) {
+                // Copy canvas data as JSON
+                const json = JSON.stringify(canvas.elements, null, 2);
                 await navigator.clipboard.writeText(json);
                 this.showToast('Canvas data copied to clipboard!');
             } else {
@@ -1074,28 +1470,26 @@ class App {
             }
         } catch (error) {
             console.error('Share error:', error);
-            alert('Could not copy to clipboard');
+            
+            // Final fallback - download JSON
+            if (error.name !== 'AbortError') {
+                const json = JSON.stringify(canvas.elements, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                this.downloadFile(URL.createObjectURL(blob), 'canvas-share.json');
+                this.showToast('Canvas exported as JSON file');
+            }
         }
     }
     
-    showToast(message, duration = 3000) {
+    showToast(message, type = 'info', duration = 3000) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+        
         const toast = document.createElement('div');
-        toast.className = 'toast';
+        toast.className = `toast ${type}`;
         toast.textContent = message;
-        toast.style.cssText = `
-            position: fixed;
-            bottom: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            padding: 12px 24px;
-            border-radius: 8px;
-            box-shadow: var(--shadow-md);
-            z-index: 10000;
-            animation: toastSlide 0.3s ease;
-        `;
-        document.body.appendChild(toast);
+        
+        container.appendChild(toast);
         
         setTimeout(() => {
             toast.style.animation = 'fadeOut 0.2s ease';
@@ -1143,7 +1537,7 @@ class App {
         // Adjust if off-screen
         if (left < 10) left = 10;
         if (left + rect.width > viewportWidth - 10) left = viewportWidth - rect.width - 10;
-        if (top < 10) top = y + 20; // Show below if not enough space above
+        if (top < 10) top = y + 20;
         
         tooltip.style.top = `${top}px`;
         tooltip.style.left = `${left}px`;

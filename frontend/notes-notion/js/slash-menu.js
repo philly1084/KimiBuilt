@@ -39,6 +39,17 @@ const SlashMenu = (function() {
             }
         });
         
+        // Keyboard navigation for menu items
+        menu.addEventListener('keydown', (e) => {
+            const item = e.target.closest('.slash-item');
+            if (!item) return;
+            
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                selectItem(item.dataset.type);
+            }
+        });
+        
         // Prevent menu from closing when clicking inside
         menu.addEventListener('mousedown', (e) => {
             e.preventDefault();
@@ -220,14 +231,19 @@ const SlashMenu = (function() {
     }
     
     /**
-     * Update visual selection
+     * Update visual selection and ARIA attributes
      */
     function updateSelection(items) {
         items.forEach((item, index) => {
             if (index === selectedIndex) {
                 item.classList.add('selected');
+                item.setAttribute('aria-selected', 'true');
+                // Focus the selected item for screen readers
+                item.setAttribute('tabindex', '0');
             } else {
                 item.classList.remove('selected');
+                item.setAttribute('aria-selected', 'false');
+                item.setAttribute('tabindex', '-1');
             }
         });
     }

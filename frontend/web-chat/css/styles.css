@@ -13,7 +13,7 @@
     
     --text-primary: #fafafa;
     --text-secondary: #a3a3a3;
-    --text-tertiary: #737373;
+    --text-tertiary: #808080;
     --text-muted: #525252;
     
     --border: #262626;
@@ -70,7 +70,7 @@
     
     --text-primary: #18181b;
     --text-secondary: #71717a;
-    --text-tertiary: #a1a1aa;
+    --text-tertiary: #71717a;
     --text-muted: #d4d4d8;
     
     --border: #e4e4e7;
@@ -133,6 +133,27 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
+}
+
+/* Focus indicators - ensure 3px outline with good contrast */
+*:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Remove focus outline for mouse users, keep for keyboard */
+:focus:not(:focus-visible) {
+    outline: none;
 }
 
 /* Custom scrollbar */
@@ -443,6 +464,7 @@ body {
     border-color: var(--border-focus);
 }
 
+/* Touch-friendly buttons - minimum 44px */
 .btn-icon {
     background-color: transparent;
     color: var(--text-secondary);
@@ -450,6 +472,11 @@ body {
     cursor: pointer;
     transition: all var(--transition-fast);
     border-radius: var(--radius-md);
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .btn-icon:hover {
@@ -850,14 +877,20 @@ body {
     opacity: 1;
 }
 
+/* Touch targets - minimum 44px */
 .message-action-btn {
-    padding: 0.25rem;
+    padding: 0.5rem;
+    min-width: 44px;
+    min-height: 44px;
     border-radius: var(--radius-sm);
     color: var(--text-tertiary);
     background: transparent;
     border: none;
     cursor: pointer;
     transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .message-action-btn:hover {
@@ -866,13 +899,15 @@ body {
 }
 
 .message-action-btn:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 3px solid var(--accent);
     outline-offset: 2px;
+    color: var(--text-primary);
 }
 
+/* Standardized line height */
 .message-text {
     color: var(--text-primary);
-    line-height: 1.75;
+    line-height: 1.6;
     word-wrap: break-word;
 }
 
@@ -892,6 +927,12 @@ body {
     flex-direction: row-reverse;
 }
 
+/* Consistent max-width for user and assistant messages */
+.message.user .message-text,
+.message.assistant .message-text {
+    max-width: 85%;
+}
+
 .message.user .message-text {
     background: linear-gradient(135deg, var(--accent), var(--accent-hover));
     color: var(--user-message-text);
@@ -899,7 +940,6 @@ body {
     border-radius: var(--radius-xl);
     border-bottom-right-radius: 0.375rem;
     display: inline-block;
-    max-width: 85%;
     box-shadow: var(--shadow-sm);
 }
 
@@ -1354,6 +1394,25 @@ body {
     padding: 1rem;
     overflow-x: auto;
     background-color: #1e1e1e;
+    position: relative;
+}
+
+/* Code block scroll indicator gradient */
+.code-block pre::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    background: linear-gradient(to right, transparent, #1e1e1e);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.code-block pre.can-scroll::after {
+    opacity: 1;
 }
 
 /* Line numbers */
@@ -1422,10 +1481,17 @@ code[class*="language-"] {
     z-index: 20;
 }
 
+/* iOS zoom fix - font-size 16px on inputs to prevent zoom */
 #message-input {
     font-family: inherit;
-    font-size: 0.9375rem;
+    font-size: 16px;
     line-height: 1.5;
+}
+
+@media (min-width: 768px) {
+    #message-input {
+        font-size: 0.9375rem;
+    }
 }
 
 #message-input::placeholder {
@@ -1562,14 +1628,18 @@ code[class*="language-"] {
     text-align: center;
 }
 
+/* Search highlight - use accent color instead of amber */
 .search-highlight {
-    background-color: rgba(245, 158, 11, 0.3);
+    background-color: var(--accent-light);
     border-radius: 2px;
     padding: 0 2px;
+    color: var(--text-primary);
+    font-weight: 500;
 }
 
 .search-highlight.current {
-    background-color: rgba(245, 158, 11, 0.6);
+    background-color: var(--accent);
+    color: white;
 }
 
 /* ============================================
@@ -1963,6 +2033,33 @@ code[class*="language-"] {
     box-shadow: var(--shadow-lg);
     animation: slide-in-right 0.3s ease-out;
     max-width: 400px;
+    position: relative;
+    transition: opacity var(--transition-fast);
+}
+
+.toast:hover {
+    opacity: 1;
+}
+
+.toast-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    padding: 0.25rem;
+    margin-left: 0.5rem;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    min-width: 28px;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.toast-close-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
 }
 
 .toast.success {
@@ -3016,4 +3113,133 @@ code[class*="language-"] {
         width: 28px;
         height: 28px;
     }
+}
+
+
+/* ============================================
+   Model Selector Loading State
+   ============================================ */
+
+.model-selector-btn.loading {
+    opacity: 0.7;
+    cursor: wait;
+    pointer-events: none;
+}
+
+.model-selector-btn.loading::after {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--text-secondary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-left: 0.5rem;
+}
+
+/* ============================================
+   Touch Device Enhancements
+   ============================================ */
+
+/* Always show message actions on touch devices */
+@media (pointer: coarse), (hover: none) {
+    .message-actions {
+        opacity: 1 !important;
+    }
+    
+    .session-actions {
+        opacity: 1 !important;
+    }
+    
+    /* Increase touch targets on mobile */
+    .message-action-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0.5rem;
+    }
+    
+    .session-actions .btn-icon {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0.5rem;
+    }
+}
+
+/* ============================================
+   Mobile Viewport Height Fix
+   ============================================ */
+
+/* Fix for mobile keyboard handling causing layout shifts */
+@supports (height: 100dvh) {
+    body {
+        height: 100dvh;
+    }
+    
+    #app {
+        height: 100dvh;
+    }
+}
+
+/* ============================================
+   Input Toggle Tooltip (visible on hover)
+   ============================================ */
+
+.input-toggle-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.375rem 0.75rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all var(--transition-fast);
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+    z-index: 100;
+}
+
+.input-toggle-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: var(--border);
+}
+
+.input-toggle-btn:hover .input-toggle-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ============================================
+   Focus Management
+   ============================================ */
+
+/* Ensure focusable elements have visible focus */
+[tabindex]:not([tabindex="-1"]):focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Skip link enhancement */
+.sr-only:focus {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 9999;
+    padding: 0.75rem 1rem;
+    background: var(--accent);
+    color: white;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
 }

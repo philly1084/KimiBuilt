@@ -179,6 +179,11 @@
             border-radius: 4px;
         }
 
+        .terminal-output {
+            scrollbar-color: var(--border-color) transparent;
+            scrollbar-width: thin;
+        }
+
         /* ===== Terminal Lines ===== */
         .line {
             margin: 2px 0;
@@ -208,6 +213,18 @@
 
         .line-output.ai {
             color: var(--text-primary);
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--success-bright);
+            padding-left: 12px;
+            margin-left: 0;
+        }
+
+        .line-output.user-message {
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent);
+            padding: 8px 12px;
+            margin: 4px 0;
+            border-radius: 0 6px 6px 0;
         }
 
         .line-output.error {
@@ -266,6 +283,10 @@
         .code-action-btn:hover {
             background: var(--bg-tertiary);
             color: var(--text-primary);
+        }
+
+        .code-action-btn[aria-label] {
+            position: relative;
         }
 
         .code-block pre {
@@ -609,6 +630,10 @@
             max-height: 60vh;
         }
 
+        .modal-body > .grid {
+            max-width: 900px;
+        }
+
         /* ===== Drag Overlay ===== */
         .drag-overlay {
             position: fixed;
@@ -659,6 +684,7 @@
             .header {
                 flex-wrap: wrap;
                 gap: 8px;
+                padding: 6px 12px;
             }
             
             .toolbar {
@@ -666,8 +692,29 @@
                 justify-content: flex-end;
             }
             
+            .btn {
+                padding: 8px 10px;
+                min-height: 44px;
+            }
+            
             .btn span {
                 display: none;
+            }
+
+            .terminal-output {
+                padding: 12px;
+            }
+
+            .input-container {
+                padding: 10px 12px;
+            }
+
+            .header-title {
+                font-size: 13px;
+            }
+
+            .status-indicator {
+                font-size: 11px;
             }
         }
         
@@ -840,17 +887,17 @@
                 <select id="modelSelect" style="padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: inherit; font-size: 12px;">
                     <option>Loading models...</option>
                 </select>
-                <button class="btn btn-sm" onclick="app.clearOutput()" title="Clear (Ctrl+L)">
+                <button class="btn btn-sm" onclick="app.clearOutput()" title="Clear (Ctrl+L)" aria-label="Clear terminal">
                     <span>Clear</span>
                 </button>
-                <button class="btn btn-sm" onclick="app.exportSession()" title="Export">
+                <button class="btn btn-sm" onclick="app.exportSession()" title="Export session" aria-label="Export session">
                     <span>Export</span>
                 </button>
-                <button class="btn btn-sm" onclick="app.cycleTheme()" title="Theme">
+                <button class="btn btn-sm" onclick="app.cycleTheme()" title="Toggle theme" aria-label="Toggle theme">
                     <span>Theme</span>
                 </button>
-                <button class="btn btn-sm" onclick="app.showShortcuts()" title="Help (F1)">?</button>
-                <a href="/" class="btn btn-sm">Home</a>
+                <button class="btn btn-sm" onclick="app.showShortcuts()" title="Help (F1)" aria-label="Show keyboard shortcuts">?</button>
+                <a href="/" class="btn btn-sm" aria-label="Go to home">Home</a>
             </div>
         </header>
 
@@ -867,8 +914,9 @@
                         <input 
                             type="text" 
                             id="commandInput" 
+                            name="cli-command"
                             placeholder="Type a message or /help for commands..."
-                            autocomplete="off"
+                            autocomplete="new-password"
                             autocorrect="off"
                             autocapitalize="off"
                             spellcheck="false"
@@ -894,6 +942,7 @@
     <div id="dragOverlay" class="drag-overlay">
         <div class="drag-overlay-text">📁 Drop files to process</div>
         <div class="drag-overlay-hint">Supports: DOCX, PDF, HTML, MD, TXT, JSON, code files</div>
+        <button class="btn" onclick="app.cancelDrag()" style="margin-top: 16px;">Cancel</button>
     </div>
 
     <!-- Shortcuts Modal -->
@@ -901,7 +950,7 @@
         <div class="modal">
             <div class="modal-header">
                 <span class="modal-title">Keyboard Shortcuts</span>
-                <button onclick="app.closeShortcuts()" class="modal-close">&times;</button>
+                <button onclick="app.closeShortcuts()" class="modal-close" aria-label="Close shortcuts">&times;</button>
             </div>
             <div class="modal-body" id="shortcutsContent"></div>
         </div>

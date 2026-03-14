@@ -25,6 +25,24 @@ class UIHelpers {
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         this.currentModel = savedModel || 'gpt-4o';
         this.updateModelUI();
+        
+        // Track last focused element for focus management
+        this.lastFocusedElement = null;
+        
+        // Command palette navigation state
+        this.commandPaletteState = {
+            selectedIndex: 0,
+            items: []
+        };
+        
+        // Setup draft saving
+        this.setupDraftSaving();
+        
+        // Restore draft on load
+        this.restoreDraft();
+        
+        // Setup code block scroll indicators
+        this.setupCodeBlockScrollIndicators();
     }
 
     // ============================================
@@ -644,6 +662,9 @@ class UIHelpers {
         lightbox.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
         
+        // Save last focused element
+        this.lastFocusedElement = document.activeElement;
+        
         // Focus trap for accessibility
         const closeBtn = lightbox.querySelector('.image-lightbox-close');
         if (closeBtn) closeBtn.focus();
@@ -657,6 +678,12 @@ class UIHelpers {
         img.src = '';
         img.alt = '';
         document.body.style.overflow = '';
+        
+        // Return focus to trigger button
+        if (this.lastFocusedElement) {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
     }
 
     downloadLightboxImage() {
@@ -694,6 +721,9 @@ class UIHelpers {
         const modal = document.getElementById('image-modal');
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
+        
+        // Save last focused element
+        this.lastFocusedElement = document.activeElement;
         
         // Focus the prompt input
         setTimeout(() => {
@@ -740,6 +770,12 @@ class UIHelpers {
         const modal = document.getElementById('image-modal');
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
+        
+        // Return focus to trigger button
+        if (this.lastFocusedElement) {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
         
         // Reset form
         const promptInput = document.getElementById('image-prompt-input');
@@ -928,12 +964,25 @@ class UIHelpers {
     // ============================================
 
     async loadModels() {
+        const modelBtn = document.getElementById('model-selector-btn');
+        
         try {
+            // Add loading state
+            if (modelBtn) modelBtn.classList.add('loading');
+            
             const response = await apiClient.getModels();
             this.availableModels = response.data || [];
+            
+            // Remove loading state
+            if (modelBtn) modelBtn.classList.remove('loading');
+            
             return this.availableModels;
         } catch (error) {
             console.error('Failed to load models:', error);
+            
+            // Remove loading state
+            if (modelBtn) modelBtn.classList.remove('loading');
+            
             return [];
         }
     }
@@ -946,11 +995,24 @@ class UIHelpers {
             this.closeModelSelector();
         }
     }
+    
+    updateModelSelectorAria(expanded) {
+        const btn = document.getElementById('model-selector-btn');
+        if (btn) {
+            btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        }
+    }
 
     async openModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
         dropdown.classList.remove('hidden');
         dropdown.setAttribute('aria-hidden', 'false');
+        
+        // Update ARIA
+        this.updateModelSelectorAria(true);
+        
+        // Save last focused element
+        this.lastFocusedElement = document.activeElement;
         
         // Load models if not already loaded
         if (this.availableModels.length === 0) {
@@ -967,6 +1029,15 @@ class UIHelpers {
         const dropdown = document.getElementById('model-selector-dropdown');
         dropdown.classList.add('hidden');
         dropdown.setAttribute('aria-hidden', 'true');
+        
+        // Update ARIA
+        this.updateModelSelectorAria(false);
+        
+        // Return focus to trigger button
+        if (this.lastFocusedElement) {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
     }
 
     renderModelList() {
@@ -1544,6 +1615,9 @@ class UIHelpers {
         input.focus();
         this.renderCommandResults('');
         
+        // Save last focused element
+        this.lastFocusedElement = document.activeElement;
+        
         // Trap focus
         this.trapFocus(palette);
     }
@@ -1552,6 +1626,12 @@ class UIHelpers {
         const palette = document.getElementById('command-palette');
         palette.classList.add('hidden');
         palette.setAttribute('aria-hidden', 'true');
+        
+        // Return focus to trigger button
+        if (this.lastFocusedElement) {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
     }
 
     renderCommandResults(query) {
@@ -1848,6 +1928,12 @@ class UIHelpers {
     // ============================================
 
     openShortcutsModal() {
+        // Close any existing shortcuts modal first
+        this.closeShortcutsModal();
+        
+        // Save last focused element
+        this.lastFocusedElement = document.activeElement;
+        
         const modal = document.createElement('div');
         modal.id = 'shortcuts-modal';
         modal.className = 'modal';
@@ -1865,7 +1951,7 @@ class UIHelpers {
             { key: 'Shift + Enter', description: 'New line in input' },
             { key: 'Enter', description: 'Send message' },
             { key: 'Esc', description: 'Close modals/panels' },
-            { key: 'Ctrl + /', description: 'Show this help' },
+            { key: '?', description: 'Show this help' },
             { key: '', description: '' },
             { key: 'Commands', description: '/image [prompt] - Generate AI images' },
             { key: '', description: '/unsplash [query] - Search stock photos' },
@@ -1880,18 +1966,18 @@ class UIHelpers {
             <div class="modal-content" style="max-width: 480px;">
                 <div class="modal-header">
                     <h3 id="shortcuts-title">Keyboard Shortcuts</h3>
-                    <button class="btn-icon" onclick="uiHelpers.closeShortcutsModal()" aria-label="Close">
-                        <i data-lucide="x" class="w-5 h-5"></i>
+                    <button class="btn-icon" onclick="uiHelpers.closeShortcutsModal()" aria-label="Close keyboard shortcuts help">
+                        <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
                     </button>
                 </div>
                 <div class="modal-body">
-                    <div class="shortcuts-list">
-                        ${shortcuts.map(s => `
-                            <div class="shortcut-item">
+                    <div class="shortcuts-list" role="list">
+                        ${shortcuts.map(s => s.key ? `
+                            <div class="shortcut-item" role="listitem">
                                 <kbd class="shortcut-key">${s.key}</kbd>
                                 <span class="shortcut-desc">${s.description}</span>
                             </div>
-                        `).join('')}
+                        ` : `<div class="shortcut-item" style="background: transparent; border: none;"><span class="shortcut-desc" style="font-weight: 600; color: var(--text-primary);">${s.description}</span></div>`).join('')}
                     </div>
                 </div>
             </div>
@@ -1914,6 +2000,12 @@ class UIHelpers {
         if (modal) {
             modal.remove();
         }
+        
+        // Return focus to trigger button
+        if (this.lastFocusedElement) {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
     }
 
     // ============================================
@@ -1929,6 +2021,10 @@ class UIHelpers {
         if (modal) {
             modal.classList.remove('hidden');
             modal.setAttribute('aria-hidden', 'false');
+            
+            // Save last focused element
+            this.lastFocusedElement = document.activeElement;
+            
             this.setupImportHandlers(modal);
             this.trapFocus(modal);
         }
@@ -2545,6 +2641,105 @@ class UIHelpers {
                 toggleIcon.setAttribute('data-lucide', 'chevron-up');
                 lucide.createIcons();
             }
+        }
+    }
+    
+    // ============================================
+    // Draft Saving - Auto-save to localStorage
+    // ============================================
+    
+    setupDraftSaving() {
+        const messageInput = document.getElementById('message-input');
+        if (!messageInput) return;
+        
+        // Save draft on input
+        messageInput.addEventListener('input', () => {
+            this.saveDraft(messageInput.value);
+        });
+        
+        // Clear draft when message is sent
+        const sendBtn = document.getElementById('send-btn');
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => {
+                this.clearDraft();
+            });
+        }
+    }
+    
+    saveDraft(content) {
+        try {
+            if (content && content.trim()) {
+                localStorage.setItem('kimibuilt_message_draft', content);
+                localStorage.setItem('kimibuilt_message_draft_time', Date.now().toString());
+            } else {
+                this.clearDraft();
+            }
+        } catch (e) {
+            console.warn('Failed to save draft:', e);
+        }
+    }
+    
+    restoreDraft() {
+        try {
+            const draft = localStorage.getItem('kimibuilt_message_draft');
+            const draftTime = localStorage.getItem('kimibuilt_message_draft_time');
+            
+            if (draft && draftTime) {
+                const age = Date.now() - parseInt(draftTime, 10);
+                const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+                
+                if (age < maxAge) {
+                    const messageInput = document.getElementById('message-input');
+                    if (messageInput && !messageInput.value) {
+                        messageInput.value = draft;
+                        // Trigger input event to resize textarea
+                        messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        this.showToast('Draft restored', 'info', 'Draft');
+                    }
+                } else {
+                    this.clearDraft();
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to restore draft:', e);
+        }
+    }
+    
+    clearDraft() {
+        try {
+            localStorage.removeItem('kimibuilt_message_draft');
+            localStorage.removeItem('kimibuilt_message_draft_time');
+        } catch (e) {
+            console.warn('Failed to clear draft:', e);
+        }
+    }
+    
+    // ============================================
+    // Code Block Scroll Indicators
+    // ============================================
+    
+    setupCodeBlockScrollIndicators() {
+        const checkScroll = () => {
+            document.querySelectorAll('.code-block pre').forEach(pre => {
+                if (pre.scrollWidth > pre.clientWidth) {
+                    pre.classList.add('can-scroll');
+                } else {
+                    pre.classList.remove('can-scroll');
+                }
+            });
+        };
+        
+        // Check on window resize
+        window.addEventListener('resize', checkScroll);
+        
+        // Check after messages are rendered
+        const observer = new MutationObserver(() => {
+            setTimeout(checkScroll, 100);
+        });
+        
+        const container = document.getElementById('messages-container');
+        if (container) {
+            observer.observe(container, { childList: true, subtree: true });
         }
     }
 }
