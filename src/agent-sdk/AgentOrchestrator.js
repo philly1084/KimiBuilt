@@ -98,6 +98,7 @@ class AgentOrchestrator {
 
     this.llmClient = llmClient;
     this.embedder = embedder;
+    this.vectorStore = vectorStore;
 
     // Initialize core execution components
     /**

@@ -200,6 +200,18 @@ async function start() {
         const openaiClient = {
             createResponse: async (params) => {
                 return createResponse(params);
+            },
+            complete: async (prompt, options = {}) => {
+                const response = await createResponse({
+                    input: prompt,
+                    stream: false,
+                    model: options.model || null,
+                });
+
+                return response.output
+                    .filter((item) => item.type === 'message')
+                    .map((item) => item.content.map((content) => content.text).join(''))
+                    .join('\n');
             }
         };
         const documentService = new DocumentService(openaiClient);

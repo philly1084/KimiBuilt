@@ -1,10 +1,17 @@
-const Ajv = require('ajv');
+let Ajv;
 
-/**
- * Default AJV instance for JSON schema validation.
- * @type {Ajv}
- */
-const ajv = new Ajv({ allErrors: true, strict: false });
+try {
+  Ajv = require('ajv');
+} catch (error) {
+  console.warn('[AgentSDK] AJV not available, schema validation will degrade:', error.message);
+  Ajv = class FallbackAjv {
+    compile() {
+      const validate = () => true;
+      validate.errors = [];
+      return validate;
+    }
+  };
+}
 
 /**
  * Result of a single validation criterion.

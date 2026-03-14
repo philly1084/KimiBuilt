@@ -6,6 +6,7 @@
 const { v4: uuidv4 } = require('uuid');
 const logsController = require('./logs.controller');
 const tracesController = require('./traces.controller');
+const { vectorStore } = require('../../memory/vector-store');
 
 class DashboardController {
   constructor(agentOrchestrator) {
@@ -653,19 +654,29 @@ class DashboardController {
   }
 
   async checkVectorStore() {
-    if (this.orchestrator?.vectorStore) {
-      try {
-        await this.orchestrator.vectorStore.health();
-        return 'connected';
-      } catch {
-        return 'disconnected';
-      }
+    const sdkVectorStore = this.orchestrator?.vectorStore || this.orchestrator?.skillMemory?.vectorStore;
+    const candidate = sdkVectorStore || vectorStore;
+
+    if (!candidate) {
+      return 'not_configured';
     }
-    return 'not_configured';
+
+    try {
+      if (typeof candidate.healthCheck === 'function') {
+        return (await candidate.healthCheck()) ? 'connected' : 'disconnected';
+      }
+      if (typeof candidate.health === 'function') {
+        await candidate.health();
+        return 'connected';
+      }
+      return 'available';
+    } catch {
+      return 'disconnected';
+    }
   }
 
   async checkLLMClient() {
-    if (this.orchestrator?.llmClient) {
+    if (this.orchestrator?.llmClient?.complete || this.orchestrator?.llmClient?.createResponse) {
       return 'connected';
     }
     return 'not_configured';
@@ -673,6 +684,9 @@ class DashboardController {
 
   async checkEmbedder() {
     if (this.orchestrator?.embedder) {
+      if (typeof this.orchestrator.embedder.healthCheck === 'function') {
+        return (await this.orchestrator.embedder.healthCheck()) ? 'connected' : 'disconnected';
+      }
       return 'connected';
     }
     return 'not_configured';

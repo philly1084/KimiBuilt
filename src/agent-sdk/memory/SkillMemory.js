@@ -438,6 +438,11 @@ class SkillMemory {
       entries: Array.from(this.cache.keys())
     };
   }
+
+  async count() {
+    const results = await this.vectorStore.scroll('skills', { limit: 1000 });
+    return results.length;
+  }
 }
 
 module.exports = { Skill, SkillMemory };
