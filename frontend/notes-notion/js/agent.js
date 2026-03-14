@@ -194,9 +194,368 @@ Instructions:
 - Treat this as a live block editor, not a plain text document.
 - When referring to existing content, cite block ids when helpful.
 - When suggesting edits, say exactly which block to update or where to insert new content.
+- If the user asks you to change the page, rewrite content, insert sections, reorganize blocks, or otherwise edit the note, include a single \`\`\`notes-actions fenced JSON block that follows this schema:
+  {
+    "assistant_reply": "Short explanation of what changed",
+    "actions": [
+      { "op": "update_block", "blockId": "existing-block-id", "type": "text", "content": "Updated content" },
+      { "op": "insert_after", "blockId": "existing-block-id", "blocks": [{ "type": "heading_2", "content": "New section" }, { "type": "text", "content": "New paragraph" }] }
+    ]
+  }
+- Valid ops are: update_block, replace_block, insert_before, insert_after, append_to_page, prepend_to_page, delete_block.
+- Use plain string content for text-like blocks. Use structured objects only when a block type requires it, such as todo, code, mermaid, image, bookmark, ai_image, ai, math, or database.
+- Do not mention the notes-actions block in assistant_reply. The editor will apply it automatically.
 - Keep answers concise unless the user asks for a long response.
 - If the user asks for Mermaid output, return clean Mermaid code in a single \`\`\`mermaid block unless they ask for explanation too.
 - Do not invent page structure that is not present in the block map.`;
+    }
+
+    function normalizeActionContent(type, content) {
+        const value = content == null ? '' : content;
+
+        switch (type) {
+            case 'todo':
+                if (value && typeof value === 'object') {
+                    return {
+                        text: String(value.text || ''),
+                        checked: Boolean(value.checked)
+                    };
+                }
+                return { text: String(value || ''), checked: false };
+            case 'code':
+                if (value && typeof value === 'object') {
+                    return {
+                        language: value.language || 'plain',
+                        text: String(value.text || '')
+                    };
+                }
+                return { language: 'plain', text: String(value || '') };
+            case 'math':
+                if (value && typeof value === 'object') {
+                    return {
+                        text: String(value.text || value.latex || ''),
+                        displayMode: value.displayMode !== false
+                    };
+                }
+                return { text: String(value || ''), displayMode: true };
+            case 'mermaid':
+                if (value && typeof value === 'object') {
+                    return {
+                        text: String(value.text || ''),
+                        diagramType: value.diagramType || 'flowchart',
+                        _showEditor: false
+                    };
+                }
+                return {
+                    text: String(value || ''),
+                    diagramType: 'flowchart',
+                    _showEditor: false
+                };
+            case 'ai':
+                if (value && typeof value === 'object') {
+                    return {
+                        prompt: String(value.prompt || ''),
+                        result: value.result || null,
+                        model: value.model || null
+                    };
+                }
+                return { prompt: String(value || ''), result: null, model: null };
+            case 'image':
+                if (value && typeof value === 'object') {
+                    return {
+                        url: String(value.url || ''),
+                        caption: String(value.caption || '')
+                    };
+                }
+                return /^https?:\/\//i.test(String(value).trim())
+                    ? { url: String(value).trim(), caption: '' }
+                    : { url: '', caption: String(value || '') };
+            case 'ai_image':
+                if (value && typeof value === 'object') {
+                    return {
+                        prompt: String(value.prompt || ''),
+                        imageUrl: value.imageUrl || null,
+                        model: value.model || null,
+                        size: value.size || '1024x1024',
+                        quality: value.quality || 'standard'
+                    };
+                }
+                return {
+                    prompt: String(value || ''),
+                    imageUrl: null,
+                    model: null,
+                    size: '1024x1024',
+                    quality: 'standard'
+                };
+            case 'bookmark':
+                if (value && typeof value === 'object') {
+                    return {
+                        url: String(value.url || ''),
+                        title: String(value.title || ''),
+                        description: String(value.description || ''),
+                        favicon: String(value.favicon || ''),
+                        image: String(value.image || '')
+                    };
+                }
+                return {
+                    url: String(value || ''),
+                    title: '',
+                    description: '',
+                    favicon: '',
+                    image: ''
+                };
+            case 'database':
+                if (value && typeof value === 'object' && (Array.isArray(value.columns) || Array.isArray(value.rows))) {
+                    return {
+                        columns: Array.isArray(value.columns) ? value.columns : ['Name', 'Status', 'Notes'],
+                        rows: Array.isArray(value.rows) ? value.rows : [],
+                        sortColumn: value.sortColumn || null,
+                        sortDirection: value.sortDirection || 'asc'
+                    };
+                }
+                return {
+                    columns: ['Name', 'Status', 'Notes'],
+                    rows: String(value || '').trim() ? [[String(value).trim(), '', '']] : [['', '', '']],
+                    sortColumn: null,
+                    sortDirection: 'asc'
+                };
+            case 'divider':
+                return '';
+            default:
+                return typeof value === 'string' ? value : String(value || '');
+        }
+    }
+
+    function normalizeActionBlock(blockDefinition, options = {}) {
+        const defaultType = options.defaultType || 'text';
+        const definition = typeof blockDefinition === 'string'
+            ? { type: defaultType, content: blockDefinition }
+            : (blockDefinition || {});
+        const type = definition.type || defaultType;
+        const contentInput = Object.prototype.hasOwnProperty.call(definition, 'content')
+            ? definition.content
+            : (Object.prototype.hasOwnProperty.call(definition, 'text') ? definition.text : '');
+        const block = Blocks.createBlock(type, normalizeActionContent(type, contentInput), {
+            children: [],
+            formatting: definition.formatting || {},
+            color: definition.color || null,
+            textColor: definition.textColor || null,
+            expanded: definition.expanded,
+            icon: definition.icon
+        });
+
+        if (definition.id) {
+            block.id = definition.id;
+        }
+
+        if (Array.isArray(definition.children) && definition.children.length > 0) {
+            block.children = definition.children.map((child) => normalizeActionBlock(child));
+        }
+
+        return block;
+    }
+
+    function extractNotesActionPlan(responseText) {
+        const text = String(responseText || '');
+        const match = text.match(/```notes-actions\s*([\s\S]*?)```/i);
+        if (!match) {
+            return {
+                displayText: text.trim(),
+                actions: []
+            };
+        }
+
+        const payloadText = match[1].trim();
+        const visibleText = text.replace(match[0], '').trim();
+
+        try {
+            const payload = JSON.parse(payloadText);
+            return {
+                displayText: String(payload.assistant_reply || visibleText || '').trim(),
+                actions: Array.isArray(payload.actions) ? payload.actions : []
+            };
+        } catch (error) {
+            console.warn('Failed to parse notes action plan:', error);
+            return {
+                displayText: visibleText || text.trim(),
+                actions: []
+            };
+        }
+    }
+
+    function getFirstBlockId() {
+        return getPageContext()?.blocks?.[0]?.id || null;
+    }
+
+    function getLastBlockId() {
+        const blocks = getPageContext()?.blocks || [];
+        return blocks.length ? blocks[blocks.length - 1].id : null;
+    }
+
+    function applyNotesActions(actions = []) {
+        const editor = window.Editor;
+        if (!editor || !Array.isArray(actions) || actions.length === 0) {
+            return { appliedCount: 0, focusBlockId: null };
+        }
+
+        let appliedCount = 0;
+        let focusBlockId = null;
+
+        actions.forEach((rawAction) => {
+            if (!rawAction || typeof rawAction !== 'object') return;
+
+            const op = String(rawAction.op || '').toLowerCase();
+            const targetBlockId = rawAction.blockId || rawAction.targetBlockId || null;
+            const blockDefinitions = Array.isArray(rawAction.blocks)
+                ? rawAction.blocks
+                : (rawAction.block ? [rawAction.block] : []);
+
+            try {
+                switch (op) {
+                    case 'update_block': {
+                        if (!targetBlockId) return;
+                        const existing = editor.getBlock?.(targetBlockId);
+                        if (!existing) return;
+
+                        const nextType = rawAction.type || existing.type;
+                        const replacement = normalizeActionBlock({
+                            ...JSON.parse(JSON.stringify(existing)),
+                            id: targetBlockId,
+                            type: nextType,
+                            content: Object.prototype.hasOwnProperty.call(rawAction, 'content')
+                                ? rawAction.content
+                                : existing.content,
+                            children: rawAction.keepChildren === false ? [] : (existing.children || [])
+                        }, { defaultType: nextType });
+                        editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
+                        focusBlockId = replacement.id;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'replace_block': {
+                        if (!targetBlockId) return;
+                        const replacements = (blockDefinitions.length ? blockDefinitions : [rawAction]).map((blockDef, index) => {
+                            const normalized = normalizeActionBlock(blockDef, {
+                                defaultType: rawAction.type || blockDef.type || 'text'
+                            });
+                            if (index === 0 && !normalized.id) {
+                                normalized.id = targetBlockId;
+                            }
+                            return normalized;
+                        });
+                        const inserted = editor.replaceBlockWithBlocks?.(targetBlockId, replacements) || [];
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'insert_after': {
+                        const insertAfterId = targetBlockId || getLastBlockId();
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const inserted = editor.insertBlocksAfter?.(
+                            insertAfterId,
+                            blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                                defaultType: rawAction.type || blockDef.type || 'text'
+                            }))
+                        ) || [];
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'insert_before': {
+                        const insertBeforeId = targetBlockId || getFirstBlockId();
+                        if (!insertBeforeId) return;
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const inserted = editor.insertBlocksBefore?.(
+                            insertBeforeId,
+                            blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                                defaultType: rawAction.type || blockDef.type || 'text'
+                            }))
+                        ) || [];
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'append_to_page':
+                    case 'append': {
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const lastBlockId = getLastBlockId();
+                        const normalizedBlocks = blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const inserted = lastBlockId
+                            ? (editor.insertBlocksAfter?.(lastBlockId, normalizedBlocks) || [])
+                            : (editor.insertBlocksAfter?.(null, normalizedBlocks) || []);
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'prepend_to_page':
+                    case 'prepend': {
+                        const firstBlockId = getFirstBlockId();
+                        const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
+                            type: rawAction.type || 'text',
+                            content: rawAction.content || ''
+                        }];
+                        const normalizedBlocks = blocksToInsert.map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: rawAction.type || blockDef.type || 'text'
+                        }));
+                        const inserted = firstBlockId
+                            ? (editor.insertBlocksBefore?.(firstBlockId, normalizedBlocks) || [])
+                            : (editor.insertBlocksAfter?.(null, normalizedBlocks) || []);
+                        focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'delete_block':
+                    case 'delete': {
+                        if (!targetBlockId) return;
+                        editor.deleteBlock?.(targetBlockId);
+                        appliedCount++;
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            } catch (error) {
+                console.error(`Failed to apply notes action "${op}":`, error);
+            }
+        });
+
+        if (appliedCount > 0) {
+            editor.savePage?.();
+            if (focusBlockId) {
+                editor.focusBlock?.(focusBlockId);
+            }
+            showToast(`Applied ${appliedCount} page change${appliedCount === 1 ? '' : 's'}`, 'success');
+        }
+
+        return { appliedCount, focusBlockId };
+    }
+
+    function prepareAssistantResponse(responseText) {
+        const parsed = extractNotesActionPlan(responseText);
+        const applied = applyNotesActions(parsed.actions);
+        const fallbackReply = applied.appliedCount > 0
+            ? `Applied ${applied.appliedCount} page change${applied.appliedCount === 1 ? '' : 's'}.`
+            : '';
+
+        return {
+            displayText: parsed.displayText || fallbackReply,
+            appliedCount: applied.appliedCount
+        };
+    }
+
+    function getStreamingVisibleText(text) {
+        return String(text || '').replace(/```notes-actions[\s\S]*$/i, '').trimEnd();
     }
 
     function getStoredModelId() {
@@ -1074,13 +1433,19 @@ Instructions:
         // Get current model
         const model = state.selectedModel;
         let responseText = '';
+        let lastVisibleText = '';
 
         if (state.streamingEnabled && apiClient.streamChat) {
             for await (const chunk of apiClient.streamChat(messages, model)) {
                 if (chunk.type === 'delta' && chunk.content) {
                     responseText += chunk.content;
                     if (onChunk) {
-                        onChunk(chunk.content, responseText);
+                        const visibleText = getStreamingVisibleText(responseText);
+                        const visibleDelta = visibleText.slice(lastVisibleText.length);
+                        lastVisibleText = visibleText;
+                        if (visibleDelta) {
+                            onChunk(visibleDelta, visibleText);
+                        }
                     }
                     continue;
                 }
@@ -1098,21 +1463,25 @@ Instructions:
             responseText = response.content || response.message || String(response);
         }
 
+        const preparedResponse = prepareAssistantResponse(responseText);
+        const visibleResponse = preparedResponse.displayText || responseText;
+
         const assistantMessage = hiddenAssistantMessage
             ? null
-            : addMessage('assistant', responseText, {
+            : addMessage('assistant', visibleResponse, {
                 model: model,
-                tokensUsed: estimateTokens(question + responseText),
-                source: 'api'
+                tokensUsed: estimateTokens(question + visibleResponse),
+                source: 'api',
+                appliedCount: preparedResponse.appliedCount || 0
             });
 
         setProcessingState(false);
 
         if (onComplete) {
-            onComplete(responseText, assistantMessage);
+            onComplete(visibleResponse, assistantMessage);
         }
 
-        return responseText;
+        return visibleResponse;
     }
     
     // Stub mode for offline/no API
@@ -1129,30 +1498,40 @@ Instructions:
         if (state.streamingEnabled && onChunk) {
             const chunks = simulateStreaming(responseText);
             let fullResponse = '';
+            let visibleResponse = '';
             
             for (const chunk of chunks) {
                 await delay(30 + Math.random() * 50);
                 fullResponse += chunk;
-                onChunk(chunk, fullResponse);
+                const nextVisible = getStreamingVisibleText(fullResponse);
+                const visibleDelta = nextVisible.slice(visibleResponse.length);
+                visibleResponse = nextVisible;
+                if (visibleDelta) {
+                    onChunk(visibleDelta, nextVisible);
+                }
             }
         }
         
         // Add assistant message
+        const preparedResponse = prepareAssistantResponse(responseText);
+        const visibleResponse = preparedResponse.displayText || responseText;
+
         const assistantMessage = hiddenAssistantMessage
             ? null
-            : addMessage('assistant', responseText, {
+            : addMessage('assistant', visibleResponse, {
                 model: state.selectedModel,
-                tokensUsed: estimateTokens(question + responseText),
-                source: 'stub'
+                tokensUsed: estimateTokens(question + visibleResponse),
+                source: 'stub',
+                appliedCount: preparedResponse.appliedCount || 0
             });
 
         setProcessingState(false);
         
         if (onComplete) {
-            onComplete(responseText, assistantMessage);
+            onComplete(visibleResponse, assistantMessage);
         }
         
-        return responseText;
+        return visibleResponse;
     }
     
     function simulateStreaming(text) {

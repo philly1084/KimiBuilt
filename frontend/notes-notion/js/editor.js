@@ -1469,6 +1469,62 @@ const Editor = (function() {
 
         return normalizedBlocks;
     }
+
+    function insertBlocksAfter(blockId, blocks = []) {
+        if (!currentPage || !Array.isArray(blocks) || blocks.length === 0) return [];
+
+        const location = blockId ? findBlockLocation(blockId) : null;
+        if (blockId && !location) return [];
+
+        saveToHistory();
+
+        const normalizedBlocks = blocks.map((block) => ({
+            ...JSON.parse(JSON.stringify(block)),
+            id: block.id || Storage.generateBlockId(),
+            children: normalizeBlocks(block.children || []),
+            formatting: block.formatting || {},
+            color: block.color || null,
+            textColor: block.textColor || null,
+            createdAt: block.createdAt || Date.now(),
+        }));
+
+        const siblings = location ? location.siblings : currentPage.blocks;
+        const index = location ? location.index + 1 : siblings.length;
+        siblings.splice(index, 0, ...normalizedBlocks);
+
+        refreshEditor();
+        autoSave();
+
+        return normalizedBlocks;
+    }
+
+    function insertBlocksBefore(blockId, blocks = []) {
+        if (!currentPage || !Array.isArray(blocks) || blocks.length === 0) return [];
+
+        const location = blockId ? findBlockLocation(blockId) : null;
+        if (blockId && !location) return [];
+
+        saveToHistory();
+
+        const normalizedBlocks = blocks.map((block) => ({
+            ...JSON.parse(JSON.stringify(block)),
+            id: block.id || Storage.generateBlockId(),
+            children: normalizeBlocks(block.children || []),
+            formatting: block.formatting || {},
+            color: block.color || null,
+            textColor: block.textColor || null,
+            createdAt: block.createdAt || Date.now(),
+        }));
+
+        const siblings = location ? location.siblings : currentPage.blocks;
+        const index = location ? location.index : 0;
+        siblings.splice(index, 0, ...normalizedBlocks);
+
+        refreshEditor();
+        autoSave();
+
+        return normalizedBlocks;
+    }
     
     /**
      * Update empty state visibility
@@ -1737,6 +1793,8 @@ const Editor = (function() {
         hideInlineToolbar,
         updateBlockContent,
         replaceBlockWithBlocks,
+        insertBlocksAfter,
+        insertBlocksBefore,
         addBlockAtEnd,
         getCurrentModel
     };
