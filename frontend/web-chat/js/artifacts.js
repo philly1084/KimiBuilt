@@ -153,10 +153,15 @@
                 color: var(--text-secondary);
                 margin-bottom: 12px;
             }
+
+            .artifact-generated-card .artifact-mermaid-preview {
+                margin-bottom: 12px;
+            }
             
             .artifact-generated-card .file-actions {
                 display: flex;
                 gap: 8px;
+                flex-wrap: wrap;
             }
             
             .artifact-generated-card .file-actions button {
@@ -319,6 +324,35 @@
         return div.innerHTML;
     }
 
+    function escapeHtmlAttr(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function getArtifactBaseName(filename = 'diagram') {
+        return String(filename || 'diagram').replace(/\.[a-z0-9]+$/i, '');
+    }
+
+    function getMermaidSourceFromArtifact(artifact) {
+        if (!artifact) return '';
+
+        if (artifact.preview?.type === 'text') {
+            return String(artifact.preview.content || '').trim();
+        }
+
+        if (artifact.preview?.type === 'html') {
+            const div = document.createElement('div');
+            div.innerHTML = artifact.preview.content || '';
+            return String(div.textContent || '').trim();
+        }
+
+        return '';
+    }
+
     function getFileIconClass(filename) {
         const ext = filename.split('.').pop()?.toLowerCase();
         const docExts = ['doc', 'docx'];
@@ -387,6 +421,31 @@
             const card = document.createElement('div');
             const iconClass = getFileIconClass(artifact.filename);
             const iconName = getFileIcon(artifact.filename);
+            const mermaidSource = String(artifact.format || '').toLowerCase() === 'mermaid'
+                ? getMermaidSourceFromArtifact(artifact)
+                : '';
+            const mermaidBaseName = getArtifactBaseName(artifact.filename);
+            const mermaidPreview = mermaidSource
+                ? `
+                    <div class="artifact-mermaid-preview">
+                        <div class="mermaid-render-surface" data-mermaid-source="${escapeHtmlAttr(mermaidSource)}" data-mermaid-filename="${escapeHtmlAttr(mermaidBaseName)}">
+                            <div class="mermaid-placeholder">Rendering diagram...</div>
+                        </div>
+                    </div>
+                `
+                : '';
+            const mermaidActions = mermaidSource
+                ? `
+                    <button onclick="uiHelpers.downloadMermaidSource(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.mmd">
+                        <i data-lucide="file-code" class="w-4 h-4"></i>
+                        .mmd
+                    </button>
+                    <button onclick="uiHelpers.downloadMermaidPdf(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.pdf">
+                        <i data-lucide="file-text" class="w-4 h-4"></i>
+                        PDF
+                    </button>
+                `
+                : '';
             
             card.className = 'artifact-generated-card';
             card.innerHTML = `
@@ -397,11 +456,13 @@
                 <div class="file-meta">
                     ${artifact.format?.toUpperCase() || 'FILE'} | ${formatFileSize(artifact.sizeBytes)}
                 </div>
+                ${mermaidPreview}
                 <div class="file-actions">
                     <button class="primary" onclick="artifactManager.downloadArtifact('${artifact.id}', '${escapeHtml(artifact.filename)}')">
                         <i data-lucide="download" class="w-4 h-4"></i>
                         Download
                     </button>
+                    ${mermaidActions}
                     <button onclick="artifactManager.addToContext('${artifact.id}')">
                         <i data-lucide="plus" class="w-4 h-4"></i>
                         Add to Context
@@ -414,6 +475,8 @@
             if (window.fileManager) {
                 window.fileManager.addFile(artifact);
             }
+
+            window.uiHelpers?.renderMermaidDiagrams?.(card);
         });
         
         container.scrollTop = container.scrollHeight;
@@ -814,6 +877,12 @@
         },
         
         uploadFile: uploadArtifact,
+        persistGeneratedFile: async (content, filename, mimeType = 'application/octet-stream') => {
+            await ensureSession();
+            const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+            const file = new File([blob], filename, { type: mimeType || blob.type || 'application/octet-stream' });
+            await uploadArtifact(file);
+        },
         refresh: fetchArtifacts,
         getSelectedIds: () => [...state.selectedArtifactIds],
         clearSelection: () => {

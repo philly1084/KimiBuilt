@@ -661,7 +661,7 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             
             // Special handling for mermaid diagrams
             if (language === 'mermaid') {
-                const diagramId = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                const filenameBase = `diagram-${Date.now()}`;
                 codeBlocks.push(`
                     <div class="diagram-block">
                         <div class="code-block mermaid-code">
@@ -669,12 +669,16 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                                 <span>mermaid</span>
                                 <div class="code-actions">
                                     <button class="code-action-btn" onclick="app.copyCode(this)" aria-label="Copy code">Copy</button>
+                                    <button class="code-action-btn" onclick="app.downloadMermaidSourceFromButton(this)" data-code="${this.escapeHtmlAttr(trimmedCode)}" data-filename="${filenameBase}.mmd" aria-label="Download Mermaid source">.mmd</button>
+                                    <button class="code-action-btn" onclick="app.downloadMermaidPdfFromButton(this)" data-code="${this.escapeHtmlAttr(trimmedCode)}" data-filename="${filenameBase}.pdf" aria-label="Download Mermaid PDF">PDF</button>
                                 </div>
                             </div>
                             <pre><code class="language-mermaid nohighlight">${escapedCode}</code></pre>
                         </div>
                         <div class="diagram-preview">
-                            <div class="mermaid" id="${diagramId}">${escapedCode}</div>
+                            <div class="mermaid-render-surface" data-mermaid-source="${this.escapeHtmlAttr(trimmedCode)}" data-mermaid-filename="${filenameBase}">
+                                <div class="text-sm" style="color: var(--text-secondary);">Rendering diagram...</div>
+                            </div>
                         </div>
                     </div>
                 `);
@@ -720,10 +724,30 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     renderMermaidDiagrams(element) {
         if (typeof mermaid !== 'undefined') {
             try {
-                const nodes = element?.querySelectorAll?.('.mermaid') || document.querySelectorAll('.mermaid');
-                mermaid.run({
-                    nodes,
-                    suppressErrors: false
+                const nodes = Array.from(element?.querySelectorAll?.('.mermaid-render-surface') || document.querySelectorAll('.mermaid-render-surface'));
+                nodes.forEach(async (node) => {
+                    const source = this.sanitizeMermaidCode(node.dataset.mermaidSource || '');
+                    if (!source || node.dataset.renderedSource === source) {
+                        return;
+                    }
+
+                    try {
+                        const result = await mermaid.render(
+                            `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                            source,
+                        );
+                        node.innerHTML = result.svg;
+                        node.dataset.renderedSource = source;
+                        if (typeof result.bindFunctions === 'function') {
+                            result.bindFunctions(node);
+                        }
+                    } catch (error) {
+                        node.innerHTML = `
+                            <div class="text-sm" style="color: var(--error); margin-bottom: 8px;">Mermaid render failed: ${this.escapeHtml(error.message)}</div>
+                            <pre><code>${this.escapeHtml(source)}</code></pre>
+                        `;
+                        delete node.dataset.renderedSource;
+                    }
                 });
             } catch (err) {
                 console.warn('[CLI] Mermaid rendering failed:', err);
@@ -735,6 +759,115 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    escapeHtmlAttr(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    getMermaidFilename(baseName = 'diagram', extension = 'mmd') {
+        return `${String(baseName || 'diagram').replace(/\.[a-z0-9]+$/i, '')}.${extension}`;
+    }
+
+    downloadMermaidSourceFromButton(button) {
+        const source = this.sanitizeMermaidCode(button?.dataset?.code || '');
+        if (!source) {
+            this.printWarning('No Mermaid source available to download.');
+            return;
+        }
+
+        this.downloadFile(source, this.getMermaidFilename(button?.dataset?.filename || 'diagram', 'mmd'), 'text/plain');
+    }
+
+    async svgMarkupToImage(svgMarkup) {
+        const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+
+        try {
+            const image = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load Mermaid SVG'));
+                img.src = svgUrl;
+            });
+            return image;
+        } finally {
+            URL.revokeObjectURL(svgUrl);
+        }
+    }
+
+    async createMermaidPdfBlob(source) {
+        if (!window.PDFLib?.PDFDocument) {
+            throw new Error('PDF library is not loaded');
+        }
+        if (typeof mermaid === 'undefined') {
+            throw new Error('Mermaid is not loaded');
+        }
+
+        const result = await mermaid.render(
+            `mermaid-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            source,
+        );
+        const image = await this.svgMarkupToImage(result.svg);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.ceil(image.naturalWidth || image.width || 1200));
+        canvas.height = Math.max(1, Math.ceil(image.naturalHeight || image.height || 800));
+
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const pngDataUrl = canvas.toDataURL('image/png');
+        const pngBytes = await fetch(pngDataUrl).then((response) => response.arrayBuffer());
+
+        const pdfDoc = await window.PDFLib.PDFDocument.create();
+        const pngImage = await pdfDoc.embedPng(pngBytes);
+        const margin = 36;
+        const pageWidth = Math.max(612, canvas.width + margin * 2);
+        const pageHeight = Math.max(792, canvas.height + margin * 2);
+        const page = pdfDoc.addPage([pageWidth, pageHeight]);
+        const scale = Math.min(
+            (pageWidth - margin * 2) / pngImage.width,
+            (pageHeight - margin * 2) / pngImage.height,
+            1,
+        );
+
+        page.drawImage(pngImage, {
+            x: (pageWidth - (pngImage.width * scale)) / 2,
+            y: (pageHeight - (pngImage.height * scale)) / 2,
+            width: pngImage.width * scale,
+            height: pngImage.height * scale,
+        });
+
+        const pdfBytes = await pdfDoc.save({
+            updateFieldAppearances: false,
+            useObjectStreams: false,
+        });
+
+        return new Blob([pdfBytes], { type: 'application/pdf' });
+    }
+
+    async downloadMermaidPdfFromButton(button) {
+        const source = this.sanitizeMermaidCode(button?.dataset?.code || '');
+        if (!source) {
+            this.printWarning('No Mermaid source available to export.');
+            return;
+        }
+
+        try {
+            const pdfBlob = await this.createMermaidPdfBlob(source);
+            this.downloadFile(pdfBlob, this.getMermaidFilename(button?.dataset?.filename || 'diagram', 'pdf'), 'application/pdf');
+            this.printSystem('Mermaid PDF downloaded.');
+        } catch (error) {
+            console.error('[CLI] Mermaid PDF export failed:', error);
+            this.printError(`Failed to export Mermaid PDF: ${error.message}`);
+        }
     }
     
     getTimestamp() {
@@ -1078,11 +1211,24 @@ Do not put the entire diagram on one line.`;
             }
             
             // Create and download file
-            const filename = `diagram-${type}-${Date.now()}.mmd`;
+            const baseName = `diagram-${type}-${Date.now()}`;
+            const filename = `${baseName}.mmd`;
             this.downloadFile(diagramCode, filename, 'text/plain');
+            const pdfFilename = `${baseName}.pdf`;
+            let pdfBlob = null;
+            try {
+                pdfBlob = await this.createMermaidPdfBlob(diagramCode);
+                this.downloadFile(pdfBlob, pdfFilename, 'application/pdf');
+            } catch (pdfError) {
+                console.error('[CLI] Mermaid PDF export failed:', pdfError);
+                this.printWarning(`Mermaid PDF export failed: ${pdfError.message}`);
+            }
             
             // Add to session files
             const file = this.addSessionFile(filename, diagramCode, 'text/plain', 'diagram');
+            const pdfFile = pdfBlob
+                ? this.addSessionFile(pdfFilename, pdfBlob, 'application/pdf', 'diagram')
+                : null;
             
             // Show preview in terminal
             this.printAI(`## Generated ${type} diagram
@@ -1092,17 +1238,29 @@ ${diagramCode}
 \`\`\`
 
 **Downloaded:** ${filename}
-**File ID:** #${file.id} (use /files to manage)`);
+${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${pdfFile ? `, #${pdfFile.id}` : ''} (use /files to manage)`);
             
             this.setStatus('ready');
         } catch (error) {
             // Fallback: generate template
             const diagramCode = this.getMermaidTemplate(type, description);
-            const filename = `diagram-${type}-${Date.now()}.mmd`;
+            const baseName = `diagram-${type}-${Date.now()}`;
+            const filename = `${baseName}.mmd`;
             this.downloadFile(diagramCode, filename, 'text/plain');
+            let pdfBlob = null;
+            let pdfFilename = `${baseName}.pdf`;
+            try {
+                pdfBlob = await this.createMermaidPdfBlob(diagramCode);
+                this.downloadFile(pdfBlob, pdfFilename, 'application/pdf');
+            } catch (pdfError) {
+                console.error('[CLI] Mermaid PDF fallback export failed:', pdfError);
+            }
             
             // Add to session files
             const file = this.addSessionFile(filename, diagramCode, 'text/plain', 'diagram');
+            const pdfFile = pdfBlob
+                ? this.addSessionFile(pdfFilename, pdfBlob, 'application/pdf', 'diagram')
+                : null;
             
             this.printAI(`## Generated ${type} diagram (template)
 
@@ -1111,7 +1269,7 @@ ${diagramCode}
 \`\`\`
 
 **Downloaded:** ${filename}
-**File ID:** #${file.id} (use /files to manage)`);
+${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${pdfFile ? `, #${pdfFile.id}` : ''} (use /files to manage)`);
             
             this.setStatus('ready');
         } finally {
@@ -1672,10 +1830,5 @@ ${diagramCode}
 }
 
 const app = new CodeCLIApp();
-
-
-
-
-
 
 

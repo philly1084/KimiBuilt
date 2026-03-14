@@ -1397,6 +1397,43 @@ select:focus-visible,
     position: relative;
 }
 
+.mermaid-source-block {
+    border-bottom: 1px solid #2d2d2d;
+}
+
+.mermaid-visual-wrapper {
+    padding: 1rem;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.22), rgba(15, 23, 42, 0.08));
+}
+
+.mermaid-render-surface {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 180px;
+    padding: 1rem;
+    border-radius: var(--radius-lg);
+    background: #ffffff;
+    overflow: auto;
+}
+
+.mermaid-render-surface svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.mermaid-placeholder,
+.mermaid-render-error {
+    font-size: 0.875rem;
+    color: #475569;
+}
+
+.mermaid-render-error {
+    color: #b91c1c;
+    text-align: left;
+    width: 100%;
+}
+
 /* Code block scroll indicator gradient */
 .code-block pre::after {
     content: '';

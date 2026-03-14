@@ -43,6 +43,14 @@ class UIHelpers {
         
         // Setup code block scroll indicators
         this.setupCodeBlockScrollIndicators();
+
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: false,
+                securityLevel: 'loose',
+                theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark',
+            });
+        }
     }
 
     // ============================================
@@ -82,6 +90,43 @@ class UIHelpers {
         renderer.code = (code, language) => {
             const normalizedCode = normalizeMarkedText(code);
             const lang = normalizeMarkedLang(language);
+            const normalizedLang = lang.toLowerCase();
+
+            if (normalizedLang === 'mermaid') {
+                const mermaidSource = this.normalizeMermaidSource(normalizedCode);
+                const escapedCode = this.escapeHtml(mermaidSource);
+                const escapedAttrCode = this.escapeHtmlAttr(mermaidSource);
+                const filenameBase = `diagram-${Date.now()}`;
+
+                return `
+                    <div class="code-block mermaid-code-block">
+                        <div class="code-header">
+                            <span class="code-language">mermaid</span>
+                            <div class="code-actions">
+                                <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${escapedAttrCode}" aria-label="Copy Mermaid code">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    <span>Copy</span>
+                                </button>
+                                <button class="code-copy-btn" onclick="uiHelpers.downloadMermaidSource(this)" data-code="${escapedAttrCode}" data-filename="${filenameBase}.mmd" aria-label="Download Mermaid source">
+                                    <i data-lucide="file-code" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    <span>.mmd</span>
+                                </button>
+                                <button class="code-copy-btn" onclick="uiHelpers.downloadMermaidPdf(this)" data-code="${escapedAttrCode}" data-filename="${filenameBase}.pdf" aria-label="Download Mermaid PDF">
+                                    <i data-lucide="file-text" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    <span>PDF</span>
+                                </button>
+                            </div>
+                        </div>
+                        <pre class="mermaid-source-block"><code class="language-mermaid no-highlight">${escapedCode}</code></pre>
+                        <div class="mermaid-visual-wrapper">
+                            <div class="mermaid-render-surface" data-mermaid-source="${escapedAttrCode}" data-mermaid-filename="${filenameBase}">
+                                <div class="mermaid-placeholder">Rendering diagram...</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
             const escapedCode = this.escapeHtml(normalizedCode);
             const prismLang = this.getPrismLanguage(lang);
             const lineCount = normalizedCode.split('\n').length;
@@ -245,6 +290,11 @@ class UIHelpers {
             ${isUser ? avatar : ''}
         `;
 
+        if (!isUser) {
+            this.highlightCodeBlocks(messageEl);
+            this.renderMermaidDiagrams(messageEl);
+        }
+
         return messageEl;
     }
 
@@ -268,13 +318,13 @@ class UIHelpers {
                 'code', 'pre',
                 'a', 'img',
                 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-                'div', 'span',
+                'div', 'span', 'button', 'i',
                 'input'
             ],
             ALLOWED_ATTR: [
                 'href', 'title', 'target', 'rel', 'src', 'alt', 
                 'class', 'data-code', 'onclick', 'type', 'checked', 'disabled',
-                'aria-label', 'aria-hidden'
+                'aria-label', 'aria-hidden', 'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide'
             ],
             ALLOW_DATA_ATTR: false
         });
@@ -581,6 +631,7 @@ class UIHelpers {
         } else {
             textEl.innerHTML = this.renderAssistantMessage(content, isStreaming);
             this.highlightCodeBlocks(textEl);
+            this.renderMermaidDiagrams(textEl);
             this.reinitializeIcons(textEl);
         }
 
@@ -609,6 +660,7 @@ class UIHelpers {
         // Re-render as markdown
         textEl.innerHTML = this.renderAssistantMessage(newText, true);
         this.highlightCodeBlocks(textEl);
+        this.renderMermaidDiagrams(textEl);
         this.reinitializeIcons(textEl);
 
         return true;
@@ -1197,6 +1249,9 @@ class UIHelpers {
     highlightCodeBlocks(container) {
         const codeBlocks = container.querySelectorAll('pre code');
         codeBlocks.forEach(block => {
+            if (block.classList.contains('language-mermaid') || block.classList.contains('no-highlight')) {
+                return;
+            }
             if (window.Prism) {
                 try {
                     Prism.highlightElement(block);
@@ -1233,6 +1288,219 @@ class UIHelpers {
         } catch (err) {
             console.error('Failed to copy code:', err);
             this.showToast('Failed to copy code', 'error');
+        }
+    }
+
+    normalizeMermaidSource(text = '') {
+        let source = String(text || '')
+            .replace(/\r\n?/g, '\n')
+            .trim();
+
+        if (!source) {
+            return '';
+        }
+
+        source = source.replace(/^```mermaid\s*/i, '');
+        source = source.replace(/^```\s*/i, '');
+        source = source.replace(/```\s*$/i, '');
+
+        const whitespaceSensitive = /^mindmap\b/i.test(source);
+
+        if (!source.includes('\n') && !whitespaceSensitive && /\s{2,}/.test(source)) {
+            source = source
+                .split(/\s{2,}/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .join('\n');
+        }
+
+        source = source
+            .replace(/^(flowchart|graph)\s+([A-Za-z]{2})\s+(?=\S)/i, '$1 $2\n')
+            .replace(/^(sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|gitGraph|journey|timeline)\s+(?=\S)/i, '$1\n');
+
+        if (!whitespaceSensitive) {
+            source = source.replace(
+                /\s+(?=(?:style|classDef|class|linkStyle|click|subgraph|end|section|participant|actor|note|title|accTitle|accDescr)\b)/g,
+                '\n',
+            );
+        }
+
+        return source
+            .split('\n')
+            .flatMap((line) => (
+                !whitespaceSensitive && /\s{2,}/.test(line) && !/^\s/.test(line)
+                    ? line.split(/\s{2,}/)
+                    : [line]
+            ))
+            .map((line) => line.trimEnd())
+            .filter((line, index, lines) => line.trim() || (index > 0 && lines[index - 1].trim()))
+            .join('\n')
+            .trim();
+    }
+
+    getMermaidFilename(baseName = 'diagram', extension = 'mmd') {
+        const safeBase = String(baseName || 'diagram').replace(/\.[a-z0-9]+$/i, '');
+        return `${safeBase}.${extension}`;
+    }
+
+    downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    async persistGeneratedFile(blob, filename, mimeType = '') {
+        if (!window.artifactManager?.persistGeneratedFile) {
+            return;
+        }
+
+        try {
+            await window.artifactManager.persistGeneratedFile(blob, filename, mimeType || blob.type || 'application/octet-stream');
+        } catch (error) {
+            console.warn('[UI] Failed to persist generated Mermaid file:', error);
+        }
+    }
+
+    getMermaidSourceFromButton(button) {
+        return this.normalizeMermaidSource(button?.dataset?.code || '');
+    }
+
+    async downloadMermaidSource(button) {
+        const source = this.getMermaidSourceFromButton(button);
+        if (!source) {
+            this.showToast('No Mermaid source to download', 'error');
+            return;
+        }
+
+        const filename = this.getMermaidFilename(button?.dataset?.filename || 'diagram', 'mmd');
+        const blob = new Blob([source], { type: 'text/plain;charset=utf-8' });
+        this.downloadBlob(blob, filename);
+        await this.persistGeneratedFile(blob, filename, 'text/plain');
+    }
+
+    async svgMarkupToImage(svgMarkup) {
+        const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+
+        try {
+            const image = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load Mermaid SVG'));
+                img.src = svgUrl;
+            });
+            return image;
+        } finally {
+            URL.revokeObjectURL(svgUrl);
+        }
+    }
+
+    async createMermaidPdfBlobFromSource(source, title = 'diagram') {
+        if (!window.PDFLib?.PDFDocument) {
+            throw new Error('PDF library is not available');
+        }
+        if (typeof mermaid === 'undefined') {
+            throw new Error('Mermaid is not available');
+        }
+
+        const renderId = `mermaid-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const result = await mermaid.render(renderId, source);
+        const image = await this.svgMarkupToImage(result.svg);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.ceil(image.naturalWidth || image.width || 1200));
+        canvas.height = Math.max(1, Math.ceil(image.naturalHeight || image.height || 800));
+
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const pngDataUrl = canvas.toDataURL('image/png');
+        const pngBytes = await fetch(pngDataUrl).then((response) => response.arrayBuffer());
+
+        const pdfDoc = await window.PDFLib.PDFDocument.create();
+        const pngImage = await pdfDoc.embedPng(pngBytes);
+
+        const margin = 36;
+        const pageWidth = Math.max(612, canvas.width + margin * 2);
+        const pageHeight = Math.max(792, canvas.height + margin * 2);
+        const page = pdfDoc.addPage([pageWidth, pageHeight]);
+        const scale = Math.min(
+            (pageWidth - margin * 2) / pngImage.width,
+            (pageHeight - margin * 2) / pngImage.height,
+            1,
+        );
+        const drawWidth = pngImage.width * scale;
+        const drawHeight = pngImage.height * scale;
+
+        page.drawImage(pngImage, {
+            x: (pageWidth - drawWidth) / 2,
+            y: (pageHeight - drawHeight) / 2,
+            width: drawWidth,
+            height: drawHeight,
+        });
+
+        const pdfBytes = await pdfDoc.save({
+            updateFieldAppearances: false,
+            useObjectStreams: false,
+        });
+
+        return new Blob([pdfBytes], { type: 'application/pdf' });
+    }
+
+    async downloadMermaidPdf(button) {
+        const source = this.getMermaidSourceFromButton(button);
+        if (!source) {
+            this.showToast('No Mermaid source to export', 'error');
+            return;
+        }
+
+        const filename = this.getMermaidFilename(button?.dataset?.filename || 'diagram', 'pdf');
+
+        try {
+            const pdfBlob = await this.createMermaidPdfBlobFromSource(source, filename.replace(/\.pdf$/i, ''));
+            this.downloadBlob(pdfBlob, filename);
+            await this.persistGeneratedFile(pdfBlob, filename, 'application/pdf');
+            this.showToast('Mermaid PDF ready', 'success');
+        } catch (error) {
+            console.error('[UI] Mermaid PDF export failed:', error);
+            this.showToast(`Failed to export Mermaid PDF: ${error.message}`, 'error');
+        }
+    }
+
+    async renderMermaidDiagrams(container = document) {
+        if (typeof mermaid === 'undefined') {
+            return;
+        }
+
+        const targets = Array.from(container.querySelectorAll('.mermaid-render-surface'));
+        for (const target of targets) {
+            const source = this.normalizeMermaidSource(target.dataset.mermaidSource || '');
+            if (!source || target.dataset.mermaidRenderedSource === source) {
+                continue;
+            }
+
+            const renderId = `mermaid-inline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+            try {
+                const result = await mermaid.render(renderId, source);
+                target.innerHTML = result.svg;
+                target.dataset.mermaidRenderedSource = source;
+                if (typeof result.bindFunctions === 'function') {
+                    result.bindFunctions(target);
+                }
+            } catch (error) {
+                target.innerHTML = `
+                    <div class="mermaid-render-error">Mermaid render failed: ${this.escapeHtml(error.message)}</div>
+                    <pre class="mermaid-source-block"><code>${this.escapeHtml(source)}</code></pre>
+                `;
+                delete target.dataset.mermaidRenderedSource;
+            }
         }
     }
 
@@ -2747,5 +3015,3 @@ class UIHelpers {
 // Create global UI helpers instance
 const uiHelpers = new UIHelpers();
 window.uiHelpers = uiHelpers;
-
-

@@ -2038,6 +2038,119 @@ const Blocks = (function() {
         console.log(`[Blocks:${type}] ${message}`);
     }
 
+    function getMermaidFilenameV2(baseName = 'diagram', extension = 'mmd') {
+        return `${String(baseName || 'diagram').replace(/\.[a-z0-9]+$/i, '')}.${extension}`;
+    }
+
+    function downloadBlobV2(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    async function svgMarkupToImageV2(svgMarkup) {
+        const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+
+        try {
+            const image = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load Mermaid SVG'));
+                img.src = svgUrl;
+            });
+            return image;
+        } finally {
+            URL.revokeObjectURL(svgUrl);
+        }
+    }
+
+    async function createMermaidPdfBlobV2(diagramCode) {
+        if (!window.PDFLib?.PDFDocument) {
+            throw new Error('PDF export library is not available');
+        }
+        if (typeof mermaid === 'undefined') {
+            throw new Error('Mermaid is not available');
+        }
+
+        const renderId = `mermaid-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const result = await mermaid.render(renderId, String(diagramCode || '').trim());
+        const image = await svgMarkupToImageV2(result.svg);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.ceil(image.naturalWidth || image.width || 1200));
+        canvas.height = Math.max(1, Math.ceil(image.naturalHeight || image.height || 800));
+
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const pngDataUrl = canvas.toDataURL('image/png');
+        const pngBytes = await fetch(pngDataUrl).then((response) => response.arrayBuffer());
+
+        const pdfDoc = await window.PDFLib.PDFDocument.create();
+        const pngImage = await pdfDoc.embedPng(pngBytes);
+        const margin = 36;
+        const pageWidth = Math.max(612, canvas.width + margin * 2);
+        const pageHeight = Math.max(792, canvas.height + margin * 2);
+        const page = pdfDoc.addPage([pageWidth, pageHeight]);
+        const scale = Math.min(
+            (pageWidth - margin * 2) / pngImage.width,
+            (pageHeight - margin * 2) / pngImage.height,
+            1,
+        );
+
+        page.drawImage(pngImage, {
+            x: (pageWidth - (pngImage.width * scale)) / 2,
+            y: (pageHeight - (pngImage.height * scale)) / 2,
+            width: pngImage.width * scale,
+            height: pngImage.height * scale,
+        });
+
+        const pdfBytes = await pdfDoc.save({
+            updateFieldAppearances: false,
+            useObjectStreams: false,
+        });
+
+        return new Blob([pdfBytes], { type: 'application/pdf' });
+    }
+
+    async function downloadMermaidSourceV2(content, filenameBase = 'diagram') {
+        const source = String(content || '').trim();
+        if (!source) {
+            showBlocksToastV2('Add Mermaid code before downloading.', 'error');
+            return;
+        }
+
+        downloadBlobV2(
+            new Blob([source], { type: 'text/plain;charset=utf-8' }),
+            getMermaidFilenameV2(filenameBase, 'mmd'),
+        );
+        showBlocksToastV2('Mermaid source downloaded', 'success');
+    }
+
+    async function downloadMermaidPdfV2(content, filenameBase = 'diagram') {
+        const source = String(content || '').trim();
+        if (!source) {
+            showBlocksToastV2('Add Mermaid code before exporting.', 'error');
+            return;
+        }
+
+        try {
+            const pdfBlob = await createMermaidPdfBlobV2(source);
+            downloadBlobV2(pdfBlob, getMermaidFilenameV2(filenameBase, 'pdf'));
+            showBlocksToastV2('Mermaid PDF downloaded', 'success');
+        } catch (error) {
+            console.error('Mermaid PDF export failed:', error);
+            showBlocksToastV2(`Failed to export Mermaid PDF: ${error.message}`, 'error');
+        }
+    }
+
     function replaceMermaidWrapperV2(wrapper, block, isEditable) {
         const nextWrapper = renderMermaidBlock(block, isEditable);
         wrapper.replaceWith(nextWrapper);
@@ -2313,6 +2426,23 @@ const Blocks = (function() {
         toolbar.appendChild(fixBtn);
         toolbar.appendChild(expandBtn);
         toolbar.appendChild(explainBtn);
+
+        const downloadSourceBtn = document.createElement('button');
+        downloadSourceBtn.className = 'mermaid-action-btn';
+        downloadSourceBtn.textContent = 'Download .mmd';
+        downloadSourceBtn.addEventListener('click', async () => {
+            await downloadMermaidSourceV2(content.text, `${content.diagramType}-diagram-${Date.now()}`);
+        });
+
+        const downloadPdfBtn = document.createElement('button');
+        downloadPdfBtn.className = 'mermaid-action-btn';
+        downloadPdfBtn.textContent = 'Download PDF';
+        downloadPdfBtn.addEventListener('click', async () => {
+            await downloadMermaidPdfV2(content.text, `${content.diagramType}-diagram-${Date.now()}`);
+        });
+
+        toolbar.appendChild(downloadSourceBtn);
+        toolbar.appendChild(downloadPdfBtn);
 
         if (isEditable) {
             const editBtn = document.createElement('button');

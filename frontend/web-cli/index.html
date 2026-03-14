@@ -20,6 +20,9 @@
     
     <!-- Mermaid.js for diagram rendering -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+    <!-- PDF export for Mermaid diagrams -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -329,26 +332,20 @@
             min-height: 100px;
         }
         
-        .diagram-preview .mermaid {
+        .diagram-preview .mermaid-render-surface {
             max-width: 100%;
+            width: 100%;
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 16px;
+            overflow: auto;
         }
         
-        .diagram-preview .mermaid svg {
+        .diagram-preview .mermaid-render-surface svg {
             max-width: 100%;
             height: auto;
             display: block;
-        }
-        
-        /* Mermaid diagram styling adjustments */
-        .mermaid {
-            font-family: var(--font-family) !important;
-        }
-        
-        /* Ensure mermaid diagrams are visible */
-        .diagram-preview:empty::before {
-            content: 'Rendering diagram...';
-            color: var(--text-muted);
-            font-style: italic;
+            margin: 0 auto;
         }
 
         /* ===== Input Area ===== */
