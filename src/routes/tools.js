@@ -16,6 +16,18 @@ async function ensureToolManagerInitialized() {
   return toolManager;
 }
 
+function buildToolExecutionContext(toolManager, req, sessionId = null) {
+  return {
+    sessionId,
+    userId: req.user?.id,
+    timestamp: new Date().toISOString(),
+    toolManager,
+    tools: {
+      get: (toolId) => toolManager.getTool(toolId),
+    },
+  };
+}
+
 /**
  * GET /api/tools/available
  * Get all tools available to frontends
@@ -147,11 +159,11 @@ router.post('/invoke', async (req, res) => {
     
     const toolManager = await ensureToolManagerInitialized();
     
-    const result = await toolManager.executeTool(toolId, params, {
-      sessionId,
-      userId: req.user?.id,
-      timestamp: new Date().toISOString()
-    });
+    const result = await toolManager.executeTool(
+      toolId,
+      params,
+      buildToolExecutionContext(toolManager, req, sessionId),
+    );
     
     res.json({ success: true, data: result });
   } catch (error) {
@@ -171,10 +183,11 @@ router.post('/invoke/:id', async (req, res) => {
     
     const toolManager = await ensureToolManagerInitialized();
     
-    const result = await toolManager.executeTool(id, params, {
-      sessionId: req.body.sessionId,
-      userId: req.user?.id
-    });
+    const result = await toolManager.executeTool(
+      id,
+      params,
+      buildToolExecutionContext(toolManager, req, req.body.sessionId),
+    );
     
     res.json({ success: true, data: result });
   } catch (error) {

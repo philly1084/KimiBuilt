@@ -114,7 +114,7 @@ class WebScrapeTool extends ToolBase {
       throw new Error('Browser-based scraping requires Puppeteer installation');
     } else {
       // Static fetch
-      const fetchTool = context.tools?.get('web-fetch');
+      const fetchTool = this.resolveFetchTool(context);
       if (!fetchTool) {
         throw new Error('WebFetchTool not available');
       }
@@ -167,6 +167,40 @@ class WebScrapeTool extends ToolBase {
         fieldsExtracted: Object.keys(extractedData).length
       }
     };
+  }
+
+  resolveFetchTool(context = {}) {
+    const contextualTool = typeof context.tools?.get === 'function'
+      ? context.tools.get('web-fetch')
+      : null;
+
+    if (contextualTool?.execute) {
+      return contextualTool;
+    }
+
+    if (context.toolManager?.getTool) {
+      const managerTool = context.toolManager.getTool('web-fetch');
+      if (managerTool?.execute) {
+        return managerTool;
+      }
+    }
+
+    try {
+      const { getToolManager } = require('../../index');
+      const managerTool = getToolManager().getTool('web-fetch');
+      if (managerTool?.execute) {
+        return managerTool;
+      }
+    } catch (_error) {
+      // Fall through to a direct tool instance.
+    }
+
+    try {
+      const { WebFetchTool } = require('./WebFetchTool');
+      return new WebFetchTool();
+    } catch (_error) {
+      return null;
+    }
   }
 
   async extractWithSelectors(html, selectors) {
