@@ -175,39 +175,70 @@ const Agent = (function() {
             ? pageContext.outline.map((heading) => `- [${heading.id}] ${heading.content}`).join('\n')
             : '- No headings yet';
 
-        return `You are an AI assistant inside a block-based note editor.
-You can see the current page setup and should answer in a way that is useful for editing blocks.
+        return `You are an AI assistant editing a Notion-style block-based document.
 
-Current page setup:
-${pageSetup}
+CURRENT PAGE: "${pageContext?.title || 'Untitled'}"
 
-Outline:
+PAGE STRUCTURE:
+The document is organized into blocks. Each block has a unique ID shown in brackets like [block_abc123].
+Reference blocks by their ID when editing or inserting content.
+
+BLOCKS IN THIS PAGE:
+${blockMap || '(page is empty)'}
+
+OUTLINE (Headings):
 ${outline}
 
-Block map:
-${blockMap}
+PAGE STATS:
+${pageSetup}
 
-Page content snapshot:
-${pageContent || '(page is empty)'}
+AVAILABLE ACTIONS - Respond with JSON:
+When the user asks you to edit, create, delete, or reorganize content, respond with a JSON action block like this:
 
-Instructions:
-- Treat this as a live block editor, not a plain text document.
-- When referring to existing content, cite block ids when helpful.
-- When suggesting edits, say exactly which block to update or where to insert new content.
-- If the user asks you to change the page, rewrite content, insert sections, reorganize blocks, or otherwise edit the note, include a single \`\`\`notes-actions fenced JSON block that follows this schema:
-  {
-    "assistant_reply": "Short explanation of what changed",
-    "actions": [
-      { "op": "update_block", "blockId": "existing-block-id", "type": "text", "content": "Updated content" },
-      { "op": "insert_after", "blockId": "existing-block-id", "blocks": [{ "type": "heading_2", "content": "New section" }, { "type": "text", "content": "New paragraph" }] }
-    ]
-  }
-- Valid ops are: update_block, replace_block, insert_before, insert_after, append_to_page, prepend_to_page, delete_block.
-- Use plain string content for text-like blocks. Use structured objects only when a block type requires it, such as todo, code, mermaid, image, bookmark, ai_image, ai, math, or database.
-- Do not mention the notes-actions block in assistant_reply. The editor will apply it automatically.
-- Keep answers concise unless the user asks for a long response.
-- If the user asks for Mermaid output, return clean Mermaid code in a single \`\`\`mermaid block unless they ask for explanation too.
-- Do not invent page structure that is not present in the block map.`;
+\`\`\`notes-actions
+{
+  "assistant_reply": "Brief, friendly explanation of what I did",
+  "actions": [
+    { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
+    { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "delete_block", "blockId": "block_def456" },
+    { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
+  ]
+}
+\`\`\`
+
+VALID OPERATIONS:
+- update_block: Change content of existing block (requires blockId, type, content)
+- replace_block: Replace block with new block(s) (requires blockId, blocks array)
+- insert_after: Add new block(s) after specified block (requires blockId, blocks array)
+- insert_before: Add new block(s) before specified block (requires blockId, blocks array)
+- append_to_page: Add block(s) at end of page (requires blocks array)
+- prepend_to_page: Add block(s) at start of page (requires blocks array)
+- delete_block: Remove a block (requires blockId)
+
+BLOCK TYPES:
+- text: Plain text paragraph
+- heading_1, heading_2, heading_3: Section headings
+- bulleted_list: Bullet points
+- numbered_list: Numbered items
+- todo: Checkbox item (content: {text: "...", checked: false})
+- code: Code block (content: {language: "javascript", text: "..."})
+- quote: Blockquote
+- callout: Highlighted info box (content: {text: "...", icon: "💡"})
+- divider: Horizontal line
+- mermaid: Mermaid diagram (content: {text: "...", diagramType: "flowchart"})
+- image: Image (content: {url: "...", caption: "..."})
+- bookmark: Link bookmark (content: {url: "...", title: "..."})
+
+GUIDELINES:
+- Always reference blocks by their exact ID in [brackets]
+- assistant_reply should be brief and user-friendly (not mention the JSON actions)
+- The editor will automatically apply your actions and show the assistant_reply to the user
+- For text-like blocks, use plain strings for content
+- For special blocks (todo, code, mermaid, image, bookmark), use structured objects
+- Do not invent block IDs - only use IDs that exist in the page
+- Keep assistant_reply concise unless user asks for detailed explanation
+- If generating Mermaid diagrams, include clean diagram code in a \`\`\`mermaid block`;
     }
 
     function normalizeActionContent(type, content) {
@@ -469,6 +500,19 @@ Instructions:
 
         let appliedCount = 0;
         let focusBlockId = null;
+        
+        // Get affected blocks for visual feedback
+        const affectedBlockIds = getAffectedBlockIds(actions);
+        
+        // Highlight blocks before applying actions
+        affectedBlockIds.forEach(blockId => {
+            const action = actions.find(a => 
+                a.blockId === blockId || a.targetBlockId === blockId
+            );
+            const actionType = action?.op?.includes('delete') ? 'deleting' : 
+                              action?.op?.includes('insert') ? 'inserting' : 'editing';
+            highlightBlock(blockId, actionType);
+        });
 
         actions.forEach((rawAction) => {
             if (!rawAction || typeof rawAction !== 'object') return;
@@ -604,7 +648,15 @@ Instructions:
             if (focusBlockId) {
                 editor.focusBlock?.(focusBlockId);
             }
-            showToast(`Applied ${appliedCount} page change${appliedCount === 1 ? '' : 's'}`, 'success');
+            showActionToast(appliedCount);
+            
+            // Remove highlights after a delay
+            setTimeout(() => {
+                unhighlightAllBlocks();
+            }, 2000);
+        } else {
+            // Remove highlights immediately if no actions were applied
+            unhighlightAllBlocks();
         }
 
         return { appliedCount, focusBlockId };
@@ -635,6 +687,90 @@ Instructions:
             .replace(/```notes-actions[\s\S]*$/i, '')
             .replace(/```json[\s\S]*?(?:"assistant_reply"|"actions")[\s\S]*$/i, '')
             .trimEnd();
+    }
+
+    // ============================================
+    // Visual Feedback for AI Actions
+    // ============================================
+    
+    /**
+     * Highlight a block to show AI is working on it
+     * @param {string} blockId - The block ID to highlight
+     * @param {string} action - The action being performed ('editing', 'inserting', 'deleting')
+     */
+    function highlightBlock(blockId, action = 'editing') {
+        if (!blockId) return;
+        
+        const blockElement = document.querySelector(`[data-block-id="${blockId}"]`);
+        if (!blockElement) return;
+        
+        // Remove any existing AI state classes
+        blockElement.classList.remove('ai-editing', 'ai-inserting', 'ai-deleting');
+        
+        // Add appropriate class based on action
+        blockElement.classList.add(`ai-${action}`);
+        
+        // Scroll block into view if needed
+        blockElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        return blockElement;
+    }
+    
+    /**
+     * Remove AI highlight from a block
+     * @param {string} blockId - The block ID to unhighlight
+     */
+    function unhighlightBlock(blockId) {
+        if (!blockId) return;
+        
+        const blockElement = document.querySelector(`[data-block-id="${blockId}"]`);
+        if (!blockElement) return;
+        
+        blockElement.classList.remove('ai-editing', 'ai-inserting', 'ai-deleting');
+        return blockElement;
+    }
+    
+    /**
+     * Unhighlight all AI-affected blocks
+     */
+    function unhighlightAllBlocks() {
+        document.querySelectorAll('.ai-editing, .ai-inserting, .ai-deleting').forEach(el => {
+            el.classList.remove('ai-editing', 'ai-inserting', 'ai-deleting');
+        });
+    }
+    
+    /**
+     * Show toast notification for completed AI actions
+     * @param {number} actionCount - Number of actions applied
+     * @param {string} description - Description of what was done
+     */
+    function showActionToast(actionCount, description = '') {
+        if (actionCount === 0) return;
+        
+        const message = description || `Applied ${actionCount} change${actionCount === 1 ? '' : 's'}`;
+        showToast(message, 'success');
+    }
+    
+    /**
+     * Extract block IDs from actions for highlighting
+     * @param {Array} actions - Array of action objects
+     * @returns {Array} Array of block IDs affected
+     */
+    function getAffectedBlockIds(actions = []) {
+        const blockIds = new Set();
+        
+        actions.forEach(action => {
+            if (action.blockId) blockIds.add(action.blockId);
+            if (action.targetBlockId) blockIds.add(action.targetBlockId);
+            
+            // Also check for blocks being inserted (they won't have IDs yet, but their neighbors will)
+            if (action.blocks && Array.isArray(action.blocks)) {
+                // For insert operations, highlight the reference block
+                if (action.blockId) blockIds.add(action.blockId);
+            }
+        });
+        
+        return Array.from(blockIds);
     }
 
     function getStoredModelId() {
@@ -1190,6 +1326,77 @@ Instructions:
         return context.outline;
     }
     
+    // ============================================
+    // Page Context Helper
+    // ============================================
+    
+    /**
+     * Format page structure for AI context
+     * Returns a structured summary of all blocks with IDs, types, and content previews
+     * @param {Object} options - Formatting options
+     * @param {number} options.maxContentLength - Max length for content preview (default: 100)
+     * @param {boolean} options.includeStats - Include page statistics (default: true)
+     * @returns {string} Formatted page structure
+     */
+    function formatPageContextForAI(options = {}) {
+        const { maxContentLength = 100, includeStats = true } = options;
+        const context = getPageContext();
+        
+        if (!context) {
+            return 'No page is currently loaded.';
+        }
+        
+        const lines = [];
+        
+        // Page header
+        lines.push(`PAGE: "${context.title || 'Untitled'}"`);
+        lines.push('');
+        
+        // Statistics
+        if (includeStats) {
+            lines.push('STATISTICS:');
+            lines.push(`  - Total blocks: ${context.blockCount}`);
+            lines.push(`  - Word count: ${context.wordCount}`);
+            lines.push(`  - Reading time: ~${context.readingTime} min`);
+            lines.push(`  - Headings: ${context.outline?.length || 0}`);
+            lines.push('');
+        }
+        
+        // Block structure
+        lines.push('BLOCK STRUCTURE:');
+        context.blocks?.forEach(block => {
+            const indent = '  '.repeat(block.depth || 0);
+            const contentPreview = block.content 
+                ? truncateText(block.content, maxContentLength)
+                : '(empty)';
+            lines.push(`${indent}[${block.id}] ${block.type}: "${contentPreview}"`);
+        });
+        
+        return lines.join('\n');
+    }
+    
+    /**
+     * Get detailed info about a specific block
+     * @param {string} blockId - The block ID
+     * @returns {Object|null} Block details or null if not found
+     */
+    function getBlockInfo(blockId) {
+        const context = getPageContext();
+        if (!context?.blocks) return null;
+        
+        const block = context.blocks.find(b => b.id === blockId);
+        if (!block) return null;
+        
+        return {
+            id: block.id,
+            type: block.type,
+            content: block.content,
+            depth: block.depth,
+            hasChildren: block.hasChildren,
+            preview: truncateText(block.content, 200)
+        };
+    }
+    
     function getPageMetadata() {
         const context = getPageContext();
         if (!context) return null;
@@ -1493,10 +1700,10 @@ Instructions:
     
     // Call the real API with streaming support
     async function askWithAPI(question, context, options) {
-        const { onChunk, onComplete, hiddenAssistantMessage = false } = options;
+        const { onChunk, onComplete, onError, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
         
-        // Build messages array
+        // Build messages array with enhanced system prompt
         const systemPrompt = buildSystemPrompt(context || {
             title: 'Untitled',
             blockCount: 0,
@@ -1513,104 +1720,160 @@ Instructions:
         const model = state.selectedModel;
         let responseText = '';
         let lastVisibleText = '';
+        
+        // Track if we're processing JSON to avoid showing it in stream
+        let jsonBuffer = '';
+        let inJsonBlock = false;
 
-        if (state.streamingEnabled && apiClient.streamChat) {
-            for await (const chunk of apiClient.streamChat(messages, model)) {
-                if (chunk.type === 'delta' && chunk.content) {
-                    responseText += chunk.content;
-                    if (onChunk) {
-                        const visibleText = getStreamingVisibleText(responseText);
-                        const visibleDelta = visibleText.slice(lastVisibleText.length);
-                        lastVisibleText = visibleText;
-                        if (visibleDelta) {
-                            onChunk(visibleDelta, visibleText);
+        try {
+            if (state.streamingEnabled && apiClient.streamChat) {
+                for await (const chunk of apiClient.streamChat(messages, model)) {
+                    if (chunk.type === 'delta' && chunk.content) {
+                        const chunkText = chunk.content;
+                        responseText += chunkText;
+                        
+                        // Track JSON blocks to filter them from visible output
+                        if (chunkText.includes('```notes-actions')) {
+                            inJsonBlock = true;
+                            jsonBuffer = chunkText;
+                        } else if (inJsonBlock) {
+                            jsonBuffer += chunkText;
+                            if (chunkText.includes('```')) {
+                                inJsonBlock = false;
+                            }
+                            continue; // Skip showing JSON in stream
                         }
+                        
+                        if (onChunk && !inJsonBlock) {
+                            const visibleText = getStreamingVisibleText(responseText);
+                            const visibleDelta = visibleText.slice(lastVisibleText.length);
+                            lastVisibleText = visibleText;
+                            if (visibleDelta) {
+                                onChunk(visibleDelta, visibleText);
+                            }
+                        }
+                        continue;
                     }
-                    continue;
+
+                    if (chunk.type === 'error') {
+                        throw new Error(chunk.error || 'Streaming error');
+                    }
+                }
+            } else {
+                const response = await apiClient.chat(messages, model);
+                if (response?.error) {
+                    throw new Error(response.content || 'API request failed');
                 }
 
-                if (chunk.type === 'error') {
-                    throw new Error(chunk.error || 'Streaming error');
-                }
-            }
-        } else {
-            const response = await apiClient.chat(messages, model);
-            if (response?.error) {
-                throw new Error(response.content || 'API request failed');
+                responseText = response.content || response.message || String(response);
             }
 
-            responseText = response.content || response.message || String(response);
+            // Parse and apply structured actions from response
+            let preparedResponse;
+            try {
+                preparedResponse = prepareAssistantResponse(responseText);
+            } catch (parseError) {
+                console.warn('Failed to parse structured response, using raw text:', parseError);
+                // Fall back to treating response as plain text
+                preparedResponse = {
+                    displayText: responseText.replace(/```notes-actions[\s\S]*?```/g, '').trim(),
+                    appliedCount: 0
+                };
+            }
+            
+            const visibleResponse = preparedResponse.displayText || responseText;
+
+            const assistantMessage = hiddenAssistantMessage
+                ? null
+                : addMessage('assistant', visibleResponse, {
+                    model: model,
+                    tokensUsed: estimateTokens(question + visibleResponse),
+                    source: 'api',
+                    appliedCount: preparedResponse.appliedCount || 0
+                });
+
+            setProcessingState(false);
+
+            if (onComplete) {
+                onComplete(visibleResponse, assistantMessage);
+            }
+
+            return visibleResponse;
+            
+        } catch (error) {
+            setProcessingState(false, { error: error.message });
+            unhighlightAllBlocks(); // Clean up any highlights on error
+            
+            if (onError) {
+                onError(error);
+            } else {
+                showToast('AI request failed: ' + error.message, 'error');
+            }
+            throw error;
         }
-
-        const preparedResponse = prepareAssistantResponse(responseText);
-        const visibleResponse = preparedResponse.displayText || responseText;
-
-        const assistantMessage = hiddenAssistantMessage
-            ? null
-            : addMessage('assistant', visibleResponse, {
-                model: model,
-                tokensUsed: estimateTokens(question + visibleResponse),
-                source: 'api',
-                appliedCount: preparedResponse.appliedCount || 0
-            });
-
-        setProcessingState(false);
-
-        if (onComplete) {
-            onComplete(visibleResponse, assistantMessage);
-        }
-
-        return visibleResponse;
     }
     
     // Stub mode for offline/no API
     async function askWithStub(question, context, options) {
-        const { onChunk, onComplete, hiddenAssistantMessage = false } = options;
+        const { onChunk, onComplete, onError, hiddenAssistantMessage = false } = options;
         
-        // Simulate processing delay
-        await delay(500 + Math.random() * 1000);
-        
-        // Generate response (stub mode)
-        const responseText = generateStubResponse(question, context);
-        
-        // Simulate streaming if enabled
-        if (state.streamingEnabled && onChunk) {
-            const chunks = simulateStreaming(responseText);
-            let fullResponse = '';
-            let visibleResponse = '';
+        try {
+            // Simulate processing delay
+            await delay(500 + Math.random() * 1000);
             
-            for (const chunk of chunks) {
-                await delay(30 + Math.random() * 50);
-                fullResponse += chunk;
-                const nextVisible = getStreamingVisibleText(fullResponse);
-                const visibleDelta = nextVisible.slice(visibleResponse.length);
-                visibleResponse = nextVisible;
-                if (visibleDelta) {
-                    onChunk(visibleDelta, nextVisible);
+            // Generate response (stub mode)
+            const responseText = generateStubResponse(question, context);
+            
+            // Simulate streaming if enabled
+            if (state.streamingEnabled && onChunk) {
+                const chunks = simulateStreaming(responseText);
+                let fullResponse = '';
+                let visibleResponse = '';
+                
+                for (const chunk of chunks) {
+                    await delay(30 + Math.random() * 50);
+                    fullResponse += chunk;
+                    const nextVisible = getStreamingVisibleText(fullResponse);
+                    const visibleDelta = nextVisible.slice(visibleResponse.length);
+                    visibleResponse = nextVisible;
+                    if (visibleDelta) {
+                        onChunk(visibleDelta, nextVisible);
+                    }
                 }
             }
-        }
-        
-        // Add assistant message
-        const preparedResponse = prepareAssistantResponse(responseText);
-        const visibleResponse = preparedResponse.displayText || responseText;
+            
+            // Add assistant message
+            const preparedResponse = prepareAssistantResponse(responseText);
+            const visibleResponse = preparedResponse.displayText || responseText;
 
-        const assistantMessage = hiddenAssistantMessage
-            ? null
-            : addMessage('assistant', visibleResponse, {
-                model: state.selectedModel,
-                tokensUsed: estimateTokens(question + visibleResponse),
-                source: 'stub',
-                appliedCount: preparedResponse.appliedCount || 0
-            });
+            const assistantMessage = hiddenAssistantMessage
+                ? null
+                : addMessage('assistant', visibleResponse, {
+                    model: state.selectedModel,
+                    tokensUsed: estimateTokens(question + visibleResponse),
+                    source: 'stub',
+                    appliedCount: preparedResponse.appliedCount || 0
+                });
 
-        setProcessingState(false);
-        
-        if (onComplete) {
-            onComplete(visibleResponse, assistantMessage);
+            setProcessingState(false);
+            
+            if (onComplete) {
+                onComplete(visibleResponse, assistantMessage);
+            }
+            
+            return visibleResponse;
+            
+        } catch (error) {
+            setProcessingState(false, { error: error.message });
+            unhighlightAllBlocks();
+            
+            if (onError) {
+                onError(error);
+            } else {
+                showToast('Request failed: ' + error.message, 'error');
+            }
+            throw error;
         }
-        
-        return visibleResponse;
     }
     
     function simulateStreaming(text) {
@@ -1650,6 +1913,9 @@ Instructions:
             // Save the page
             window.Editor?.savePage?.();
             
+            // Refresh the editor UI
+            window.Editor?.refreshEditor?.();
+            
             showToast('Block updated', 'success');
             
             // Add system message about the edit
@@ -1676,6 +1942,9 @@ Instructions:
             }
             
             window.Editor?.savePage?.();
+            
+            // Refresh the editor UI
+            window.Editor?.refreshEditor?.();
             
             const typeName = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             showToast(`${typeName} block added`, 'success');
@@ -1708,6 +1977,9 @@ Instructions:
             
             window.Editor?.savePage?.();
             
+            // Refresh the editor UI
+            window.Editor?.refreshEditor?.();
+            
             const typeName = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             showToast(`${typeName} block added`, 'success');
             
@@ -1729,6 +2001,9 @@ Instructions:
             
             window.Editor?.deleteBlock?.(blockId);
             window.Editor?.savePage?.();
+            
+            // Refresh the editor UI
+            window.Editor?.refreshEditor?.();
             
             showToast('Block deleted', 'success');
             
@@ -1818,6 +2093,9 @@ Instructions:
             window.Editor?.updateBlockContent?.(blockId, improvedContent);
             window.Editor?.savePage?.();
             
+            // Refresh the editor UI
+            window.Editor?.refreshEditor?.();
+            
             const response = pickRandom(RESPONSE_TEMPLATES.improve);
             addMessage('assistant', response, {
                 action: 'improve',
@@ -1875,6 +2153,9 @@ Instructions:
             if (targetBlockId) {
                 const newBlock = window.Editor?.insertBlockAfter?.(targetBlockId, 'text', continuedContent);
                 window.Editor?.savePage?.();
+                
+                // Refresh the editor UI
+                window.Editor?.refreshEditor?.();
                 
                 if (newBlock) {
                     window.Editor?.focusBlock?.(newBlock.id);
@@ -2054,6 +2335,10 @@ Instructions:
         getOutline,
         getPageMetadata,
         
+        // Page Context Helper (new)
+        formatPageContextForAI,
+        getBlockInfo,
+        
         // Chat Interface
         ask,
         getMessages,
@@ -2079,10 +2364,17 @@ Instructions:
         continueWriting,
         generateOutline,
         
+        // Visual Feedback (new)
+        highlightBlock,
+        unhighlightBlock,
+        unhighlightAllBlocks,
+        
         // Internal utilities (exposed for testing/advanced use)
         _generateStubResponse: generateStubResponse,
         _simulateStreaming: simulateStreaming,
-        _buildSystemPrompt: buildSystemPrompt
+        _buildSystemPrompt: buildSystemPrompt,
+        _applyNotesActions: applyNotesActions,
+        _extractNotesActionPlan: extractNotesActionPlan
     };
 })();
 

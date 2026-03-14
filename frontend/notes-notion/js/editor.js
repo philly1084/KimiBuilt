@@ -1796,7 +1796,8 @@ const Editor = (function() {
         insertBlocksAfter,
         insertBlocksBefore,
         addBlockAtEnd,
-        getCurrentModel
+        getCurrentModel,
+        refreshEditor
     };
     
     return window.Editor;
