@@ -6,9 +6,6 @@
 const express = require('express');
 const router = express.Router();
 
-// Middleware
-const auth = require('../../middleware/auth');
-
 // Controllers
 const promptsController = require('./prompts.controller');
 const modelsController = require('./models.controller');
