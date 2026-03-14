@@ -91,11 +91,106 @@ function normalizeMermaidSource(text = '') {
         .trim();
 }
 
-function ensureHtmlDocument(bodyHtml, title = 'Document') {
-    const content = String(bodyHtml || '').trim();
-    if (/<!doctype html>/i.test(content)) {
-        return content;
+function extractHtmlBody(html = '') {
+    const source = String(html || '').trim();
+    if (!source) {
+        return { body: '', head: '' };
     }
+
+    const headMatch = source.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+    const bodyMatch = source.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+
+    return {
+        head: headMatch ? headMatch[1].trim() : '',
+        body: bodyMatch ? bodyMatch[1].trim() : source,
+    };
+}
+
+function extractCompositeDocumentParts(input = '') {
+    let source = String(input || '').replace(/\r\n?/g, '\n').trim();
+    if (!source) {
+        return { mermaidSource: '', bodyContent: '', headContent: '' };
+    }
+
+    let bodyContent = '';
+    let headContent = '';
+
+    const htmlFence = source.match(/```html\s*([\s\S]*?)```/i);
+    if (htmlFence) {
+        source = source.replace(htmlFence[0], '').trim();
+        const htmlParts = extractHtmlBody(htmlFence[1]);
+        bodyContent = htmlParts.body;
+        headContent = htmlParts.head;
+    } else if (/<!doctype html>|<html\b|<body\b/i.test(source)) {
+        const htmlParts = extractHtmlBody(source);
+        source = '';
+        bodyContent = htmlParts.body;
+        headContent = htmlParts.head;
+    }
+
+    let mermaidSource = '';
+    const mermaidFence = source.match(/```mermaid\s*([\s\S]*?)```/i);
+    if (mermaidFence) {
+        mermaidSource = normalizeMermaidSource(mermaidFence[1]);
+        source = source.replace(mermaidFence[0], '').trim();
+    } else if (detectMermaidDiagramType(source) !== 'unknown') {
+        const htmlStart = source.search(/```html\b|<!doctype html>|<html\b|<body\b|^#\s|^\d+\.\s|\n#\s|\n\d+\.\s/m);
+        const mermaidCandidate = htmlStart > 0 ? source.slice(0, htmlStart).trim() : source;
+        const normalizedMermaid = normalizeMermaidSource(mermaidCandidate);
+        if (detectMermaidDiagramType(normalizedMermaid) !== 'unknown') {
+            mermaidSource = normalizedMermaid;
+            source = htmlStart > 0 ? source.slice(htmlStart).trim() : '';
+        }
+    }
+
+    if (!bodyContent) {
+        bodyContent = source.trim();
+    } else if (source.trim()) {
+        bodyContent = `${source.trim()}\n\n${bodyContent}`.trim();
+    }
+
+    return { mermaidSource, bodyContent, headContent };
+}
+
+function renderBodyMarkup(content = '') {
+    const trimmed = String(content || '').trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (/<[a-z][\s\S]*>/i.test(trimmed)) {
+        return trimmed;
+    }
+
+    return trimmed
+        .split(/\n{2,}/)
+        .map((block) => {
+            const normalized = block.trim();
+            if (!normalized) {
+                return '';
+            }
+            return `<p>${escapeHtml(normalized).replace(/\n/g, '<br>')}</p>`;
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
+function buildMermaidMarkup(mermaidSource = '') {
+    if (!mermaidSource) {
+        return '';
+    }
+
+    return `
+<section class="mermaid-section">
+  <div class="mermaid-frame">
+    <div class="mermaid">${escapeHtml(mermaidSource)}</div>
+  </div>
+</section>`;
+}
+
+function ensureHtmlDocument(bodyHtml, title = 'Document') {
+    const { mermaidSource, bodyContent, headContent } = extractCompositeDocumentParts(bodyHtml);
+    const content = renderBodyMarkup(bodyContent);
 
     return `<!DOCTYPE html>
 <html>
@@ -109,9 +204,30 @@ table { border-collapse: collapse; width: 100%; margin: 16px 0; }
 th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
 pre { background: #f3f4f6; padding: 12px; overflow: auto; }
 code { background: #f3f4f6; padding: 2px 4px; }
+.mermaid-section { margin: 0 0 24px; }
+.mermaid-frame { border: 1px solid #d1d5db; border-radius: 12px; padding: 16px; background: #ffffff; }
+.mermaid { text-align: center; }
+.mermaid svg { max-width: 100%; height: auto; }
 </style>
+${headContent}
+${mermaidSource ? '<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>' : ''}
+${mermaidSource ? `<script>
+window.addEventListener('load', async () => {
+  if (!window.mermaid) return;
+  try {
+    window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+    const nodes = document.querySelectorAll('.mermaid');
+    if (nodes.length) {
+      await window.mermaid.run({ nodes });
+    }
+  } catch (error) {
+    console.error('Mermaid render failed:', error);
+  }
+});
+</script>` : ''}
 </head>
 <body>
+${buildMermaidMarkup(mermaidSource)}
 ${content}
 </body>
 </html>`;
@@ -388,9 +504,12 @@ async function resolveBrowserPath() {
     return null;
 }
 
-function getBrowserArgs(outputPath, inputPath) {
+function getBrowserArgs(outputPath, inputPath, html = '') {
     const configuredArgs = String(config.artifacts.browserArgs || '').trim();
     const extraArgs = configuredArgs ? configuredArgs.split(/\s+/).filter(Boolean) : [];
+    const virtualTimeBudget = /class="mermaid"|cdn\.jsdelivr\.net\/npm\/mermaid/i.test(String(html || ''))
+        ? 10000
+        : 5000;
     return [
         '--headless',
         '--disable-gpu',
@@ -398,7 +517,7 @@ function getBrowserArgs(outputPath, inputPath) {
         '--allow-file-access-from-files',
         '--disable-dev-shm-usage',
         '--run-all-compositor-stages-before-draw',
-        '--virtual-time-budget=5000',
+        `--virtual-time-budget=${virtualTimeBudget}`,
         '--no-pdf-header-footer',
         `--print-to-pdf=${outputPath}`,
         ...extraArgs,
@@ -419,7 +538,7 @@ async function renderPdfViaBrowser(html, title) {
 
     try {
         await fs.writeFile(htmlPath, html, 'utf8');
-        await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath), {
+        await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, html), {
             timeout: config.artifacts.pdfTimeoutMs,
             windowsHide: true,
         });
@@ -517,6 +636,7 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
 
 module.exports = {
     ensureHtmlDocument,
+    extractCompositeDocumentParts,
     normalizeMermaidSource,
     renderArtifact,
 };
