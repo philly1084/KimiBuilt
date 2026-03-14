@@ -21,6 +21,20 @@ router.get('/', async (_req, res, next) => {
                 m.id.includes('mistral') ||
                 m.id.includes('gemini')
             )
+            .filter(m => {
+                const id = String(m.id || '').toLowerCase();
+                return ![
+                    'image',
+                    'embedding',
+                    'tts',
+                    'transcribe',
+                    'audio',
+                    'realtime',
+                    'vision-preview',
+                    'preview-tools',
+                    '-tools',
+                ].some(token => id.includes(token));
+            })
             .map(m => ({
                 id: m.id,
                 object: m.object || 'model',

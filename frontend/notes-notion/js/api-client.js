@@ -588,7 +588,19 @@ class NotesAPIClient {
                 'antigravity',
             ].some((token) => id.includes(token));
 
-            return looksLikeChatModel && !id.includes('image');
+            const looksUnsupportedForNotes = [
+                'image',
+                'embedding',
+                'tts',
+                'transcribe',
+                'audio',
+                'realtime',
+                'vision-preview',
+                'preview-tools',
+                '-tools',
+            ].some((token) => id.includes(token));
+
+            return looksLikeChatModel && !looksUnsupportedForNotes;
         });
     }
 }

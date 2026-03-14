@@ -245,6 +245,33 @@ const Blocks = (function() {
         
         return null;
     }
+
+    function normalizeDatabaseContent(content) {
+        const source = (content && typeof content === 'object') ? content : {};
+        const columns = Array.isArray(source.columns) && source.columns.length > 0
+            ? source.columns.map((column, index) => {
+                const label = String(column || '').trim();
+                return label || `Column ${index + 1}`;
+            })
+            : ['Name', 'Status', 'Notes'];
+
+        const rows = Array.isArray(source.rows)
+            ? source.rows.map((row) => {
+                const cells = Array.isArray(row) ? row.slice(0, columns.length) : [row];
+                while (cells.length < columns.length) {
+                    cells.push('');
+                }
+                return cells.map((cell) => (cell == null ? '' : String(cell)));
+            })
+            : [];
+
+        return {
+            columns,
+            rows,
+            sortColumn: Number.isInteger(source.sortColumn) ? source.sortColumn : null,
+            sortDirection: source.sortDirection === 'desc' ? 'desc' : 'asc'
+        };
+    }
     
     /**
      * Render a text-based block (text, headings, quote)
@@ -1781,7 +1808,8 @@ const Blocks = (function() {
         const wrapper = document.createElement('div');
         wrapper.className = 'block-content';
         
-        const data = block.content || { columns: ['Name'], rows: [], sortColumn: null, sortDirection: 'asc' };
+        const data = normalizeDatabaseContent(block.content);
+        block.content = data;
         
         const table = document.createElement('div');
         table.className = 'database-table';

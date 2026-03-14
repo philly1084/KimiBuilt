@@ -791,6 +791,38 @@ GUIDELINES:
             console.warn('Failed to persist selected model:', error);
         }
     }
+
+    function isSupportedNotesModelId(modelId) {
+        const id = String(modelId || '').trim().toLowerCase();
+        if (!id) return false;
+
+        const looksLikeChatModel = [
+            'gpt',
+            'claude',
+            'gemini',
+            'kimi',
+            'llama',
+            'mistral',
+            'qwen',
+            'phi',
+            'ollama',
+            'antigravity',
+        ].some((token) => id.includes(token));
+
+        const looksUnsupported = [
+            'image',
+            'embedding',
+            'tts',
+            'transcribe',
+            'audio',
+            'realtime',
+            'vision-preview',
+            'preview-tools',
+            '-tools',
+        ].some((token) => id.includes(token));
+
+        return looksLikeChatModel && !looksUnsupported;
+    }
     
     // ============================================
     // State Management
@@ -1063,7 +1095,7 @@ GUIDELINES:
 
             // Validate selected model
             const availableModels = state.cachedModels || FALLBACK_MODELS;
-            if (!availableModels.find(m => m.id === state.selectedModel)) {
+            if (!isSupportedNotesModelId(state.selectedModel) || !availableModels.find(m => m.id === state.selectedModel)) {
                 state.selectedModel = availableModels[0]?.id || 'gpt-4o';
                 persistSelectedModel(state.selectedModel);
             }
@@ -1122,7 +1154,7 @@ GUIDELINES:
     function setSelectedModel(modelId) {
         const availableModels = getModels();
         const model = availableModels.find(m => m.id === modelId);
-        if (model) {
+        if (model && isSupportedNotesModelId(modelId)) {
             state.selectedModel = modelId;
             persistSelectedModel(modelId);
             return true;
@@ -1716,94 +1748,123 @@ GUIDELINES:
             { role: 'user', content: question }
         ];
         
-        // Get current model
-        const model = state.selectedModel;
-        let responseText = '';
-        let lastVisibleText = '';
-        
-        // Track if we're processing JSON to avoid showing it in stream
-        let jsonBuffer = '';
-        let inJsonBlock = false;
+        const fallbackModel = 'gpt-4o';
+        const attemptedModels = [];
+        const candidateModels = [state.selectedModel];
+        if (state.selectedModel !== fallbackModel) {
+            candidateModels.push(fallbackModel);
+        }
 
         try {
-            if (state.streamingEnabled && apiClient.streamChat) {
-                for await (const chunk of apiClient.streamChat(messages, model)) {
-                    if (chunk.type === 'delta' && chunk.content) {
-                        const chunkText = chunk.content;
-                        responseText += chunkText;
-                        
-                        // Track JSON blocks to filter them from visible output
-                        if (chunkText.includes('```notes-actions')) {
-                            inJsonBlock = true;
-                            jsonBuffer = chunkText;
-                        } else if (inJsonBlock) {
-                            jsonBuffer += chunkText;
-                            if (chunkText.includes('```')) {
-                                inJsonBlock = false;
-                            }
-                            continue; // Skip showing JSON in stream
-                        }
-                        
-                        if (onChunk && !inJsonBlock) {
-                            const visibleText = getStreamingVisibleText(responseText);
-                            const visibleDelta = visibleText.slice(lastVisibleText.length);
-                            lastVisibleText = visibleText;
-                            if (visibleDelta) {
-                                onChunk(visibleDelta, visibleText);
-                            }
-                        }
-                        continue;
-                    }
-
-                    if (chunk.type === 'error') {
-                        throw new Error(chunk.error || 'Streaming error');
-                    }
-                }
-            } else {
-                const response = await apiClient.chat(messages, model);
-                if (response?.error) {
-                    throw new Error(response.content || 'API request failed');
+            for (const model of candidateModels) {
+                if (!isSupportedNotesModelId(model) || attemptedModels.includes(model)) {
+                    continue;
                 }
 
-                responseText = response.content || response.message || String(response);
+                attemptedModels.push(model);
+                let responseText = '';
+                let lastVisibleText = '';
+                let jsonBuffer = '';
+                let inJsonBlock = false;
+
+                try {
+                    if (state.streamingEnabled && apiClient.streamChat) {
+                        for await (const chunk of apiClient.streamChat(messages, model)) {
+                            if (chunk.type === 'delta' && chunk.content) {
+                                const chunkText = chunk.content;
+                                responseText += chunkText;
+
+                                if (chunkText.includes('```notes-actions')) {
+                                    inJsonBlock = true;
+                                    jsonBuffer = chunkText;
+                                } else if (inJsonBlock) {
+                                    jsonBuffer += chunkText;
+                                    if (chunkText.includes('```')) {
+                                        inJsonBlock = false;
+                                    }
+                                    continue;
+                                }
+
+                                if (onChunk && !inJsonBlock) {
+                                    const visibleText = getStreamingVisibleText(responseText);
+                                    const visibleDelta = visibleText.slice(lastVisibleText.length);
+                                    lastVisibleText = visibleText;
+                                    if (visibleDelta) {
+                                        onChunk(visibleDelta, visibleText);
+                                    }
+                                }
+                                continue;
+                            }
+
+                            if (chunk.type === 'error') {
+                                const streamError = new Error(chunk.error || 'Streaming error');
+                                streamError.status = chunk.status;
+                                throw streamError;
+                            }
+                        }
+                    } else {
+                        const response = await apiClient.chat(messages, model);
+                        if (response?.error) {
+                            const apiError = new Error(response.content || 'API request failed');
+                            apiError.status = response.status;
+                            throw apiError;
+                        }
+
+                        responseText = response.content || response.message || String(response);
+                    }
+
+                    let preparedResponse;
+                    try {
+                        preparedResponse = prepareAssistantResponse(responseText);
+                    } catch (parseError) {
+                        console.warn('Failed to parse structured response, using raw text:', parseError);
+                        preparedResponse = {
+                            displayText: responseText.replace(/```notes-actions[\s\S]*?```/g, '').trim(),
+                            appliedCount: 0
+                        };
+                    }
+
+                    const visibleResponse = preparedResponse.displayText || responseText;
+                    const assistantMessage = hiddenAssistantMessage
+                        ? null
+                        : addMessage('assistant', visibleResponse, {
+                            model,
+                            tokensUsed: estimateTokens(question + visibleResponse),
+                            source: 'api',
+                            appliedCount: preparedResponse.appliedCount || 0
+                        });
+
+                    if (model !== state.selectedModel) {
+                        state.selectedModel = model;
+                        persistSelectedModel(model);
+                        window.dispatchEvent(new CustomEvent('modelChanged', { detail: { modelId: model } }));
+                        showToast(`Switched AI model to ${model} after the previous model failed.`, 'info');
+                    }
+
+                    setProcessingState(false);
+
+                    if (onComplete) {
+                        onComplete(visibleResponse, assistantMessage);
+                    }
+
+                    return visibleResponse;
+                } catch (error) {
+                    const shouldRetryWithFallback = model !== fallbackModel &&
+                        (error.status >= 500 || /server error|api request failed|streaming error/i.test(String(error.message || '')));
+
+                    if (!shouldRetryWithFallback) {
+                        throw error;
+                    }
+
+                    console.warn(`Model ${model} failed for Notes agent, retrying with ${fallbackModel}:`, error.message);
+                }
             }
 
-            // Parse and apply structured actions from response
-            let preparedResponse;
-            try {
-                preparedResponse = prepareAssistantResponse(responseText);
-            } catch (parseError) {
-                console.warn('Failed to parse structured response, using raw text:', parseError);
-                // Fall back to treating response as plain text
-                preparedResponse = {
-                    displayText: responseText.replace(/```notes-actions[\s\S]*?```/g, '').trim(),
-                    appliedCount: 0
-                };
-            }
-            
-            const visibleResponse = preparedResponse.displayText || responseText;
-
-            const assistantMessage = hiddenAssistantMessage
-                ? null
-                : addMessage('assistant', visibleResponse, {
-                    model: model,
-                    tokensUsed: estimateTokens(question + visibleResponse),
-                    source: 'api',
-                    appliedCount: preparedResponse.appliedCount || 0
-                });
-
-            setProcessingState(false);
-
-            if (onComplete) {
-                onComplete(visibleResponse, assistantMessage);
-            }
-
-            return visibleResponse;
-            
+            throw new Error('AI request failed for all available fallback models');
         } catch (error) {
             setProcessingState(false, { error: error.message });
-            unhighlightAllBlocks(); // Clean up any highlights on error
-            
+            unhighlightAllBlocks();
+
             if (onError) {
                 onError(error);
             } else {
