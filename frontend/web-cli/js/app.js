@@ -449,6 +449,9 @@ Session Statistics:
         
         // Highlight code blocks
         line.querySelectorAll('pre code').forEach((block) => {
+            if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
+                return;
+            }
             hljs.highlightElement(block);
         });
         
@@ -628,7 +631,8 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     
     renderMarkdown(text) {
         // Simple markdown rendering
-        let html = this.escapeHtml(text);
+        const codeBlocks = [];
+        let html = String(text || '');
         
         // Code blocks (including mermaid)
         html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
@@ -636,11 +640,12 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
             const trimmedCode = language === 'mermaid'
                 ? this.sanitizeMermaidCode(code)
                 : code.trim();
+            const escapedCode = this.escapeHtml(trimmedCode);
             
             // Special handling for mermaid diagrams
             if (language === 'mermaid') {
                 const diagramId = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-                return `
+                codeBlocks.push(`
                     <div class="diagram-block">
                         <div class="code-block mermaid-code">
                             <div class="code-header">
@@ -649,16 +654,17 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                                     <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
                                 </div>
                             </div>
-                            <pre><code class="language-mermaid">${trimmedCode}</code></pre>
+                            <pre><code class="language-mermaid nohighlight">${escapedCode}</code></pre>
                         </div>
                         <div class="diagram-preview">
-                            <div class="mermaid" id="${diagramId}">${trimmedCode}</div>
+                            <div class="mermaid" id="${diagramId}">${escapedCode}</div>
                         </div>
                     </div>
-                `;
+                `);
+                return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
             }
             
-            return `
+            codeBlocks.push(`
                 <div class="code-block">
                     <div class="code-header">
                         <span>${language}</span>
@@ -666,10 +672,13 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
                             <button class="code-action-btn" onclick="app.copyCode(this)">Copy</button>
                         </div>
                     </div>
-                    <pre><code class="language-${language}">${trimmedCode}</code></pre>
+                    <pre><code class="language-${language}">${escapedCode}</code></pre>
                 </div>
-            `;
+            `);
+            return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
         });
+
+        html = this.escapeHtml(html);
         
         // Inline code
         html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
@@ -682,6 +691,8 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         
         // Line breaks
         html = html.replace(/\n/g, '<br>');
+
+        html = html.replace(/__CODE_BLOCK_(\d+)__/g, (match, index) => codeBlocks[Number(index)] || match);
         
         return html;
     }
@@ -692,9 +703,10 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
     renderMermaidDiagrams(element) {
         if (typeof mermaid !== 'undefined') {
             try {
+                const nodes = element?.querySelectorAll?.('.mermaid') || document.querySelectorAll('.mermaid');
                 mermaid.run({
-                    querySelector: '.mermaid',
-                    suppressErrors: true
+                    nodes,
+                    suppressErrors: false
                 });
             } catch (err) {
                 console.warn('[CLI] Mermaid rendering failed:', err);
@@ -1589,7 +1601,12 @@ ${diagramCode}
         if (lastLine && lastLine.classList.contains('streaming')) {
             lastLine.innerHTML = this.renderMarkdown(this.currentOutput + text);
             this.currentOutput += text;
-            hljs.highlightAll();
+            lastLine.querySelectorAll('pre code').forEach((block) => {
+                if (block.classList.contains('language-mermaid') || block.classList.contains('nohighlight')) {
+                    return;
+                }
+                hljs.highlightElement(block);
+            });
         } else {
             this.currentOutput = text;
             const line = document.createElement('div');
