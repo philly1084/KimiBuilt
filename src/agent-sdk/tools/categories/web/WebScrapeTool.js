@@ -30,7 +30,7 @@ class WebScrapeTool extends ToolBase {
     super({
       id: 'web-scrape',
       name: 'Web Scraper',
-      description: 'Extract structured data from web pages using selectors or AI',
+      description: 'Extract structured data from web pages using selectors, with optional headless-browser rendering for dynamic pages and TLS/certificate-problem sites',
       category: 'web',
       version: '1.0.0',
       backend: {
@@ -48,7 +48,7 @@ class WebScrapeTool extends ToolBase {
           },
           selectors: {
             type: 'object',
-            description: 'CSS selectors for extraction',
+            description: 'CSS selectors for structured extraction',
             additionalProperties: {
               type: 'object',
               properties: {
@@ -80,16 +80,16 @@ class WebScrapeTool extends ToolBase {
           },
           waitForSelector: {
             type: 'string',
-            description: 'Wait for element before extracting (requires browser)'
+            description: 'Wait for a selector in the rendered DOM before extracting (browser mode)'
           },
           javascript: {
             type: 'boolean',
-            description: 'Execute JavaScript (requires headless browser)',
+            description: 'Use the backend headless browser and rendered DOM for JavaScript-heavy pages',
             default: false
           },
           browser: {
             type: 'boolean',
-            description: 'Use headless browser for dynamic content',
+            description: 'Force backend headless-browser rendering, useful for dynamic pages and certificate/TLS fetch failures',
             default: false
           },
           timeout: {

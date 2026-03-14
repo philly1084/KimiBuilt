@@ -46,7 +46,7 @@ function registerWebTools() {
 function getTriggerPatterns(toolId) {
   const patterns = {
     'web-fetch': ['fetch', 'download', 'get url', 'load page'],
-    'web-scrape': ['scrape', 'extract from', 'crawl', 'parse website', 'get data from'],
+    'web-scrape': ['scrape', 'extract from', 'crawl', 'parse website', 'get data from', 'render page', 'dynamic website', 'javascript page', 'certificate issue'],
     'web-search': ['search', 'look up', 'find on web', 'google', 'search for']
   };
   return patterns[toolId] || [toolId];

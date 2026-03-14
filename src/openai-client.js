@@ -543,6 +543,36 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '') {
         .filter(Boolean);
 }
 
+function buildAutomaticToolGuidance(automaticTools = []) {
+    if (!automaticTools.length) {
+        return null;
+    }
+
+    const guidance = [
+        'You can use the provided tools whenever they will improve accuracy or gather missing data.',
+    ];
+
+    if (automaticTools.some((entry) => entry.id === 'web-search')) {
+        guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'web-fetch')) {
+        guidance.push('- Use `web-fetch` for simple static page retrieval when you only need raw content from a URL.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
+        guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'security-scan')) {
+        guidance.push('- Use `security-scan` for code audits, secret detection, and vulnerability checks when code is present.');
+    }
+
+    guidance.push('Prefer tools over guessing when the user asks for live web data, extraction, or verification.');
+
+    return guidance.join('\n');
+}
+
 function trimString(value, maxLength = 12000) {
     if (typeof value !== 'string' || value.length <= maxLength) {
         return value;
@@ -682,6 +712,14 @@ async function runAutomaticToolLoop(openai, {
     const availableTools = automaticTools.map((entry) => entry.definition);
     const workingMessages = [...messages];
     let finalResponse = null;
+    const toolGuidance = buildAutomaticToolGuidance(automaticTools);
+
+    if (toolGuidance) {
+        workingMessages.push({
+            role: 'system',
+            content: toolGuidance,
+        });
+    }
 
     console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${automaticTools.map((entry) => entry.id).join(', ')}`);
 
