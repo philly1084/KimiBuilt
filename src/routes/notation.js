@@ -4,6 +4,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
 
@@ -18,6 +19,8 @@ const notationSchema = {
 };
 
 router.post('/', validate(notationSchema), async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     try {
         const {
             notation,
@@ -51,6 +54,15 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             artifactIds,
         );
 
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: notation,
+            model: model || null,
+            mode: 'notation',
+            transport: 'http',
+            metadata: { route: '/api/notation', helperMode },
+        });
+
         const response = await createResponse({
             input: notation,
             previousResponseId: session.previousResponseId,
@@ -83,6 +95,14 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             model,
         });
 
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: structured.result,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+            metadata: { helperMode },
+        });
+
         res.json({
             sessionId,
             responseId: response.id,
@@ -91,6 +111,12 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             ...structured,
         });
     } catch (err) {
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            duration: Date.now() - startedAt,
+            model: req.body?.model || null,
+            metadata: { helperMode: req.body?.helperMode || 'expand' },
+        });
         next(err);
     }
 });

@@ -4,6 +4,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
 
@@ -32,6 +33,8 @@ const chatSchema = {
 };
 
 router.post('/', validate(chatSchema), async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     try {
         const { message, stream = true, model = null, artifactIds = [], outputFormat = null } = req.body;
         let { sessionId } = req.body;
@@ -60,6 +63,15 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 : 'You are a helpful AI assistant. Be concise and informative.',
             artifactIds,
         );
+
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: message,
+            model: model || session?.metadata?.model || null,
+            mode: 'chat',
+            transport: 'http',
+            metadata: { route: '/api/chat', stream },
+        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -99,6 +111,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         artifactIds,
                         model,
                     });
+                    completeRuntimeTask(runtimeTask?.id, {
+                        responseId: event.response.id,
+                        output: fullText,
+                        model: event.response.model || model || null,
+                        duration: Date.now() - startedAt,
+                    });
                     res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts })}\n\n`);
                 }
             }
@@ -137,6 +155,13 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             model,
         });
 
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: outputText,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+        });
+
         res.json({
             sessionId,
             responseId: response.id,
@@ -144,6 +169,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             artifacts,
         });
     } catch (err) {
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            duration: Date.now() - startedAt,
+            model: req.body?.model || null,
+        });
         next(err);
     }
 });

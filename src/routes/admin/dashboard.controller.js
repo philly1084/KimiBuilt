@@ -4,6 +4,8 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
+const logsController = require('./logs.controller');
+const tracesController = require('./traces.controller');
 
 class DashboardController {
   constructor(agentOrchestrator) {
@@ -337,6 +339,248 @@ class DashboardController {
     }
   }
 
+  ensureRuntimeSession(sessionId, metadata = {}) {
+    if (!sessionId) {
+      return null;
+    }
+
+    if (!this.sessionStore.has(sessionId)) {
+      this.sessionStore.set(sessionId, {
+        id: sessionId,
+        tasks: [],
+        createdAt: new Date().toISOString(),
+        lastActivity: new Date().toISOString(),
+        metadata,
+      });
+    }
+
+    const session = this.sessionStore.get(sessionId);
+    session.lastActivity = new Date().toISOString();
+    session.metadata = {
+      ...(session.metadata || {}),
+      ...metadata,
+    };
+    return session;
+  }
+
+  recordRuntimeTaskStart({ sessionId, input, model, mode = 'chat', transport = 'http', metadata = {} }) {
+    const taskId = uuidv4();
+    const now = new Date().toISOString();
+    const task = {
+      id: taskId,
+      sessionId,
+      input,
+      model: model || 'unknown',
+      mode,
+      transport,
+      metadata,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+      source: 'runtime',
+    };
+
+    this.taskStore.set(taskId, task);
+    const session = this.ensureRuntimeSession(sessionId, { mode, transport });
+    if (session && !session.tasks.includes(taskId)) {
+      session.tasks.push(taskId);
+    }
+
+    this.logActivity('task_created', `${mode} request started`, {
+      taskId,
+      sessionId,
+      model: task.model,
+      transport,
+    });
+
+    return task;
+  }
+
+  recordRuntimeTaskComplete(taskId, { responseId, output = '', model, duration = 0, tokensUsed = 0, metadata = {} } = {}) {
+    const task = this.taskStore.get(taskId);
+    if (!task) {
+      return null;
+    }
+
+    task.status = 'completed';
+    task.model = model || task.model;
+    task.completedAt = new Date().toISOString();
+    task.updatedAt = task.completedAt;
+    task.result = {
+      output,
+      duration,
+      tokensUsed,
+      responseId,
+      metadata,
+    };
+
+    logsController.addLog({
+      level: 'info',
+      model: task.model,
+      prompt: task.input,
+      response: String(output || '').slice(0, 2000),
+      tokens: Number(tokensUsed || 0),
+      latency: Number(duration || 0),
+      status: 'success',
+      message: `${task.mode} request completed`,
+      route: task.mode,
+      transport: task.transport,
+      sessionId: task.sessionId,
+      responseId,
+    });
+
+    tracesController.addTrace({
+      id: `trace-${taskId}`,
+      taskId,
+      sessionId: task.sessionId,
+      status: 'completed',
+      startTime: task.createdAt,
+      endTime: task.completedAt,
+      duration: Number(duration || 0),
+      model: task.model,
+      input: task.input,
+      output: String(output || '').slice(0, 4000),
+      timeline: [
+        {
+          step: 1,
+          type: 'request',
+          name: `${task.mode} request received`,
+          startTime: task.createdAt,
+          endTime: task.createdAt,
+          duration: 0,
+          status: 'completed',
+          details: {
+            transport: task.transport,
+            sessionId: task.sessionId,
+          },
+        },
+        {
+          step: 2,
+          type: 'model_call',
+          name: `Model response (${task.model})`,
+          startTime: task.createdAt,
+          endTime: task.completedAt,
+          duration: Number(duration || 0),
+          status: 'completed',
+          details: {
+            responseId,
+            outputPreview: String(output || '').slice(0, 200),
+          },
+        },
+      ],
+      metrics: {
+        totalTokens: Number(tokensUsed || 0),
+        promptTokens: 0,
+        completionTokens: Number(tokensUsed || 0),
+        toolCalls: 0,
+        retries: 0,
+      },
+      createdAt: task.createdAt,
+    });
+
+    this.ensureRuntimeSession(task.sessionId, { mode: task.mode, transport: task.transport });
+    this.logActivity('task_completed', `${task.mode} request completed`, {
+      taskId,
+      sessionId: task.sessionId,
+      model: task.model,
+      duration: Number(duration || 0),
+      responseId,
+    });
+
+    return task;
+  }
+
+  recordRuntimeTaskError(taskId, { error, model, duration = 0, metadata = {} } = {}) {
+    const task = this.taskStore.get(taskId);
+    if (!task) {
+      return null;
+    }
+
+    task.status = 'failed';
+    task.model = model || task.model;
+    task.failedAt = new Date().toISOString();
+    task.updatedAt = task.failedAt;
+    task.error = error?.message || String(error || 'Unknown error');
+    task.metadata = {
+      ...(task.metadata || {}),
+      ...metadata,
+    };
+
+    logsController.addLog({
+      level: 'error',
+      model: task.model,
+      prompt: task.input,
+      response: '',
+      tokens: 0,
+      latency: Number(duration || 0),
+      status: 'error',
+      message: task.error,
+      route: task.mode,
+      transport: task.transport,
+      sessionId: task.sessionId,
+      error: task.error,
+    });
+
+    tracesController.addTrace({
+      id: `trace-${taskId}`,
+      taskId,
+      sessionId: task.sessionId,
+      status: 'failed',
+      startTime: task.createdAt,
+      endTime: task.failedAt,
+      duration: Number(duration || 0),
+      model: task.model,
+      input: task.input,
+      output: '',
+      timeline: [
+        {
+          step: 1,
+          type: 'request',
+          name: `${task.mode} request received`,
+          startTime: task.createdAt,
+          endTime: task.createdAt,
+          duration: 0,
+          status: 'completed',
+          details: {
+            transport: task.transport,
+            sessionId: task.sessionId,
+          },
+        },
+        {
+          step: 2,
+          type: 'model_call',
+          name: `Model request failed (${task.model})`,
+          startTime: task.createdAt,
+          endTime: task.failedAt,
+          duration: Number(duration || 0),
+          status: 'error',
+          details: {
+            error: task.error,
+          },
+        },
+      ],
+      metrics: {
+        totalTokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        toolCalls: 0,
+        retries: 0,
+      },
+      createdAt: task.createdAt,
+    });
+
+    this.ensureRuntimeSession(task.sessionId, { mode: task.mode, transport: task.transport });
+    this.logActivity('task_failed', `${task.mode} request failed`, {
+      taskId,
+      sessionId: task.sessionId,
+      model: task.model,
+      duration: Number(duration || 0),
+      error: task.error,
+    });
+
+    return task;
+  }
+
   async getSkillCount() {
     if (this.orchestrator?.skillMemory) {
       try {
@@ -349,7 +593,7 @@ class DashboardController {
   }
 
   async getTraceCount() {
-    return Array.from(this.taskStore.values()).filter(t => t.result?.trace).length;
+    return tracesController.traces.size;
   }
 
   calculateAvgResponseTime() {

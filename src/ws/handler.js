@@ -2,6 +2,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 // Admin dashboard event emitter
 const EventEmitter = require('events');
@@ -84,6 +85,8 @@ function setupWebSocket(wss) {
 }
 
 async function handleChat(ws, session, payload = {}) {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     const { message, model = null, artifactIds = [], outputFormat = null } = payload;
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -99,50 +102,75 @@ async function handleChat(ws, session, payload = {}) {
             : 'You are a helpful AI assistant. Be concise and informative.',
         artifactIds,
     );
-
-    const response = await createResponse({
+    runtimeTask = startRuntimeTask({
+        sessionId: session.id,
         input: message,
-        previousResponseId: session.previousResponseId,
-        contextMessages,
-        instructions,
-        stream: true,
         model,
+        mode: 'chat',
+        transport: 'ws',
+        metadata: { route: '/ws', stream: true },
     });
 
-    let fullText = '';
+    try {
+        const response = await createResponse({
+            input: message,
+            previousResponseId: session.previousResponseId,
+            contextMessages,
+            instructions,
+            stream: true,
+            model,
+        });
 
-    for await (const event of response) {
-        if (event.type === 'response.output_text.delta') {
-            fullText += event.delta;
-            ws.send(JSON.stringify({ type: 'delta', content: event.delta }));
-        }
+        let fullText = '';
 
-        if (event.type === 'response.completed') {
-            await sessionStore.recordResponse(session.id, event.response.id);
-            memoryService.rememberResponse(session.id, fullText);
-            const artifacts = await maybeGenerateOutputArtifact({
-                sessionId: session.id,
-                session,
-                mode: 'chat',
-                outputFormat: effectiveOutputFormat,
-                content: fullText,
-                prompt: message,
-                title: 'chat-output',
-                responseId: event.response.id,
-                artifactIds,
-                model,
-            });
-            ws.send(JSON.stringify({
-                type: 'done',
-                sessionId: session.id,
-                responseId: event.response.id,
-                artifacts,
-            }));
+        for await (const event of response) {
+            if (event.type === 'response.output_text.delta') {
+                fullText += event.delta;
+                ws.send(JSON.stringify({ type: 'delta', content: event.delta }));
+            }
+
+            if (event.type === 'response.completed') {
+                await sessionStore.recordResponse(session.id, event.response.id);
+                memoryService.rememberResponse(session.id, fullText);
+                const artifacts = await maybeGenerateOutputArtifact({
+                    sessionId: session.id,
+                    session,
+                    mode: 'chat',
+                    outputFormat: effectiveOutputFormat,
+                    content: fullText,
+                    prompt: message,
+                    title: 'chat-output',
+                    responseId: event.response.id,
+                    artifactIds,
+                    model,
+                });
+                completeRuntimeTask(runtimeTask?.id, {
+                    responseId: event.response.id,
+                    output: fullText,
+                    model: event.response.model || model || null,
+                    duration: Date.now() - startedAt,
+                });
+                ws.send(JSON.stringify({
+                    type: 'done',
+                    sessionId: session.id,
+                    responseId: event.response.id,
+                    artifacts,
+                }));
+            }
         }
+    } catch (error) {
+        failRuntimeTask(runtimeTask?.id, {
+            error,
+            duration: Date.now() - startedAt,
+            model,
+        });
+        throw error;
     }
 }
 
 async function handleCanvas(ws, session, payload = {}) {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     const {
         message,
         canvasType = 'document',
@@ -163,49 +191,76 @@ async function handleCanvas(ws, session, payload = {}) {
         `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
         artifactIds,
     );
-
-    const response = await createResponse({
-        input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
-        previousResponseId: session.previousResponseId,
-        contextMessages,
-        instructions,
-        stream: false,
-        model,
-    });
-
-    await sessionStore.recordResponse(session.id, response.id);
-
-    const outputText = response.output
-        .filter((item) => item.type === 'message')
-        .map((item) => item.content.map((content) => content.text).join(''))
-        .join('\n');
-
-    memoryService.rememberResponse(session.id, outputText);
-    const artifacts = await maybeGenerateOutputArtifact({
+    runtimeTask = startRuntimeTask({
         sessionId: session.id,
-        session,
+        input: message,
+        model,
         mode: 'canvas',
-        outputFormat,
-        content: outputText,
-        prompt: message,
-        title: `canvas-${canvasType}`,
-        responseId: response.id,
-        artifactIds,
-        existingContent,
-        model,
+        transport: 'ws',
+        metadata: { route: '/ws', canvasType },
     });
 
-    ws.send(JSON.stringify({
-        type: 'done',
-        sessionId: session.id,
-        responseId: response.id,
-        canvasType,
-        content: outputText,
-        artifacts,
-    }));
+    try {
+        const response = await createResponse({
+            input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
+            previousResponseId: session.previousResponseId,
+            contextMessages,
+            instructions,
+            stream: false,
+            model,
+        });
+
+        await sessionStore.recordResponse(session.id, response.id);
+
+        const outputText = response.output
+            .filter((item) => item.type === 'message')
+            .map((item) => item.content.map((content) => content.text).join(''))
+            .join('\n');
+
+        memoryService.rememberResponse(session.id, outputText);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId: session.id,
+            session,
+            mode: 'canvas',
+            outputFormat,
+            content: outputText,
+            prompt: message,
+            title: `canvas-${canvasType}`,
+            responseId: response.id,
+            artifactIds,
+            existingContent,
+            model,
+        });
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: outputText,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+            metadata: { canvasType },
+        });
+
+        ws.send(JSON.stringify({
+            type: 'done',
+            sessionId: session.id,
+            responseId: response.id,
+            canvasType,
+            content: outputText,
+            artifacts,
+        }));
+    } catch (error) {
+        failRuntimeTask(runtimeTask?.id, {
+            error,
+            duration: Date.now() - startedAt,
+            model,
+            metadata: { canvasType },
+        });
+        throw error;
+    }
 }
 
 async function handleNotation(ws, session, payload = {}) {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     const {
         notation,
         helperMode = 'expand',
@@ -226,46 +281,71 @@ async function handleNotation(ws, session, payload = {}) {
         `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
         artifactIds,
     );
-
-    const response = await createResponse({
+    runtimeTask = startRuntimeTask({
+        sessionId: session.id,
         input: notation,
-        previousResponseId: session.previousResponseId,
-        contextMessages,
-        instructions,
-        stream: false,
         model,
-    });
-
-    await sessionStore.recordResponse(session.id, response.id);
-
-    const outputText = response.output
-        .filter((item) => item.type === 'message')
-        .map((item) => item.content.map((content) => content.text).join(''))
-        .join('\n');
-
-    memoryService.rememberResponse(session.id, outputText);
-    const artifacts = await maybeGenerateOutputArtifact({
-        sessionId: session.id,
-        session,
         mode: 'notation',
-        outputFormat,
-        content: outputText,
-        prompt: notation,
-        title: `notation-${helperMode}`,
-        responseId: response.id,
-        artifactIds,
-        existingContent: context,
-        model,
+        transport: 'ws',
+        metadata: { route: '/ws', helperMode },
     });
 
-    ws.send(JSON.stringify({
-        type: 'done',
-        sessionId: session.id,
-        responseId: response.id,
-        helperMode,
-        content: outputText,
-        artifacts,
-    }));
+    try {
+        const response = await createResponse({
+            input: notation,
+            previousResponseId: session.previousResponseId,
+            contextMessages,
+            instructions,
+            stream: false,
+            model,
+        });
+
+        await sessionStore.recordResponse(session.id, response.id);
+
+        const outputText = response.output
+            .filter((item) => item.type === 'message')
+            .map((item) => item.content.map((content) => content.text).join(''))
+            .join('\n');
+
+        memoryService.rememberResponse(session.id, outputText);
+        const artifacts = await maybeGenerateOutputArtifact({
+            sessionId: session.id,
+            session,
+            mode: 'notation',
+            outputFormat,
+            content: outputText,
+            prompt: notation,
+            title: `notation-${helperMode}`,
+            responseId: response.id,
+            artifactIds,
+            existingContent: context,
+            model,
+        });
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: outputText,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+            metadata: { helperMode },
+        });
+
+        ws.send(JSON.stringify({
+            type: 'done',
+            sessionId: session.id,
+            responseId: response.id,
+            helperMode,
+            content: outputText,
+            artifacts,
+        }));
+    } catch (error) {
+        failRuntimeTask(runtimeTask?.id, {
+            error,
+            duration: Date.now() - startedAt,
+            model,
+            metadata: { helperMode },
+        });
+        throw error;
+    }
 }
 
 // Admin WebSocket handlers

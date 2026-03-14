@@ -4,6 +4,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
 
@@ -18,6 +19,8 @@ const canvasSchema = {
 };
 
 router.post('/', validate(canvasSchema), async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     try {
         const {
             message,
@@ -51,6 +54,15 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             artifactIds,
         );
 
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: message,
+            model: model || null,
+            mode: 'canvas',
+            transport: 'http',
+            metadata: { route: '/api/canvas', canvasType },
+        });
+
         const response = await createResponse({
             input: message,
             previousResponseId: session.previousResponseId,
@@ -83,6 +95,14 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             model,
         });
 
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: structured.content,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+            metadata: { canvasType },
+        });
+
         res.json({
             sessionId,
             responseId: response.id,
@@ -91,6 +111,12 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             ...structured,
         });
     } catch (err) {
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            duration: Date.now() - startedAt,
+            model: req.body?.model || null,
+            metadata: { canvasType: req.body?.canvasType || 'document' },
+        });
         next(err);
     }
 });

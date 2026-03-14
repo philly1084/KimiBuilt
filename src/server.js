@@ -25,6 +25,7 @@ const documentsRouter = require('./routes/documents');
 const unsplashRouter = require('./routes/unsplash');
 const adminRouter = require('./routes/admin');
 const DashboardController = require('./routes/admin/dashboard.controller');
+const { setDashboardController } = require('./admin/runtime-monitor');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -223,6 +224,7 @@ async function start() {
 
         app.locals.agentOrchestrator = agentOrchestrator;
         app.locals.dashboardController = new DashboardController(agentOrchestrator);
+        setDashboardController(app.locals.dashboardController);
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);
     }

@@ -4,6 +4,7 @@ const { memoryService } = require('../memory/memory-service');
 const { createResponse, generateImage, listModels } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
+const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
 
@@ -55,6 +56,8 @@ router.get('/models', async (_req, res, next) => {
 });
 
 router.post('/chat/completions', async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     try {
         const {
             model,
@@ -106,6 +109,14 @@ router.post('/chat/completions', async (req, res, next) => {
             : '';
         const instructions = await buildInstructionsWithArtifacts(session, artifactInstructions, artifact_ids);
         const input = messages.map((message) => ({ role: message.role, content: message.content }));
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: lastUserMessage?.content || JSON.stringify(input),
+            model: model || null,
+            mode: 'openai-chat',
+            transport: 'http',
+            metadata: { route: '/v1/chat/completions', stream },
+        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -153,6 +164,12 @@ router.post('/chat/completions', async (req, res, next) => {
                         artifactIds: artifact_ids,
                         model,
                     });
+                    completeRuntimeTask(runtimeTask?.id, {
+                        responseId: event.response.id,
+                        output: fullText,
+                        model: event.response.model || model || null,
+                        duration: Date.now() - startedAt,
+                    });
                     res.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
                         object: 'chat.completion.chunk',
@@ -194,6 +211,12 @@ router.post('/chat/completions', async (req, res, next) => {
             artifactIds: artifact_ids,
             model,
         });
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: outputText,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+        });
 
         res.json({
             id: `chatcmpl-${response.id}`,
@@ -218,11 +241,18 @@ router.post('/chat/completions', async (req, res, next) => {
             artifacts,
         });
     } catch (err) {
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            duration: Date.now() - startedAt,
+            model: req.body?.model || null,
+        });
         next(err);
     }
 });
 
 router.post('/responses', async (req, res, next) => {
+    let runtimeTask = null;
+    const startedAt = Date.now();
     try {
         const {
             model,
@@ -264,6 +294,14 @@ router.post('/responses', async (req, res, next) => {
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
         const fullInstructions = await buildInstructionsWithArtifacts(session, [instructions || '', artifactInstructions].filter(Boolean).join('\n\n'), artifact_ids);
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: userInput || JSON.stringify(input),
+            model: model || null,
+            mode: 'openai-responses',
+            transport: 'http',
+            metadata: { route: '/v1/responses', stream },
+        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -302,6 +340,12 @@ router.post('/responses', async (req, res, next) => {
                         artifactIds: artifact_ids,
                         model,
                     });
+                    completeRuntimeTask(runtimeTask?.id, {
+                        responseId: event.response.id,
+                        output: fullText,
+                        model: event.response.model || model || null,
+                        duration: Date.now() - startedAt,
+                    });
                     res.write(`data: ${JSON.stringify({ type: 'response.completed', response: event.response, session_id: sessionId, artifacts })}\n\n`);
                 }
             }
@@ -334,6 +378,12 @@ router.post('/responses', async (req, res, next) => {
             artifactIds: artifact_ids,
             model,
         });
+        completeRuntimeTask(runtimeTask?.id, {
+            responseId: response.id,
+            output: outputText,
+            model: response.model || model || null,
+            duration: Date.now() - startedAt,
+        });
 
         res.json({
             ...response,
@@ -341,6 +391,11 @@ router.post('/responses', async (req, res, next) => {
             artifacts,
         });
     } catch (err) {
+        failRuntimeTask(runtimeTask?.id, {
+            error: err,
+            duration: Date.now() - startedAt,
+            model: req.body?.model || null,
+        });
         next(err);
     }
 });
