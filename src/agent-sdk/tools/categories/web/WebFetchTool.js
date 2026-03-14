@@ -104,12 +104,14 @@ class WebFetchTool extends ToolBase {
       maxRedirects = 5
     } = params;
 
+    const normalizedUrl = this.normalizeUrl(url);
+
     // Check cache first
-    const cacheKey = this.getCacheKey(params);
+    const cacheKey = this.getCacheKey({ ...params, url: normalizedUrl });
     if (cache && method === 'GET') {
       const cached = this.getFromCache(cacheKey);
       if (cached) {
-        tracker.recordNetworkCall(url, method, { cached: true });
+        tracker.recordNetworkCall(normalizedUrl, method, { cached: true });
         return { ...cached, cached: true };
       }
     }
@@ -132,7 +134,7 @@ class WebFetchTool extends ToolBase {
       try {
         const startTime = Date.now();
         
-        const response = await this.fetchWithTimeout(url, {
+        const response = await this.fetchWithTimeout(normalizedUrl, {
           method,
           headers: fetchHeaders,
           body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
@@ -143,7 +145,7 @@ class WebFetchTool extends ToolBase {
         const responseBody = await response.text();
 
         // Track side effect
-        tracker.recordNetworkCall(url, method, {
+        tracker.recordNetworkCall(normalizedUrl, method, {
           status: response.status,
           contentType: response.headers.get('content-type')
         });
@@ -166,7 +168,11 @@ class WebFetchTool extends ToolBase {
         return result;
 
       } catch (error) {
-        lastError = error;
+        lastError = this.formatFetchError(error, normalizedUrl, timeout);
+        tracker.recordNetworkCall(normalizedUrl, method, {
+          failed: true,
+          error: lastError.message,
+        });
         
         if (attempt < retries - 1) {
           const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
@@ -193,6 +199,36 @@ class WebFetchTool extends ToolBase {
       clearTimeout(timeoutId);
       throw error;
     }
+  }
+
+  normalizeUrl(url) {
+    const value = String(url || '').trim();
+    if (!value) {
+      throw new Error('URL is required');
+    }
+
+    const withScheme = /^[a-z]+:\/\//i.test(value) ? value : `https://${value}`;
+
+    try {
+      const parsed = new URL(withScheme);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+      }
+      return parsed.toString();
+    } catch (error) {
+      throw new Error(`Invalid URL '${value}': ${error.message}`);
+    }
+  }
+
+  formatFetchError(error, url, timeout) {
+    if (error?.name === 'AbortError') {
+      return new Error(`Request to ${url} timed out after ${timeout}ms`);
+    }
+
+    const causeCode = error?.cause?.code || error?.code || '';
+    const causeMessage = error?.cause?.message || error?.message || 'Unknown network error';
+    const detail = causeCode ? `${causeCode}: ${causeMessage}` : causeMessage;
+    return new Error(`Network error fetching ${url}: ${detail}`);
   }
 
   getCacheKey(params) {
