@@ -329,10 +329,10 @@
 /* Block Handle - Notion-style subtle grip */
 .block-handle {
     position: absolute;
-    left: -24px;
-    top: 6px;
-    width: 18px;
-    height: 20px;
+    left: -32px;
+    top: 4px;
+    width: 26px;
+    height: 24px;
     cursor: grab;
     opacity: 0;
     display: flex;
@@ -359,6 +359,7 @@
     background-image: radial-gradient(circle, rgba(55, 53, 47, 0.4) 1.5px, transparent 1.5px);
     background-size: 4px 4px;
     background-position: 0 0;
+    pointer-events: none;
 }
 
 /* Block Input - Notion-style spacing */

@@ -333,6 +333,15 @@ const Selection = (function() {
                 showContextMenu(blockId, e);
             }
         });
+
+        // Explicit right-click support on the handle itself so the block menu
+        // is available even when the editable content area is too small.
+        handle.addEventListener('contextmenu', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            selectBlock(blockId);
+            showContextMenu(blockId, e);
+        });
         
         // Right-click on block to show context menu
         blockElement.addEventListener('contextmenu', (e) => {

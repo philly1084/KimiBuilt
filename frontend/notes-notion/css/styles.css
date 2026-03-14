@@ -889,10 +889,10 @@ body {
 /* Block Handle (⋮⋮) - Notion-style subtle drag handle */
 .block-handle {
     position: absolute;
-    left: -24px;
-    top: 6px;
-    width: 18px;
-    height: 20px;
+    left: -32px;
+    top: 4px;
+    width: 26px;
+    height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
