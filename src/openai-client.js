@@ -40,6 +40,16 @@ function normalizeModelId(modelId = '') {
     return String(modelId || '').trim();
 }
 
+const AUTO_TOOL_ALLOWLIST = new Set([
+    'web-fetch',
+    'web-search',
+    'web-scrape',
+    'security-scan',
+]);
+
+const AUTO_TOOL_MAX_ROUNDS = 3;
+const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
+
 function hasDedicatedMediaConfig() {
     return Boolean(normalizeModelId(config.media.apiKey));
 }
@@ -324,7 +334,405 @@ async function resolveImageModel(requestedModel = null) {
     throw error;
 }
 
+function normalizeMessageContent(content) {
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map((item) => {
+                if (typeof item === 'string') {
+                    return item;
+                }
+
+                if (item?.type === 'text') {
+                    return item.text || '';
+                }
+
+                return item?.text || '';
+            })
+            .join('');
+    }
+
+    return '';
+}
+
+function buildMessages({
+    input,
+    instructions = null,
+    contextMessages = [],
+}) {
+    const messages = [];
+
+    if (instructions) {
+        messages.push({
+            role: 'system',
+            content: instructions,
+        });
+    }
+
+    if (contextMessages.length > 0) {
+        messages.push({
+            role: 'system',
+            content: `[Relevant context from memory]\n${contextMessages.join('\n---\n')}`,
+        });
+    }
+
+    if (typeof input === 'string') {
+        messages.push({
+            role: 'user',
+            content: input,
+        });
+    } else if (Array.isArray(input)) {
+        messages.push(...input);
+    } else {
+        messages.push(input);
+    }
+
+    return messages;
+}
+
+function getLastUserText(messages = []) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index]?.role === 'user') {
+            return normalizeMessageContent(messages[index].content);
+        }
+    }
+
+    return '';
+}
+
+function normalizeTriggerPattern(pattern = '') {
+    return String(pattern || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function promptMentionsPattern(prompt, pattern) {
+    const normalizedPrompt = normalizeTriggerPattern(prompt);
+    const normalizedPattern = normalizeTriggerPattern(pattern);
+    if (!normalizedPrompt || !normalizedPattern) {
+        return false;
+    }
+
+    return normalizedPrompt.includes(normalizedPattern);
+}
+
+function shouldAutoUseTool(toolId, prompt = '', skill = null) {
+    const normalizedPrompt = String(prompt || '').toLowerCase();
+    if (!normalizedPrompt) {
+        return false;
+    }
+
+    const hasUrl = /https?:\/\/\S+/i.test(prompt);
+    const mentionsCode = /```|function\s+\w+|const\s+\w+|let\s+\w+|class\s+\w+|import\s+|<script\b|SELECT\b|FROM\b/i.test(prompt);
+
+    const heuristics = {
+        'web-fetch': hasUrl && /\b(fetch|open|read|inspect|visit|download|load|check|look at)\b/i.test(prompt),
+        'web-search': /\b(search|look up|find|latest|recent|news|current|research|what is|who is)\b/i.test(prompt),
+        'web-scrape': hasUrl && /\b(scrape|extract|parse|crawl|collect|get data|pull data)\b/i.test(prompt),
+        'security-scan': mentionsCode && /\b(security|vulnerab|secret|audit|scan|xss|sql injection|path traversal)\b/i.test(prompt),
+    };
+
+    if (heuristics[toolId]) {
+        return true;
+    }
+
+    if (Array.isArray(skill?.triggerPatterns)) {
+        return skill.triggerPatterns.some((pattern) => promptMentionsPattern(normalizedPrompt, pattern));
+    }
+
+    return false;
+}
+
+function sanitizeToolSchema(schema) {
+    if (!schema || typeof schema !== 'object') {
+        return { type: 'object', properties: {} };
+    }
+
+    if (Array.isArray(schema)) {
+        return schema.map((entry) => sanitizeToolSchema(entry));
+    }
+
+    const sanitized = {};
+    const allowedKeys = [
+        'type',
+        'description',
+        'enum',
+        'default',
+        'required',
+        'properties',
+        'items',
+        'additionalProperties',
+        'maximum',
+        'minimum',
+        'maxLength',
+        'minLength',
+    ];
+
+    for (const key of allowedKeys) {
+        if (schema[key] === undefined) {
+            continue;
+        }
+
+        if (key === 'type' && Array.isArray(schema.type)) {
+            sanitized.type = schema.type.find((entry) => entry !== 'null') || schema.type[0];
+            continue;
+        }
+
+        if (key === 'properties' && schema.properties && typeof schema.properties === 'object') {
+            sanitized.properties = Object.fromEntries(
+                Object.entries(schema.properties).map(([propertyName, propertySchema]) => [
+                    propertyName,
+                    sanitizeToolSchema(propertySchema),
+                ]),
+            );
+            continue;
+        }
+
+        if (key === 'items') {
+            sanitized.items = sanitizeToolSchema(schema.items);
+            continue;
+        }
+
+        if (key === 'additionalProperties' && typeof schema.additionalProperties === 'object') {
+            sanitized.additionalProperties = sanitizeToolSchema(schema.additionalProperties);
+            continue;
+        }
+
+        sanitized[key] = schema[key];
+    }
+
+    if (!sanitized.type && sanitized.properties) {
+        sanitized.type = 'object';
+    }
+
+    return sanitized;
+}
+
+function buildAutomaticToolDefinitions(toolManager, prompt = '') {
+    if (!toolManager?.registry) {
+        return [];
+    }
+
+    return Array.from(AUTO_TOOL_ALLOWLIST)
+        .map((toolId) => {
+            const tool = toolManager.getTool(toolId);
+            const skill = toolManager.registry.getSkill(toolId);
+            const available = tool && (!skill || skill.enabled !== false);
+
+            if (!available || !shouldAutoUseTool(toolId, prompt, skill)) {
+                return null;
+            }
+
+            return {
+                id: toolId,
+                skill,
+                definition: {
+                    type: 'function',
+                    function: {
+                        name: toolId,
+                        description: tool.description || tool.name || toolId,
+                        parameters: sanitizeToolSchema(tool.inputSchema),
+                    },
+                },
+            };
+        })
+        .filter(Boolean);
+}
+
+function trimString(value, maxLength = 12000) {
+    if (typeof value !== 'string' || value.length <= maxLength) {
+        return value;
+    }
+
+    const hiddenCharacters = value.length - maxLength;
+    return `${value.slice(0, maxLength)}\n...[truncated ${hiddenCharacters} chars]`;
+}
+
+function sanitizeToolResultPayload(value, depth = 0) {
+    if (value == null) {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        return trimString(value);
+    }
+
+    if (typeof value !== 'object') {
+        return value;
+    }
+
+    if (depth >= 4) {
+        return '[truncated]';
+    }
+
+    if (Array.isArray(value)) {
+        return value.slice(0, 25).map((entry) => sanitizeToolResultPayload(entry, depth + 1));
+    }
+
+    const output = {};
+    for (const [key, entry] of Object.entries(value).slice(0, 50)) {
+        output[key] = sanitizeToolResultPayload(entry, depth + 1);
+    }
+
+    return output;
+}
+
+function normalizeToolResultForModel(result, fallbackToolId) {
+    return {
+        success: result?.success !== false,
+        toolId: result?.toolId || fallbackToolId,
+        duration: result?.duration || 0,
+        data: sanitizeToolResultPayload(result?.data),
+        error: result?.error || null,
+        sideEffects: sanitizeToolResultPayload(result?.sideEffects || {}),
+        timestamp: result?.timestamp || new Date().toISOString(),
+    };
+}
+
+function buildToolExecutionContext(toolManager, context = {}) {
+    return {
+        ...context,
+        toolManager,
+        tools: {
+            get: (toolId) => toolManager.getTool(toolId),
+        },
+    };
+}
+
+function normalizeToolCall(toolCall = {}) {
+    return {
+        id: toolCall.id,
+        type: toolCall.type || 'function',
+        function: {
+            name: toolCall.function?.name,
+            arguments: toolCall.function?.arguments || '{}',
+        },
+    };
+}
+
+function parseToolArguments(rawArguments = '{}') {
+    if (!rawArguments) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(rawArguments);
+    } catch (error) {
+        return {
+            __parseError: `Invalid tool arguments: ${error.message}`,
+            raw: rawArguments,
+        };
+    }
+}
+
+async function executeAutomaticToolCall(toolManager, toolCall, context = {}) {
+    const toolId = toolCall.function?.name;
+
+    if (!toolId || !AUTO_TOOL_ALLOWLIST.has(toolId)) {
+        return {
+            success: false,
+            toolId: toolId || 'unknown',
+            error: `Automatic execution is not allowed for tool '${toolId || 'unknown'}'`,
+        };
+    }
+
+    const params = parseToolArguments(toolCall.function?.arguments || '{}');
+    if (params.__parseError) {
+        return {
+            success: false,
+            toolId,
+            error: params.__parseError,
+            rawArguments: trimString(params.raw || ''),
+        };
+    }
+
+    try {
+        const result = await toolManager.executeTool(
+            toolId,
+            params,
+            buildToolExecutionContext(toolManager, context),
+        );
+        return normalizeToolResultForModel(result, toolId);
+    } catch (error) {
+        return {
+            success: false,
+            toolId,
+            error: error.message,
+        };
+    }
+}
+
+async function runAutomaticToolLoop(openai, {
+    model,
+    messages,
+    toolManager,
+    toolContext = {},
+}) {
+    const prompt = getLastUserText(messages);
+    const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);
+
+    if (automaticTools.length === 0) {
+        return null;
+    }
+
+    const availableTools = automaticTools.map((entry) => entry.definition);
+    const workingMessages = [...messages];
+    let finalResponse = null;
+
+    console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${automaticTools.map((entry) => entry.id).join(', ')}`);
+
+    for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
+        finalResponse = await openai.chat.completions.create({
+            model,
+            messages: workingMessages,
+            tools: availableTools,
+            tool_choice: 'auto',
+            stream: false,
+        });
+
+        const assistantMessage = finalResponse.choices[0]?.message || {};
+        const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
+
+        if (toolCalls.length === 0) {
+            return finalResponse;
+        }
+
+        workingMessages.push({
+            role: 'assistant',
+            content: assistantMessage.content || '',
+            tool_calls: toolCalls.map((toolCall) => normalizeToolCall(toolCall)),
+        });
+
+        for (const toolCall of toolCalls) {
+            const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
+            workingMessages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: JSON.stringify(result),
+            });
+        }
+    }
+
+    finalResponse = await openai.chat.completions.create({
+        model,
+        messages: workingMessages,
+        stream: false,
+    });
+
+    return finalResponse;
+}
+
+function getChatCompletionText(response) {
+    return normalizeMessageContent(response?.choices?.[0]?.message?.content || '');
+}
+
 function normalizeChatResponse(response) {
+    const outputText = getChatCompletionText(response);
+
     return {
         id: response.id,
         object: 'response',
@@ -337,7 +745,7 @@ function normalizeChatResponse(response) {
                 content: [
                     {
                         type: 'text',
-                        text: response.choices[0]?.message?.content || '',
+                        text: outputText,
                     },
                 ],
             },
@@ -381,6 +789,34 @@ async function* normalizeStreamResponse(stream) {
     }
 }
 
+async function* synthesizeStreamResponse(response) {
+    const responseId = response?.id || `resp_${Date.now()}`;
+    const model = response?.model || null;
+    const text = getChatCompletionText(response);
+
+    if (text) {
+        for (let index = 0; index < text.length; index += SYNTHETIC_STREAM_CHUNK_SIZE) {
+            yield {
+                type: 'response.output_text.delta',
+                delta: text.slice(index, index + SYNTHETIC_STREAM_CHUNK_SIZE),
+            };
+        }
+    }
+
+    yield {
+        type: 'response.completed',
+        response: {
+            id: responseId,
+            model,
+            output: normalizeChatResponse({
+                ...response,
+                id: responseId,
+                model,
+            }).output,
+        },
+    };
+}
+
 async function createResponse({
     input,
     previousResponseId = null,
@@ -388,34 +824,16 @@ async function createResponse({
     instructions = null,
     stream = false,
     model = null,
+    toolManager = null,
+    toolContext = {},
+    enableAutomaticToolCalls = false,
 }) {
     const openai = getClient();
-    const messages = [];
-
-    if (instructions) {
-        messages.push({
-            role: 'system',
-            content: instructions,
-        });
-    }
-
-    if (contextMessages.length > 0) {
-        messages.push({
-            role: 'system',
-            content: `[Relevant context from memory]\n${contextMessages.join('\n---\n')}`,
-        });
-    }
-
-    if (typeof input === 'string') {
-        messages.push({
-            role: 'user',
-            content: input,
-        });
-    } else if (Array.isArray(input)) {
-        messages.push(...input);
-    } else {
-        messages.push(input);
-    }
+    const messages = buildMessages({
+        input,
+        instructions,
+        contextMessages,
+    });
 
     const params = {
         model: model || config.openai.model,
@@ -427,6 +845,27 @@ async function createResponse({
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
 
     try {
+        if (enableAutomaticToolCalls && toolManager) {
+            try {
+                const toolResponse = await runAutomaticToolLoop(openai, {
+                    model: params.model,
+                    messages,
+                    toolManager,
+                    toolContext: {
+                        previousResponseId,
+                        ...toolContext,
+                    },
+                });
+
+                if (toolResponse) {
+                    console.log('[OpenAI] Automatic tool orchestration completed');
+                    return stream ? synthesizeStreamResponse(toolResponse) : normalizeChatResponse(toolResponse);
+                }
+            } catch (toolError) {
+                console.warn('[OpenAI] Automatic tool orchestration unavailable, falling back to plain chat:', toolError.message);
+            }
+        }
+
         const response = await openai.chat.completions.create(params);
         return stream ? normalizeStreamResponse(response) : normalizeChatResponse(response);
     } catch (error) {
@@ -494,4 +933,10 @@ module.exports = {
     listImageModels,
     createResponse,
     generateImage,
+    __testUtils: {
+        buildAutomaticToolDefinitions,
+        normalizeToolResultForModel,
+        sanitizeToolSchema,
+        shouldAutoUseTool,
+    },
 };

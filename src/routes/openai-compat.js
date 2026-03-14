@@ -131,6 +131,13 @@ router.post('/chat/completions', async (req, res, next) => {
                 instructions,
                 stream: true,
                 model,
+                toolManager: req.app.locals.toolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/v1/chat/completions',
+                    transport: 'http',
+                },
+                enableAutomaticToolCalls: true,
             });
 
             let fullText = '';
@@ -194,6 +201,13 @@ router.post('/chat/completions', async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            toolManager: req.app.locals.toolManager,
+            toolContext: {
+                sessionId,
+                route: '/v1/chat/completions',
+                transport: 'http',
+            },
+            enableAutomaticToolCalls: true,
         });
 
         await sessionStore.recordResponse(sessionId, response.id);
@@ -316,6 +330,13 @@ router.post('/responses', async (req, res, next) => {
                 instructions: fullInstructions,
                 stream: true,
                 model,
+                toolManager: req.app.locals.toolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/v1/responses',
+                    transport: 'http',
+                },
+                enableAutomaticToolCalls: true,
             });
 
             let fullText = '';
@@ -361,6 +382,13 @@ router.post('/responses', async (req, res, next) => {
             instructions: fullInstructions,
             stream: false,
             model,
+            toolManager: req.app.locals.toolManager,
+            toolContext: {
+                sessionId,
+                route: '/v1/responses',
+                transport: 'http',
+            },
+            enableAutomaticToolCalls: true,
         });
 
         await sessionStore.recordResponse(sessionId, response.id);

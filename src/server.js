@@ -238,7 +238,7 @@ app.use(errorHandler);
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
-setupWebSocket(wss);
+setupWebSocket(wss, app);
 
 async function start() {
     try {

@@ -26,7 +26,7 @@ function inferOutputFormatFromText(text = '') {
     return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
 }
 
-function setupWebSocket(wss) {
+function setupWebSocket(wss, app = null) {
     wss.on('connection', (ws) => {
         console.log('[WS] Client connected');
 
@@ -55,7 +55,7 @@ function setupWebSocket(wss) {
 
                 switch (type) {
                     case 'chat':
-                        await handleChat(ws, session, payload);
+                        await handleChat(ws, session, payload, app?.locals?.toolManager || null);
                         break;
                     case 'canvas':
                         await handleCanvas(ws, session, payload);
@@ -84,7 +84,7 @@ function setupWebSocket(wss) {
     });
 }
 
-async function handleChat(ws, session, payload = {}) {
+async function handleChat(ws, session, payload = {}, toolManager = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
     const { message, model = null, artifactIds = [], outputFormat = null } = payload;
@@ -119,6 +119,13 @@ async function handleChat(ws, session, payload = {}) {
             instructions,
             stream: true,
             model,
+            toolManager,
+            toolContext: {
+                sessionId: session.id,
+                route: '/ws',
+                transport: 'ws',
+            },
+            enableAutomaticToolCalls: true,
         });
 
         let fullText = '';

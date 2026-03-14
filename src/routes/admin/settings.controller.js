@@ -52,6 +52,16 @@ class SettingsController {
         rateLimiting: true,
         rateLimit: 100, // requests per minute
         allowedIPs: []
+      },
+      integrations: {
+        ssh: {
+          enabled: false,
+          host: '',
+          port: 22,
+          username: '',
+          password: '',
+          privateKeyPath: '',
+        }
       }
     };
 
@@ -67,7 +77,7 @@ class SettingsController {
     try {
       res.json({
         success: true,
-        data: this.settings
+        data: this.getPublicSettings()
       });
     } catch (error) {
       console.error('Error getting settings:', error);
@@ -80,7 +90,7 @@ class SettingsController {
    */
   async update(req, res) {
     try {
-      const updates = req.body;
+      const updates = this.normalizeIncomingSettings(req.body || {});
 
       // Deep merge settings
       this.settings = this.deepMerge(this.settings, updates);
@@ -90,7 +100,7 @@ class SettingsController {
 
       res.json({
         success: true,
-        data: this.settings,
+        data: this.getPublicSettings(),
         message: 'Settings updated successfully'
       });
     } catch (error) {
@@ -118,7 +128,7 @@ class SettingsController {
 
       res.json({
         success: true,
-        data: this.settings,
+        data: this.getPublicSettings(),
         message: section ? `${section} settings reset` : 'All settings reset'
       });
     } catch (error) {
@@ -198,11 +208,112 @@ class SettingsController {
     try {
       const settingsPath = path.join(__dirname, '../../../config/dashboard-settings.json');
       const data = await fs.readFile(settingsPath, 'utf8');
-      this.settings = JSON.parse(data);
+      this.settings = this.deepMerge(this.getDefaultSettings(), JSON.parse(data));
     } catch (error) {
       // Use defaults if file doesn't exist
       console.log('Using default settings');
     }
+  }
+
+  normalizeIncomingSettings(updates = {}) {
+    const normalized = JSON.parse(JSON.stringify(updates || {}));
+    const sshUpdate = normalized.integrations?.ssh;
+
+    if (sshUpdate) {
+      const currentSsh = this.settings?.integrations?.ssh || {};
+      const nextSsh = {
+        ...sshUpdate,
+      };
+
+      if (nextSsh.host !== undefined) {
+        nextSsh.host = String(nextSsh.host || '').trim();
+      }
+
+      if (nextSsh.username !== undefined) {
+        nextSsh.username = String(nextSsh.username || '').trim();
+      }
+
+      if (nextSsh.privateKeyPath !== undefined) {
+        nextSsh.privateKeyPath = String(nextSsh.privateKeyPath || '').trim();
+      }
+
+      if (nextSsh.port !== undefined) {
+        const parsedPort = parseInt(nextSsh.port, 10);
+        nextSsh.port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : (currentSsh.port || 22);
+      }
+
+      if (nextSsh.enabled !== undefined) {
+        nextSsh.enabled = Boolean(nextSsh.enabled);
+      }
+
+      const clearPassword = Boolean(nextSsh.clearPassword);
+      delete nextSsh.clearPassword;
+      delete nextSsh.hasPassword;
+      delete nextSsh.source;
+      delete nextSsh.configured;
+
+      if (clearPassword) {
+        nextSsh.password = '';
+      } else if (nextSsh.password === undefined || nextSsh.password === null || nextSsh.password === '') {
+        nextSsh.password = currentSsh.password || '';
+      } else {
+        nextSsh.password = String(nextSsh.password);
+      }
+
+      normalized.integrations = {
+        ...(normalized.integrations || {}),
+        ssh: nextSsh,
+      };
+    }
+
+    return normalized;
+  }
+
+  getPublicSettings() {
+    const publicSettings = JSON.parse(JSON.stringify(this.settings));
+    const ssh = publicSettings.integrations?.ssh;
+
+    if (ssh) {
+      const effective = this.getEffectiveSshConfig();
+      delete ssh.password;
+      ssh.enabled = Boolean(effective.enabled);
+      ssh.hasPassword = Boolean(effective.password);
+      ssh.configured = Boolean(effective.enabled && effective.host && effective.username && (effective.password || effective.privateKeyPath));
+      ssh.source = effective.source;
+      ssh.privateKeyPath = effective.privateKeyPath || '';
+      ssh.host = effective.host || '';
+      ssh.port = effective.port || 22;
+      ssh.username = effective.username || '';
+    }
+
+    return publicSettings;
+  }
+
+  getEffectiveSshConfig() {
+    const stored = this.settings?.integrations?.ssh || {};
+    const envHost = process.env.KIMIBUILT_SSH_HOST || process.env.SSH_HOST || '';
+    const envPort = parseInt(process.env.KIMIBUILT_SSH_PORT || process.env.SSH_PORT || '', 10);
+    const envUsername = process.env.KIMIBUILT_SSH_USERNAME || process.env.SSH_USERNAME || '';
+    const envPassword = process.env.KIMIBUILT_SSH_PASSWORD || process.env.SSH_PASSWORD || '';
+    const envPrivateKeyPath = process.env.KIMIBUILT_SSH_KEY_PATH || process.env.SSH_KEY_PATH || '';
+
+    const host = envHost || stored.host || '';
+    const username = envUsername || stored.username || '';
+    const port = Number.isFinite(envPort) && envPort > 0 ? envPort : (stored.port || 22);
+    const password = envPassword || stored.password || '';
+    const privateKeyPath = envPrivateKeyPath || stored.privateKeyPath || '';
+    const enabled = Boolean(stored.enabled || envHost || envUsername || envPassword || envPrivateKeyPath);
+    const source = envHost || envUsername || envPassword || envPrivateKeyPath ? 'cluster-secret' : 'dashboard';
+
+    return {
+      enabled,
+      host,
+      port,
+      username,
+      password,
+      privateKeyPath,
+      source,
+    };
   }
 
   /**
@@ -253,6 +364,16 @@ class SettingsController {
         rateLimiting: true,
         rateLimit: 100,
         allowedIPs: []
+      },
+      integrations: {
+        ssh: {
+          enabled: false,
+          host: '',
+          port: 22,
+          username: '',
+          password: '',
+          privateKeyPath: '',
+        }
       }
     };
   }

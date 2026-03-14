@@ -613,7 +613,7 @@
                             <div class="settings-nav">
                                 <button class="settings-nav-item active" data-settings="general">General</button>
                                 <button class="settings-nav-item" data-settings="features">Features</button>
-                                <button class="settings-nav-item" data-settings="api">API & Keys</button>
+                                <button class="settings-nav-item" data-settings="api">API & Integrations</button>
                                 <button class="settings-nav-item" data-settings="notifications">Notifications</button>
                                 <button class="settings-nav-item" data-settings="advanced">Advanced</button>
                             </div>
@@ -780,6 +780,69 @@
                                                 <button type="button" class="btn btn-ghost" id="testConnectionBtn">Test Connection</button>
                                             </div>
                                         </form>
+                                    </div>
+                                </div>
+
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h3>SSH Tool Target</h3>
+                                        <p class="text-muted">Used by the `ssh-execute` tool when host or credentials are not provided in the request. Cluster secret values override dashboard values.</p>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="sshEnabled">Enable SSH Tool Defaults</label>
+                                                <select class="form-control" id="sshEnabled">
+                                                    <option value="true">Enabled</option>
+                                                    <option value="false">Disabled</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="sshCredentialSource">Active Source</label>
+                                                <input type="text" class="form-control" id="sshCredentialSource" value="dashboard" readonly>
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="sshHost">SSH Host / IP</label>
+                                                <input type="text" class="form-control" id="sshHost" placeholder="10.0.0.5">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="sshPort">SSH Port</label>
+                                                <input type="number" class="form-control" id="sshPort" value="22" min="1" max="65535">
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="sshUsername">SSH Username</label>
+                                                <input type="text" class="form-control" id="sshUsername" placeholder="ubuntu">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="sshPrivateKeyPath">Private Key Path</label>
+                                                <input type="text" class="form-control" id="sshPrivateKeyPath" placeholder="/home/kimibuilt/.ssh/id_rsa">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="sshPassword">SSH Password</label>
+                                            <div class="input-group">
+                                                <input type="password" class="form-control" id="sshPassword" placeholder="Leave blank to keep current value" autocomplete="new-password">
+                                                <button type="button" class="btn btn-ghost" id="showSshPassword">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                        <circle cx="12" cy="12" r="3"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="feature-item">
+                                            <div class="feature-info">
+                                                <span class="feature-name">Clear Stored SSH Password</span>
+                                                <span class="feature-desc">Use this only if you want to remove the dashboard-stored password. Secret-backed passwords are unaffected.</span>
+                                            </div>
+                                            <label class="toggle">
+                                                <input type="checkbox" id="clearSshPassword">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                        <p class="text-muted" id="sshConfigSummary">No SSH credentials configured.</p>
                                     </div>
                                 </div>
                             </div>

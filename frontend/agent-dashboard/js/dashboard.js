@@ -250,6 +250,10 @@ class Dashboard {
         document.getElementById('showOpenaiKey')?.addEventListener('click', () => {
             this.togglePasswordVisibility('openaiKey');
         });
+
+        document.getElementById('showSshPassword')?.addEventListener('click', () => {
+            this.togglePasswordVisibility('sshPassword');
+        });
         
         // Danger zone buttons
         document.getElementById('clearAllLogsBtn')?.addEventListener('click', () => {
@@ -2105,11 +2109,25 @@ class Dashboard {
             apiClient.apiKey = document.getElementById('apiKey').value.trim();
             localStorage.setItem('api_key', apiClient.apiKey);
 
+            const sshPassword = document.getElementById('sshPassword').value;
+            const clearSshPassword = document.getElementById('clearSshPassword').checked;
+
             const settings = {
                 api: {
                     baseURL: document.getElementById('apiEndpoint').value,
                     timeout: parseInt(document.getElementById('requestTimeout').value, 10),
                     maxRetries: parseInt(document.getElementById('maxRetries').value, 10),
+                },
+                integrations: {
+                    ssh: {
+                        enabled: document.getElementById('sshEnabled').value === 'true',
+                        host: document.getElementById('sshHost').value.trim(),
+                        port: parseInt(document.getElementById('sshPort').value, 10) || 22,
+                        username: document.getElementById('sshUsername').value.trim(),
+                        privateKeyPath: document.getElementById('sshPrivateKeyPath').value.trim(),
+                        password: sshPassword,
+                        clearPassword: clearSshPassword,
+                    },
                 },
             };
 
@@ -2277,6 +2295,7 @@ class Dashboard {
         const models = settings.models || {};
         const api = settings.api || {};
         const features = settings.features || {};
+        const ssh = settings.integrations?.ssh || {};
 
         this.setInputValue('dashboardTitle', general.appName || 'Agent SDK Admin');
         this.setInputValue('timezone', general.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -2290,6 +2309,14 @@ class Dashboard {
         this.setInputValue('defaultTopP', models.topP ?? 1);
         this.setInputValue('defaultFrequencyPenalty', models.frequencyPenalty ?? 0);
         this.setInputValue('defaultPresencePenalty', models.presencePenalty ?? 0);
+        this.setInputValue('sshEnabled', String(ssh.enabled !== false));
+        this.setInputValue('sshHost', ssh.host || '');
+        this.setInputValue('sshPort', ssh.port ?? 22);
+        this.setInputValue('sshUsername', ssh.username || '');
+        this.setInputValue('sshPrivateKeyPath', ssh.privateKeyPath || '');
+        this.setInputValue('sshCredentialSource', ssh.source || 'dashboard');
+        this.setInputValue('sshPassword', '');
+        this.setCheckboxValue('clearSshPassword', false);
 
         this.syncModelOptions();
         this.setInputValue('defaultModel', models.defaultModel || 'gpt-4o');
@@ -2305,6 +2332,16 @@ class Dashboard {
         ['defaultTemperature', 'defaultTopP', 'defaultFrequencyPenalty', 'defaultPresencePenalty'].forEach((id) => {
             this.syncRangeValue(id);
         });
+
+        const sshSummary = document.getElementById('sshConfigSummary');
+        if (sshSummary) {
+            const summary = ssh.enabled === false
+                ? 'SSH defaults are disabled.'
+                : ssh.configured
+                ? `SSH defaults active from ${ssh.source || 'dashboard'} for ${ssh.username || 'user'}@${ssh.host || 'host'}:${ssh.port || 22}${ssh.hasPassword ? ' with a stored password' : (ssh.privateKeyPath ? ' with a private key' : '')}.`
+                : 'No complete SSH credential set is configured yet.';
+            sshSummary.textContent = summary;
+        }
     }
 
     setInputValue(id, value) {

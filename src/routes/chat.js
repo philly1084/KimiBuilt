@@ -86,6 +86,13 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 instructions,
                 stream: true,
                 model,
+                toolManager: req.app.locals.toolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/api/chat',
+                    transport: 'http',
+                },
+                enableAutomaticToolCalls: true,
             });
 
             let fullText = '';
@@ -132,6 +139,13 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            toolManager: req.app.locals.toolManager,
+            toolContext: {
+                sessionId,
+                route: '/api/chat',
+                transport: 'http',
+            },
+            enableAutomaticToolCalls: true,
         });
 
         await sessionStore.recordResponse(sessionId, response.id);

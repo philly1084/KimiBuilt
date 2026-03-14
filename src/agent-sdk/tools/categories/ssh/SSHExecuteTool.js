@@ -3,6 +3,11 @@
  */
 
 const { ToolBase } = require('../../ToolBase');
+const fs = require('fs').promises;
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+const settingsController = require('../../../../routes/admin/settings.controller');
 
 class SSHExecuteTool extends ToolBase {
   constructor() {
@@ -19,7 +24,7 @@ class SSHExecuteTool extends ToolBase {
       },
       inputSchema: {
         type: 'object',
-        required: ['host', 'command'],
+        required: ['command'],
         properties: {
           host: {
             type: 'string',
@@ -76,9 +81,9 @@ class SSHExecuteTool extends ToolBase {
 
   async handler(params, context, tracker) {
     const {
-      host,
-      port = 22,
-      username,
+      host: requestedHost,
+      port: requestedPort,
+      username: requestedUsername,
       command,
       timeout = 60000,
       workingDirectory,
@@ -86,14 +91,26 @@ class SSHExecuteTool extends ToolBase {
       sudo = false
     } = params;
 
-    // Get credentials from context or environment
-    const credentials = await this.getCredentials(host, username, context);
+    const connection = await this.getConnectionConfig({
+      host: requestedHost,
+      port: requestedPort,
+      username: requestedUsername,
+      context,
+    });
     
-    if (!credentials) {
-      throw new Error(`No SSH credentials configured for ${host}`);
+    if (!connection.host) {
+      throw new Error('No SSH host configured. Set one in Admin Settings or the cluster secret.');
     }
 
-    tracker.recordExecution(`ssh ${username}@${host}:${port}`, { command });
+    if (!connection.username) {
+      throw new Error(`No SSH username configured for ${connection.host}`);
+    }
+
+    if (!connection.password && !connection.privateKeyPath) {
+      throw new Error(`No SSH password or private key configured for ${connection.host}`);
+    }
+
+    tracker.recordExecution(`ssh ${connection.username}@${connection.host}:${connection.port}`, { command });
 
     // Build full command
     let fullCommand = command;
@@ -113,12 +130,9 @@ class SSHExecuteTool extends ToolBase {
       fullCommand = `sudo ${fullCommand}`;
     }
 
-    // Execute SSH command
-    // In production, this would use the ssh2 library
-    // For now, return a simulated response
-    const result = await this.executeSSH(host, port, credentials, fullCommand, timeout);
+    const result = await this.executeSSH(connection, fullCommand, timeout);
 
-    tracker.recordNetworkCall(`ssh://${host}:${port}`, 'EXEC', {
+    tracker.recordNetworkCall(`ssh://${connection.host}:${connection.port}`, 'EXEC', {
       command: command.substring(0, 100),
       exitCode: result.exitCode
     });
@@ -126,40 +140,183 @@ class SSHExecuteTool extends ToolBase {
     return result;
   }
 
-  async getCredentials(host, username, context) {
-    // Priority:
-    // 1. Context-provided credentials
-    // 2. Environment variables
-    // 3. SSH config file
-    // 4. Credential store
-    
-    if (context.sshCredentials?.[host]) {
-      return context.sshCredentials[host];
-    }
-    
-    // Check environment
-    if (process.env.SSH_KEY_PATH) {
-      return {
-        username: username || process.env.SSH_USERNAME,
-        privateKeyPath: process.env.SSH_KEY_PATH
-      };
-    }
-    
-    return null;
+  async getConnectionConfig({ host, port, username, context }) {
+    const configured = settingsController.getEffectiveSshConfig();
+    const contextual = this.getContextCredentials(host, context);
+    const defaultConfig = configured.enabled ? configured : {};
+
+    return {
+      host: host || contextual.host || defaultConfig.host,
+      port: port || contextual.port || defaultConfig.port || 22,
+      username: username || contextual.username || defaultConfig.username,
+      password: contextual.password || defaultConfig.password || '',
+      privateKeyPath: contextual.privateKeyPath || defaultConfig.privateKeyPath || '',
+    };
   }
 
-  async executeSSH(host, port, credentials, command, timeout) {
-    // This is a placeholder - would use node-ssh or ssh2 library
-    console.log(`[SSH] Would execute on ${host}:${port}: ${command.substring(0, 50)}...`);
-    
-    // Simulate execution
-    return {
-      stdout: `Simulated output for: ${command.substring(0, 30)}...`,
-      stderr: '',
-      exitCode: 0,
-      duration: 1000,
-      host: `${host}:${port}`
+  getContextCredentials(host, context = {}) {
+    if (!context?.sshCredentials) {
+      return {};
+    }
+
+    if (host && context.sshCredentials[host]) {
+      return context.sshCredentials[host];
+    }
+
+    return context.sshCredentials.default || {};
+  }
+
+  async executeSSH(connection, command, timeout) {
+    const sshPath = await this.findSshBinary();
+    const askPassScript = connection.password ? await this.createAskPassScript() : null;
+    const startedAt = Date.now();
+
+    const sshArgs = [
+      '-p',
+      String(connection.port || 22),
+      '-o',
+      'StrictHostKeyChecking=no',
+      '-o',
+      'UserKnownHostsFile=/dev/null',
+      '-o',
+      'ConnectTimeout=15',
+      '-o',
+      'ServerAliveInterval=15',
+      '-o',
+      'ServerAliveCountMax=3',
+    ];
+
+    if (connection.privateKeyPath) {
+      sshArgs.push('-i', connection.privateKeyPath);
+    }
+
+    if (connection.password) {
+      sshArgs.push(
+        '-o',
+        'PreferredAuthentications=password,keyboard-interactive',
+        '-o',
+        'PubkeyAuthentication=no',
+      );
+    }
+
+    sshArgs.push(
+      `${connection.username}@${connection.host}`,
+      this.wrapRemoteCommand(command),
+    );
+
+    const env = {
+      ...process.env,
+      LC_ALL: 'C',
     };
+
+    if (connection.password && askPassScript) {
+      env.SSH_ASKPASS = askPassScript;
+      env.SSH_ASKPASS_REQUIRE = 'force';
+      env.DISPLAY = env.DISPLAY || 'kimibuilt:0';
+      env.KIMIBUILT_SSH_PASSWORD = connection.password;
+    }
+
+    try {
+      const result = await this.spawnProcess(sshPath, sshArgs, {
+        env,
+        timeout,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        duration: Date.now() - startedAt,
+        host: `${connection.host}:${connection.port}`,
+      };
+    } finally {
+      if (askPassScript) {
+        await fs.rm(path.dirname(askPassScript), { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  }
+
+  async findSshBinary() {
+    const candidates = ['/usr/bin/ssh', '/bin/ssh', 'ssh'];
+
+    for (const candidate of candidates) {
+      try {
+        await this.spawnProcess(candidate, ['-V'], {
+          timeout: 5000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        return candidate;
+      } catch (error) {
+        if (!/ENOENT/i.test(error.message)) {
+          return candidate;
+        }
+      }
+    }
+
+    throw new Error('SSH client is not installed in the backend container');
+  }
+
+  async createAskPassScript() {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-ssh-'));
+    const scriptPath = path.join(tempDir, 'askpass.sh');
+    await fs.writeFile(scriptPath, '#!/bin/sh\necho "$KIMIBUILT_SSH_PASSWORD"\n', { mode: 0o700 });
+    await fs.chmod(scriptPath, 0o700);
+    return scriptPath;
+  }
+
+  wrapRemoteCommand(command) {
+    return `sh -lc ${this.quoteShellArg(command)}`;
+  }
+
+  quoteShellArg(value) {
+    return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
+  }
+
+  spawnProcess(command, args, options = {}) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(command, args, options);
+      let stdout = '';
+      let stderr = '';
+      let timeoutId = null;
+
+      if (options.timeout) {
+        timeoutId = setTimeout(() => {
+          child.kill('SIGTERM');
+          const error = new Error(`${command} timed out after ${options.timeout}ms`);
+          error.code = 'ETIMEDOUT';
+          reject(error);
+        }, options.timeout);
+      }
+
+      child.stdout?.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr?.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('error', (error) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        reject(error);
+      });
+
+      child.on('close', (exitCode) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (exitCode === 0) {
+          resolve({ exitCode, stdout, stderr });
+          return;
+        }
+
+        const message = stderr.trim() || stdout.trim() || `${command} exited with code ${exitCode}`;
+        const error = new Error(message);
+        error.exitCode = exitCode;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      });
+    });
   }
 }
 
