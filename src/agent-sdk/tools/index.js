@@ -5,6 +5,7 @@
 
 const { getUnifiedRegistry } = require('../registry/UnifiedRegistry');
 const { getAgentBus } = require('../agents/AgentBus');
+const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -275,8 +276,49 @@ class ToolManager {
       }
     ];
 
+    const docsTools = [
+      {
+        id: 'tool-doc-read',
+        name: 'Tool Doc Reader',
+        category: 'system',
+        description: 'Load detailed tool documentation only when explicitly requested',
+        backend: {
+          handler: async (params) => {
+            const metadata = await getToolDocMetadata(params.toolId);
+            if (!metadata.docAvailable) {
+              throw new Error(`No documentation found for tool '${params.toolId}'`);
+            }
+
+            const doc = await readToolDoc(params.toolId);
+            return {
+              toolId: params.toolId,
+              support: metadata.support,
+              content: doc.content,
+            };
+          },
+          sideEffects: ['read'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['toolId'],
+          properties: {
+            toolId: { type: 'string', description: 'Tool ID to load documentation for' }
+          }
+        },
+        skill: {
+          triggerPatterns: ['tool help', 'tool documentation', 'how do i use tool', 'what can this tool do'],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'book-open'
+        }
+      }
+    ];
+
     // Register all system tools
-    [...fileTools, ...codeTools].forEach(def => {
+    [...fileTools, ...codeTools, ...docsTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

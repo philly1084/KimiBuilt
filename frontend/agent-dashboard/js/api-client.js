@@ -406,6 +406,20 @@ class ApiClient {
     async getSkills() {
         return this.get('/api/admin/skills');
     }
+
+    /**
+     * Get frontend-visible tools from the live registry
+     */
+    async getTools(category = null) {
+        return this.get('/api/tools/available', category ? { category } : null);
+    }
+
+    /**
+     * Get detailed tool documentation
+     */
+    async getToolDocumentation(id) {
+        return this.get(`/api/tools/docs/${id}`);
+    }
     
     /**
      * Get skill details

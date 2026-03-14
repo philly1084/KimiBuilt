@@ -89,7 +89,7 @@
                                 <polyline points="2 17 12 22 22 17"/>
                                 <polyline points="2 12 12 17 22 12"/>
                             </svg>
-                            <span>Skills</span>
+                            <span>Tools</span>
                         </li>
                         <li class="nav-item" data-view="traces">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -312,7 +312,7 @@
                                 <line x1="12" y1="5" x2="12" y2="19"/>
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
-                            New Prompt
+                            Live Slots
                         </button>
                     </div>
 
@@ -339,7 +339,7 @@
                             <div class="editor-header">
                                 <div class="editor-info">
                                     <input type="text" class="prompt-name-input" id="promptName" placeholder="Prompt Name">
-                                    <span class="prompt-version">v1.0</span>
+                                    <span class="prompt-version">live slot</span>
                                 </div>
                                 <div class="editor-actions">
                                     <button class="btn btn-ghost" id="testPromptBtn">Test</button>
@@ -535,32 +535,63 @@
                 <!-- Skills View -->
                 <section class="view" id="skillsView">
                     <div class="page-header">
+                        <div>
+                            <h2 class="section-title">Tool Catalog</h2>
+                            <p class="section-subtitle">Live registry tools, setup status, and lazy-loaded docs.</p>
+                        </div>
                         <div class="page-actions">
                             <div class="search-box">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="11" cy="11" r="8"/>
                                     <path d="M21 21l-4.35-4.35"/>
                                 </svg>
-                                <input type="text" placeholder="Search skills..." id="skillSearch">
+                                <input type="text" placeholder="Search tools..." id="skillSearch">
                             </div>
                             <button class="btn btn-primary" id="discoverSkillsBtn">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+                                    <path d="M23 4v6h-6"/>
+                                    <path d="M1 20v-6h6"/>
+                                    <path d="M3.51 9a9 9 0 0114.13-3.36L23 10"/>
+                                    <path d="M20.49 15a9 9 0 01-14.13 3.36L1 14"/>
                                 </svg>
-                                Discover
+                                Refresh Catalog
                             </button>
                         </div>
                     </div>
 
-                    <div class="skills-categories" id="skillCategories">
-                        <button class="category-btn active" data-category="all">All</button>
-                        <button class="category-btn" data-category="builtin">Built-in</button>
-                        <button class="category-btn" data-category="custom">Custom</button>
-                        <button class="category-btn" data-category="third-party">Third-party</button>
+                    <div class="tool-summary-grid" id="toolSummaryGrid">
+                        <!-- Populated by JS -->
                     </div>
 
-                    <div class="skills-grid" id="skillsGrid">
-                        <!-- Populated by JS -->
+                    <div class="tool-toolbar">
+                        <div class="skills-categories" id="skillCategories">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div class="tool-toolbar-actions">
+                            <select class="select-sm" id="toolSupportFilter">
+                                <option value="all">All support levels</option>
+                                <option value="stable">Stable</option>
+                                <option value="requires_setup">Requires setup</option>
+                                <option value="experimental">Experimental</option>
+                                <option value="unknown">Unknown</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="tools-layout">
+                        <div class="skills-grid" id="skillsGrid">
+                            <!-- Populated by JS -->
+                        </div>
+                        <aside class="card tool-detail-card">
+                            <div class="card-header">
+                                <h3>Tool Detail</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="tool-detail" id="toolDetail">
+                                    <p class="empty-state">Select a tool to inspect setup requirements, skill wiring, and docs.</p>
+                                </div>
+                            </div>
+                        </aside>
                     </div>
                 </section>
 

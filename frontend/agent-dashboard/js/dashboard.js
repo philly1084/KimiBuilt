@@ -14,6 +14,9 @@ class Dashboard {
             models: [],
             prompts: [],
             skills: [],
+            tools: [],
+            toolDocs: {},
+            selectedToolId: null,
             logs: [],
             traces: [],
             settings: {},
@@ -193,16 +196,21 @@ class Dashboard {
         });
         
         // Skill categories
-        document.querySelectorAll('.category-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                this.filterSkills(e.target.dataset.category);
-            });
+        document.getElementById('skillCategories')?.addEventListener('click', (e) => {
+            const button = e.target.closest('.category-btn');
+            if (button) {
+                this.filterSkills(button.dataset.category);
+            }
         });
-        
+
         document.getElementById('skillSearch')?.addEventListener('input', (e) => {
             this.searchSkills(e.target.value);
         });
-        
+
+        document.getElementById('toolSupportFilter')?.addEventListener('change', () => {
+            this.renderSkills(this.getFilteredTools());
+        });
+
         document.getElementById('discoverSkillsBtn')?.addEventListener('click', () => {
             this.discoverSkills();
         });
@@ -357,7 +365,7 @@ class Dashboard {
             prompts: 'Prompts',
             models: 'Models',
             logs: 'Logs',
-            skills: 'Skills',
+            skills: 'Tools',
             traces: 'Traces',
             settings: 'Settings'
         };
@@ -408,6 +416,9 @@ class Dashboard {
      */
     async loadViewData(view) {
         switch (view) {
+            case 'skills':
+                await this.loadSkills();
+                break;
             case 'logs':
                 await this.loadLogs();
                 break;
@@ -484,7 +495,8 @@ class Dashboard {
             }
         } catch (error) {
             console.error('Error loading prompts:', error);
-            this.renderPromptList(this.getMockPrompts());
+            this.state.prompts = [];
+            this.renderPromptList([]);
         }
     }
     
@@ -492,15 +504,38 @@ class Dashboard {
      * Load skills
      */
     async loadSkills() {
-        try {
-            const response = await apiClient.get('/api/admin/skills');
-            const skills = this.unwrapApiPayload(response, []).map(skill => this.normalizeSkill(skill));
-            this.state.skills = skills;
-            this.renderSkills(skills);
-        } catch (error) {
-            console.error('Error loading skills:', error);
-            this.renderSkills(this.getMockSkills());
+        const [skillsResult, toolsResult] = await Promise.allSettled([
+            apiClient.getSkills(),
+            apiClient.getTools(),
+        ]);
+
+        let skills = [];
+        if (skillsResult.status === 'fulfilled') {
+            skills = this.unwrapApiPayload(skillsResult.value, []).map((skill) => this.normalizeSkill(skill));
+        } else {
+            console.error('Error loading skills:', skillsResult.reason);
         }
+
+        let tools = [];
+        if (toolsResult.status === 'fulfilled') {
+            const skillMap = new Map(skills.map((skill) => [skill.id, skill]));
+            tools = this.unwrapApiPayload(toolsResult.value, []).map((tool) =>
+                this.normalizeTool(tool, skillMap.get(tool.id)),
+            );
+        } else {
+            console.error('Error loading tools:', toolsResult.reason);
+            this.showToast('Failed to load live tool catalog', 'error');
+        }
+
+        this.state.skills = skills;
+        this.state.tools = tools;
+        this.renderSkillCategories(tools);
+        this.renderToolSummary(tools);
+        this.renderSkills(this.getFilteredTools());
+
+        const nextSelectedTool = tools.find((tool) => tool.id === this.state.selectedToolId) || tools[0] || null;
+        this.state.selectedToolId = nextSelectedTool?.id || null;
+        this.renderToolDetail(nextSelectedTool);
     }
     
     /**
@@ -753,12 +788,17 @@ class Dashboard {
     renderPromptList(prompts) {
         const container = document.getElementById('promptList');
         if (!container) return;
+
+        if (!prompts.length) {
+            container.innerHTML = '<p class="empty-state">No live runtime prompt slots were returned.</p>';
+            return;
+        }
         
         container.innerHTML = prompts.map(prompt => `
             <div class="prompt-item ${this.state.selectedPrompt?.id === prompt.id ? 'active' : ''}" 
                  data-id="${prompt.id}" onclick="dashboard.selectPromptById('${prompt.id}')">
-                <span class="prompt-item-name">${prompt.name}</span>
-                <span class="prompt-item-meta">Updated ${this.formatDate(prompt.updatedAt)}</span>
+                <span class="prompt-item-name">${this.escapeHtml(prompt.name)}</span>
+                <span class="prompt-item-meta">${this.escapeHtml(prompt.assignment || prompt.category || 'runtime slot')}</span>
             </div>
         `).join('');
     }
@@ -769,34 +809,41 @@ class Dashboard {
     renderSkills(skills) {
         const container = document.getElementById('skillsGrid');
         if (!container) return;
-        
-        container.innerHTML = skills.map(skill => `
-            <div class="skill-card">
+
+        if (!skills.length) {
+            container.innerHTML = '<div class="empty-state">No tools match the current filters.</div>';
+            return;
+        }
+
+        container.innerHTML = skills.map((tool) => `
+            <div class="skill-card tool-card ${this.state.selectedToolId === tool.id ? 'selected' : ''}">
                 <div class="skill-header">
                     <div class="skill-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-                            <polyline points="2 17 12 22 22 17"/>
-                            <polyline points="2 12 12 17 22 12"/>
-                        </svg>
+                        ${this.getToolCategoryIcon(tool.category)}
                     </div>
                     <div class="skill-info">
-                        <span class="skill-name">${skill.name}</span>
-                        <span class="skill-category">${skill.category}</span>
+                        <span class="skill-name">${this.escapeHtml(tool.name)}</span>
+                        <span class="skill-category">${this.escapeHtml(tool.id)} - ${this.escapeHtml(tool.category)}</span>
                     </div>
-                    <span class="skill-status ${skill.enabled ? '' : 'disabled'}"></span>
+                    <span class="skill-status ${tool.enabled === false ? 'disabled' : ''} ${tool.enabled === null ? 'unknown' : ''}"></span>
                 </div>
-                <p class="skill-description">${skill.description}</p>
+                <div class="tool-badges">
+                    <span class="support-badge ${this.escapeHtml(tool.support)}">${this.escapeHtml(this.formatSupportLabel(tool.support))}</span>
+                    <span class="tool-chip">${tool.docAvailable ? 'Docs available' : 'No docs'}</span>
+                    <span class="tool-chip">${tool.enabled === null ? 'Registry only' : (tool.enabled ? 'Skill enabled' : 'Skill disabled')}</span>
+                </div>
+                <p class="skill-description">${this.escapeHtml(tool.description)}</p>
                 <div class="skill-footer">
                     <div class="skill-stats">
-                        <span class="skill-stat"><strong>${skill.usageCount || 0}</strong> uses</span>
-                        <span class="skill-stat"><strong>${skill.successRate || 0}%</strong> success</span>
+                        <span class="skill-stat"><strong>${tool.usageCount || 0}</strong> uses</span>
+                        <span class="skill-stat"><strong>${tool.successRate || 0}%</strong> success</span>
                     </div>
                     <div class="skill-actions">
-                        <button class="btn btn-sm btn-ghost" onclick="dashboard.editSkill('${skill.id}')">Edit</button>
-                        <button class="btn btn-sm btn-secondary" onclick="dashboard.toggleSkill('${skill.id}')">
-                            ${skill.enabled ? 'Disable' : 'Enable'}
-                        </button>
+                        <button class="btn btn-sm btn-ghost" onclick="dashboard.selectTool('${tool.id}')">Details</button>
+                        ${tool.docAvailable ? `<button class="btn btn-sm btn-ghost" onclick="dashboard.loadToolDocumentation('${tool.id}')">Docs</button>` : ''}
+                        ${tool.enabled === null
+                            ? ''
+                            : `<button class="btn btn-sm btn-secondary" onclick="dashboard.toggleSkill('${tool.id}')">${tool.enabled ? 'Disable' : 'Enable'}</button>`}
                     </div>
                 </div>
             </div>
@@ -1021,6 +1068,10 @@ class Dashboard {
         document.getElementById('promptName').value = prompt.name;
         document.getElementById('promptEditor').value = prompt.content || '';
         this.updatePromptEditor(prompt.content || '');
+        const version = document.querySelector('.prompt-version');
+        if (version) {
+            version.textContent = prompt.assignment || 'live slot';
+        }
         
         // Update active state in list
         document.querySelectorAll('.prompt-item').forEach(item => {
@@ -1102,7 +1153,7 @@ class Dashboard {
             <div class="history-item">
                 <span class="history-version">Current</span>
                 <span class="history-date">${this.formatDate(prompt.updatedAt)}</span>
-                <span class="history-author">${prompt.isDefault ? 'System prompt' : 'Custom prompt'}</span>
+                <span class="history-author">${this.escapeHtml(prompt.assignment || 'Live runtime slot')}</span>
             </div>
             <div class="history-item">
                 <span class="history-version">History unavailable</span>
@@ -1136,15 +1187,7 @@ class Dashboard {
     }
     
     createNewPrompt() {
-        this.state.selectedPrompt = null;
-        document.getElementById('promptName').value = '';
-        document.getElementById('promptEditor').value = '';
-        this.updatePromptEditor('');
-        
-        // Clear active state
-        document.querySelectorAll('.prompt-item').forEach(item => {
-            item.classList.remove('active');
-        });
+        this.showToast('This page edits fixed live runtime prompt slots. Select an existing slot to change it.', 'info');
     }
     
     switchPromptTab(tab) {
@@ -1399,22 +1442,12 @@ class Dashboard {
         document.querySelectorAll('.category-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.category === category);
         });
-        
-        let filtered = [...this.state.skills];
-        if (category !== 'all') {
-            filtered = filtered.filter(s => s.category?.toLowerCase() === category);
-        }
-        
-        this.renderSkills(filtered);
+
+        this.renderSkills(this.getFilteredTools());
     }
     
     searchSkills(query) {
-        const lowerQuery = query.toLowerCase();
-        const filtered = this.state.skills.filter(s => 
-            s.name.toLowerCase().includes(lowerQuery) ||
-            s.description.toLowerCase().includes(lowerQuery)
-        );
-        this.renderSkills(filtered);
+        this.renderSkills(this.getFilteredTools(query));
     }
     
     async toggleSkill(id) {
@@ -1437,8 +1470,14 @@ class Dashboard {
     }
     
     discoverSkills() {
-        this.showToast('Skill discovery started', 'info');
-        // Implement skill discovery logic
+        this.loadSkills()
+            .then(() => {
+                this.showToast('Tool catalog refreshed', 'success');
+            })
+            .catch((error) => {
+                console.error('Error refreshing tool catalog:', error);
+                this.showToast('Failed to refresh tool catalog', 'error');
+            });
     }
     
     filterTraces() {
@@ -1621,6 +1660,23 @@ class Dashboard {
         };
     }
 
+    normalizeTool(tool = {}, skill = null) {
+        return {
+            ...tool,
+            id: tool.id || tool.name || 'unknown-tool',
+            name: tool.name || tool.id || 'Unknown Tool',
+            description: tool.description || 'No description available.',
+            category: (tool.category || 'uncategorized').toLowerCase(),
+            support: (tool.support || 'unknown').toLowerCase(),
+            docAvailable: Boolean(tool.docAvailable),
+            enabled: skill ? Boolean(skill.enabled) : null,
+            usageCount: Number(skill?.usageCount || 0),
+            successRate: Number(skill?.successRate || 0),
+            triggerPatterns: skill?.triggerPatterns || [],
+            requiresConfirmation: Boolean(skill?.requiresConfirmation),
+        };
+    }
+
     normalizeLog(log = {}) {
         return {
             ...log,
@@ -1667,6 +1723,215 @@ class Dashboard {
             title: activity.description || activity.title || activity.type || 'Activity',
             meta: this.formatDate(activity.timestamp),
         };
+    }
+
+    renderSkillCategories(tools = []) {
+        const container = document.getElementById('skillCategories');
+        if (!container) return;
+
+        const counts = tools.reduce((acc, tool) => {
+            acc[tool.category] = (acc[tool.category] || 0) + 1;
+            return acc;
+        }, {});
+        const activeCategory = document.querySelector('#skillCategories .category-btn.active')?.dataset.category || 'all';
+        const categories = ['all', ...Object.keys(counts).sort()];
+
+        container.innerHTML = categories.map((category) => {
+            const count = category === 'all' ? tools.length : counts[category] || 0;
+            const label = category === 'all'
+                ? 'All'
+                : category.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+            return `
+                <button class="category-btn ${activeCategory === category ? 'active' : ''}" data-category="${this.escapeHtml(category)}">
+                    ${this.escapeHtml(label)} <span class="category-count">${count}</span>
+                </button>
+            `;
+        }).join('');
+    }
+
+    renderToolSummary(tools = []) {
+        const container = document.getElementById('toolSummaryGrid');
+        if (!container) return;
+
+        const stable = tools.filter((tool) => tool.support === 'stable').length;
+        const setup = tools.filter((tool) => tool.support === 'requires_setup').length;
+        const docs = tools.filter((tool) => tool.docAvailable).length;
+
+        container.innerHTML = [
+            { label: 'Registered Tools', value: tools.length, tone: 'info' },
+            { label: 'Stable', value: stable, tone: 'success' },
+            { label: 'Requires Setup', value: setup, tone: 'warning' },
+            { label: 'Docs Ready', value: docs, tone: 'accent' },
+        ].map((item) => `
+            <div class="tool-summary-card ${item.tone}">
+                <span class="tool-summary-value">${item.value}</span>
+                <span class="tool-summary-label">${item.label}</span>
+            </div>
+        `).join('');
+    }
+
+    getFilteredTools(query = null) {
+        const searchValue = (query ?? document.getElementById('skillSearch')?.value ?? '').trim().toLowerCase();
+        const category = document.querySelector('#skillCategories .category-btn.active')?.dataset.category || 'all';
+        const support = document.getElementById('toolSupportFilter')?.value || 'all';
+
+        return this.state.tools.filter((tool) => {
+            if (category !== 'all' && tool.category !== category) {
+                return false;
+            }
+            if (support !== 'all' && tool.support !== support) {
+                return false;
+            }
+            if (!searchValue) {
+                return true;
+            }
+
+            return [
+                tool.name,
+                tool.id,
+                tool.description,
+                tool.category,
+                tool.support,
+            ].some((value) => String(value || '').toLowerCase().includes(searchValue));
+        });
+    }
+
+    selectTool(id) {
+        const tool = this.state.tools.find((item) => item.id === id);
+        if (!tool) {
+            this.showToast('Tool not found', 'error');
+            return;
+        }
+
+        this.state.selectedToolId = id;
+        this.renderSkills(this.getFilteredTools());
+        this.renderToolDetail(tool);
+    }
+
+    async loadToolDocumentation(id, forceReload = false) {
+        const tool = this.state.tools.find((item) => item.id === id);
+        if (!tool) {
+            this.showToast('Tool not found', 'error');
+            return;
+        }
+
+        this.state.selectedToolId = id;
+        this.renderSkills(this.getFilteredTools());
+
+        if (!tool.docAvailable) {
+            this.renderToolDetail(tool);
+            this.showToast('No tool documentation is available for this tool', 'info');
+            return;
+        }
+
+        if (!forceReload && this.state.toolDocs[id]) {
+            this.renderToolDetail(tool);
+            return;
+        }
+
+        const detail = document.getElementById('toolDetail');
+        if (detail) {
+            detail.innerHTML = '<p class="empty-state">Loading tool documentation...</p>';
+        }
+
+        try {
+            const response = await apiClient.getToolDocumentation(id);
+            this.state.toolDocs[id] = this.unwrapApiPayload(response, {});
+            this.renderToolDetail(tool);
+        } catch (error) {
+            console.error(`Error loading tool documentation for ${id}:`, error);
+            this.showToast('Failed to load tool documentation', 'error');
+            this.renderToolDetail(tool);
+        }
+    }
+
+    renderToolDetail(tool) {
+        const container = document.getElementById('toolDetail');
+        if (!container) return;
+
+        if (!tool) {
+            container.innerHTML = '<p class="empty-state">Select a tool to inspect setup requirements, skill wiring, and docs.</p>';
+            return;
+        }
+
+        const doc = this.state.toolDocs[tool.id];
+        const supportText = this.formatSupportDescription(tool.support);
+        const triggerMarkup = tool.triggerPatterns?.length
+            ? `<div class="tool-detail-section"><h4>Trigger Patterns</h4><p>${this.escapeHtml(tool.triggerPatterns.join(', '))}</p></div>`
+            : '';
+        const docMarkup = doc?.content
+            ? `<div class="tool-doc-content"><pre>${this.escapeHtml(doc.content)}</pre></div>`
+            : `<p class="tool-doc-placeholder">${tool.docAvailable ? 'Docs are available on demand. Load them only when you need setup or usage detail.' : 'No tool doc file is registered for this tool.'}</p>`;
+
+        container.innerHTML = `
+            <div class="tool-detail-header">
+                <div>
+                    <h3>${this.escapeHtml(tool.name)}</h3>
+                    <p class="tool-detail-subtitle">${this.escapeHtml(tool.id)} - ${this.escapeHtml(tool.category)}</p>
+                </div>
+                <span class="support-badge ${this.escapeHtml(tool.support)}">${this.escapeHtml(this.formatSupportLabel(tool.support))}</span>
+            </div>
+            <p class="tool-detail-description">${this.escapeHtml(tool.description)}</p>
+            <div class="tool-detail-meta">
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Skill State</span>
+                    <span class="tool-detail-value">${tool.enabled === null ? 'Registry only' : (tool.enabled ? 'Enabled' : 'Disabled')}</span>
+                </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Support</span>
+                    <span class="tool-detail-value">${this.escapeHtml(supportText)}</span>
+                </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Docs</span>
+                    <span class="tool-detail-value">${tool.docAvailable ? 'Available' : 'Not published'}</span>
+                </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Requires Confirmation</span>
+                    <span class="tool-detail-value">${tool.requiresConfirmation ? 'Yes' : 'No'}</span>
+                </div>
+            </div>
+            ${triggerMarkup}
+            <div class="tool-detail-section">
+                <h4>Documentation</h4>
+                ${docMarkup}
+            </div>
+            <div class="tool-detail-actions">
+                ${tool.docAvailable ? `<button class="btn btn-sm btn-secondary" onclick="dashboard.loadToolDocumentation('${tool.id}', true)">${doc?.content ? 'Reload Docs' : 'Load Docs'}</button>` : ''}
+                ${tool.enabled === null ? '' : `<button class="btn btn-sm btn-ghost" onclick="dashboard.toggleSkill('${tool.id}')">${tool.enabled ? 'Disable Skill' : 'Enable Skill'}</button>`}
+            </div>
+        `;
+    }
+
+    formatSupportLabel(support) {
+        return String(support || 'unknown')
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    formatSupportDescription(support) {
+        switch (support) {
+            case 'stable':
+                return 'Ready for normal agent use';
+            case 'requires_setup':
+                return 'Needs secrets, host config, or runtime prerequisites';
+            case 'experimental':
+                return 'Available but not production-ready';
+            default:
+                return 'Support level has not been classified';
+        }
+    }
+
+    getToolCategoryIcon(category) {
+        const icons = {
+            web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 010 20"/><path d="M12 2a15 15 0 000 20"/></svg>',
+            ssh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+            sandbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+            database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>',
+            design: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 113 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>',
+            system: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
+        };
+
+        return icons[category] || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 010 1.4l-7 7a1 1 0 01-1.4-1.4l7-7a1 1 0 011.4 0z"/><path d="M17 7h.01"/><path d="M12 3l9 9-9 9-9-9 9-9z"/></svg>';
     }
 
     renderSystemHealth(health, latency, error = null) {
@@ -1776,8 +2041,9 @@ class Dashboard {
             prompts: this.state.prompts.filter(p => 
                 p.name.toLowerCase().includes(query.toLowerCase())
             ),
-            skills: this.state.skills.filter(s => 
-                s.name.toLowerCase().includes(query.toLowerCase())
+            skills: this.state.tools.filter(s => 
+                s.name.toLowerCase().includes(query.toLowerCase()) ||
+                s.id.toLowerCase().includes(query.toLowerCase())
             ),
             logs: this.state.logs.filter(l => 
                 l.prompt?.toLowerCase().includes(query.toLowerCase())
@@ -1979,6 +2245,11 @@ class Dashboard {
             return;
         }
 
+        if (!this.state.selectedPrompt?.id) {
+            this.showToast('Select a live prompt slot before saving', 'warning');
+            return;
+        }
+
         try {
             const prompt = {
                 name,
@@ -1986,14 +2257,8 @@ class Dashboard {
                 updatedAt: new Date().toISOString(),
             };
 
-            let savedPrompt = null;
-            if (this.state.selectedPrompt?.id) {
-                const response = await apiClient.put(`/api/admin/prompts/${this.state.selectedPrompt.id}`, prompt);
-                savedPrompt = this.unwrapApiPayload(response, null);
-            } else {
-                const response = await apiClient.post('/api/admin/prompts', prompt);
-                savedPrompt = this.unwrapApiPayload(response, null);
-            }
+            const response = await apiClient.put(`/api/admin/prompts/${this.state.selectedPrompt.id}`, prompt);
+            const savedPrompt = this.unwrapApiPayload(response, null);
 
             this.showToast('Prompt saved successfully', 'success');
             await this.loadPrompts();
@@ -2002,7 +2267,7 @@ class Dashboard {
             }
         } catch (error) {
             console.error('Error saving prompt:', error);
-            this.showToast('Failed to save prompt', 'error');
+            this.showToast(error.userMessage || error.message || 'Failed to save prompt', 'error');
         }
     }
 
@@ -2082,7 +2347,14 @@ class Dashboard {
     }
 
     discoverSkills() {
-        this.showToast('Skill discovery is not exposed by the backend yet', 'info');
+        this.loadSkills()
+            .then(() => {
+                this.showToast('Tool catalog refreshed', 'success');
+            })
+            .catch((error) => {
+                console.error('Error refreshing tool catalog:', error);
+                this.showToast('Failed to refresh tool catalog', 'error');
+            });
     }
 
     async saveGeneralSettings() {
@@ -2209,14 +2481,15 @@ class Dashboard {
     }
 
     editSkill(id) {
-        const skill = this.state.skills.find((item) => item.id === id);
-        if (!skill) {
-            this.showToast('Skill not found', 'error');
+        const tool = this.state.tools.find((item) => item.id === id);
+        if (!tool) {
+            this.showToast('Tool not found', 'error');
             return;
         }
 
         this.navigateTo('skills');
-        this.showToast(`${skill.name}: ${skill.description}`, 'info', 5000);
+        this.selectTool(id);
+        this.showToast(`${tool.name}: ${tool.description}`, 'info', 5000);
     }
 
     restoreVersion(version) {

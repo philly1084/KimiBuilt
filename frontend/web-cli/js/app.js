@@ -28,7 +28,7 @@ class CodeCLIApp {
         this.commands = [
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
-            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool',
+            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
             '/files', '/ls', '/download', '/open'
         ];
         
@@ -335,6 +335,9 @@ class CodeCLIApp {
             case 'tool':
                 await this.invokeToolCommand(args);
                 break;
+            case 'tool-help':
+                await this.showToolHelp(args);
+                break;
             case 'files':
             case 'ls':
                 this.listFiles();
@@ -530,6 +533,7 @@ Session Statistics:
   /model <name>      Change AI model
   /tools [category]  List frontend-available tools
   /tool <id> <json>  Invoke a tool with JSON params
+  /tool-help <id>    Show on-demand documentation for a tool
   /image <prompt>    Generate an image
                      Defaults to the backend image model (official OpenAI if configured)
                      Options: --model gpt-image-1.5|gpt-image-1-mini|gpt-image-1
@@ -575,6 +579,9 @@ Type any message to chat with the AI.
                     : Object.keys(tool.inputSchema?.properties || {});
                 lines.push(`- \`${tool.id}\` (${tool.category})`);
                 lines.push(`  ${tool.description || 'No description provided.'}`);
+                if (tool.support?.status) {
+                    lines.push(`  Support: ${tool.support.status}`);
+                }
                 if (params.length) {
                     const paramNames = Array.isArray(params)
                         ? params.map((param) => typeof param === 'string' ? param : param.name).filter(Boolean)
@@ -586,9 +593,28 @@ Type any message to chat with the AI.
             });
             lines.push('');
             lines.push('Usage: /tool <id> {"key":"value"}');
+            lines.push('Help: /tool-help <id>');
             this.printAI(lines.join('\n'));
         } catch (error) {
             this.printError(`Failed to load tools: ${error.message}`);
+        }
+    }
+
+    async showToolHelp(args) {
+        const [toolId] = args;
+        if (!toolId) {
+            this.printError('Usage: /tool-help <id>');
+            return;
+        }
+
+        this.setStatus('thinking');
+        try {
+            const doc = await api.getToolDoc(toolId);
+            this.printAI(`## Tool Help: \`${toolId}\`\n\nSupport: \`${doc?.support?.status || 'unknown'}\`\n\n${doc?.content || 'No documentation found.'}`);
+        } catch (error) {
+            this.printError(`Tool help failed: ${error.message}`);
+        } finally {
+            this.setStatus('ready');
         }
     }
 
@@ -1901,4 +1927,3 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
 }
 
 const app = new CodeCLIApp();
-

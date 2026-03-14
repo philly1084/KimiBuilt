@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { getUnifiedRegistry } = require('../agent-sdk/registry/UnifiedRegistry');
 const { getToolManager } = require('../agent-sdk/tools');
+const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
 
 const registry = getUnifiedRegistry();
 
@@ -43,12 +44,17 @@ router.get('/available', async (req, res) => {
       tools = tools.filter(t => t.category === category);
     }
     
+    const enrichedTools = await Promise.all(tools.map(async (tool) => ({
+      ...tool,
+      ...(await getToolDocMetadata(tool.id)),
+    })));
+
     res.json({
       success: true,
-      data: tools,
+      data: enrichedTools,
       meta: {
-        total: tools.length,
-        categories: [...new Set(tools.map(t => t.category))]
+        total: enrichedTools.length,
+        categories: [...new Set(enrichedTools.map(t => t.category))]
       }
     });
   } catch (error) {
@@ -106,6 +112,35 @@ router.get('/stats', async (req, res) => {
 });
 
 /**
+ * GET /api/tools/docs/:id
+ * Load detailed tool documentation on demand
+ */
+router.get('/docs/:id', async (req, res) => {
+  try {
+    await ensureToolManagerInitialized();
+    const { id } = req.params;
+    const metadata = await getToolDocMetadata(id);
+
+    if (!metadata.docAvailable) {
+      return res.status(404).json({ success: false, error: 'Tool documentation not found' });
+    }
+
+    const doc = await readToolDoc(id);
+    res.json({
+      success: true,
+      data: {
+        toolId: id,
+        content: doc.content,
+        support: metadata.support,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting tool documentation:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/tools/:id
  * Get tool details
  */
@@ -122,6 +157,8 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Tool not found' });
     }
     
+    const docMetadata = await getToolDocMetadata(id);
+
     res.json({
       success: true,
       data: {
@@ -136,7 +173,8 @@ router.get('/:id', async (req, res) => {
           triggerPatterns: skill.triggerPatterns,
           requiresConfirmation: skill.requiresConfirmation
         } : null,
-        parameters: manifest?.parameters || []
+        parameters: manifest?.parameters || [],
+        ...docMetadata,
       }
     });
   } catch (error) {

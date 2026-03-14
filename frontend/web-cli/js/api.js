@@ -455,6 +455,24 @@ class WebCLIAPI {
         return data.data || [];
     }
 
+    async getToolDoc(toolId) {
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/tools/docs/${encodeURIComponent(toolId)}`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Tool doc failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || null;
+    }
+
     async invokeTool(toolId, params = {}) {
         const response = await this.fetchWithTimeout(
             `${BASE_URL_WITHOUT_API}/api/tools/invoke`,

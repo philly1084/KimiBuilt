@@ -49,6 +49,12 @@ const config = {
         browserArgs: process.env.ARTIFACT_BROWSER_ARGS || '',
         pdfTimeoutMs: parseInt(process.env.ARTIFACT_PDF_TIMEOUT_MS, 10) || 15000,
     },
+
+    search: {
+        provider: process.env.SEARCH_PROVIDER || 'perplexity',
+        perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
+        perplexityBaseURL: process.env.PERPLEXITY_BASE_URL || 'https://api.perplexity.ai',
+    },
 };
 
 function validate() {

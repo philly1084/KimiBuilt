@@ -45,6 +45,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'web-search',
     'web-scrape',
     'security-scan',
+    'tool-doc-read',
 ]);
 
 const AUTO_TOOL_MAX_ROUNDS = 3;
@@ -434,6 +435,7 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null) {
         'web-search': /\b(search|look up|find|latest|recent|news|current|research|what is|who is)\b/i.test(prompt),
         'web-scrape': hasUrl && /\b(scrape|extract|parse|crawl|collect|get data|pull data)\b/i.test(prompt),
         'security-scan': mentionsCode && /\b(security|vulnerab|secret|audit|scan|xss|sql injection|path traversal)\b/i.test(prompt),
+        'tool-doc-read': /\b(tool|tools|skill|skills)\b/i.test(prompt) && /\b(help|docs|documentation|how do i use|what can|capab|setup|parameters|args|usage)\b/i.test(prompt),
     };
 
     if (heuristics[toolId]) {
@@ -566,6 +568,10 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'security-scan')) {
         guidance.push('- Use `security-scan` for code audits, secret detection, and vulnerability checks when code is present.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'tool-doc-read')) {
+        guidance.push('- Use `tool-doc-read` when the user asks how a tool works, what parameters it takes, or what its setup/limitations are. Pass the target `toolId`.');
     }
 
     guidance.push('Prefer tools over guessing when the user asks for live web data, extraction, or verification.');

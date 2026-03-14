@@ -1,5 +1,6 @@
 const { TaskStatus } = require('../core/TaskStatus');
 const { ExecutionTrace, ExecutionStep } = require('./ExecutionTrace');
+const runtimePromptRegistry = require('../prompts/runtime-prompt-registry');
 
 /**
  * Result of executing a single step.
@@ -41,7 +42,8 @@ class Executor {
     retryEngine,
     verifier,
     planner,
-    llmClient
+    llmClient,
+    skillContext = ''
   }) {
     /** @type {Object} Tool registry */
     this.toolRegistry = toolRegistry;
@@ -60,6 +62,9 @@ class Executor {
     
     /** @type {Object} LLM client */
     this.llmClient = llmClient;
+
+    /** @type {string} Retrieved skill context for prompt augmentation */
+    this.skillContext = skillContext;
     
     /** @type {Object} Event handlers */
     this.eventHandlers = {
@@ -477,21 +482,14 @@ class Executor {
    * @returns {string} Constructed prompt
    */
   constructPrompt(step, task) {
-    const parts = [
-      `Task: ${task.objective}`,
-      `Step: ${step.description}`,
-      `Type: ${step.type}`
-    ];
-    
-    if (task.input) {
-      parts.push(`Input: ${JSON.stringify(task.input, null, 2)}`);
-    }
-    
-    if (step.params) {
-      parts.push(`Parameters: ${JSON.stringify(step.params, null, 2)}`);
-    }
-    
-    return parts.join('\n\n');
+    return runtimePromptRegistry.render('agent-sdk-executor-llm-step', {
+      taskObjective: task.objective,
+      stepDescription: step.description,
+      stepType: step.type,
+      taskInputBlock: task.input ? `Input:\n${JSON.stringify(task.input, null, 2)}` : '',
+      stepParamsBlock: step.params ? `Parameters:\n${JSON.stringify(step.params, null, 2)}` : '',
+      skillContextBlock: this.skillContext ? `Relevant Skills:\n${this.skillContext}` : '',
+    }).trim();
   }
   
   /**

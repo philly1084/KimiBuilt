@@ -558,8 +558,9 @@ class ChatApp {
         const trimmed = String(content || '').trim();
         const isListCommand = trimmed === '/tools' || trimmed.startsWith('/tools ');
         const isInvokeCommand = trimmed.startsWith('/tool ');
+        const isHelpCommand = trimmed.startsWith('/tool-help ');
 
-        if (!isListCommand && !isInvokeCommand) {
+        if (!isListCommand && !isInvokeCommand && !isHelpCommand) {
             return false;
         }
 
@@ -585,6 +586,13 @@ class ChatApp {
                 const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
                 const tools = await apiClient.getAvailableTools(category || null);
                 assistantContent = this.formatToolsList(tools, category);
+            } else if (isHelpCommand) {
+                const toolId = trimmed.slice('/tool-help '.length).trim();
+                if (!toolId) {
+                    throw new Error('Usage: /tool-help <id>');
+                }
+                const doc = await apiClient.getToolDoc(toolId);
+                assistantContent = `## Tool Help: \`${toolId}\`\n\nSupport: \`${doc?.support?.status || 'unknown'}\`\n\n${doc?.content || 'No documentation found.'}`;
             } else {
                 const match = trimmed.match(/^\/tool\s+([^\s]+)(?:\s+([\s\S]+))?$/i);
                 if (!match) {
@@ -642,12 +650,16 @@ class ChatApp {
                 : Object.keys(tool.inputSchema?.properties || {});
             lines.push(`- \`${tool.id}\` (${tool.category})`);
             lines.push(`  ${tool.description || 'No description provided.'}`);
+            if (tool.support?.status) {
+                lines.push(`  Support: ${tool.support.status}`);
+            }
             if (params.length) {
                 lines.push(`  Params: ${params.join(', ')}`);
             }
         });
         lines.push('');
         lines.push('Usage: `/tool <id> {"key":"value"}`');
+        lines.push('Help: `/tool-help <id>`');
         return lines.join('\n');
     }
 
@@ -1592,5 +1604,3 @@ document.addEventListener('DOMContentLoaded', () => {
     window.chatApp = new ChatApp();
     window.app = window.chatApp; // Backward compatibility
 });
-
-

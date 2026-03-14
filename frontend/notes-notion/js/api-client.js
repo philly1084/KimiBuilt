@@ -623,6 +623,20 @@ class NotesAPIClient {
         return data.data || [];
     }
 
+    async getToolDoc(toolId) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/docs/${encodeURIComponent(toolId)}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to load tool documentation: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data || null;
+    }
+
     async invokeTool(toolId, params = {}) {
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/invoke`, {
             method: 'POST',

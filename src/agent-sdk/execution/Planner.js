@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const runtimePromptRegistry = require('../prompts/runtime-prompt-registry');
 
 /**
  * Step status values.
@@ -423,20 +424,12 @@ class Planner {
    * @returns {Promise<TaskAnalysis>} Analysis result
    */
   async analyzeTask(task) {
-    // Use LLM to analyze task complexity and requirements
-    const prompt = `
-Analyze this task and provide a JSON response with:
-1. complexity: "low", "medium", or "high"
-2. requiredTools: array of tool names needed
-3. estimatedSteps: estimated number of execution steps (number)
-4. challenges: array of anticipated challenges
-
-Task: ${task.objective}
-Type: ${task.type}
-Input: ${JSON.stringify(task.input)}
-Available Tools: ${JSON.stringify(task.tools || [])}
-
-Respond with valid JSON only.`;
+    const prompt = runtimePromptRegistry.render('agent-sdk-planner-analysis', {
+      objective: task.objective,
+      type: task.type,
+      input: JSON.stringify(task.input),
+      availableTools: JSON.stringify(task.tools || []),
+    });
     
     try {
       if (this.llmClient) {

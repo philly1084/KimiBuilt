@@ -1676,7 +1676,7 @@ GUIDELINES:
     // ============================================
     function isToolCommand(question) {
         const trimmed = String(question || '').trim();
-        return trimmed === '/tools' || trimmed.startsWith('/tools ') || trimmed.startsWith('/tool ');
+        return trimmed === '/tools' || trimmed.startsWith('/tools ') || trimmed.startsWith('/tool ') || trimmed.startsWith('/tool-help ');
     }
 
     function formatAvailableToolsResponse(tools, category = null) {
@@ -1693,12 +1693,16 @@ GUIDELINES:
                 : Object.keys(tool.inputSchema?.properties || {});
             lines.push(`- \`${tool.id}\` (${tool.category})`);
             lines.push(`  ${tool.description || 'No description provided.'}`);
+            if (tool.support?.status) {
+                lines.push(`  Support: ${tool.support.status}`);
+            }
             if (params.length) {
                 lines.push(`  Params: ${params.join(', ')}`);
             }
         });
         lines.push('');
         lines.push('Usage: `/tool <id> {"key":"value"}`');
+        lines.push('Help: `/tool-help <id>`');
         return lines.join('\n');
     }
 
@@ -1720,6 +1724,14 @@ GUIDELINES:
             const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
             const tools = await apiClient.getAvailableTools(category || null);
             responseText = formatAvailableToolsResponse(tools, category);
+        } else if (trimmed.startsWith('/tool-help ')) {
+            const toolId = trimmed.slice('/tool-help '.length).trim();
+            if (!toolId) {
+                throw new Error('Usage: /tool-help <id>');
+            }
+
+            const doc = await apiClient.getToolDoc(toolId);
+            responseText = `## Tool Help: \`${toolId}\`\n\nSupport: \`${doc?.support?.status || 'unknown'}\`\n\n${doc?.content || 'No documentation found.'}`;
         } else {
             const match = trimmed.match(/^\/tool\s+([^\s]+)(?:\s+([\s\S]+))?$/i);
             if (!match) {
