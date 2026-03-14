@@ -10,8 +10,10 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(window.location.hostname)
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 
 // Default request timeout in milliseconds
-const DEFAULT_TIMEOUT = 30000;
-const IMAGE_TIMEOUT = 120000;
+const DEFAULT_TIMEOUT = 120000;
+const CHAT_STREAM_TIMEOUT = 180000;
+const LOCAL_MODEL_TIMEOUT = 300000;
+const IMAGE_TIMEOUT = 240000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
@@ -22,6 +24,18 @@ class WebCLIAPI {
         this.models = [];
         this.connectionStatus = 'unknown';
         this.lastHealthCheck = null;
+    }
+
+    isLikelyLocalModel(modelId = '') {
+        return /(ollama|llama|mistral|qwen|phi|gemma|deepseek|local)/i.test(String(modelId || ''));
+    }
+
+    getChatTimeout(modelId = null, stream = true) {
+        const effectiveModel = modelId || this.currentModel || '';
+        if (this.isLikelyLocalModel(effectiveModel)) {
+            return LOCAL_MODEL_TIMEOUT;
+        }
+        return stream ? CHAT_STREAM_TIMEOUT : DEFAULT_TIMEOUT;
     }
 
     /**
@@ -178,7 +192,7 @@ class WebCLIAPI {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(params),
-            });
+            }, MAX_RETRIES, this.getChatTimeout(params.model, true));
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -237,7 +251,9 @@ class WebCLIAPI {
             let suggestions = ['Check your internet connection', 'Verify the backend is running'];
             
             if (error.message.includes('timeout')) {
-                suggestions = ['The request took too long', 'Try a shorter message', 'Check server load'];
+                suggestions = this.isLikelyLocalModel(model || this.currentModel)
+                    ? ['The local model is taking longer to produce the first tokens', 'Wait for the model to warm up or load into memory', 'Try a smaller local model if this keeps happening']
+                    : ['The request took too long', 'Try a shorter message', 'Check server load'];
             }
             
             yield { type: 'error', error: error.message, suggestions };
@@ -287,7 +303,7 @@ class WebCLIAPI {
                     existingContent,
                     sessionId: this.sessionId,
                 }),
-            });
+            }, MAX_RETRIES, this.getChatTimeout(this.currentModel, false));
 
             if (!response.ok) {
                 throw new Error(`Canvas request failed: HTTP ${response.status}`);
@@ -317,7 +333,7 @@ class WebCLIAPI {
                     context,
                     sessionId: this.sessionId,
                 }),
-            });
+            }, MAX_RETRIES, this.getChatTimeout(this.currentModel, false));
 
             if (!response.ok) {
                 throw new Error(`Notation request failed: HTTP ${response.status}`);
