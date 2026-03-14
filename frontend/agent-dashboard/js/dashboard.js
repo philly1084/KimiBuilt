@@ -51,8 +51,8 @@ class Dashboard {
         // Load initial data
         await this.loadInitialData();
         
-        // Show welcome toast
-        this.showToast('Dashboard connected', 'success');
+        const connected = document.querySelector('#connectionStatus .status-dot')?.classList.contains('online');
+        this.showToast(connected ? 'Dashboard connected' : 'Dashboard loaded in degraded mode', connected ? 'success' : 'warning');
     }
     
     /**
@@ -385,10 +385,13 @@ class Dashboard {
             await this.loadSkills();
             
             // Load recent activity
-            this.loadRecentActivity();
+            await this.loadRecentActivity();
             
             // Load model usage
-            this.loadModelUsage();
+            await this.loadModelUsage();
+
+            // Load health
+            await this.loadSystemHealth();
             
         } catch (error) {
             console.error('Error loading initial data:', error);
@@ -418,13 +421,9 @@ class Dashboard {
      */
     async loadStats() {
         try {
-            // Mock data - replace with actual API call
-            const stats = await apiClient.get('/api/admin/stats') || {
-                totalTasks: 1247,
-                successRate: 97.3,
-                activeSessions: 8,
-                skillsLearned: 24
-            };
+            const response = await apiClient.get('/api/admin/stats');
+            const payload = this.unwrapApiPayload(response, {});
+            const stats = this.normalizeOverviewStats(payload);
             
             this.state.stats = stats;
             
@@ -444,8 +443,21 @@ class Dashboard {
      */
     async loadModels() {
         try {
-            const models = await apiClient.get('/api/admin/models') || this.getMockModels();
+            const [modelsResponse, usageResponse] = await Promise.all([
+                apiClient.get('/api/admin/models'),
+                apiClient.get('/api/admin/models/usage/stats').catch(() => null),
+            ]);
+            const usageById = new Map(
+                this.unwrapApiPayload(usageResponse, []).map((usage) => [usage.modelId, usage])
+            );
+            const models = this.unwrapApiPayload(modelsResponse, []).map((model) =>
+                this.normalizeModel({
+                    ...model,
+                    ...(usageById.get(model.id) || {}),
+                })
+            );
             this.state.models = models;
+            this.syncModelOptions(models);
             this.renderModels(models);
         } catch (error) {
             console.error('Error loading models:', error);
@@ -458,7 +470,8 @@ class Dashboard {
      */
     async loadPrompts() {
         try {
-            const prompts = await apiClient.get('/api/admin/prompts') || this.getMockPrompts();
+            const response = await apiClient.get('/api/admin/prompts');
+            const prompts = this.unwrapApiPayload(response, []);
             this.state.prompts = prompts;
             this.renderPromptList(prompts);
             
@@ -476,7 +489,8 @@ class Dashboard {
      */
     async loadSkills() {
         try {
-            const skills = await apiClient.get('/api/admin/skills') || this.getMockSkills();
+            const response = await apiClient.get('/api/admin/skills');
+            const skills = this.unwrapApiPayload(response, []).map(skill => this.normalizeSkill(skill));
             this.state.skills = skills;
             this.renderSkills(skills);
         } catch (error) {
@@ -493,10 +507,15 @@ class Dashboard {
         
         try {
             const { page, limit } = this.state.pagination.logs;
-            const logs = await apiClient.get(`/api/admin/logs?page=${page}&limit=${limit}`) || 
-                        this.getMockLogs();
+            const response = await apiClient.get('/api/admin/logs', { page, limit });
+            const logs = this.unwrapApiPayload(response, []).map(log => this.normalizeLog(log));
+            const pagination = this.getApiPagination(response);
             
             this.state.logs = logs;
+            if (pagination) {
+                this.state.pagination.logs = { ...this.state.pagination.logs, ...pagination, total: pagination.total || 0 };
+            }
+            this.populateLogModelFilter(logs);
             this.renderLogs(logs);
             this.updateLogsPagination();
         } catch (error) {
@@ -511,10 +530,17 @@ class Dashboard {
     async loadTraces() {
         try {
             const { page, limit } = this.state.pagination.traces;
-            const traces = await apiClient.get(`/api/admin/traces?page=${page}&limit=${limit}`) || 
-                          this.getMockTraces();
+            const response = await apiClient.get('/api/admin/traces', { page, limit });
+            const traces = this.unwrapApiPayload(response, []).map(trace => this.normalizeTrace(trace));
+            const pagination = this.getApiPagination(response);
             
             this.state.traces = traces;
+            if (pagination) {
+                this.state.pagination.traces = { ...this.state.pagination.traces, ...pagination, total: pagination.total || 0 };
+            }
+            if (this.state.selectedTrace && !traces.some((trace) => trace.id === this.state.selectedTrace.id)) {
+                this.state.selectedTrace = null;
+            }
             this.renderTraces(traces);
         } catch (error) {
             console.error('Error loading traces:', error);
@@ -527,7 +553,8 @@ class Dashboard {
      */
     async loadSettings() {
         try {
-            const settings = await apiClient.get('/api/admin/settings');
+            const response = await apiClient.get('/api/admin/settings');
+            const settings = this.unwrapApiPayload(response, null);
             if (settings) {
                 this.state.settings = settings;
                 this.applySettings(settings);
@@ -601,34 +628,7 @@ class Dashboard {
      * Setup WebSocket connection
      */
     setupWebSocket() {
-        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/admin`;
-        
-        try {
-            this.ws = new WebSocket(wsUrl);
-            
-            this.ws.onopen = () => {
-                console.log('WebSocket connected');
-                this.updateConnectionStatus(true);
-            };
-            
-            this.ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                this.handleWebSocketMessage(data);
-            };
-            
-            this.ws.onclose = () => {
-                console.log('WebSocket disconnected');
-                this.updateConnectionStatus(false);
-                this.scheduleReconnect();
-            };
-            
-            this.ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
-            
-        } catch (error) {
-            console.error('Failed to setup WebSocket:', error);
-        }
+        console.info('Admin dashboard realtime socket is not configured; using polling.');
     }
     
     /**
@@ -666,11 +666,14 @@ class Dashboard {
      */
     startPolling() {
         // Poll stats every 30 seconds
-        this.refreshInterval = setInterval(() => {
-            this.loadStats();
+        this.refreshInterval = setInterval(async () => {
+            await this.loadStats();
+            await this.loadSystemHealth();
+            await this.loadRecentActivity();
+            await this.loadModelUsage();
             
             if (this.state.currentView === 'logs' && !this.state.logsPaused) {
-                this.loadLogs();
+                await this.loadLogs();
             }
         }, 30000);
     }
@@ -877,62 +880,104 @@ class Dashboard {
     /**
      * Load recent activity
      */
-    loadRecentActivity() {
-        const activities = [
-            { type: 'success', title: 'Task completed successfully', meta: '2 minutes ago' },
-            { type: 'info', title: 'New skill discovered: file_parser', meta: '15 minutes ago' },
-            { type: 'error', title: 'API request failed', meta: '1 hour ago' },
-            { type: 'success', title: 'Model configuration updated', meta: '2 hours ago' }
-        ];
-        
+    async loadRecentActivity() {
         const container = document.getElementById('recentActivity');
         if (!container) return;
-        
-        container.innerHTML = activities.map(activity => `
-            <div class="activity-item">
-                <div class="activity-icon ${activity.type}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        ${activity.type === 'success' 
-                            ? '<polyline points="20 6 9 17 4 12"/>'
-                            : activity.type === 'error'
-                            ? '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
-                            : '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'
-                        }
-                    </svg>
+
+        try {
+            const response = await apiClient.get('/api/admin/activity', { limit: 12 });
+            const activities = this.unwrapApiPayload(response, []).map(activity => this.normalizeActivity(activity));
+            const items = activities.length > 0 ? activities : [
+                { type: 'info', title: 'No recent dashboard activity', meta: 'Waiting for agent tasks' }
+            ];
+
+            container.innerHTML = items.map(activity => `
+                <div class="activity-item">
+                    <div class="activity-icon ${activity.type}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            ${activity.type === 'success' 
+                                ? '<polyline points="20 6 9 17 4 12"/>'
+                                : activity.type === 'error'
+                                ? '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
+                                : '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'
+                            }
+                        </svg>
+                    </div>
+                    <div class="activity-content">
+                        <span class="activity-title">${activity.title}</span>
+                        <span class="activity-meta">${activity.meta}</span>
+                    </div>
                 </div>
-                <div class="activity-content">
-                    <span class="activity-title">${activity.title}</span>
-                    <span class="activity-meta">${activity.meta}</span>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading recent activity:', error);
+            container.innerHTML = `
+                <div class="activity-item">
+                    <div class="activity-icon error">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </div>
+                    <div class="activity-content">
+                        <span class="activity-title">Failed to load recent activity</span>
+                        <span class="activity-meta">${this.escapeHtml(error.message)}</span>
+                    </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }
     }
     
     /**
      * Load model usage
      */
-    loadModelUsage() {
-        const usage = [
-            { name: 'GPT-4o', requests: 842, percent: 68 },
-            { name: 'GPT-4o Mini', requests: 312, percent: 25 },
-            { name: 'GPT-3.5 Turbo', requests: 93, percent: 7 }
-        ];
-        
+    async loadModelUsage() {
         const container = document.getElementById('modelUsage');
         if (!container) return;
-        
-        container.innerHTML = usage.map(model => `
-            <div class="model-usage-item">
-                <div class="model-info">
-                    <span class="model-name">${model.name}</span>
-                    <span class="model-requests">${model.requests.toLocaleString()} requests</span>
+
+        try {
+            const response = await apiClient.get('/api/admin/models/usage/stats');
+            const usage = this.unwrapApiPayload(response, []).map((model) => ({
+                name: model.modelName || model.name || model.modelId || 'Unknown',
+                requests: Number(model.requests || 0),
+                percent: Number(model.successRate || 0),
+            }));
+
+            const items = usage.length > 0 ? usage : [
+                { name: 'No usage yet', requests: 0, percent: 0 }
+            ];
+
+            container.innerHTML = items.map(model => `
+                <div class="model-usage-item">
+                    <div class="model-info">
+                        <span class="model-name">${this.escapeHtml(model.name)}</span>
+                        <span class="model-requests">${model.requests.toLocaleString()} requests</span>
+                    </div>
+                    <div class="model-bar">
+                        <div class="model-fill" style="width: ${Math.max(0, Math.min(model.percent, 100))}%"></div>
+                    </div>
+                    <span class="model-percent">${Math.max(0, Math.min(model.percent, 100))}%</span>
                 </div>
-                <div class="model-bar">
-                    <div class="model-fill" style="width: ${model.percent}%"></div>
-                </div>
-                <span class="model-percent">${model.percent}%</span>
-            </div>
-        `).join('');
+            `).join('');
+        } catch (error) {
+            console.error('Error loading model usage:', error);
+            container.innerHTML = '<div class="model-usage-item"><span class="model-name">Failed to load usage data</span></div>';
+        }
+    }
+
+    async loadSystemHealth() {
+        try {
+            const startedAt = performance.now();
+            const response = await apiClient.get('/api/admin/health');
+            const latency = Math.round(performance.now() - startedAt);
+            const health = this.unwrapApiPayload(response, {});
+            this.updateConnectionStatus(true);
+            this.renderSystemHealth(health, latency);
+        } catch (error) {
+            console.error('Error loading system health:', error);
+            this.updateConnectionStatus(false);
+            this.renderSystemHealth(null, null, error);
+        }
     }
     
     // ==================== ACTIONS ====================
@@ -1001,18 +1046,64 @@ class Dashboard {
         
         try {
             const prompt = {
-                id: this.state.selectedPrompt?.id || Date.now().toString(),
                 name,
                 content,
                 updatedAt: new Date().toISOString()
             };
-            
-            await apiClient.post('/api/admin/prompts', prompt);
+
+            if (this.state.selectedPrompt?.id) {
+                await apiClient.put(`/api/admin/prompts/${this.state.selectedPrompt.id}`, prompt);
+            } else {
+                await apiClient.post('/api/admin/prompts', prompt);
+            }
             
             this.showToast('Prompt saved successfully', 'success');
             this.loadPrompts();
         } catch (error) {
             this.showToast('Failed to save prompt', 'error');
+        }
+    }
+
+    openHistoryModal() {
+        const modal = document.getElementById('historyModal');
+        const container = document.getElementById('historyList');
+        if (!modal || !container) return;
+
+        const prompt = this.state.selectedPrompt;
+        container.innerHTML = prompt ? `
+            <div class="history-item">
+                <span class="history-version">Current</span>
+                <span class="history-date">${this.formatDate(prompt.updatedAt)}</span>
+                <span class="history-author">${prompt.isDefault ? 'System prompt' : 'Custom prompt'}</span>
+            </div>
+            <div class="history-item">
+                <span class="history-version">History unavailable</span>
+                <span class="history-date">Backend route not implemented</span>
+                <span class="history-author">This dashboard is showing live prompt data only.</span>
+            </div>
+        ` : '<div class="history-item"><span class="history-version">No prompt selected</span></div>';
+        modal.classList.add('active');
+    }
+
+    async saveDefaultConfig() {
+        try {
+            const settings = {
+                models: {
+                    defaultModel: document.getElementById('defaultModel').value,
+                    temperature: parseFloat(document.getElementById('defaultTemperature').value),
+                    maxTokens: parseInt(document.getElementById('defaultMaxTokens').value, 10),
+                    topP: parseFloat(document.getElementById('defaultTopP').value),
+                    frequencyPenalty: parseFloat(document.getElementById('defaultFrequencyPenalty').value),
+                    presencePenalty: parseFloat(document.getElementById('defaultPresencePenalty').value),
+                },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            this.showToast('Configuration saved', 'success');
+        } catch (error) {
+            console.error('Error saving default config:', error);
+            this.showToast('Failed to save configuration', 'error');
         }
     }
     
@@ -1093,26 +1184,33 @@ class Dashboard {
     
     async runPromptTest() {
         const input = document.getElementById('testInput').value;
-        const model = document.getElementById('testModel').value;
-        const temperature = document.getElementById('testTemperature').value;
         const output = document.querySelector('#testOutput .output-content');
         
+        if (!this.state.selectedPrompt?.id) {
+            this.showToast('Save or select a prompt before testing it', 'warning');
+            return;
+        }
+
         if (!input) {
-            this.showToast('Please enter test input', 'warning');
+            this.showToast('Please enter test variables as JSON', 'warning');
             return;
         }
         
         output.innerHTML = '<p class="placeholder">Running test...</p>';
         
         try {
-            const result = await apiClient.post('/api/admin/test', {
-                prompt: document.getElementById('promptEditor').value,
-                input,
-                model,
-                temperature: parseFloat(temperature)
+            let variables = {};
+            try {
+                variables = JSON.parse(input);
+            } catch {
+                throw new Error('Test input must be valid JSON, for example {"language":"JavaScript"}');
+            }
+
+            const response = await apiClient.post(`/api/admin/prompts/${this.state.selectedPrompt.id}/test`, {
+                variables
             });
-            
-            output.innerHTML = `<pre>${this.escapeHtml(result.response || 'No response')}</pre>`;
+            const result = this.unwrapApiPayload(response, {});
+            output.innerHTML = `<pre>${this.escapeHtml(result.rendered || 'No rendered output')}</pre>`;
         } catch (error) {
             output.innerHTML = `<p class="error">Error: ${error.message}</p>`;
         }
@@ -1120,16 +1218,15 @@ class Dashboard {
     
     async saveDefaultConfig() {
         try {
-            const config = {
-                model: document.getElementById('defaultModel').value,
-                temperature: parseFloat(document.getElementById('defaultTemperature').value),
-                maxTokens: parseInt(document.getElementById('defaultMaxTokens').value),
-                topP: parseFloat(document.getElementById('defaultTopP').value),
-                frequencyPenalty: parseFloat(document.getElementById('defaultFrequencyPenalty').value),
-                presencePenalty: parseFloat(document.getElementById('defaultPresencePenalty').value)
+            const settings = {
+                models: {
+                    defaultModel: document.getElementById('defaultModel').value,
+                    temperature: parseFloat(document.getElementById('defaultTemperature').value),
+                    maxTokens: parseInt(document.getElementById('defaultMaxTokens').value),
+                }
             };
-            
-            await apiClient.post('/api/admin/config', config);
+
+            await apiClient.put('/api/admin/settings', settings);
             this.showToast('Configuration saved', 'success');
         } catch (error) {
             this.showToast('Failed to save configuration', 'error');
@@ -1164,14 +1261,21 @@ class Dashboard {
     }
     
     clearLogs() {
-        this.state.logs = [];
-        this.renderLogs([]);
-        this.updateLogsPagination();
+        apiClient.post('/api/admin/logs/clear')
+            .then(() => {
+                this.state.logs = [];
+                this.state.pagination.logs.total = 0;
+                this.renderLogs([]);
+                this.updateLogsPagination();
+            })
+            .catch((error) => {
+                console.error('Error clearing logs:', error);
+                this.showToast('Failed to clear logs', 'error');
+            });
     }
     
     exportLogs() {
-        const csv = this.convertToCSV(this.state.logs);
-        this.downloadFile(csv, 'logs.csv', 'text/csv');
+        window.open('/api/admin/logs/export/csv', '_blank', 'noopener');
     }
     
     filterLogs() {
@@ -1287,16 +1391,20 @@ class Dashboard {
     
     async toggleSkill(id) {
         try {
-            await apiClient.post(`/api/admin/skills/${id}/toggle`);
+            const skill = this.state.skills.find(s => s.id === id);
+            if (!skill) {
+                throw new Error('Skill not found');
+            }
+
+            const endpoint = skill.enabled
+                ? `/api/admin/skills/${id}/disable`
+                : `/api/admin/skills/${id}/enable`;
+            await apiClient.post(endpoint);
             this.loadSkills();
             this.showToast('Skill status updated', 'success');
         } catch (error) {
-            // Toggle locally for demo
-            const skill = this.state.skills.find(s => s.id === id);
-            if (skill) {
-                skill.enabled = !skill.enabled;
-                this.renderSkills(this.state.skills);
-            }
+            console.error('Error toggling skill:', error);
+            this.showToast('Failed to update skill status', 'error');
         }
     }
     
@@ -1337,38 +1445,44 @@ class Dashboard {
     async saveGeneralSettings() {
         try {
             const settings = {
-                title: document.getElementById('dashboardTitle').value,
-                timezone: document.getElementById('timezone').value,
-                dateFormat: document.getElementById('dateFormat').value
+                general: {
+                    appName: document.getElementById('dashboardTitle').value,
+                    timezone: document.getElementById('timezone').value,
+                    dateFormat: document.getElementById('dateFormat').value
+                }
             };
             
-            await apiClient.post('/api/admin/settings/general', settings);
+            await apiClient.put('/api/admin/settings', settings);
             this.showToast('Settings saved', 'success');
         } catch (error) {
-            this.showToast('Settings saved (mock)', 'success');
+            this.showToast('Failed to save settings', 'error');
         }
     }
     
     async saveApiSettings() {
         try {
             const settings = {
-                endpoint: document.getElementById('apiEndpoint').value,
-                timeout: parseInt(document.getElementById('requestTimeout').value),
-                maxRetries: parseInt(document.getElementById('maxRetries').value)
+                api: {
+                    baseURL: document.getElementById('apiEndpoint').value,
+                    timeout: parseInt(document.getElementById('requestTimeout').value),
+                    maxRetries: parseInt(document.getElementById('maxRetries').value)
+                }
             };
             
-            await apiClient.post('/api/admin/settings/api', settings);
+            await apiClient.put('/api/admin/settings', settings);
             this.showToast('API settings saved', 'success');
         } catch (error) {
-            this.showToast('API settings saved (mock)', 'success');
+            this.showToast('Failed to save API settings', 'error');
         }
     }
     
     async testConnection() {
         try {
-            await apiClient.get('/api/health');
+            await apiClient.get('/api/admin/health');
+            this.updateConnectionStatus(true);
             this.showToast('Connection successful', 'success');
         } catch (error) {
+            this.updateConnectionStatus(false);
             this.showToast('Connection failed', 'error');
         }
     }
@@ -1411,10 +1525,14 @@ class Dashboard {
     
     async updateFeatureToggle(featureId, enabled) {
         try {
-            await apiClient.post('/api/admin/features', { featureId, enabled });
+            await apiClient.put('/api/admin/settings', {
+                features: {
+                    [featureId]: enabled
+                }
+            });
             this.showToast(`Feature ${enabled ? 'enabled' : 'disabled'}`, 'success');
         } catch (error) {
-            // Local toggle for demo
+            this.showToast('Failed to update feature toggle', 'error');
         }
     }
     
@@ -1429,6 +1547,148 @@ class Dashboard {
             dot.classList.toggle('offline', !connected);
             text.textContent = connected ? 'Connected' : 'Disconnected';
         }
+    }
+
+    unwrapApiPayload(response, fallback = null) {
+        if (response == null) return fallback;
+        if (typeof response === 'object' && 'success' in response && 'data' in response) {
+            return response.data ?? fallback;
+        }
+        return response;
+    }
+
+    getApiPagination(response) {
+        if (response && typeof response === 'object' && response.pagination) {
+            return response.pagination;
+        }
+        return null;
+    }
+
+    normalizeOverviewStats(payload = {}) {
+        const overview = payload.overview || {};
+        return {
+            totalTasks: Number(overview.totalTasks || payload.totalTasks || 0),
+            successRate: Number(overview.successRate || payload.successRate || 0),
+            activeSessions: Number(overview.activeSessions || payload.activeSessions || 0),
+            skillsLearned: Number(overview.totalSkills || payload.skillsLearned || 0),
+        };
+    }
+
+    normalizeModel(model = {}) {
+        return {
+            ...model,
+            provider: model.provider || model.owned_by || 'unknown',
+            active: Boolean(model.active ?? model.isActive ?? model.isDefault),
+            requests: Number(model.requests || 0),
+            avgLatency: Number(model.avgLatency || model.avgResponseTime || 0),
+        };
+    }
+
+    normalizeSkill(skill = {}) {
+        return {
+            ...skill,
+            enabled: Boolean(skill.enabled ?? skill.isEnabled),
+            usageCount: Number(skill.usageCount ?? skill.stats?.usageCount ?? 0),
+            successRate: Number(skill.successRate ?? skill.stats?.successRate ?? 0),
+        };
+    }
+
+    normalizeLog(log = {}) {
+        return {
+            ...log,
+            level: log.level || 'info',
+            model: log.model || '-',
+            prompt: log.prompt || log.message || '-',
+            latency: Number(log.latency || log.duration || 0),
+            status: log.status || (log.error ? 'error' : 'success'),
+        };
+    }
+
+    normalizeTrace(trace = {}) {
+        const steps = Array.isArray(trace.steps)
+            ? trace.steps
+            : Array.isArray(trace.timeline)
+                ? trace.timeline.map((step, index) => ({
+                    name: step.name || step.type || `Step ${index + 1}`,
+                    offset: step.duration || 0,
+                    status: step.status === 'completed' ? 'success' : (step.status || 'info'),
+                    details: typeof step.details === 'string' ? step.details : JSON.stringify(step.details || {}),
+                }))
+                : [];
+
+        return {
+            ...trace,
+            name: trace.name || trace.objective || trace.input || trace.taskId || trace.id,
+            startedAt: trace.startedAt || trace.startTime || trace.createdAt,
+            duration: Number(trace.duration || 0),
+            steps,
+        };
+    }
+
+    normalizeActivity(activity = {}) {
+        const typeMap = {
+            task_completed: 'success',
+            task_failed: 'error',
+            task_cancelled: 'warning',
+            task_created: 'info',
+            session_cleared: 'info',
+        };
+
+        return {
+            type: typeMap[activity.type] || 'info',
+            title: activity.description || activity.title || activity.type || 'Activity',
+            meta: this.formatDate(activity.timestamp),
+        };
+    }
+
+    renderSystemHealth(health, latency, error = null) {
+        const statusEl = document.getElementById('systemHealthStatus');
+        const apiLatencyFill = document.getElementById('healthApiLatencyFill');
+        const apiLatencyValue = document.getElementById('healthApiLatencyValue');
+        const sdkFill = document.getElementById('healthSdkFill');
+        const sdkValue = document.getElementById('healthSdkValue');
+        const memoryFill = document.getElementById('healthMemoryFill');
+        const memoryValue = document.getElementById('healthMemoryValue');
+        const vectorFill = document.getElementById('healthVectorFill');
+        const vectorValue = document.getElementById('healthVectorValue');
+
+        if (!statusEl || !apiLatencyFill || !apiLatencyValue || !sdkFill || !sdkValue || !memoryFill || !memoryValue || !vectorFill || !vectorValue) {
+            return;
+        }
+
+        if (error || !health) {
+            statusEl.textContent = 'Disconnected';
+            statusEl.className = 'status-badge error';
+            apiLatencyFill.style.width = '0%';
+            apiLatencyValue.textContent = '--';
+            sdkFill.style.width = '0%';
+            sdkValue.textContent = 'offline';
+            memoryFill.style.width = '0%';
+            memoryValue.textContent = '--';
+            vectorFill.style.width = '0%';
+            vectorValue.textContent = 'offline';
+            return;
+        }
+
+        const status = health.status || 'unknown';
+        statusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        statusEl.className = `status-badge ${status === 'healthy' ? 'healthy' : (status === 'degraded' ? 'warning' : 'error')}`;
+
+        const memoryBytes = Number(health.memory?.heapUsed || 0);
+        const memoryMb = Math.round(memoryBytes / (1024 * 1024));
+        const memoryPercent = Math.max(0, Math.min(100, Math.round((memoryBytes / Math.max(Number(health.memory?.heapTotal || 1), 1)) * 100)));
+        const apiPercent = Math.max(5, Math.min(100, Math.round((Number(latency || 0) / 500) * 100)));
+        const sdkConnected = health.services?.sdk === 'connected';
+        const vectorConnected = health.services?.vectorStore === 'connected';
+
+        apiLatencyFill.style.width = `${apiPercent}%`;
+        apiLatencyValue.textContent = `${Number(latency || 0)}ms`;
+        sdkFill.style.width = sdkConnected ? '100%' : '20%';
+        sdkValue.textContent = health.services?.sdk || 'unknown';
+        memoryFill.style.width = `${memoryPercent}%`;
+        memoryValue.textContent = `${memoryMb} MB`;
+        vectorFill.style.width = vectorConnected ? '100%' : '20%';
+        vectorValue.textContent = health.services?.vectorStore || 'unknown';
     }
     
     addRealtimeLog(log) {
@@ -1621,6 +1881,440 @@ class Dashboard {
             clearTimeout(timeout);
             timeout = setTimeout(later, wait);
         };
+    }
+
+    renderTraces(traces) {
+        const container = document.getElementById('tracesList');
+        if (!container) return;
+
+        container.innerHTML = traces.map((trace) => `
+            <div class="trace-item ${this.state.selectedTrace?.id === trace.id ? 'active' : ''}" data-id="${trace.id}"
+                 onclick="dashboard.selectTrace('${trace.id}')">
+                <div class="trace-header">
+                    <span class="trace-name">${trace.name}</span>
+                    <span class="trace-status ${trace.status}"></span>
+                </div>
+                <div class="trace-meta">
+                    ${this.formatDate(trace.startedAt)} &middot; ${trace.duration}ms &middot; ${(trace.steps || []).length} steps
+                </div>
+            </div>
+        `).join('');
+
+        if (traces.length > 0 && !this.state.selectedTrace) {
+            this.selectTrace(traces[0].id);
+        }
+    }
+
+    async loadModelUsage() {
+        const container = document.getElementById('modelUsage');
+        if (!container) return;
+
+        try {
+            const response = await apiClient.get('/api/admin/models/usage/stats');
+            const usage = this.unwrapApiPayload(response, []).map((model) => ({
+                name: model.modelName || model.name || model.modelId || 'Unknown',
+                requests: Number(model.requests || 0),
+                avgLatency: Number(model.avgResponseTime || 0),
+            }));
+            const totalRequests = usage.reduce((sum, model) => sum + model.requests, 0);
+            const items = usage.length > 0
+                ? usage.map((model) => ({
+                    ...model,
+                    percent: totalRequests > 0 ? Math.round((model.requests / totalRequests) * 100) : 0,
+                }))
+                : [{ name: 'No usage yet', requests: 0, avgLatency: 0, percent: 0 }];
+
+            container.innerHTML = items.map((model) => `
+                <div class="model-usage-item">
+                    <div class="model-info">
+                        <span class="model-name">${this.escapeHtml(model.name)}</span>
+                        <span class="model-requests">${model.requests.toLocaleString()} requests${model.avgLatency ? ` | ${model.avgLatency}ms avg` : ''}</span>
+                    </div>
+                    <div class="model-bar">
+                        <div class="model-fill" style="width: ${Math.max(0, Math.min(model.percent, 100))}%"></div>
+                    </div>
+                    <span class="model-percent">${Math.max(0, Math.min(model.percent, 100))}%</span>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading model usage:', error);
+            container.innerHTML = '<div class="model-usage-item"><span class="model-name">Failed to load usage data</span></div>';
+        }
+    }
+
+    async savePrompt() {
+        const name = document.getElementById('promptName').value;
+        const content = document.getElementById('promptEditor').value;
+
+        if (!name || !content) {
+            this.showToast('Please provide a name and content', 'warning');
+            return;
+        }
+
+        try {
+            const prompt = {
+                name,
+                content,
+                updatedAt: new Date().toISOString(),
+            };
+
+            let savedPrompt = null;
+            if (this.state.selectedPrompt?.id) {
+                const response = await apiClient.put(`/api/admin/prompts/${this.state.selectedPrompt.id}`, prompt);
+                savedPrompt = this.unwrapApiPayload(response, null);
+            } else {
+                const response = await apiClient.post('/api/admin/prompts', prompt);
+                savedPrompt = this.unwrapApiPayload(response, null);
+            }
+
+            this.showToast('Prompt saved successfully', 'success');
+            await this.loadPrompts();
+            if (savedPrompt?.id) {
+                this.selectPromptById(savedPrompt.id);
+            }
+        } catch (error) {
+            console.error('Error saving prompt:', error);
+            this.showToast('Failed to save prompt', 'error');
+        }
+    }
+
+    async runPromptTest() {
+        const input = document.getElementById('testInput').value;
+        const output = document.querySelector('#testOutput .output-content');
+
+        if (!this.state.selectedPrompt?.id) {
+            this.showToast('Save or select a prompt before testing it', 'warning');
+            return;
+        }
+
+        if (!input) {
+            this.showToast('Please enter test variables as JSON', 'warning');
+            return;
+        }
+
+        output.innerHTML = '<p class="placeholder">Running test...</p>';
+
+        try {
+            let variables = {};
+            try {
+                variables = JSON.parse(input);
+            } catch {
+                throw new Error('Test input must be valid JSON, for example {"language":"JavaScript"}');
+            }
+
+            const response = await apiClient.post(`/api/admin/prompts/${this.state.selectedPrompt.id}/test`, {
+                variables,
+            });
+            const result = this.unwrapApiPayload(response, {});
+            output.innerHTML = `
+                <pre>${this.escapeHtml(result.rendered || 'No rendered output')}</pre>
+                <div class="log-detail-grid">
+                    <div class="log-detail-item">
+                        <span class="log-detail-label">Characters</span>
+                        <span class="log-detail-value">${result.stats?.characters || 0}</span>
+                    </div>
+                    <div class="log-detail-item">
+                        <span class="log-detail-label">Estimated Tokens</span>
+                        <span class="log-detail-value">${result.stats?.tokens || 0}</span>
+                    </div>
+                    <div class="log-detail-item">
+                        <span class="log-detail-label">Missing Variables</span>
+                        <span class="log-detail-value">${(result.missing || []).join(', ') || 'None'}</span>
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            output.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+        }
+    }
+
+    async clearLogs() {
+        try {
+            await apiClient.post('/api/admin/logs/clear');
+            this.state.logs = [];
+            this.state.pagination.logs.total = 0;
+            this.renderLogs([]);
+            this.updateLogsPagination();
+            this.showToast('All logs cleared', 'success');
+        } catch (error) {
+            console.error('Error clearing logs:', error);
+            this.showToast('Failed to clear logs', 'error');
+        }
+    }
+
+    changeLogPage(direction) {
+        const { page, total, limit } = this.state.pagination.logs;
+        const newPage = page + direction;
+        const totalPages = Math.ceil(total / Math.max(limit, 1)) || 1;
+
+        if (newPage < 1 || newPage > totalPages) return;
+
+        this.state.pagination.logs.page = newPage;
+        this.loadLogs();
+    }
+
+    discoverSkills() {
+        this.showToast('Skill discovery is not exposed by the backend yet', 'info');
+    }
+
+    async saveGeneralSettings() {
+        try {
+            const settings = {
+                general: {
+                    appName: document.getElementById('dashboardTitle').value,
+                    timezone: document.getElementById('timezone').value,
+                    dateFormat: document.getElementById('dateFormat').value,
+                },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            this.showToast('Settings saved', 'success');
+        } catch (error) {
+            console.error('Error saving general settings:', error);
+            this.showToast('Failed to save settings', 'error');
+        }
+    }
+
+    async saveApiSettings() {
+        try {
+            apiClient.apiKey = document.getElementById('apiKey').value.trim();
+            localStorage.setItem('api_key', apiClient.apiKey);
+
+            const settings = {
+                api: {
+                    baseURL: document.getElementById('apiEndpoint').value,
+                    timeout: parseInt(document.getElementById('requestTimeout').value, 10),
+                    maxRetries: parseInt(document.getElementById('maxRetries').value, 10),
+                },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            this.showToast('API settings saved', 'success');
+        } catch (error) {
+            console.error('Error saving API settings:', error);
+            this.showToast('Failed to save API settings', 'error');
+        }
+    }
+
+    async testConnection() {
+        try {
+            const response = await apiClient.get('/api/admin/health');
+            const health = this.unwrapApiPayload(response, {});
+            this.updateConnectionStatus(true);
+            this.showToast(`Connection successful (${health.status || 'unknown'})`, 'success');
+        } catch (error) {
+            this.updateConnectionStatus(false);
+            this.showToast(`Connection failed: ${error.message}`, 'error');
+        }
+    }
+
+    confirmClearAllLogs() {
+        if (confirm('Are you sure you want to clear all logs? This action cannot be undone.')) {
+            this.clearLogs();
+        }
+    }
+
+    confirmResetConfig() {
+        if (!confirm('Are you sure you want to reset all settings to defaults?')) {
+            return;
+        }
+
+        apiClient.post('/api/admin/settings/reset')
+            .then((response) => {
+                const settings = this.unwrapApiPayload(response, {});
+                this.applySettings(settings);
+                this.showToast('Settings reset to defaults', 'success');
+            })
+            .catch((error) => {
+                console.error('Error resetting settings:', error);
+                this.showToast('Failed to reset settings', 'error');
+            });
+    }
+
+    async updateFeatureToggle(featureId, enabled) {
+        try {
+            const response = await apiClient.put('/api/admin/settings', this.getFeatureSettingsPatch(featureId, enabled));
+            this.applySettings(this.unwrapApiPayload(response, this.state.settings));
+            this.showToast(`Feature ${enabled ? 'enabled' : 'disabled'}`, 'success');
+        } catch (error) {
+            console.error('Error updating feature toggle:', error);
+            this.showToast('Failed to update feature toggle', 'error');
+        }
+    }
+
+    editModel(id) {
+        const model = this.state.models.find((item) => item.id === id);
+        if (!model) {
+            this.showToast('Model not found', 'error');
+            return;
+        }
+
+        this.navigateTo('models');
+        this.setInputValue('defaultModel', model.id);
+        this.showToast(`Loaded ${model.name} into the default config editor`, 'info');
+    }
+
+    testModel(id) {
+        const model = this.state.models.find((item) => item.id === id);
+        if (!model) {
+            this.showToast('Model not found', 'error');
+            return;
+        }
+
+        this.showToast(`${model.name} is configured in the dashboard`, 'info');
+    }
+
+    editSkill(id) {
+        const skill = this.state.skills.find((item) => item.id === id);
+        if (!skill) {
+            this.showToast('Skill not found', 'error');
+            return;
+        }
+
+        this.navigateTo('skills');
+        this.showToast(`${skill.name}: ${skill.description}`, 'info', 5000);
+    }
+
+    restoreVersion(version) {
+        this.showToast(`Prompt history restore is not available yet (${version})`, 'info');
+    }
+
+    normalizeModel(model = {}) {
+        return {
+            ...model,
+            provider: model.provider || model.owned_by || 'unknown',
+            active: Boolean(model.active ?? model.isActive ?? model.isDefault),
+            requests: Number(model.requests ?? model.usageCount ?? 0),
+            avgLatency: Number(model.avgLatency ?? model.avgResponseTime ?? 0),
+        };
+    }
+
+    getFeatureSettingsPatch(featureId, enabled) {
+        const featureMap = {
+            featureWebsocket: 'realTimeUpdates',
+            featureSkillDiscovery: 'enableSkills',
+            featureValidation: 'enableTracing',
+            featureDebug: 'enableDebug',
+        };
+        const key = featureMap[featureId] || featureId;
+
+        if (featureId === 'featureRetry') {
+            return {
+                api: {
+                    maxRetries: enabled ? Math.max(Number(this.state.settings?.api?.maxRetries || 3), 1) : 0,
+                },
+            };
+        }
+
+        return {
+            features: {
+                [key]: enabled,
+            },
+        };
+    }
+
+    syncModelOptions(models = this.state.models) {
+        const select = document.getElementById('defaultModel');
+        if (!select) return;
+
+        const existing = new Set(Array.from(select.options).map((option) => option.value));
+        (models || []).forEach((model) => {
+            if (existing.has(model.id)) return;
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = model.name;
+            select.appendChild(option);
+        });
+
+        if (this.state.settings?.models?.defaultModel) {
+            select.value = this.state.settings.models.defaultModel;
+        }
+    }
+
+    populateLogModelFilter(logs = []) {
+        const select = document.getElementById('logModelFilter');
+        if (!select) return;
+
+        const currentValue = select.value || 'all';
+        const models = Array.from(new Set((logs || []).map((log) => log.model).filter(Boolean)));
+
+        select.innerHTML = '<option value="all">All Models</option>' + models.map((model) =>
+            `<option value="${this.escapeHtml(model)}">${this.escapeHtml(model)}</option>`
+        ).join('');
+        select.value = models.includes(currentValue) || currentValue === 'all' ? currentValue : 'all';
+    }
+
+    applySettings(settings = {}) {
+        this.state.settings = settings;
+
+        const general = settings.general || {};
+        const models = settings.models || {};
+        const api = settings.api || {};
+        const features = settings.features || {};
+
+        this.setInputValue('dashboardTitle', general.appName || 'Agent SDK Admin');
+        this.setInputValue('timezone', general.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+        this.setInputValue('dateFormat', general.dateFormat || 'YYYY-MM-DD');
+        this.setInputValue('apiEndpoint', api.baseURL || window.location.origin);
+        this.setInputValue('apiKey', apiClient.apiKey || localStorage.getItem('api_key') || '');
+        this.setInputValue('requestTimeout', api.timeout ?? 30000);
+        this.setInputValue('maxRetries', api.maxRetries ?? 3);
+        this.setInputValue('defaultTemperature', models.temperature ?? 0.7);
+        this.setInputValue('defaultMaxTokens', models.maxTokens ?? 4096);
+        this.setInputValue('defaultTopP', models.topP ?? 1);
+        this.setInputValue('defaultFrequencyPenalty', models.frequencyPenalty ?? 0);
+        this.setInputValue('defaultPresencePenalty', models.presencePenalty ?? 0);
+
+        this.syncModelOptions();
+        this.setInputValue('defaultModel', models.defaultModel || 'gpt-4o');
+        apiClient.baseUrl = window.location.origin;
+
+        this.setCheckboxValue('featureWebsocket', Boolean(features.realTimeUpdates));
+        this.setCheckboxValue('featureCaching', Boolean(features.featureCaching));
+        this.setCheckboxValue('featureRetry', Number(api.maxRetries ?? 0) > 0);
+        this.setCheckboxValue('featureSkillDiscovery', Boolean(features.enableSkills));
+        this.setCheckboxValue('featureValidation', Boolean(features.enableTracing));
+        this.setCheckboxValue('featureDebug', Boolean(features.enableDebug));
+
+        ['defaultTemperature', 'defaultTopP', 'defaultFrequencyPenalty', 'defaultPresencePenalty'].forEach((id) => {
+            this.syncRangeValue(id);
+        });
+    }
+
+    setInputValue(id, value) {
+        const element = document.getElementById(id);
+        if (!element || value === undefined || value === null) return;
+
+        if (element.tagName === 'SELECT') {
+            const exists = Array.from(element.options).some((option) => option.value === String(value));
+            if (!exists) {
+                const option = document.createElement('option');
+                option.value = String(value);
+                option.textContent = String(value);
+                element.appendChild(option);
+            }
+        }
+
+        element.value = String(value);
+    }
+
+    setCheckboxValue(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.checked = Boolean(value);
+        }
+    }
+
+    syncRangeValue(id) {
+        const input = document.getElementById(id);
+        if (!input) return;
+
+        const display = input.parentElement?.querySelector('.range-value');
+        if (display) {
+            display.textContent = input.value;
+        }
     }
     
     // ==================== MOCK DATA ====================

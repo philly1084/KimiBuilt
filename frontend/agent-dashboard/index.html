@@ -266,37 +266,37 @@
                         <div class="card">
                             <div class="card-header">
                                 <h3>System Health</h3>
-                                <span class="status-badge healthy">Healthy</span>
+                                <span class="status-badge healthy" id="systemHealthStatus">Healthy</span>
                             </div>
                             <div class="card-body">
                                 <div class="health-metrics">
                                     <div class="health-metric">
                                         <span class="metric-name">API Latency</span>
                                         <div class="metric-bar">
-                                            <div class="metric-fill" style="width: 23%"></div>
+                                            <div class="metric-fill" id="healthApiLatencyFill" style="width: 0%"></div>
                                         </div>
-                                        <span class="metric-value">45ms</span>
+                                        <span class="metric-value" id="healthApiLatencyValue">--</span>
                                     </div>
                                     <div class="health-metric">
-                                        <span class="metric-name">Token Usage</span>
+                                        <span class="metric-name">SDK</span>
                                         <div class="metric-bar">
-                                            <div class="metric-fill warning" style="width: 67%"></div>
+                                            <div class="metric-fill" id="healthSdkFill" style="width: 0%"></div>
                                         </div>
-                                        <span class="metric-value">67%</span>
+                                        <span class="metric-value" id="healthSdkValue">--</span>
                                     </div>
                                     <div class="health-metric">
                                         <span class="metric-name">Memory</span>
                                         <div class="metric-bar">
-                                            <div class="metric-fill" style="width: 42%"></div>
+                                            <div class="metric-fill" id="healthMemoryFill" style="width: 0%"></div>
                                         </div>
-                                        <span class="metric-value">42%</span>
+                                        <span class="metric-value" id="healthMemoryValue">--</span>
                                     </div>
                                     <div class="health-metric">
-                                        <span class="metric-name">Storage</span>
+                                        <span class="metric-name">Vector Store</span>
                                         <div class="metric-bar">
-                                            <div class="metric-fill" style="width: 15%"></div>
+                                            <div class="metric-fill" id="healthVectorFill" style="width: 0%"></div>
                                         </div>
-                                        <span class="metric-value">15%</span>
+                                        <span class="metric-value" id="healthVectorValue">--</span>
                                     </div>
                                 </div>
                             </div>

@@ -360,14 +360,14 @@ class ApiClient {
      * Get default configuration
      */
     async getDefaultConfig() {
-        return this.get('/api/admin/config');
+        return this.get('/api/admin/settings');
     }
     
     /**
      * Update default configuration
      */
     async updateDefaultConfig(config) {
-        return this.put('/api/admin/config', config);
+        return this.put('/api/admin/settings', config);
     }
     
     /**
@@ -388,14 +388,14 @@ class ApiClient {
      * Clear all logs
      */
     async clearLogs() {
-        return this.delete('/api/admin/logs');
+        return this.post('/api/admin/logs/clear');
     }
     
     /**
      * Export logs
      */
     async exportLogs(format = 'json', filters = {}) {
-        return this.get('/api/admin/logs/export', { format, ...filters }, {
+        return this.get(`/api/admin/logs/export/${format}`, filters, {
             responseType: 'blob'
         });
     }
@@ -418,7 +418,7 @@ class ApiClient {
      * Enable/disable a skill
      */
     async toggleSkill(id, enabled) {
-        return this.post(`/api/admin/skills/${id}/toggle`, { enabled });
+        return this.post(`/api/admin/skills/${id}/${enabled ? 'enable' : 'disable'}`);
     }
     
     /**
@@ -432,7 +432,7 @@ class ApiClient {
      * Discover new skills
      */
     async discoverSkills() {
-        return this.post('/api/admin/skills/discover');
+        return this.get('/api/admin/skills/search/query', { q: '' });
     }
     
     /**
@@ -467,24 +467,26 @@ class ApiClient {
      * Get feature toggles
      */
     async getFeatures() {
-        return this.get('/api/admin/features');
+        return this.get('/api/admin/settings');
     }
     
     /**
      * Update feature toggle
      */
     async updateFeature(featureId, enabled) {
-        return this.post('/api/admin/features', { featureId, enabled });
+        return this.put('/api/admin/settings', {
+            features: {
+                [featureId]: enabled
+            }
+        });
     }
     
     /**
      * Test a prompt
      */
-    async testPrompt(prompt, input, options = {}) {
-        return this.post('/api/admin/test', {
-            prompt,
-            input,
-            ...options
+    async testPrompt(id, variables = {}) {
+        return this.post(`/api/admin/prompts/${id}/test`, {
+            variables
         });
     }
     
@@ -492,21 +494,21 @@ class ApiClient {
      * Test API connection
      */
     async testConnection() {
-        return this.get('/api/health');
+        return this.get('/api/admin/health');
     }
     
     /**
      * Get system health
      */
     async getHealth() {
-        return this.get('/api/health');
+        return this.get('/api/admin/health');
     }
     
     /**
      * Export all data
      */
     async exportAllData() {
-        return this.get('/api/admin/export', {}, { responseType: 'blob' });
+        throw new Error('Bulk export route is not available');
     }
     
     /**
