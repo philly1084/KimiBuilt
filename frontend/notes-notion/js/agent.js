@@ -689,6 +689,17 @@ GUIDELINES:
             .trimEnd();
     }
 
+    function isInvalidGatewayResponseText(text) {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) return false;
+
+        return normalized.includes('support@backend.io') ||
+            normalized.includes('docs.backend.io/cli') ||
+            (normalized.includes('need help?') && normalized.includes('backend.io')) ||
+            normalized.startsWith('<!doctype html') ||
+            normalized.startsWith('<html');
+    }
+
     // ============================================
     // Visual Feedback for AI Actions
     // ============================================
@@ -1774,6 +1785,12 @@ GUIDELINES:
                                 const chunkText = chunk.content;
                                 responseText += chunkText;
 
+                                if (isInvalidGatewayResponseText(responseText)) {
+                                    const invalidGatewayError = new Error('Invalid response returned by the AI gateway.');
+                                    invalidGatewayError.status = 502;
+                                    throw invalidGatewayError;
+                                }
+
                                 if (chunkText.includes('```notes-actions')) {
                                     inJsonBlock = true;
                                     jsonBuffer = chunkText;
@@ -1811,6 +1828,12 @@ GUIDELINES:
                         }
 
                         responseText = response.content || response.message || String(response);
+                    }
+
+                    if (isInvalidGatewayResponseText(responseText)) {
+                        const invalidGatewayError = new Error('Invalid response returned by the AI gateway.');
+                        invalidGatewayError.status = 502;
+                        throw invalidGatewayError;
                     }
 
                     let preparedResponse;

@@ -3,6 +3,13 @@ const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 
+// Admin dashboard event emitter
+const EventEmitter = require('events');
+const adminEvents = new EventEmitter();
+
+// Store admin dashboard connections
+const adminConnections = new Set();
+
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
     const checks = [
@@ -54,6 +61,12 @@ function setupWebSocket(wss) {
                         break;
                     case 'notation':
                         await handleNotation(ws, session, payload);
+                        break;
+                    case 'admin_subscribe':
+                        handleAdminSubscribe(ws);
+                        break;
+                    case 'admin_unsubscribe':
+                        handleAdminUnsubscribe(ws);
                         break;
                     default:
                         ws.send(JSON.stringify({ type: 'error', message: `Unknown type: ${type}` }));
@@ -255,4 +268,67 @@ async function handleNotation(ws, session, payload = {}) {
     }));
 }
 
-module.exports = { setupWebSocket };
+// Admin WebSocket handlers
+function handleAdminSubscribe(ws) {
+    adminConnections.add(ws);
+    ws.isAdmin = true;
+    
+    // Send initial stats
+    ws.send(JSON.stringify({
+        type: 'admin_connected',
+        timestamp: new Date().toISOString()
+    }));
+    
+    console.log(`[WS] Admin client subscribed. Total: ${adminConnections.size}`);
+}
+
+function handleAdminUnsubscribe(ws) {
+    adminConnections.delete(ws);
+    ws.isAdmin = false;
+    console.log(`[WS] Admin client unsubscribed. Total: ${adminConnections.size}`);
+}
+
+// Broadcast to all admin connections
+function broadcastToAdmins(data) {
+    const message = JSON.stringify(data);
+    adminConnections.forEach(ws => {
+        if (ws.readyState === 1) { // WebSocket.OPEN
+            ws.send(message);
+        }
+    });
+}
+
+// Admin event helpers
+function emitTaskEvent(eventType, data) {
+    broadcastToAdmins({
+        type: 'task_event',
+        event: eventType,
+        data,
+        timestamp: new Date().toISOString()
+    });
+}
+
+function emitLogEvent(logEntry) {
+    broadcastToAdmins({
+        type: 'log_event',
+        data: logEntry,
+        timestamp: new Date().toISOString()
+    });
+}
+
+function emitStatsUpdate(stats) {
+    broadcastToAdmins({
+        type: 'stats_update',
+        data: stats,
+        timestamp: new Date().toISOString()
+    });
+}
+
+module.exports = { 
+    setupWebSocket,
+    adminEvents,
+    broadcastToAdmins,
+    emitTaskEvent,
+    emitLogEvent,
+    emitStatsUpdate
+};

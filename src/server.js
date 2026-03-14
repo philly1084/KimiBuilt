@@ -23,10 +23,15 @@ const artifactsRouter = require('./routes/artifacts');
 const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
 const unsplashRouter = require('./routes/unsplash');
+const adminRouter = require('./routes/admin');
+const DashboardController = require('./routes/admin/dashboard.controller');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
 const { createResponse } = require('./openai-client');
+
+// Agent SDK
+const AgentOrchestrator = require('./agent-sdk/core/AgentOrchestrator');
 
 validate();
 
@@ -80,6 +85,7 @@ app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat')));
 app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli')));
 app.use('/notes', express.static(path.join(frontendPath, 'notes-notion')));
 app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw')));
+app.use('/admin', express.static(path.join(frontendPath, 'agent-dashboard')));
 
 app.get('/', (_req, res) => {
     res.send(`
@@ -144,6 +150,10 @@ app.get('/', (_req, res) => {
             <h3>Canvas</h3>
             <p>Visual canvas with Excalidraw integration</p>
         </a>
+        <a href="/admin/" class="card" style="border-color: #22c55e;">
+            <h3>🎛️ Admin Dashboard</h3>
+            <p>Agent SDK control and monitoring</p>
+        </a>
     </div>
 </body>
 </html>
@@ -160,6 +170,7 @@ app.use('/api/artifacts', artifactsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
+app.use('/api/admin', adminRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -193,6 +204,25 @@ async function start() {
         const documentService = new DocumentService(openaiClient);
         app.locals.documentService = documentService;
         console.log('[Boot] Document service ready');
+
+        console.log('[Boot] Initializing Agent SDK...');
+        // Initialize Agent Orchestrator for dashboard
+        const agentOrchestrator = new AgentOrchestrator({
+            llmClient: openaiClient,
+            embedder: embedder,
+            vectorStore: vectorStore,
+            config: {
+                enableTracing: true,
+                enableSkills: true
+            }
+        });
+        app.locals.agentOrchestrator = agentOrchestrator;
+        
+        // Initialize dashboard controller with orchestrator
+        const dashboardController = new DashboardController(agentOrchestrator);
+        app.locals.dashboardController = dashboardController;
+        
+        console.log('[Boot] Agent SDK ready');
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);
     }
