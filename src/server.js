@@ -30,9 +30,6 @@ const DashboardController = require('./routes/admin/dashboard.controller');
 const { DocumentService } = require('./documents/document-service');
 const { createResponse } = require('./openai-client');
 
-// Agent SDK
-const { AgentOrchestrator } = require('./agent-sdk');
-
 validate();
 
 const app = express();
@@ -206,23 +203,26 @@ async function start() {
         console.log('[Boot] Document service ready');
 
         console.log('[Boot] Initializing Agent SDK...');
-        // Initialize Agent Orchestrator for dashboard
-        const agentOrchestrator = new AgentOrchestrator({
-            llmClient: openaiClient,
-            embedder: embedder,
-            vectorStore: vectorStore,
-            config: {
-                enableTracing: true,
-                enableSkills: true
-            }
-        });
+        let agentOrchestrator = null;
+
+        try {
+            const { AgentOrchestrator } = require('./agent-sdk');
+            agentOrchestrator = new AgentOrchestrator({
+                llmClient: openaiClient,
+                embedder: embedder,
+                vectorStore: vectorStore,
+                config: {
+                    enableTracing: true,
+                    enableSkills: true
+                }
+            });
+            console.log('[Boot] Agent SDK ready');
+        } catch (sdkError) {
+            console.warn('[Boot] Agent SDK disabled:', sdkError.message);
+        }
+
         app.locals.agentOrchestrator = agentOrchestrator;
-        
-        // Initialize dashboard controller with orchestrator
-        const dashboardController = new DashboardController(agentOrchestrator);
-        app.locals.dashboardController = dashboardController;
-        
-        console.log('[Boot] Agent SDK ready');
+        app.locals.dashboardController = new DashboardController(agentOrchestrator);
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);
     }
