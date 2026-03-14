@@ -326,12 +326,43 @@ Instructions:
         }
     }
 
+    function canonicalizeBlockType(type) {
+        const normalized = String(type || 'text').trim().toLowerCase();
+        const aliases = {
+            paragraph: 'text',
+            p: 'text',
+            h1: 'heading_1',
+            heading1: 'heading_1',
+            'heading-1': 'heading_1',
+            h2: 'heading_2',
+            heading2: 'heading_2',
+            'heading-2': 'heading_2',
+            h3: 'heading_3',
+            heading3: 'heading_3',
+            'heading-3': 'heading_3',
+            bullet: 'bulleted_list',
+            bullets: 'bulleted_list',
+            bullet_list: 'bulleted_list',
+            'bullet-list': 'bulleted_list',
+            bulletedlist: 'bulleted_list',
+            numberedlist: 'numbered_list',
+            number_list: 'numbered_list',
+            numberlist: 'numbered_list',
+            'number-list': 'numbered_list',
+            checklist: 'todo',
+            to_do: 'todo',
+            todo: 'todo'
+        };
+
+        return aliases[normalized] || normalized || 'text';
+    }
+
     function normalizeActionBlock(blockDefinition, options = {}) {
         const defaultType = options.defaultType || 'text';
         const definition = typeof blockDefinition === 'string'
             ? { type: defaultType, content: blockDefinition }
             : (blockDefinition || {});
-        const type = definition.type || defaultType;
+        const type = canonicalizeBlockType(definition.type || defaultType);
         const contentInput = Object.prototype.hasOwnProperty.call(definition, 'content')
             ? definition.content
             : (Object.prototype.hasOwnProperty.call(definition, 'text') ? definition.text : '');
@@ -355,10 +386,48 @@ Instructions:
         return block;
     }
 
+    function tryParseNotesActionPayload(payloadText) {
+        if (!payloadText) return null;
+
+        try {
+            const payload = JSON.parse(payloadText);
+            if (payload && typeof payload === 'object' && Array.isArray(payload.actions)) {
+                return {
+                    displayText: String(payload.assistant_reply || '').trim(),
+                    actions: payload.actions
+                };
+            }
+        } catch (error) {
+            return null;
+        }
+
+        return null;
+    }
+
     function extractNotesActionPlan(responseText) {
         const text = String(responseText || '');
         const match = text.match(/```notes-actions\s*([\s\S]*?)```/i);
         if (!match) {
+            const jsonFenceMatch = text.match(/```json\s*([\s\S]*?)```/i);
+            const directPayload = tryParseNotesActionPayload(text.trim());
+            const fencedPayload = jsonFenceMatch ? tryParseNotesActionPayload(jsonFenceMatch[1].trim()) : null;
+            const extractedJsonMatch = text.match(/(\{[\s\S]*"actions"\s*:[\s\S]*\})/i);
+            const extractedPayload = extractedJsonMatch
+                ? tryParseNotesActionPayload(extractedJsonMatch[1].trim())
+                : null;
+            const parsed = directPayload || fencedPayload || extractedPayload;
+
+            if (parsed) {
+                const visibleText = parsed.displayText || text
+                    .replace(jsonFenceMatch?.[0] || '', '')
+                    .replace(extractedJsonMatch?.[1] || '', '')
+                    .trim();
+                return {
+                    displayText: visibleText,
+                    actions: parsed.actions
+                };
+            }
+
             return {
                 displayText: text.trim(),
                 actions: []
@@ -368,19 +437,19 @@ Instructions:
         const payloadText = match[1].trim();
         const visibleText = text.replace(match[0], '').trim();
 
-        try {
-            const payload = JSON.parse(payloadText);
-            return {
-                displayText: String(payload.assistant_reply || visibleText || '').trim(),
-                actions: Array.isArray(payload.actions) ? payload.actions : []
-            };
-        } catch (error) {
-            console.warn('Failed to parse notes action plan:', error);
+        const parsed = tryParseNotesActionPayload(payloadText);
+        if (!parsed) {
+            console.warn('Failed to parse notes action plan payload');
             return {
                 displayText: visibleText || text.trim(),
                 actions: []
             };
         }
+
+        return {
+            displayText: String(parsed.displayText || visibleText || '').trim(),
+            actions: parsed.actions
+        };
     }
 
     function getFirstBlockId() {
@@ -555,7 +624,17 @@ Instructions:
     }
 
     function getStreamingVisibleText(text) {
-        return String(text || '').replace(/```notes-actions[\s\S]*$/i, '').trimEnd();
+        const value = String(text || '');
+        const trimmed = value.trim();
+
+        if (/^\{[\s\S]*"actions"\s*:/i.test(trimmed) && /"assistant_reply"\s*:/i.test(trimmed)) {
+            return '';
+        }
+
+        return value
+            .replace(/```notes-actions[\s\S]*$/i, '')
+            .replace(/```json[\s\S]*?(?:"assistant_reply"|"actions")[\s\S]*$/i, '')
+            .trimEnd();
     }
 
     function getStoredModelId() {
