@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent SDK Admin Dashboard</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    <span class="logo-text">Agent SDK</span>
+                </div>
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <span class="nav-label">Dashboard</span>
+                    <ul class="nav-list">
+                        <li class="nav-item active" data-view="overview">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="7" height="7"/>
+                                <rect x="14" y="3" width="7" height="7"/>
+                                <rect x="14" y="14" width="7" height="7"/>
+                                <rect x="3" y="14" width="7" height="7"/>
+                            </svg>
+                            <span>Overview</span>
+                        </li>
+                        <li class="nav-item" data-view="prompts">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                                <polyline points="10 9 9 9 8 9"/>
+                            </svg>
+                            <span>Prompts</span>
+                        </li>
+                        <li class="nav-item" data-view="models">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
+                                <rect x="9" y="9" width="6" height="6"/>
+                                <line x1="9" y1="1" x2="9" y2="4"/>
+                                <line x1="15" y1="1" x2="15" y2="4"/>
+                                <line x1="9" y1="20" x2="9" y2="23"/>
+                                <line x1="15" y1="20" x2="15" y2="23"/>
+                                <line x1="20" y1="9" x2="23" y2="9"/>
+                                <line x1="20" y1="14" x2="23" y2="14"/>
+                                <line x1="1" y1="9" x2="4" y2="9"/>
+                                <line x1="1" y1="14" x2="4" y2="14"/>
+                            </svg>
+                            <span>Models</span>
+                        </li>
+                        <li class="nav-item" data-view="logs">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                                <polyline points="10 9 9 9 8 9"/>
+                            </svg>
+                            <span>Logs</span>
+                            <span class="badge" id="logsBadge">0</span>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="nav-section">
+                    <span class="nav-label">System</span>
+                    <ul class="nav-list">
+                        <li class="nav-item" data-view="skills">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                                <polyline points="2 17 12 22 22 17"/>
+                                <polyline points="2 12 12 17 22 12"/>
+                            </svg>
+                            <span>Skills</span>
+                        </li>
+                        <li class="nav-item" data-view="traces">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                            </svg>
+                            <span>Traces</span>
+                        </li>
+                        <li class="nav-item" data-view="settings">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                            </svg>
+                            <span>Settings</span>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">Connected</span>
+                </div>
+                <div class="user-info">
+                    <div class="user-avatar">A</div>
+                    <div class="user-details">
+                        <span class="user-name">Admin</span>
+                        <span class="user-role">Superuser</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <div class="header-left">
+                    <h1 class="page-title" id="pageTitle">Overview</h1>
+                    <nav class="breadcrumbs" id="breadcrumbs">
+                        <span>Dashboard</span>
+                        <span class="separator">/</span>
+                        <span class="current">Overview</span>
+                    </nav>
+                </div>
+                <div class="header-right">
+                    <div class="search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        <input type="text" placeholder="Search..." id="globalSearch">
+                    </div>
+                    <button class="btn btn-icon" id="notificationsBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                            <path d="M13.73 21a2 2 0 01-3.46 0"/>
+                        </svg>
+                        <span class="notification-dot"></span>
+                    </button>
+                    <button class="btn btn-icon" id="themeToggle">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="moon">
+                            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Views -->
+            <div class="content-wrapper">
+                <!-- Overview View -->
+                <section class="view active" id="overviewView">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon primary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="totalTasks">0</span>
+                                <span class="stat-label">Total Tasks</span>
+                                <span class="stat-change positive">+12% <span>vs last hour</span></span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon success">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                                    <polyline points="22 4 12 14.01 9 11.01"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="successRate">0%</span>
+                                <span class="stat-label">Success Rate</span>
+                                <span class="stat-change positive">+2.5% <span>vs last hour</span></span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="activeSessions">0</span>
+                                <span class="stat-label">Active Sessions</span>
+                                <span class="stat-change neutral">0% <span>vs last hour</span></span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                                    <polyline points="2 17 12 22 22 17"/>
+                                    <polyline points="2 12 12 17 22 12"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="skillsLearned">0</span>
+                                <span class="stat-label">Skills Learned</span>
+                                <span class="stat-change positive">+3 <span>this week</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="card chart-card">
+                            <div class="card-header">
+                                <h3>Request Volume</h3>
+                                <div class="card-actions">
+                                    <select class="select-sm" id="chartTimeRange">
+                                        <option value="1h">Last Hour</option>
+                                        <option value="24h" selected>Last 24 Hours</option>
+                                        <option value="7d">Last 7 Days</option>
+                                        <option value="30d">Last 30 Days</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container" id="requestChart">
+                                    <canvas id="requestVolumeCanvas"></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Recent Activity</h3>
+                                <button class="btn btn-sm btn-ghost" data-view="logs">View All</button>
+                            </div>
+                            <div class="card-body">
+                                <div class="activity-list" id="recentActivity">
+                                    <!-- Populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Model Usage</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="model-usage-list" id="modelUsage">
+                                    <!-- Populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>System Health</h3>
+                                <span class="status-badge healthy">Healthy</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="health-metrics">
+                                    <div class="health-metric">
+                                        <span class="metric-name">API Latency</span>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: 23%"></div>
+                                        </div>
+                                        <span class="metric-value">45ms</span>
+                                    </div>
+                                    <div class="health-metric">
+                                        <span class="metric-name">Token Usage</span>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill warning" style="width: 67%"></div>
+                                        </div>
+                                        <span class="metric-value">67%</span>
+                                    </div>
+                                    <div class="health-metric">
+                                        <span class="metric-name">Memory</span>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: 42%"></div>
+                                        </div>
+                                        <span class="metric-value">42%</span>
+                                    </div>
+                                    <div class="health-metric">
+                                        <span class="metric-name">Storage</span>
+                                        <div class="metric-bar">
+                                            <div class="metric-fill" style="width: 15%"></div>
+                                        </div>
+                                        <span class="metric-value">15%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Prompts View -->
+                <section class="view" id="promptsView">
+                    <div class="page-actions">
+                        <button class="btn btn-primary" id="newPromptBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            New Prompt
+                        </button>
+                    </div>
+
+                    <div class="split-layout">
+                        <div class="sidebar-panel">
+                            <div class="panel-header">
+                                <h3>Prompt Library</h3>
+                                <div class="search-box sm">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="11" cy="11" r="8"/>
+                                        <path d="M21 21l-4.35-4.35"/>
+                                    </svg>
+                                    <input type="text" placeholder="Search prompts..." id="promptSearch">
+                                </div>
+                            </div>
+                            <div class="panel-content">
+                                <div class="prompt-list" id="promptList">
+                                    <!-- Populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="main-panel">
+                            <div class="editor-header">
+                                <div class="editor-info">
+                                    <input type="text" class="prompt-name-input" id="promptName" placeholder="Prompt Name">
+                                    <span class="prompt-version">v1.0</span>
+                                </div>
+                                <div class="editor-actions">
+                                    <button class="btn btn-ghost" id="testPromptBtn">Test</button>
+                                    <button class="btn btn-secondary" id="savePromptBtn">Save</button>
+                                    <button class="btn btn-ghost" id="promptHistoryBtn">History</button>
+                                </div>
+                            </div>
+                            <div class="editor-body">
+                                <div class="editor-tabs">
+                                    <button class="tab-btn active" data-tab="editor">Editor</button>
+                                    <button class="tab-btn" data-tab="preview">Preview</button>
+                                    <button class="tab-btn" data-tab="variables">Variables</button>
+                                </div>
+                                <div class="tab-content active" id="editorTab">
+                                    <textarea class="prompt-editor" id="promptEditor" placeholder="Enter your system prompt here..."></textarea>
+                                    <div class="editor-toolbar">
+                                        <button class="toolbar-btn" title="Insert Variable" data-insert="{{variable}}">{'{ }'}</button>
+                                        <button class="toolbar-btn" title="Insert Context" data-insert="{{context}}">@ctx</button>
+                                        <button class="toolbar-btn" title="Insert User Input" data-insert="{{input}}">@user</button>
+                                        <span class="toolbar-divider"></span>
+                                        <span class="char-count" id="charCount">0 chars</span>
+                                    </div>
+                                </div>
+                                <div class="tab-content" id="previewTab">
+                                    <div class="prompt-preview" id="promptPreview">
+                                        <p class="preview-placeholder">Preview will appear here...</p>
+                                    </div>
+                                </div>
+                                <div class="tab-content" id="variablesTab">
+                                    <div class="variables-list" id="variablesList">
+                                        <p class="empty-state">No variables defined</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Models View -->
+                <section class="view" id="modelsView">
+                    <div class="page-actions">
+                        <button class="btn btn-secondary" id="addModelBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            Add Model
+                        </button>
+                    </div>
+
+                    <div class="models-grid" id="modelsGrid">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <h3>Default Configuration</h3>
+                        </div>
+                        <div class="card-body">
+                            <form class="config-form" id="defaultConfigForm">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="defaultModel">Default Model</label>
+                                        <select class="form-control" id="defaultModel">
+                                            <option value="gpt-4o">GPT-4o</option>
+                                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="defaultTemperature">Temperature</label>
+                                        <div class="range-input">
+                                            <input type="range" min="0" max="2" step="0.1" value="0.7" id="defaultTemperature">
+                                            <span class="range-value">0.7</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="defaultMaxTokens">Max Tokens</label>
+                                        <input type="number" class="form-control" id="defaultMaxTokens" value="4096" min="1" max="128000">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="defaultTopP">Top P</label>
+                                        <div class="range-input">
+                                            <input type="range" min="0" max="1" step="0.01" value="1" id="defaultTopP">
+                                            <span class="range-value">1.0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="defaultFrequencyPenalty">Frequency Penalty</label>
+                                        <div class="range-input">
+                                            <input type="range" min="-2" max="2" step="0.1" value="0" id="defaultFrequencyPenalty">
+                                            <span class="range-value">0</span>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="defaultPresencePenalty">Presence Penalty</label>
+                                        <div class="range-input">
+                                            <input type="range" min="-2" max="2" step="0.1" value="0" id="defaultPresencePenalty">
+                                            <span class="range-value">0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary">Save Defaults</button>
+                                    <button type="button" class="btn btn-ghost" id="resetDefaultsBtn">Reset to Defaults</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Logs View -->
+                <section class="view" id="logsView">
+                    <div class="logs-toolbar">
+                        <div class="logs-filters">
+                            <div class="filter-group">
+                                <label>Level</label>
+                                <select class="select-sm" id="logLevelFilter">
+                                    <option value="all">All Levels</option>
+                                    <option value="info">Info</option>
+                                    <option value="warn">Warning</option>
+                                    <option value="error">Error</option>
+                                    <option value="debug">Debug</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>Model</label>
+                                <select class="select-sm" id="logModelFilter">
+                                    <option value="all">All Models</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>Time Range</label>
+                                <select class="select-sm" id="logTimeFilter">
+                                    <option value="15m">Last 15 min</option>
+                                    <option value="1h" selected>Last Hour</option>
+                                    <option value="24h">Last 24 Hours</option>
+                                    <option value="7d">Last 7 Days</option>
+                                </select>
+                            </div>
+                            <div class="filter-group search">
+                                <input type="text" placeholder="Filter logs..." id="logSearch">
+                            </div>
+                        </div>
+                        <div class="logs-actions">
+                            <button class="btn btn-sm btn-ghost" id="clearLogsBtn">Clear</button>
+                            <button class="btn btn-sm btn-ghost" id="exportLogsBtn">Export</button>
+                            <button class="btn btn-sm btn-icon active" id="pauseLogsBtn" title="Pause/Resume">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="6" y="4" width="4" height="16"/>
+                                    <rect x="14" y="4" width="4" height="16"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="logs-container">
+                        <div class="logs-table-wrapper">
+                            <table class="logs-table" id="logsTable">
+                                <thead>
+                                    <tr>
+                                        <th class="col-time">Time</th>
+                                        <th class="col-level">Level</th>
+                                        <th class="col-model">Model</th>
+                                        <th class="col-prompt">Prompt</th>
+                                        <th class="col-tokens">Tokens</th>
+                                        <th class="col-latency">Latency</th>
+                                        <th class="col-status">Status</th>
+                                        <th class="col-actions"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="logsTableBody">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="logs-pagination">
+                            <span class="logs-info">Showing <strong id="logsShown">0</strong> of <strong id="logsTotal">0</strong> logs</span>
+                            <div class="pagination-controls">
+                                <button class="btn btn-sm btn-ghost" id="logsPrevPage" disabled>Previous</button>
+                                <span class="page-info">Page <span id="currentPage">1</span> of <span id="totalPages">1</span></span>
+                                <button class="btn btn-sm btn-ghost" id="logsNextPage">Next</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Skills View -->
+                <section class="view" id="skillsView">
+                    <div class="page-header">
+                        <div class="page-actions">
+                            <div class="search-box">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <path d="M21 21l-4.35-4.35"/>
+                                </svg>
+                                <input type="text" placeholder="Search skills..." id="skillSearch">
+                            </div>
+                            <button class="btn btn-primary" id="discoverSkillsBtn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+                                </svg>
+                                Discover
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="skills-categories" id="skillCategories">
+                        <button class="category-btn active" data-category="all">All</button>
+                        <button class="category-btn" data-category="builtin">Built-in</button>
+                        <button class="category-btn" data-category="custom">Custom</button>
+                        <button class="category-btn" data-category="third-party">Third-party</button>
+                    </div>
+
+                    <div class="skills-grid" id="skillsGrid">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <!-- Traces View -->
+                <section class="view" id="tracesView">
+                    <div class="traces-toolbar">
+                        <div class="traces-filters">
+                            <div class="filter-group">
+                                <label>Session</label>
+                                <select class="select-sm" id="traceSessionFilter">
+                                    <option value="all">All Sessions</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label>Status</label>
+                                <select class="select-sm" id="traceStatusFilter">
+                                    <option value="all">All Status</option>
+                                    <option value="completed">Completed</option>
+                                    <option value="running">Running</option>
+                                    <option value="failed">Failed</option>
+                                </select>
+                            </div>
+                            <div class="filter-group search">
+                                <input type="text" placeholder="Search traces..." id="traceSearch">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="traces-layout">
+                        <div class="traces-list-panel">
+                            <div class="traces-list" id="tracesList">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                        <div class="trace-detail-panel" id="traceDetailPanel">
+                            <div class="trace-timeline" id="traceTimeline">
+                                <!-- Populated by JS -->
+                            </div>
+                            <div class="trace-details" id="traceDetails">
+                                <p class="empty-state">Select a trace to view details</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings View -->
+                <section class="view" id="settingsView">
+                    <div class="settings-layout">
+                        <div class="settings-sidebar">
+                            <div class="settings-nav">
+                                <button class="settings-nav-item active" data-settings="general">General</button>
+                                <button class="settings-nav-item" data-settings="features">Features</button>
+                                <button class="settings-nav-item" data-settings="api">API & Keys</button>
+                                <button class="settings-nav-item" data-settings="notifications">Notifications</button>
+                                <button class="settings-nav-item" data-settings="advanced">Advanced</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-content">
+                            <!-- General Settings -->
+                            <div class="settings-section active" id="generalSettings">
+                                <h2>General Settings</h2>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <form id="generalSettingsForm">
+                                            <div class="form-group">
+                                                <label for="dashboardTitle">Dashboard Title</label>
+                                                <input type="text" class="form-control" id="dashboardTitle" value="Agent SDK Admin">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="timezone">Timezone</label>
+                                                <select class="form-control" id="timezone">
+                                                    <option value="UTC">UTC</option>
+                                                    <option value="America/New_York">Eastern Time</option>
+                                                    <option value="America/Chicago">Central Time</option>
+                                                    <option value="America/Denver">Mountain Time</option>
+                                                    <option value="America/Los_Angeles">Pacific Time</option>
+                                                    <option value="Europe/London">London</option>
+                                                    <option value="Europe/Paris">Paris</option>
+                                                    <option value="Asia/Tokyo">Tokyo</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="dateFormat">Date Format</label>
+                                                <select class="form-control" id="dateFormat">
+                                                    <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                                                    <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                                                    <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                                                    <option value="ISO">ISO 8601</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-actions">
+                                                <button type="submit" class="btn btn-primary">Save Changes</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Features Settings -->
+                            <div class="settings-section" id="featuresSettings">
+                                <h2>Feature Toggles</h2>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="feature-list" id="featureList">
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">WebSocket Streaming</span>
+                                                    <span class="feature-desc">Enable real-time log streaming via WebSocket</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="featureWebsocket" checked>
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Request Caching</span>
+                                                    <span class="feature-desc">Cache API responses to reduce costs</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="featureCaching" checked>
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Auto-Retry Failed Requests</span>
+                                                    <span class="feature-desc">Automatically retry failed API calls</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="featureRetry" checked>
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Skill Discovery</span>
+                                                    <span class="feature-desc">Allow automatic skill discovery from traces</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="featureSkillDiscovery">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Request Validation</span>
+                                                    <span class="feature-desc">Validate all requests before sending to API</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="featureValidation" checked>
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Debug Mode</span>
+                                                    <span class="feature-desc">Enable detailed debug logging</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="featureDebug">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- API Settings -->
+                            <div class="settings-section" id="apiSettings">
+                                <h2>API Configuration</h2>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <form id="apiSettingsForm">
+                                            <div class="form-group">
+                                                <label for="apiEndpoint">API Endpoint</label>
+                                                <input type="url" class="form-control" id="apiEndpoint" value="http://localhost:3000">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="apiKey">API Key</label>
+                                                <div class="input-group">
+                                                    <input type="password" class="form-control" id="apiKey" placeholder="sk-...">
+                                                    <button type="button" class="btn btn-ghost" id="showApiKey">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                            <circle cx="12" cy="12" r="3"/>
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="openaiKey">OpenAI API Key</label>
+                                                <div class="input-group">
+                                                    <input type="password" class="form-control" id="openaiKey" placeholder="sk-...">
+                                                    <button type="button" class="btn btn-ghost" id="showOpenaiKey">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                            <circle cx="12" cy="12" r="3"/>
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="requestTimeout">Request Timeout (ms)</label>
+                                                    <input type="number" class="form-control" id="requestTimeout" value="30000">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="maxRetries">Max Retries</label>
+                                                    <input type="number" class="form-control" id="maxRetries" value="3">
+                                                </div>
+                                            </div>
+                                            <div class="form-actions">
+                                                <button type="submit" class="btn btn-primary">Save API Settings</button>
+                                                <button type="button" class="btn btn-ghost" id="testConnectionBtn">Test Connection</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Notifications Settings -->
+                            <div class="settings-section" id="notificationsSettings">
+                                <h2>Notifications</h2>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="feature-list">
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Email Notifications</span>
+                                                    <span class="feature-desc">Receive email alerts for system events</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="notifyEmail">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Error Alerts</span>
+                                                    <span class="feature-desc">Get notified when errors occur</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="notifyErrors" checked>
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Daily Summary</span>
+                                                    <span class="feature-desc">Receive daily usage summary</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="notifyDaily">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Advanced Settings -->
+                            <div class="settings-section" id="advancedSettings">
+                                <h2>Advanced</h2>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="danger-zone">
+                                            <h3>Danger Zone</h3>
+                                            <div class="danger-item">
+                                                <div class="danger-info">
+                                                    <span class="danger-name">Clear All Logs</span>
+                                                    <span class="danger-desc">Permanently delete all request logs</span>
+                                                </div>
+                                                <button class="btn btn-danger" id="clearAllLogsBtn">Clear Logs</button>
+                                            </div>
+                                            <div class="danger-item">
+                                                <div class="danger-info">
+                                                    <span class="danger-name">Reset Configuration</span>
+                                                    <span class="danger-desc">Reset all settings to default values</span>
+                                                </div>
+                                                <button class="btn btn-danger" id="resetConfigBtn">Reset</button>
+                                            </div>
+                                            <div class="danger-item">
+                                                <div class="danger-info">
+                                                    <span class="danger-name">Export Data</span>
+                                                    <span class="danger-desc">Download all configuration and logs</span>
+                                                </div>
+                                                <button class="btn btn-secondary" id="exportDataBtn">Export</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal: Test Prompt -->
+    <div class="modal" id="testPromptModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Test Prompt</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="test-config">
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select class="form-control" id="testModel">
+                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <div class="range-input">
+                            <input type="range" min="0" max="2" step="0.1" value="0.7" id="testTemperature">
+                            <span class="range-value">0.7</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="test-input">
+                    <label>Test Input</label>
+                    <textarea class="form-control" id="testInput" rows="4" placeholder="Enter test input..."></textarea>
+                </div>
+                <div class="test-output" id="testOutput">
+                    <label>Response</label>
+                    <div class="output-content">
+                        <p class="placeholder">Response will appear here...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost modal-close">Cancel</button>
+                <button class="btn btn-primary" id="runTestBtn">Run Test</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Prompt History -->
+    <div class="modal" id="historyModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h3>Prompt History</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="history-list" id="historyList">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Log Details -->
+    <div class="modal" id="logDetailsModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-container modal-lg">
+            <div class="modal-header">
+                <h3>Log Details</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="log-details" id="logDetails">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="js/api-client.js"></script>
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
