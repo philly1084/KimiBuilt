@@ -31,7 +31,7 @@ const { DocumentService } = require('./documents/document-service');
 const { createResponse } = require('./openai-client');
 
 // Agent SDK
-const AgentOrchestrator = require('./agent-sdk/core/AgentOrchestrator');
+const { AgentOrchestrator } = require('./agent-sdk');
 
 validate();
 
@@ -235,4 +235,3 @@ async function start() {
 start();
 
 module.exports = { app, server };
-
