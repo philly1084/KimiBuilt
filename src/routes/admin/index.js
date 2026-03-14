@@ -16,6 +16,8 @@ const settingsController = require('./settings.controller');
 
 // Dashboard controller is initialized with orchestrator in server.js
 const getDashboardController = (req) => req.app.locals.dashboardController;
+const callController = (controller, method) => (req, res, next) =>
+  controller[method](req, res, next);
 
 // API Routes
 
@@ -25,48 +27,48 @@ router.get('/health', (req, res) => getDashboardController(req).getHealth(req, r
 router.get('/activity', (req, res) => getDashboardController(req).getRecentActivity(req, res));
 
 // Prompts Management
-router.get('/prompts', promptsController.getAll);
-router.get('/prompts/:id', promptsController.getById);
-router.post('/prompts', promptsController.create);
-router.put('/prompts/:id', promptsController.update);
-router.delete('/prompts/:id', promptsController.remove);
-router.post('/prompts/:id/test', promptsController.test);
+router.get('/prompts', callController(promptsController, 'getAll'));
+router.get('/prompts/:id', callController(promptsController, 'getById'));
+router.post('/prompts', callController(promptsController, 'create'));
+router.put('/prompts/:id', callController(promptsController, 'update'));
+router.delete('/prompts/:id', callController(promptsController, 'remove'));
+router.post('/prompts/:id/test', callController(promptsController, 'test'));
 
 // Models Configuration
-router.get('/models', modelsController.getAll);
-router.get('/models/:id', modelsController.getById);
-router.put('/models/:id', modelsController.update);
-router.post('/models/:id/activate', modelsController.activate);
-router.get('/models/usage/stats', modelsController.getUsageStats);
+router.get('/models', callController(modelsController, 'getAll'));
+router.get('/models/:id', callController(modelsController, 'getById'));
+router.put('/models/:id', callController(modelsController, 'update'));
+router.post('/models/:id/activate', callController(modelsController, 'activate'));
+router.get('/models/usage/stats', callController(modelsController, 'getUsageStats'));
 
 // Logs
-router.get('/logs', logsController.getAll);
-router.get('/logs/stream', logsController.stream);
-router.get('/logs/:id', logsController.getById);
-router.post('/logs/clear', logsController.clear);
-router.get('/logs/export/:format', logsController.export);
+router.get('/logs', callController(logsController, 'getAll'));
+router.get('/logs/stream', callController(logsController, 'stream'));
+router.get('/logs/:id', callController(logsController, 'getById'));
+router.post('/logs/clear', callController(logsController, 'clear'));
+router.get('/logs/export/:format', callController(logsController, 'export'));
 
 // Skills
-router.get('/skills', skillsController.getAll);
-router.get('/skills/:id', skillsController.getById);
-router.put('/skills/:id', skillsController.update);
-router.post('/skills/:id/enable', skillsController.enable);
-router.post('/skills/:id/disable', skillsController.disable);
-router.delete('/skills/:id', skillsController.remove);
-router.get('/skills/search/query', skillsController.search);
+router.get('/skills', callController(skillsController, 'getAll'));
+router.get('/skills/:id', callController(skillsController, 'getById'));
+router.put('/skills/:id', callController(skillsController, 'update'));
+router.post('/skills/:id/enable', callController(skillsController, 'enable'));
+router.post('/skills/:id/disable', callController(skillsController, 'disable'));
+router.delete('/skills/:id', callController(skillsController, 'remove'));
+router.get('/skills/search/query', callController(skillsController, 'search'));
 
 // Traces
-router.get('/traces', tracesController.getAll);
-router.get('/traces/:id', tracesController.getById);
-router.get('/traces/:id/timeline', tracesController.getTimeline);
-router.delete('/traces/:id', tracesController.remove);
-router.get('/traces/export/:format', tracesController.export);
+router.get('/traces', callController(tracesController, 'getAll'));
+router.get('/traces/:id', callController(tracesController, 'getById'));
+router.get('/traces/:id/timeline', callController(tracesController, 'getTimeline'));
+router.delete('/traces/:id', callController(tracesController, 'remove'));
+router.get('/traces/export/:format', callController(tracesController, 'export'));
 
 // Settings
-router.get('/settings', settingsController.getAll);
-router.put('/settings', settingsController.update);
-router.post('/settings/reset', settingsController.reset);
-router.post('/settings/clear-cache', settingsController.clearCache);
+router.get('/settings', callController(settingsController, 'getAll'));
+router.put('/settings', callController(settingsController, 'update'));
+router.post('/settings/reset', callController(settingsController, 'reset'));
+router.post('/settings/clear-cache', callController(settingsController, 'clearCache'));
 
 // SDK Control
 router.post('/sdk/execute', (req, res) => getDashboardController(req).executeTask(req, res));
