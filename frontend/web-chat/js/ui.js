@@ -63,6 +63,14 @@ class UIHelpers {
         ]);
     }
 
+    getReservedFilenameBases() {
+        return new Set([
+            'con', 'prn', 'aux', 'nul',
+            'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
+            'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+        ]);
+    }
+
     getPleasantFilenameParts() {
         return {
             adjectives: [
@@ -107,7 +115,18 @@ class UIHelpers {
             return this.generatePleasantFilenameBase();
         }
 
-        return meaningfulTokens.slice(0, 6).join('-') || this.generatePleasantFilenameBase();
+        const candidate = meaningfulTokens.slice(0, 6).join('-') || this.generatePleasantFilenameBase();
+        return this.getReservedFilenameBases().has(candidate) ? this.generatePleasantFilenameBase() : candidate;
+    }
+
+    sanitizeDownloadFilename(filename, fallbackBase = 'download', fallbackExtension = '') {
+        const raw = String(filename || '').trim();
+        const extensionMatch = raw.match(/(\.[a-z0-9]{1,10})$/i);
+        const extension = extensionMatch ? extensionMatch[1].toLowerCase() : (fallbackExtension ? `.${String(fallbackExtension).replace(/^\./, '')}` : '');
+        const base = raw.replace(/\.[a-z0-9]{1,10}$/i, '');
+        const safeBase = this.createFriendlyFilenameBase(base || fallbackBase, fallbackBase);
+        const truncatedBase = safeBase.slice(0, 80).replace(/-+$/g, '') || this.createFriendlyFilenameBase(fallbackBase, fallbackBase);
+        return `${truncatedBase}${extension}`;
     }
 
     createFriendlyFilenameBaseFromMermaid(source, fallback = 'diagram') {
@@ -1426,15 +1445,14 @@ class UIHelpers {
     }
 
     getMermaidFilename(baseName = 'diagram', extension = 'mmd') {
-        const safeBase = this.createFriendlyFilenameBase(String(baseName || 'diagram').replace(/\.[a-z0-9]+$/i, ''), 'diagram');
-        return `${safeBase}.${extension}`;
+        return this.sanitizeDownloadFilename(baseName, 'diagram', extension);
     }
 
     downloadBlob(blob, filename) {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename;
+        link.download = this.sanitizeDownloadFilename(filename, 'download');
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

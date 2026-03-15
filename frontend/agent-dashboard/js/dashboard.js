@@ -1661,13 +1661,18 @@ class Dashboard {
     }
 
     normalizeTool(tool = {}, skill = null) {
+        const supportMeta = tool.support && typeof tool.support === 'object'
+            ? tool.support
+            : { status: tool.support || 'unknown', notes: [] };
+
         return {
             ...tool,
             id: tool.id || tool.name || 'unknown-tool',
             name: tool.name || tool.id || 'Unknown Tool',
             description: tool.description || 'No description available.',
             category: (tool.category || 'uncategorized').toLowerCase(),
-            support: (tool.support || 'unknown').toLowerCase(),
+            support: String(supportMeta.status || 'unknown').toLowerCase(),
+            supportNotes: Array.isArray(supportMeta.notes) ? supportMeta.notes : [],
             docAvailable: Boolean(tool.docAvailable),
             enabled: skill ? Boolean(skill.enabled) : null,
             usageCount: Number(skill?.usageCount || 0),
@@ -1856,6 +1861,16 @@ class Dashboard {
 
         const doc = this.state.toolDocs[tool.id];
         const supportText = this.formatSupportDescription(tool.support);
+        const supportNotesMarkup = tool.supportNotes?.length
+            ? `
+                <div class="tool-detail-section">
+                    <h4>Support Notes</h4>
+                    <ul class="tool-note-list">
+                        ${tool.supportNotes.map((note) => `<li>${this.escapeHtml(note)}</li>`).join('')}
+                    </ul>
+                </div>
+            `
+            : '';
         const triggerMarkup = tool.triggerPatterns?.length
             ? `<div class="tool-detail-section"><h4>Trigger Patterns</h4><p>${this.escapeHtml(tool.triggerPatterns.join(', '))}</p></div>`
             : '';
@@ -1891,6 +1906,7 @@ class Dashboard {
                 </div>
             </div>
             ${triggerMarkup}
+            ${supportNotesMarkup}
             <div class="tool-detail-section">
                 <h4>Documentation</h4>
                 ${docMarkup}

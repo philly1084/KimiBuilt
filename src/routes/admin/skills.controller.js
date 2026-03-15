@@ -12,11 +12,18 @@ class SkillsController {
     this.registry = getUnifiedRegistry();
   }
 
+  async ensureInitialized() {
+    const toolManager = getToolManager();
+    await toolManager.initialize();
+    return toolManager;
+  }
+
   /**
    * Get all skills from unified registry
    */
   async getAll(req, res) {
     try {
+      await this.ensureInitialized();
       const { category = 'all', status = 'all', search = '' } = req.query;
 
       // Get skills from unified registry
@@ -68,6 +75,7 @@ class SkillsController {
    */
   async getById(req, res) {
     try {
+      await this.ensureInitialized();
       const { id } = req.params;
       const skill = this.registry.getSkill(id);
 
@@ -104,6 +112,7 @@ class SkillsController {
    */
   async update(req, res) {
     try {
+      await this.ensureInitialized();
       const { id } = req.params;
       const updates = req.body;
 
@@ -127,6 +136,7 @@ class SkillsController {
    */
   async enable(req, res) {
     try {
+      await this.ensureInitialized();
       const { id } = req.params;
       
       const success = this.registry.setSkillEnabled(id, true);
@@ -147,6 +157,7 @@ class SkillsController {
    */
   async disable(req, res) {
     try {
+      await this.ensureInitialized();
       const { id } = req.params;
       
       const success = this.registry.setSkillEnabled(id, false);
@@ -167,6 +178,7 @@ class SkillsController {
    */
   async remove(req, res) {
     try {
+      await this.ensureInitialized();
       const { id } = req.params;
 
       if (!this.registry.getSkill(id)) {
@@ -188,6 +200,7 @@ class SkillsController {
    */
   async search(req, res) {
     try {
+      await this.ensureInitialized();
       const { q } = req.query;
 
       if (!q) {
@@ -214,6 +227,7 @@ class SkillsController {
    */
   async getCategories(req, res) {
     try {
+      await this.ensureInitialized();
       const categories = this.registry.getCategories();
       
       // Add counts
@@ -237,6 +251,7 @@ class SkillsController {
    */
   async getStats(req, res) {
     try {
+      await this.ensureInitialized();
       const skills = this.registry.getAllSkills();
       
       res.json({
@@ -260,6 +275,7 @@ class SkillsController {
    */
   async execute(req, res) {
     try {
+      const toolManager = await this.ensureInitialized();
       const { id } = req.params;
       const params = req.body;
 
@@ -273,7 +289,6 @@ class SkillsController {
       }
 
       // Get tool manager and execute
-      const toolManager = getToolManager();
       const result = await toolManager.executeTool(id, params, {
         sessionId: req.body.sessionId,
         userId: req.user?.id

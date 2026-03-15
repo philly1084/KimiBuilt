@@ -249,6 +249,7 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 {
   "assistant_reply": "Brief, friendly explanation of what I did",
   "actions": [
+    { "op": "update_page", "title": "Middle East Overnight Brief", "icon": "🌍" },
     { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
     { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
     { "op": "delete_block", "blockId": "block_def456" },
@@ -258,6 +259,7 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 \`\`\`
 
 VALID OPERATIONS:
+- update_page: Update page-level metadata like title, icon, cover, properties, or page default model
 - update_block: Change content of existing block (requires blockId, type, content)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
 - insert_after: Add new block(s) after specified block (requires blockId, blocks array)
@@ -302,6 +304,8 @@ GUIDELINES:
 - You may optionally add "color" and "textColor" to any inserted/replaced block using: ${NOTES_COLOR_OPTIONS.join(', ')}.
 - Use styling intentionally for hierarchy and variety, for example yellow or blue callouts, gray supporting notes, red warnings, and green status summaries.
 - For structured blocks (todo, callout, code, math, mermaid, image, ai_image, bookmark, database, ai), use structured objects rather than plain strings.
+- When the user asks for a redesign, dashboard, brief, report, or polished layout, consider updating the page title/icon/cover with update_page in addition to the blocks.
+- If the user asks for color or visual design, explicitly consider both block background colors ("color") and text colors ("textColor") where they improve readability.
 - When improving layout or variety, prefer mixing headings, callouts, quotes, lists, databases, images, dividers, and tasteful color/textColor choices instead of only plain paragraphs`;
     }
 
@@ -760,6 +764,17 @@ GUIDELINES:
 
             try {
                 switch (op) {
+                    case 'update_page': {
+                        const pageUpdates = {};
+                        ['title', 'icon', 'cover', 'properties', 'defaultModel'].forEach((key) => {
+                            if (Object.prototype.hasOwnProperty.call(rawAction, key)) {
+                                pageUpdates[key] = rawAction[key];
+                            }
+                        });
+                        editor.updatePageMetadata?.(pageUpdates);
+                        appliedCount++;
+                        break;
+                    }
                     case 'update_block': {
                         if (!targetBlockId) return;
                         const existing = editor.getBlock?.(targetBlockId);

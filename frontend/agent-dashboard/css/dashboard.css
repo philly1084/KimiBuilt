@@ -1998,6 +1998,16 @@ select.form-control,
     margin-bottom: var(--space-sm);
 }
 
+.tool-note-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--text-secondary);
+}
+
+.tool-note-list li + li {
+    margin-top: var(--space-xs);
+}
+
 .tool-doc-content {
     background-color: var(--bg-primary);
     border: 1px solid var(--border-primary);

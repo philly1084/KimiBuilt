@@ -1633,6 +1633,91 @@ const Editor = (function() {
         }
     }
 
+    function updatePageMetadata(updates = {}) {
+        if (!currentPage || !updates || typeof updates !== 'object') return;
+
+        saveToHistory();
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'title')) {
+            currentPage.title = String(updates.title || '').trim() || 'Untitled';
+            const titleInput = document.getElementById('page-title');
+            if (titleInput) {
+                titleInput.value = currentPage.title;
+            }
+            const breadcrumbCurrent = document.getElementById('breadcrumb-current');
+            if (breadcrumbCurrent) {
+                breadcrumbCurrent.textContent = currentPage.title;
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'icon')) {
+            currentPage.icon = String(updates.icon || '').trim();
+            const iconEl = document.getElementById('page-icon');
+            const addIconHint = document.querySelector('.add-icon-hint');
+            if (iconEl) {
+                iconEl.textContent = currentPage.icon;
+                iconEl.style.display = currentPage.icon ? 'inline' : 'none';
+            }
+            if (addIconHint) {
+                addIconHint.style.display = currentPage.icon ? 'none' : 'inline';
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'cover')) {
+            currentPage.cover = updates.cover ? String(updates.cover).trim() : null;
+            const coverArea = document.getElementById('cover-area');
+            const coverImage = document.getElementById('cover-image');
+            const addCoverBtn = document.getElementById('add-cover-btn');
+            if (coverArea && coverImage) {
+                if (currentPage.cover) {
+                    coverArea.style.display = 'block';
+                    coverImage.style.backgroundImage = `url(${currentPage.cover})`;
+                    if (addCoverBtn) addCoverBtn.style.display = 'none';
+                } else {
+                    coverArea.style.display = 'none';
+                    coverImage.style.backgroundImage = '';
+                    if (addCoverBtn) addCoverBtn.style.display = 'flex';
+                }
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'properties')) {
+            currentPage.properties = Array.isArray(updates.properties)
+                ? updates.properties
+                    .map((prop) => ({
+                        key: String(prop?.key || '').trim(),
+                        value: String(prop?.value || '').trim()
+                    }))
+                    .filter((prop) => prop.key)
+                : [];
+
+            const propertiesArea = document.getElementById('properties-area');
+            if (propertiesArea) {
+                propertiesArea.innerHTML = '';
+                currentPage.properties.forEach((prop) => {
+                    const row = document.createElement('div');
+                    row.className = 'property-row';
+                    row.innerHTML = `
+                        <span class="property-key">${escapeHtml(prop.key)}:</span>
+                        <span class="property-value">${escapeHtml(prop.value)}</span>
+                    `;
+                    propertiesArea.appendChild(row);
+                });
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'defaultModel')) {
+            currentPage.defaultModel = updates.defaultModel ? String(updates.defaultModel).trim() : null;
+            const pageModelDropdown = document.getElementById('page-model-dropdown');
+            if (pageModelDropdown) {
+                pageModelDropdown.value = currentPage.defaultModel || '';
+            }
+        }
+
+        document.title = currentPage.title ? `${currentPage.title} - Notes` : 'Notes - Notion Style';
+        savePage();
+    }
+
     function getBlock(blockId) {
         return findBlockLocation(blockId)?.block || null;
     }
@@ -1986,6 +2071,7 @@ const Editor = (function() {
         insertBlocksAfter,
         insertBlocksBefore,
         addBlockAtEnd,
+        updatePageMetadata,
         getCurrentModel,
         refreshEditor,
         getBlockConversionInfo

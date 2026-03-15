@@ -95,6 +95,12 @@ const GENERIC_FILENAME_WORDS = new Set([
     'temp', 'test', 'text', 'tmp', 'untitled', 'web',
 ]);
 
+const RESERVED_FILENAME_BASES = new Set([
+    'con', 'prn', 'aux', 'nul',
+    'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
+    'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+]);
+
 function generatePleasantFilenamePair() {
     const adjective = FILENAME_ADJECTIVES[Math.floor(Math.random() * FILENAME_ADJECTIVES.length)];
     const noun = FILENAME_NOUNS[Math.floor(Math.random() * FILENAME_NOUNS.length)];
@@ -115,7 +121,8 @@ function createFriendlyFilenameBase(value = 'artifact', fallback = 'artifact') {
     }
 
     const normalized = meaningfulTokens.slice(0, 6).join('-');
-    return normalized || generatePleasantFilenamePair();
+    const candidate = normalized || generatePleasantFilenamePair();
+    return RESERVED_FILENAME_BASES.has(candidate) ? generatePleasantFilenamePair() : candidate;
 }
 
 function chunkText(text = '', maxLength = 1200) {
