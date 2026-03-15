@@ -132,12 +132,20 @@ class NotesAPIClient {
      *     if (chunk.type === 'delta') console.log(chunk.content);
      * }
      */
-    async *streamChat(messages, model = 'gpt-4o', signal = null) {
+    async *streamChat(messages, model = 'gpt-4o', signal = null, requestOptions = {}) {
         const params = {
             model,
             messages,
             stream: true,
         };
+
+        if (requestOptions.outputFormat) {
+            params.output_format = requestOptions.outputFormat;
+        }
+
+        if (Array.isArray(requestOptions.artifactIds) && requestOptions.artifactIds.length > 0) {
+            params.artifact_ids = requestOptions.artifactIds;
+        }
         
         // Include session ID if available and not a local session
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
@@ -215,6 +223,8 @@ class NotesAPIClient {
                 const decoder = new TextDecoder();
                 let buffer = '';
                 
+                let finalArtifacts = [];
+
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
@@ -248,9 +258,13 @@ class NotesAPIClient {
                                         yield { type: 'delta', content };
                                     }
                                     
+                                    if (Array.isArray(parsed.artifacts)) {
+                                        finalArtifacts = parsed.artifacts;
+                                    }
+
                                     // Check if generation is complete
                                     if (parsed.choices?.[0]?.finish_reason) {
-                                        yield { type: 'done', sessionId: this.currentSessionId };
+                                        yield { type: 'done', sessionId: this.currentSessionId, artifacts: finalArtifacts };
                                         return;
                                     }
                                 } catch (e) {
@@ -270,7 +284,7 @@ class NotesAPIClient {
                 
                 // Success - reset retry count
                 this.retryCount = 0;
-                yield { type: 'done', sessionId: this.currentSessionId };
+                yield { type: 'done', sessionId: this.currentSessionId, artifacts: finalArtifacts };
                 return;
                 
             } catch (error) {
@@ -312,12 +326,20 @@ class NotesAPIClient {
      * const response = await client.chat(messages, 'gpt-4o');
      * console.log(response.content);
      */
-    async chat(messages, model = 'gpt-4o') {
+    async chat(messages, model = 'gpt-4o', requestOptions = {}) {
         const params = {
             model,
             messages,
             stream: false,
         };
+
+        if (requestOptions.outputFormat) {
+            params.output_format = requestOptions.outputFormat;
+        }
+
+        if (Array.isArray(requestOptions.artifactIds) && requestOptions.artifactIds.length > 0) {
+            params.artifact_ids = requestOptions.artifactIds;
+        }
         
         // Include session ID if available and not a local session
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
@@ -357,6 +379,7 @@ class NotesAPIClient {
                 return {
                     content: data.choices?.[0]?.message?.content || '',
                     sessionId: this.currentSessionId,
+                    artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
                 };
                 
             } catch (error) {

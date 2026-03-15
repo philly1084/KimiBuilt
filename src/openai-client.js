@@ -44,6 +44,9 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'web-fetch',
     'web-search',
     'web-scrape',
+    'ssh-execute',
+    'docker-exec',
+    'code-sandbox',
     'security-scan',
     'tool-doc-read',
 ]);
@@ -434,6 +437,9 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null) {
         'web-fetch': hasUrl && /\b(fetch|open|read|inspect|visit|download|load|check|look at)\b/i.test(prompt),
         'web-search': /\b(search|look up|find|latest|recent|news|current|research|what is|who is)\b/i.test(prompt),
         'web-scrape': hasUrl && /\b(scrape|extract|parse|crawl|collect|get data|pull data)\b/i.test(prompt),
+        'ssh-execute': /\b(ssh|server|remote host|remote server|remote machine|login to|log into|run on server|execute on server|deploy on server)\b/i.test(prompt),
+        'docker-exec': /\b(docker|container|docker exec|run in container|inside container|inside docker)\b/i.test(prompt),
+        'code-sandbox': /\b(sandbox|isolated|ephemeral|temp environment|run code|execute code|test this code|try this script)\b/i.test(prompt),
         'security-scan': mentionsCode && /\b(security|vulnerab|secret|audit|scan|xss|sql injection|path traversal)\b/i.test(prompt),
         'tool-doc-read': /\b(tool|tools|skill|skills)\b/i.test(prompt) && /\b(help|docs|documentation|how do i use|what can|capab|setup|parameters|args|usage)\b/i.test(prompt),
     };
@@ -564,6 +570,18 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
         guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'ssh-execute')) {
+        guidance.push('- Use `ssh-execute` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'docker-exec')) {
+        guidance.push('- Use `docker-exec` for commands that must run inside an existing Docker container.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {
+        guidance.push('- Use `code-sandbox` to run code in an isolated environment when you need to verify behavior without modifying the main system.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'security-scan')) {

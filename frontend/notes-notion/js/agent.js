@@ -2125,6 +2125,71 @@ GUIDELINES:
         return trimmed === '/tools' || trimmed.startsWith('/tools ') || trimmed.startsWith('/tool ') || trimmed.startsWith('/tool-help ');
     }
 
+    function inferRequestedArtifactFormat(question) {
+        const normalized = String(question || '').toLowerCase();
+        if (!normalized) return null;
+
+        if (/\bstandalone html\b|\bhtml\b/.test(normalized)) return 'html';
+        if (/\bpdf\b/.test(normalized)) return 'pdf';
+        if (/\bdocx\b|\bword document\b/.test(normalized)) return 'docx';
+        if (/\bxml\b/.test(normalized)) return 'xml';
+        if (/\bxlsx\b|\bexcel\b|\bspreadsheet\b/.test(normalized)) return 'xlsx';
+        if (/\bmermaid\b/.test(normalized)) return 'mermaid';
+        return null;
+    }
+
+    function isArtifactGenerationIntent(question) {
+        const normalized = String(question || '').toLowerCase();
+        if (!normalized) return false;
+
+        const format = inferRequestedArtifactFormat(normalized);
+        if (!format) return false;
+
+        return /\b(export|generate|create|make|save|download|convert|render|produce|link)\b/.test(normalized);
+    }
+
+    function appendArtifactBookmark(artifact, format) {
+        const downloadUrl = artifact?.downloadUrl
+            ? new URL(artifact.downloadUrl, window.location.origin).toString()
+            : null;
+        if (!downloadUrl || !window.Blocks?.createBlock) {
+            return false;
+        }
+
+        const page = window.Editor?.getCurrentPage?.();
+        if (!page) {
+            return false;
+        }
+
+        const exportMarker = `notes-agent-artifact-${format || artifact.format || 'file'}`;
+        const existingBlock = (page.blocks || []).find((block) => block?.exportMarker === exportMarker);
+        const title = artifact.filename
+            ? `Download ${artifact.filename}`
+            : `Download ${String(format || artifact.format || 'file').toUpperCase()} export`;
+        const description = `Generated ${new Date().toLocaleString()}`;
+
+        const bookmarkBlock = window.Blocks.createBlock('bookmark', {
+            url: downloadUrl,
+            title,
+            description,
+            favicon: '',
+            image: ''
+        }, {
+            exportMarker
+        });
+
+        if (existingBlock) {
+            bookmarkBlock.id = existingBlock.id;
+            window.Editor.replaceBlockWithBlocks?.(existingBlock.id, [bookmarkBlock]);
+            return true;
+        }
+
+        const blocks = page.blocks || [];
+        const lastBlockId = blocks.length ? blocks[blocks.length - 1].id : null;
+        window.Editor.insertBlocksAfter?.(lastBlockId, [bookmarkBlock]);
+        return true;
+    }
+
     function formatAvailableToolsResponse(tools, category = null) {
         if (!Array.isArray(tools) || tools.length === 0) {
             return category
@@ -2290,6 +2355,12 @@ GUIDELINES:
     async function askWithAPI(question, context, options) {
         const { onChunk, onComplete, onError, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
+        const requestedArtifactFormat = isArtifactGenerationIntent(question)
+            ? inferRequestedArtifactFormat(question)
+            : null;
+        const requestOptions = requestedArtifactFormat
+            ? { outputFormat: requestedArtifactFormat }
+            : {};
         
         // Build messages array with enhanced system prompt
         const systemPrompt = buildSystemPrompt(context || {
@@ -2322,10 +2393,11 @@ GUIDELINES:
                 let lastVisibleText = '';
                 let jsonBuffer = '';
                 let inJsonBlock = false;
+                let generatedArtifacts = [];
 
                 try {
                     if (state.streamingEnabled && apiClient.streamChat) {
-                        for await (const chunk of apiClient.streamChat(messages, model)) {
+                        for await (const chunk of apiClient.streamChat(messages, model, null, requestOptions)) {
                             if (chunk.type === 'delta' && chunk.content) {
                                 const chunkText = chunk.content;
                                 responseText += chunkText;
@@ -2358,6 +2430,11 @@ GUIDELINES:
                                 continue;
                             }
 
+                            if (chunk.type === 'done' && Array.isArray(chunk.artifacts)) {
+                                generatedArtifacts = chunk.artifacts;
+                                continue;
+                            }
+
                             if (chunk.type === 'error') {
                                 const streamError = new Error(chunk.error || 'Streaming error');
                                 streamError.status = chunk.status;
@@ -2365,7 +2442,7 @@ GUIDELINES:
                             }
                         }
                     } else {
-                        const response = await apiClient.chat(messages, model);
+                        const response = await apiClient.chat(messages, model, requestOptions);
                         if (response?.error) {
                             const apiError = new Error(response.content || 'API request failed');
                             apiError.status = response.status;
@@ -2373,6 +2450,7 @@ GUIDELINES:
                         }
 
                         responseText = response.content || response.message || String(response);
+                        generatedArtifacts = Array.isArray(response.artifacts) ? response.artifacts : [];
                     }
 
                     if (isInvalidGatewayResponseText(responseText)) {
@@ -2395,7 +2473,14 @@ GUIDELINES:
                         };
                     }
 
-                    const visibleResponse = preparedResponse.displayText || responseText;
+                    if (generatedArtifacts.length > 0 && requestedArtifactFormat) {
+                        generatedArtifacts.forEach((artifact) => appendArtifactBookmark(artifact, requestedArtifactFormat));
+                    }
+
+                    const artifactLinkNotice = generatedArtifacts.length > 0 && requestedArtifactFormat
+                        ? `\n\nDownload link added at the bottom of the page for the generated ${requestedArtifactFormat.toUpperCase()} export.`
+                        : '';
+                    const visibleResponse = (preparedResponse.displayText || responseText) + artifactLinkNotice;
                     const assistantMessage = hiddenAssistantMessage
                         ? null
                         : addMessage('assistant', visibleResponse, {
