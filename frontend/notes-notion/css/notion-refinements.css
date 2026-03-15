@@ -769,18 +769,21 @@ button:focus-visible,
     
     /* AI Widget - Auto hide on small screens */
     .agent-widget {
-        bottom: 16px;
-        right: 16px;
+        right: calc(16px + env(safe-area-inset-right, 0px));
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     }
     
     .agent-widget-btn {
-        padding: 12px;
-        min-width: auto;
-        border-radius: 50%;
+        gap: 10px;
+        padding: 10px 14px;
+        min-width: 0;
+        max-width: calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+        border-radius: 18px;
     }
     
     .agent-label {
-        display: none;
+        display: block;
+        font-size: 13px;
     }
     
     .agent-motion-text {
@@ -788,8 +791,8 @@ button:focus-visible,
     }
     
     .agent-avatar {
-        width: 44px;
-        height: 44px;
+        width: 36px;
+        height: 36px;
     }
     
     /* Sidebar - Proper off-canvas behavior */
@@ -1061,7 +1064,7 @@ button:focus-visible,
 
 .agent-status.processing .agent-status-indicator {
     background: var(--agent-accent-start);
-    animation: pulse 1.5s infinite;
+    animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
@@ -1166,24 +1169,24 @@ button:focus-visible,
 }
 
 .agent-widget-btn.processing {
-    animation: agentWidgetPulse 1.8s ease-in-out infinite;
+    animation: agentWidgetPulse 2.4s ease-in-out infinite;
     filter: saturate(1.06);
 }
 
 .agent-widget-btn.processing[data-motion="running"] .agent-avatar {
-    animation: agentRun 0.9s ease-in-out infinite;
+    animation: agentRun 1.2s ease-in-out infinite;
 }
 
 .agent-widget-btn.processing[data-motion="jumping"] .agent-avatar {
-    animation: agentJump 1s ease-in-out infinite;
+    animation: agentJump 1.35s ease-in-out infinite;
 }
 
 .agent-widget-btn.processing[data-motion="skipping"] .agent-avatar {
-    animation: agentSkip 1s ease-in-out infinite;
+    animation: agentSkip 1.35s ease-in-out infinite;
 }
 
 .agent-widget-btn.processing[data-motion="gliding"] .agent-avatar {
-    animation: agentGlide 1.2s ease-in-out infinite;
+    animation: agentGlide 1.6s ease-in-out infinite;
 }
 
 @keyframes agentWidgetPulse {
@@ -1588,17 +1591,30 @@ button:focus-visible,
     }
     
     .agent-widget {
-        right: 16px;
-        bottom: 16px;
+        right: calc(16px + env(safe-area-inset-right, 0px));
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     }
     
     .agent-label {
-        display: none;
+        display: block;
+        font-size: 13px;
     }
     
+    .agent-motion-text {
+        display: none;
+    }
+
     .agent-widget-btn {
-        padding: 12px;
-        border-radius: 50%;
+        gap: 10px;
+        padding: 10px 14px;
+        min-width: 0;
+        max-width: calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+        border-radius: 18px;
+    }
+
+    .agent-avatar {
+        width: 36px;
+        height: 36px;
     }
 }
 

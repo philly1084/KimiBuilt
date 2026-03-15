@@ -491,7 +491,7 @@ const AgentUI = (function() {
         processingTicker = window.setInterval(() => {
             processingFrame = (processingFrame + 1) % PROCESSING_STATES.length;
             applyProcessingFrame(true);
-        }, 1200);
+        }, 1600);
     }
 
     function stopProcessingTicker() {
