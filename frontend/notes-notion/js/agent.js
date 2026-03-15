@@ -55,6 +55,30 @@ const Agent = (function() {
         return date.toISOString();
     }
 
+    function coerceTextValue(value) {
+        if (typeof value === 'string') {
+            return value;
+        }
+
+        if (value == null) {
+            return '';
+        }
+
+        const extracted = window.Blocks?.extractResponseText?.(value);
+        if (typeof extracted === 'string' && extracted) {
+            return extracted;
+        }
+
+        if (typeof value === 'object') {
+            if (typeof value.text === 'string') return value.text;
+            if (typeof value.content === 'string') return value.content;
+            if (typeof value.message === 'string') return value.message;
+            if (typeof value.prompt === 'string') return value.prompt;
+        }
+
+        return String(value);
+    }
+
     function extractBlockTextValue(block) {
         if (!block) return '';
 
@@ -296,11 +320,15 @@ GUIDELINES:
             case 'callout':
                 if (value && typeof value === 'object') {
                     return {
-                        text: String(value.text || value.content || value.message || ''),
+                        text: coerceTextValue(
+                            Object.prototype.hasOwnProperty.call(value, 'text')
+                                ? value.text
+                                : value.content ?? value.message ?? value
+                        ),
                         icon: String(value.icon || '!')
                     };
                 }
-                return { text: String(value || ''), icon: '!' };
+                return { text: coerceTextValue(value), icon: '!' };
             case 'code':
                 if (value && typeof value === 'object') {
                     return {
@@ -343,29 +371,36 @@ GUIDELINES:
                 if (value && typeof value === 'object') {
                     return {
                         url: String(value.url || ''),
-                        caption: String(value.caption || '')
+                        caption: coerceTextValue(value.caption || value.text || '')
                     };
                 }
                 return /^https?:\/\//i.test(String(value).trim())
                     ? { url: String(value).trim(), caption: '' }
-                    : { url: '', caption: String(value || '') };
+                    : { url: '', caption: coerceTextValue(value) };
             case 'ai_image':
                 if (value && typeof value === 'object') {
+                    const hasSearchResults = Array.isArray(value.unsplashResults) && value.unsplashResults.length > 0;
+                    const hasImage = Boolean(value.imageUrl || value.url || value.imageAssetId);
                     return {
-                        prompt: String(value.prompt || ''),
-                        imageUrl: value.imageUrl || null,
+                        prompt: coerceTextValue(value.prompt || value.text || value.description || ''),
+                        caption: coerceTextValue(value.caption || ''),
+                        imageUrl: value.imageUrl || value.url || null,
                         model: value.model || null,
                         size: value.size || '1024x1024',
                         quality: value.quality || 'standard',
                         style: value.style || 'vivid',
                         source: value.source === 'unsplash' ? 'unsplash' : 'ai',
-                        status: value.status || 'pending',
+                        status: value.status || (hasSearchResults ? 'search_results' : (hasImage ? 'done' : 'pending')),
+                        unsplashResults: hasSearchResults ? value.unsplashResults : null,
+                        selectedUnsplashId: value.selectedUnsplashId || null,
                         unsplashPhotographer: value.unsplashPhotographer || null,
-                        unsplashPhotographerUrl: value.unsplashPhotographerUrl || null
+                        unsplashPhotographerUrl: value.unsplashPhotographerUrl || null,
+                        imageAssetId: value.imageAssetId || null
                     };
                 }
                 return {
-                    prompt: String(value || ''),
+                    prompt: coerceTextValue(value),
+                    caption: '',
                     imageUrl: null,
                     model: null,
                     size: '1024x1024',
@@ -373,8 +408,11 @@ GUIDELINES:
                     style: 'vivid',
                     source: 'ai',
                     status: 'pending',
+                    unsplashResults: null,
+                    selectedUnsplashId: null,
                     unsplashPhotographer: null,
-                    unsplashPhotographerUrl: null
+                    unsplashPhotographerUrl: null,
+                    imageAssetId: null
                 };
             case 'bookmark':
                 if (value && typeof value === 'object') {
@@ -463,9 +501,64 @@ GUIDELINES:
             ? { type: defaultType, content: blockDefinition }
             : (blockDefinition || {});
         const type = canonicalizeBlockType(definition.type || defaultType);
-        const contentInput = Object.prototype.hasOwnProperty.call(definition, 'content')
+        let contentInput = Object.prototype.hasOwnProperty.call(definition, 'content')
             ? definition.content
             : (Object.prototype.hasOwnProperty.call(definition, 'text') ? definition.text : '');
+
+        if (!Object.prototype.hasOwnProperty.call(definition, 'content') && definition && typeof definition === 'object') {
+            switch (type) {
+                case 'callout':
+                    contentInput = {
+                        text: Object.prototype.hasOwnProperty.call(definition, 'text') ? definition.text : '',
+                        icon: definition.icon
+                    };
+                    break;
+                case 'image':
+                    contentInput = {
+                        url: definition.url || '',
+                        caption: definition.caption || definition.text || ''
+                    };
+                    break;
+                case 'ai_image':
+                    contentInput = {
+                        prompt: definition.prompt || definition.text || '',
+                        caption: definition.caption || '',
+                        imageUrl: definition.imageUrl || definition.url || null,
+                        model: definition.model || null,
+                        size: definition.size || '1024x1024',
+                        quality: definition.quality || 'standard',
+                        style: definition.style || 'vivid',
+                        source: definition.source || 'ai',
+                        status: definition.status,
+                        unsplashResults: definition.unsplashResults || null,
+                        selectedUnsplashId: definition.selectedUnsplashId || null,
+                        unsplashPhotographer: definition.unsplashPhotographer || null,
+                        unsplashPhotographerUrl: definition.unsplashPhotographerUrl || null,
+                        imageAssetId: definition.imageAssetId || null
+                    };
+                    break;
+                case 'bookmark':
+                    contentInput = {
+                        url: definition.url || '',
+                        title: definition.title || '',
+                        description: definition.description || definition.text || '',
+                        favicon: definition.favicon || '',
+                        image: definition.image || ''
+                    };
+                    break;
+                case 'database':
+                    contentInput = {
+                        columns: definition.columns,
+                        rows: definition.rows,
+                        sortColumn: definition.sortColumn,
+                        sortDirection: definition.sortDirection
+                    };
+                    break;
+                default:
+                    break;
+            }
+        }
+
         const block = Blocks.createBlock(type, normalizeActionContent(type, contentInput), {
             children: [],
             formatting: definition.formatting || {},
