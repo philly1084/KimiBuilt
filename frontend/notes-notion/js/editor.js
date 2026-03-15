@@ -22,6 +22,15 @@ const Editor = (function() {
     function normalizeBlocks(blocks = []) {
         return blocks.map((block) => ({
             ...block,
+            ...(block.type === 'callout'
+                ? (() => {
+                    const normalizedCallout = window.Blocks?.normalizeCalloutContent?.(block.content, block.icon || '!');
+                    return normalizedCallout ? {
+                        content: normalizedCallout,
+                        icon: normalizedCallout.icon
+                    } : {};
+                })()
+                : {}),
             children: normalizeBlocks(Array.isArray(block.children) ? block.children : []),
             formatting: block.formatting || {},
         }));
@@ -36,6 +45,7 @@ const Editor = (function() {
 
         if (block.content && typeof block.content === 'object') {
             if (block.type === 'todo') return block.content.text || '';
+            if (block.type === 'callout') return block.content.text || '';
             if (block.type === 'ai') return block.content.prompt || block.content.result || '';
             if (block.type === 'image' || block.type === 'ai_image') {
                 return block.content.caption || block.content.prompt || block.content.url || '';
@@ -69,6 +79,15 @@ const Editor = (function() {
                     text,
                     checked: Boolean(existing?.checked)
                 };
+            case 'callout':
+                return window.Blocks?.normalizeCalloutContent?.({
+                    ...existing,
+                    text
+                }, existing?.icon || '!')
+                    || {
+                        text,
+                        icon: existing?.icon || '!'
+                    };
             case 'code':
                 return {
                     language: existing?.language || 'plain',
@@ -1342,6 +1361,9 @@ const Editor = (function() {
         const sourceContent = newContent !== null ? newContent : block.content;
         block.content = createContentForType(newType, sourceText, sourceContent);
         block.type = newType;
+        if (newType === 'callout' && block.content && typeof block.content === 'object' && block.content.icon) {
+            block.icon = block.content.icon;
+        }
 
         refreshEditor();
         autoSave();
@@ -1364,6 +1386,8 @@ const Editor = (function() {
             : inputOrContent;
 
         if (block.type === 'todo' && typeof block.content === 'object') {
+            block.content.text = typeof nextContent === 'string' ? nextContent : '';
+        } else if (block.type === 'callout' && typeof block.content === 'object') {
             block.content.text = typeof nextContent === 'string' ? nextContent : '';
         } else if (block.type === 'code' && typeof block.content === 'object') {
             block.content.text = typeof nextContent === 'string' ? nextContent : '';

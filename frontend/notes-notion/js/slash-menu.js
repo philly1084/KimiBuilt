@@ -261,15 +261,16 @@ const SlashMenu = (function() {
      * Select an item
      */
     function selectItem(type) {
+        const blockId = currentBlockId;
         hide();
         
         if (onSelectCallback) {
-            onSelectCallback(type, currentBlockId);
+            onSelectCallback(type, blockId);
         }
         
         // Dispatch event for editor
         const event = new CustomEvent('slash-command', {
-            detail: { type, blockId: currentBlockId }
+            detail: { type, blockId }
         });
         document.dispatchEvent(event);
     }

@@ -141,15 +141,24 @@ const Blocks = (function() {
      */
     function createBlock(type = 'text', content = '', options = {}) {
         const id = Storage.generateBlockId();
+        const blockOptions = { ...options };
+        let normalizedContent = content;
+
+        if (type === 'callout') {
+            const normalizedCallout = normalizeCalloutContent(content, blockOptions.icon || '!');
+            normalizedContent = normalizedCallout;
+            blockOptions.icon = normalizedCallout.icon;
+        }
+
         return {
             id,
             type,
-            content,
-            children: options.children || [],
-            formatting: options.formatting || {},
-            color: options.color || null,
+            content: normalizedContent,
+            children: blockOptions.children || [],
+            formatting: blockOptions.formatting || {},
+            color: blockOptions.color || null,
             createdAt: Date.now(),
-            ...options
+            ...blockOptions
         };
     }
     
@@ -270,6 +279,40 @@ const Blocks = (function() {
             rows,
             sortColumn: Number.isInteger(source.sortColumn) ? source.sortColumn : null,
             sortDirection: source.sortDirection === 'desc' ? 'desc' : 'asc'
+        };
+    }
+
+    function normalizeCalloutContent(content, fallbackIcon = '!') {
+        const icon = typeof fallbackIcon === 'string' && fallbackIcon.trim()
+            ? fallbackIcon.trim()
+            : '!';
+
+        if (typeof content === 'string') {
+            return {
+                text: content,
+                icon
+            };
+        }
+
+        if (!content || typeof content !== 'object') {
+            return {
+                text: '',
+                icon
+            };
+        }
+
+        const text = extractResponseText(
+            typeof content.text === 'string'
+                ? content.text
+                : content.content ?? content.message ?? content.response ?? content.result ?? content.prompt ?? content
+        );
+
+        return {
+            ...content,
+            text,
+            icon: typeof content.icon === 'string' && content.icon.trim()
+                ? content.icon.trim()
+                : icon
         };
     }
     
@@ -422,12 +465,16 @@ const Blocks = (function() {
      * Render a callout block
      */
     function renderCalloutBlock(block, isEditable = true) {
+        const content = normalizeCalloutContent(block.content, block.icon || '!');
+        block.content = content;
+        block.icon = content.icon;
+
         const wrapper = document.createElement('div');
         wrapper.className = 'block-content';
         
         const icon = document.createElement('span');
         icon.className = 'callout-icon';
-        icon.textContent = block.icon || '!';
+        icon.textContent = content.icon;
         icon.title = 'Click to change icon';
         
         icon.addEventListener('click', (e) => {
@@ -447,6 +494,10 @@ const Blocks = (function() {
                         const span = e.target.closest('.emoji-grid span');
                         if (span) {
                             block.icon = span.textContent;
+                            block.content = {
+                                ...normalizeCalloutContent(block.content, span.textContent),
+                                icon: span.textContent
+                            };
                             icon.textContent = span.textContent;
                             picker.style.display = 'none';
                             document.removeEventListener('click', handleOutsideClick);
@@ -472,7 +523,7 @@ const Blocks = (function() {
         input.className = 'block-input';
         input.contentEditable = isEditable;
         input.dataset.blockId = block.id;
-        input.innerHTML = formatContent(block.content, block.formatting) || '';
+        input.innerHTML = formatContent(content.text, block.formatting) || '';
         
         const type = BLOCK_TYPES[block.type];
         input.dataset.placeholder = type.placeholder;
@@ -2611,6 +2662,7 @@ const Blocks = (function() {
         getDefaultModel,
         getDefaultImageModel,
         extractResponseText,
+        normalizeCalloutContent,
         // Expose render functions for direct use
         render: {
             text: renderTextBlock,
