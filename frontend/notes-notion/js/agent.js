@@ -597,6 +597,80 @@ GUIDELINES:
         return null;
     }
 
+    function findBalancedNotesActionPayload(text) {
+        const source = String(text || '');
+        if (!source.includes('"actions"')) {
+            return null;
+        }
+
+        for (let start = 0; start < source.length; start++) {
+            if (source[start] !== '{') continue;
+
+            let depth = 0;
+            let inString = false;
+            let isEscaped = false;
+
+            for (let index = start; index < source.length; index++) {
+                const char = source[index];
+
+                if (inString) {
+                    if (isEscaped) {
+                        isEscaped = false;
+                    } else if (char === '\\') {
+                        isEscaped = true;
+                    } else if (char === '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (char === '"') {
+                    inString = true;
+                    continue;
+                }
+
+                if (char === '{') {
+                    depth += 1;
+                    continue;
+                }
+
+                if (char === '}') {
+                    depth -= 1;
+                    if (depth === 0) {
+                        const candidate = source.slice(start, index + 1);
+                        const parsed = tryParseNotesActionPayload(candidate);
+                        if (parsed) {
+                            return {
+                                parsed,
+                                candidate
+                            };
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function looksLikeNotesActionResponse(text) {
+        const value = String(text || '');
+        return /```notes-actions/i.test(value) ||
+            /```json/i.test(value) ||
+            /"assistant_reply"\s*:/i.test(value) ||
+            /"actions"\s*:/i.test(value);
+    }
+
+    function stripStructuredResponseText(text) {
+        const value = String(text || '');
+        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:/i);
+        if (markerIndex >= 0) {
+            return value.slice(0, markerIndex).trim();
+        }
+        return value.trim();
+    }
+
     function extractNotesActionPlan(responseText) {
         const text = String(responseText || '');
         const match = text.match(/```notes-actions\s*([\s\S]*?)```/i);
@@ -604,16 +678,13 @@ GUIDELINES:
             const jsonFenceMatch = text.match(/```json\s*([\s\S]*?)```/i);
             const directPayload = tryParseNotesActionPayload(text.trim());
             const fencedPayload = jsonFenceMatch ? tryParseNotesActionPayload(jsonFenceMatch[1].trim()) : null;
-            const extractedJsonMatch = text.match(/(\{[\s\S]*"actions"\s*:[\s\S]*\})/i);
-            const extractedPayload = extractedJsonMatch
-                ? tryParseNotesActionPayload(extractedJsonMatch[1].trim())
-                : null;
-            const parsed = directPayload || fencedPayload || extractedPayload;
+            const balancedPayload = findBalancedNotesActionPayload(text);
+            const parsed = directPayload || fencedPayload || balancedPayload?.parsed || null;
 
             if (parsed) {
                 const visibleText = parsed.displayText || text
                     .replace(jsonFenceMatch?.[0] || '', '')
-                    .replace(extractedJsonMatch?.[1] || '', '')
+                    .replace(balancedPayload?.candidate || '', '')
                     .trim();
                 return {
                     displayText: visibleText,
@@ -622,8 +693,9 @@ GUIDELINES:
             }
 
             return {
-                displayText: text.trim(),
-                actions: []
+                displayText: looksLikeNotesActionResponse(text) ? '' : text.trim(),
+                actions: [],
+                parseFailed: looksLikeNotesActionResponse(text)
             };
         }
 
@@ -634,8 +706,9 @@ GUIDELINES:
         if (!parsed) {
             console.warn('Failed to parse notes action plan payload');
             return {
-                displayText: visibleText || text.trim(),
-                actions: []
+                displayText: visibleText || '',
+                actions: [],
+                parseFailed: true
             };
         }
 
@@ -841,7 +914,9 @@ GUIDELINES:
             : '';
 
         return {
-            displayText: parsed.displayText || fallbackReply,
+            displayText: parsed.displayText || fallbackReply || (parsed.parseFailed
+                ? 'I prepared page updates, but the response could not be applied automatically. Please try again.'
+                : ''),
             appliedCount: applied.appliedCount
         };
     }
@@ -854,10 +929,11 @@ GUIDELINES:
             return '';
         }
 
-        return value
-            .replace(/```notes-actions[\s\S]*$/i, '')
-            .replace(/```json[\s\S]*?(?:"assistant_reply"|"actions")[\s\S]*$/i, '')
-            .trimEnd();
+        return stripStructuredResponseText(
+            value
+                .replace(/```notes-actions[\s\S]*$/i, '')
+                .replace(/```json[\s\S]*?(?:"assistant_reply"|"actions")[\s\S]*$/i, '')
+        ).trimEnd();
     }
 
     function isInvalidGatewayResponseText(text) {
@@ -2113,8 +2189,11 @@ GUIDELINES:
                         preparedResponse = prepareAssistantResponse(responseText);
                     } catch (parseError) {
                         console.warn('Failed to parse structured response, using raw text:', parseError);
+                        const cleanedText = stripStructuredResponseText(responseText);
                         preparedResponse = {
-                            displayText: responseText.replace(/```notes-actions[\s\S]*?```/g, '').trim(),
+                            displayText: cleanedText || (looksLikeNotesActionResponse(responseText)
+                                ? 'I prepared page updates, but the response could not be applied automatically. Please try again.'
+                                : ''),
                             appliedCount: 0
                         };
                     }
