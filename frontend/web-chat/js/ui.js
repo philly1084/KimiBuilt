@@ -53,6 +53,93 @@ class UIHelpers {
         }
     }
 
+    getGenericFilenameWords() {
+        return new Set([
+            'a', 'an', 'all', 'artifact', 'assistant', 'chat', 'conversation', 'copy',
+            'default', 'diagram', 'document', 'download', 'export', 'file', 'final',
+            'generated', 'generic', 'image', 'kimibuilt', 'latest', 'mermaid', 'new',
+            'notes', 'output', 'page', 'pdf', 'report', 'response', 'result', 'session',
+            'temp', 'test', 'text', 'tmp', 'untitled', 'web',
+        ]);
+    }
+
+    getPleasantFilenameParts() {
+        return {
+            adjectives: [
+                'amber', 'autumn', 'bright', 'calm', 'clear', 'cobalt', 'crisp', 'dawn',
+                'ember', 'gentle', 'golden', 'lively', 'lunar', 'maple', 'mellow', 'misty',
+                'noble', 'orchid', 'quiet', 'silver', 'solar', 'steady', 'velvet', 'warm'
+            ],
+            nouns: [
+                'atlas', 'bloom', 'bridge', 'canvas', 'compass', 'draft', 'field', 'garden',
+                'harbor', 'horizon', 'journal', 'lantern', 'meadow', 'notebook', 'outline',
+                'palette', 'path', 'pocket', 'report', 'sketch', 'story', 'studio', 'summit', 'trail'
+            ],
+        };
+    }
+
+    generatePleasantFilenameBase() {
+        const { adjectives, nouns } = this.getPleasantFilenameParts();
+        const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const noun = nouns[Math.floor(Math.random() * nouns.length)];
+        return `${adjective}-${noun}`;
+    }
+
+    slugifyFilenameBase(value, fallback = 'artifact') {
+        const clean = String(value || fallback)
+            .toLowerCase()
+            .replace(/\.[a-z0-9]+$/i, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        return clean || fallback;
+    }
+
+    createFriendlyFilenameBase(value, fallback = 'artifact') {
+        const slug = this.slugifyFilenameBase(value, fallback);
+        const tokens = slug.split('-').filter(Boolean);
+        if (tokens.length === 0) {
+            return this.generatePleasantFilenameBase();
+        }
+
+        const genericWords = this.getGenericFilenameWords();
+        const meaningfulTokens = tokens.filter((token) => !genericWords.has(token));
+        if (meaningfulTokens.length === 0) {
+            return this.generatePleasantFilenameBase();
+        }
+
+        return meaningfulTokens.slice(0, 6).join('-') || this.generatePleasantFilenameBase();
+    }
+
+    createFriendlyFilenameBaseFromMermaid(source, fallback = 'diagram') {
+        const text = this.normalizeMermaidSource(source || '');
+        const labelMatches = Array.from(text.matchAll(/\[(.*?)\]|\((.*?)\)|"(.*?)"/g))
+            .map((match) => match[1] || match[2] || match[3] || '')
+            .map((label) => label.trim())
+            .filter(Boolean);
+
+        if (labelMatches.length > 0) {
+            return this.createFriendlyFilenameBase(labelMatches[0], fallback);
+        }
+
+        const words = text
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(Boolean)
+            .filter((word) => !new Set([
+                'flowchart', 'graph', 'sequence', 'sequencediagram', 'classdiagram', 'erdiagram',
+                'statediagram', 'gantt', 'pie', 'mindmap', 'gitgraph', 'td', 'lr', 'tb', 'bt',
+                'subgraph', 'end', 'style', 'classdef', 'click', 'section', 'participant', 'actor',
+                'note', 'title'
+            ]).has(word));
+
+        if (words.length > 0) {
+            return this.createFriendlyFilenameBase(words.slice(0, 4).join(' '), fallback);
+        }
+
+        return this.generatePleasantFilenameBase();
+    }
+
     // ============================================
     // Markdown Setup
     // ============================================
@@ -96,7 +183,7 @@ class UIHelpers {
                 const mermaidSource = this.normalizeMermaidSource(normalizedCode);
                 const escapedCode = this.escapeHtml(mermaidSource);
                 const escapedAttrCode = this.escapeHtmlAttr(mermaidSource);
-                const filenameBase = `diagram-${Date.now()}`;
+                const filenameBase = this.createFriendlyFilenameBaseFromMermaid(mermaidSource, 'diagram');
 
                 return `
                     <div class="code-block mermaid-code-block">
@@ -1339,7 +1426,7 @@ class UIHelpers {
     }
 
     getMermaidFilename(baseName = 'diagram', extension = 'mmd') {
-        const safeBase = String(baseName || 'diagram').replace(/\.[a-z0-9]+$/i, '');
+        const safeBase = this.createFriendlyFilenameBase(String(baseName || 'diagram').replace(/\.[a-z0-9]+$/i, ''), 'diagram');
         return `${safeBase}.${extension}`;
     }
 

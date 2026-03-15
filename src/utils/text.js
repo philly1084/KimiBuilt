@@ -75,6 +75,49 @@ function slugifyFilename(value = 'artifact') {
     return clean || 'artifact';
 }
 
+const FILENAME_ADJECTIVES = [
+    'amber', 'autumn', 'bright', 'calm', 'clear', 'cobalt', 'crisp', 'dawn',
+    'ember', 'gentle', 'golden', 'harbor', 'lively', 'lunar', 'maple', 'mellow',
+    'misty', 'noble', 'orchid', 'quiet', 'silver', 'solar', 'steady', 'velvet'
+];
+
+const FILENAME_NOUNS = [
+    'atlas', 'bloom', 'bridge', 'canvas', 'compass', 'draft', 'field', 'garden',
+    'harbor', 'horizon', 'journal', 'lantern', 'meadow', 'notebook', 'outline',
+    'palette', 'path', 'pocket', 'report', 'sketch', 'story', 'studio', 'summit', 'trail'
+];
+
+const GENERIC_FILENAME_WORDS = new Set([
+    'a', 'an', 'all', 'artifact', 'assistant', 'chat', 'conversation', 'copy',
+    'default', 'diagram', 'document', 'download', 'export', 'file', 'final',
+    'generated', 'generic', 'image', 'kimibuilt', 'latest', 'mermaid', 'new',
+    'notes', 'output', 'page', 'pdf', 'report', 'response', 'result', 'session',
+    'temp', 'test', 'text', 'tmp', 'untitled', 'web',
+]);
+
+function generatePleasantFilenamePair() {
+    const adjective = FILENAME_ADJECTIVES[Math.floor(Math.random() * FILENAME_ADJECTIVES.length)];
+    const noun = FILENAME_NOUNS[Math.floor(Math.random() * FILENAME_NOUNS.length)];
+    return `${adjective}-${noun}`;
+}
+
+function createFriendlyFilenameBase(value = 'artifact', fallback = 'artifact') {
+    const slug = slugifyFilename(value || fallback);
+    const tokens = slug.split('-').filter(Boolean);
+
+    if (tokens.length === 0) {
+        return generatePleasantFilenamePair();
+    }
+
+    const meaningfulTokens = tokens.filter((token) => !GENERIC_FILENAME_WORDS.has(token));
+    if (meaningfulTokens.length === 0) {
+        return generatePleasantFilenamePair();
+    }
+
+    const normalized = meaningfulTokens.slice(0, 6).join('-');
+    return normalized || generatePleasantFilenamePair();
+}
+
 function chunkText(text = '', maxLength = 1200) {
     const normalized = normalizeWhitespace(text);
     if (!normalized) return [];
@@ -134,10 +177,12 @@ function chunkText(text = '', maxLength = 1200) {
 }
 
 module.exports = {
+    createFriendlyFilenameBase,
     chunkText,
     decodeXmlEntities,
     escapeHtml,
     escapeXml,
+    generatePleasantFilenamePair,
     normalizeWhitespace,
     slugifyFilename,
     stripHtml,

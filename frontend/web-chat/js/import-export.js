@@ -12,6 +12,52 @@ class ImportExportManager {
         this.progressCallback = null;
     }
 
+    getGenericFilenameWords() {
+        return new Set([
+            'a', 'an', 'all', 'assistant', 'chat', 'conversation', 'default', 'document',
+            'download', 'export', 'file', 'generated', 'generic', 'kimibuilt', 'new',
+            'notes', 'output', 'pdf', 'report', 'response', 'result', 'session', 'temp',
+            'test', 'text', 'tmp', 'untitled', 'web'
+        ]);
+    }
+
+    generatePleasantFilenameBase() {
+        const adjectives = [
+            'amber', 'autumn', 'bright', 'calm', 'clear', 'crisp', 'dawn', 'ember',
+            'gentle', 'golden', 'lively', 'lunar', 'maple', 'mellow', 'misty', 'noble',
+            'orchid', 'quiet', 'silver', 'solar', 'steady', 'velvet', 'warm'
+        ];
+        const nouns = [
+            'atlas', 'bloom', 'bridge', 'canvas', 'compass', 'draft', 'field', 'garden',
+            'harbor', 'horizon', 'journal', 'lantern', 'meadow', 'notebook', 'outline',
+            'palette', 'path', 'report', 'sketch', 'story', 'studio', 'summit', 'trail'
+        ];
+        const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const noun = nouns[Math.floor(Math.random() * nouns.length)];
+        return `${adjective}-${noun}`;
+    }
+
+    createFriendlyFilenameBase(value, fallback = 'conversation') {
+        const slug = String(value || fallback)
+            .toLowerCase()
+            .replace(/\.[a-z0-9]+$/i, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+
+        const tokens = slug.split('-').filter(Boolean);
+        if (tokens.length === 0) {
+            return this.generatePleasantFilenameBase();
+        }
+
+        const genericWords = this.getGenericFilenameWords();
+        const meaningfulTokens = tokens.filter((token) => !genericWords.has(token));
+        if (meaningfulTokens.length === 0) {
+            return this.generatePleasantFilenameBase();
+        }
+
+        return meaningfulTokens.slice(0, 6).join('-') || this.generatePleasantFilenameBase();
+    }
+
     // ============================================
     // Export Functions
     // ============================================
@@ -24,28 +70,27 @@ class ImportExportManager {
             throw new Error('No messages to export');
         }
 
-        const timestamp = new Date().toISOString().split('T')[0];
-        const sessionTitle = (session?.title || 'conversation').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const sessionTitle = this.createFriendlyFilenameBase(session?.title || 'conversation', 'conversation');
 
         switch (format) {
             case 'markdown':
-                return this.exportAsMarkdown(messages, session, timestamp, sessionTitle);
+                return this.exportAsMarkdown(messages, session, sessionTitle);
             case 'json':
-                return this.exportAsJSON(messages, session, timestamp, sessionTitle);
+                return this.exportAsJSON(messages, session, sessionTitle);
             case 'txt':
-                return this.exportAsText(messages, session, timestamp, sessionTitle);
+                return this.exportAsText(messages, session, sessionTitle);
             case 'html':
-                return this.exportAsHTML(messages, session, timestamp, sessionTitle);
+                return this.exportAsHTML(messages, session, sessionTitle);
             case 'docx':
-                return await this.exportAsDOCX(messages, session, timestamp, sessionTitle);
+                return await this.exportAsDOCX(messages, session, sessionTitle);
             case 'pdf':
-                return await this.exportAsPDF(messages, session, timestamp, sessionTitle);
+                return await this.exportAsPDF(messages, session, sessionTitle);
             default:
                 throw new Error(`Unsupported export format: ${format}`);
         }
     }
 
-    exportAsMarkdown(messages, session, timestamp, sessionTitle) {
+    exportAsMarkdown(messages, session, sessionTitle) {
         const date = new Date().toLocaleString();
         let md = `# ${session?.title || 'Conversation'}\n\n`;
         md += `**Date:** ${date}  \n`;
@@ -83,12 +128,12 @@ class ImportExportManager {
 
         return {
             content: md,
-            filename: `${sessionTitle}_${timestamp}.md`,
+            filename: `${sessionTitle}.md`,
             mimeType: 'text/markdown'
         };
     }
 
-    exportAsJSON(messages, session, timestamp, sessionTitle) {
+    exportAsJSON(messages, session, sessionTitle) {
         const exportData = {
             exportFormat: 'kimibuilt-conversation',
             version: '2.0',
@@ -113,12 +158,12 @@ class ImportExportManager {
 
         return {
             content: JSON.stringify(exportData, null, 2),
-            filename: `${sessionTitle}_${timestamp}.json`,
+            filename: `${sessionTitle}.json`,
             mimeType: 'application/json'
         };
     }
 
-    exportAsText(messages, session, timestamp, sessionTitle) {
+    exportAsText(messages, session, sessionTitle) {
         const date = new Date().toLocaleString();
         let text = `${session?.title || 'Conversation'}\n`;
         text += `Date: ${date}\n`;
@@ -156,12 +201,12 @@ class ImportExportManager {
 
         return {
             content: text,
-            filename: `${sessionTitle}_${timestamp}.txt`,
+            filename: `${sessionTitle}.txt`,
             mimeType: 'text/plain'
         };
     }
 
-    exportAsHTML(messages, session, timestamp, sessionTitle) {
+    exportAsHTML(messages, session, sessionTitle) {
         const date = new Date().toLocaleString();
         const theme = document.documentElement.getAttribute('data-theme') || 'dark';
         
@@ -371,12 +416,12 @@ class ImportExportManager {
 
         return {
             content: html,
-            filename: `${sessionTitle}_${timestamp}.html`,
+            filename: `${sessionTitle}.html`,
             mimeType: 'text/html'
         };
     }
 
-    async exportAsDOCX(messages, session, timestamp, sessionTitle) {
+    async exportAsDOCX(messages, session, sessionTitle) {
         // Check if docx library is loaded
         if (typeof docx === 'undefined') {
             await this.loadScript('https://unpkg.com/docx@8.5.0/build/index.js');
@@ -485,7 +530,7 @@ class ImportExportManager {
         const blob = await Packer.toBlob(doc);
         return {
             blob: blob,
-            filename: `${sessionTitle}_${timestamp}.docx`,
+            filename: `${sessionTitle}.docx`,
             mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         };
     }
@@ -619,13 +664,13 @@ class ImportExportManager {
         return children.length > 0 ? children : [new docx.TextRun(text)];
     }
 
-    async exportAsPDF(messages, session, timestamp, sessionTitle) {
+    async exportAsPDF(messages, session, sessionTitle) {
         // Check if html2pdf is loaded
         if (typeof html2pdf === 'undefined') {
             await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js');
         }
 
-        const htmlContent = this.exportAsHTML(messages, session, timestamp, sessionTitle).content;
+        const htmlContent = this.exportAsHTML(messages, session, sessionTitle).content;
         
         // Create a temporary container
         const container = document.createElement('div');
@@ -638,7 +683,7 @@ class ImportExportManager {
         try {
             const opt = {
                 margin: [15, 15],
-                filename: `${sessionTitle}_${timestamp}.pdf`,
+                filename: `${sessionTitle}.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
                 html2canvas: { 
                     scale: 2,
@@ -656,7 +701,7 @@ class ImportExportManager {
             
             return {
                 blob: pdfBlob,
-                filename: `${sessionTitle}_${timestamp}.pdf`,
+                filename: `${sessionTitle}.pdf`,
                 mimeType: 'application/pdf'
             };
         } finally {

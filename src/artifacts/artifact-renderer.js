@@ -5,7 +5,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { pathToFileURL } = require('url');
 const { createZip } = require('../utils/zip');
-const { escapeHtml, escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
+const { createFriendlyFilenameBase, escapeHtml, escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
 const { FORMAT_EXTENSIONS, FORMAT_MIME_TYPES, normalizeFormat } = require('./constants');
 const { config } = require('../config');
 
@@ -532,7 +532,7 @@ async function renderPdfViaBrowser(html, title) {
     }
 
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-pdf-'));
-    const baseName = slugifyFilename(title || 'document');
+    const baseName = createFriendlyFilenameBase(title || 'document', 'document');
     const htmlPath = path.join(tempDir, `${baseName}.html`);
     const pdfPath = path.join(tempDir, `${baseName}.pdf`);
 
@@ -556,7 +556,7 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
     const normalizedFormat = normalizeFormat(format);
     const extension = FORMAT_EXTENSIONS[normalizedFormat] || '.txt';
     const mimeType = FORMAT_MIME_TYPES[normalizedFormat] || 'application/octet-stream';
-    const filename = `${slugifyFilename(title)}${extension}`;
+    const filename = `${createFriendlyFilenameBase(title, 'artifact')}${extension}`;
 
     if (normalizedFormat === 'html') {
         const html = ensureHtmlDocument(content, title);
