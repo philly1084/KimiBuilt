@@ -302,7 +302,7 @@ const Blocks = (function() {
         }
 
         const text = extractResponseText(
-            typeof content.text === 'string'
+            Object.prototype.hasOwnProperty.call(content, 'text')
                 ? content.text
                 : content.content ?? content.message ?? content.response ?? content.result ?? content.prompt ?? content
         );
@@ -2553,7 +2553,10 @@ const Blocks = (function() {
         // Handle non-string inputs
         if (typeof text !== 'string') {
             if (text === null || text === undefined) return '';
-            text = String(text);
+            text = extractResponseText(text);
+            if (typeof text !== 'string') {
+                text = String(text);
+            }
         }
         
         // Escape HTML

@@ -6,6 +6,7 @@
 const Agent = (function() {
     const SHARED_MODEL_STORAGE_KEY = 'kimibuilt_default_model';
     const LEGACY_MODEL_STORAGE_KEY = 'notes_agent_model';
+    const NOTES_COLOR_OPTIONS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
     let initPromise = null;
 
     // ============================================
@@ -71,6 +72,8 @@ const Agent = (function() {
                 const checked = content.checked ? '[x]' : '[ ]';
                 return `${checked} ${content.text || ''}`.trim();
             }
+            case 'callout':
+                return `${content.icon || block.icon || '!'} ${content.text || ''}`.trim();
             case 'code':
                 return content.text || '';
             case 'mermaid':
@@ -82,14 +85,25 @@ const Agent = (function() {
                 return parts.join('\n');
             }
             case 'image':
-            case 'ai_image':
                 return content.caption || content.alt || content.url || 'Image block';
+            case 'ai_image': {
+                const source = content.source === 'unsplash' ? 'Unsplash' : 'AI image';
+                const details = [
+                    content.prompt || '',
+                    content.unsplashPhotographer ? `photo by ${content.unsplashPhotographer}` : '',
+                    content.imageUrl || ''
+                ].filter(Boolean);
+                return details.length ? `${source}: ${details.join(' | ')}` : source;
+            }
             case 'bookmark':
                 return content.title || content.description || content.url || 'Bookmark block';
             case 'database': {
                 const columns = Array.isArray(content.columns) ? content.columns.length : 0;
                 const rows = Array.isArray(content.rows) ? content.rows.length : 0;
-                return `Database with ${columns} columns and ${rows} rows`;
+                const columnList = Array.isArray(content.columns) ? content.columns.join(', ') : '';
+                return columnList
+                    ? `Database with ${columns} columns (${columnList}) and ${rows} rows`
+                    : `Database with ${columns} columns and ${rows} rows`;
             }
             case 'math':
                 return content.text || content.latex || '';
@@ -110,7 +124,11 @@ const Agent = (function() {
 
         return pageContext.blocks.map((block) => {
             const indent = '  '.repeat(block.depth);
-            const prefix = `${indent}- [${block.id}] ${block.type}`;
+            const styleParts = [];
+            if (block.color) styleParts.push(`bg:${block.color}`);
+            if (block.textColor) styleParts.push(`text:${block.textColor}`);
+            const styleSuffix = styleParts.length ? ` {${styleParts.join(', ')}}` : '';
+            const prefix = `${indent}- [${block.id}] ${block.type}${styleSuffix}`;
             const preview = truncateText(block.content, 220);
             return preview ? `${prefix}: ${preview}` : prefix;
         }).join('\n');
@@ -128,8 +146,14 @@ const Agent = (function() {
         }
 
         const selectedBlock = pageContext?.blocks?.find((block) => block.id === selectedBlockId) || null;
+        const selectedBlockStyle = selectedBlock
+            ? [
+                selectedBlock.color ? `bg:${selectedBlock.color}` : '',
+                selectedBlock.textColor ? `text:${selectedBlock.textColor}` : ''
+            ].filter(Boolean).join(', ')
+            : '';
         const selectedBlockSummary = selectedBlock
-            ? `[${selectedBlock.id}] ${selectedBlock.type}: ${truncateText(selectedBlock.content, 220)}`
+            ? `[${selectedBlock.id}] ${selectedBlock.type}${selectedBlockStyle ? ` {${selectedBlockStyle}}` : ''}: ${truncateText(selectedBlock.content, 220)}`
             : (selectedBlockId ? `Selected block id: ${selectedBlockId}` : 'No block is selected.');
 
         return {
@@ -157,6 +181,8 @@ const Agent = (function() {
             `Properties: ${properties}`,
             `Last updated: ${formatTimestamp(pageContext.lastUpdated)}`,
             `Selection: ${selection.selectedBlockSummary}`,
+            `Supported text colors: default, ${NOTES_COLOR_OPTIONS.join(', ')}`,
+            `Supported block background colors: default, ${NOTES_COLOR_OPTIONS.join(', ')}`,
         ];
 
         if (selection.selectedText) {
@@ -238,7 +264,21 @@ GUIDELINES:
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
 - Do not invent block IDs - only use IDs that exist in the page
 - Keep assistant_reply concise unless user asks for detailed explanation
-- If generating Mermaid diagrams, include clean diagram code in a \`\`\`mermaid block`;
+- If generating Mermaid diagrams, include clean diagram code in a \`\`\`mermaid block
+- Additional supported blocks and capabilities:
+  - toggle: expand/collapse section with plain string content
+  - math: equation block using {text, displayMode}
+  - ai_image: use {prompt, source: "ai"|"unsplash", imageUrl, model, size, quality, style}
+  - database: use {columns, rows, sortColumn, sortDirection}
+  - ai: inline AI block using {prompt, result, model}
+- For callout blocks, use structured content like {text: "...", icon: "💡"}.
+- Use image for known image URLs or uploaded/static images.
+- Use ai_image with source: "ai" for generated illustrations, posters, covers, concept art, mockups, and diagrams.
+- Use ai_image with source: "unsplash" for real photography, mood boards, people, offices, products, and reference imagery.
+- You may optionally add "color" and "textColor" to any inserted/replaced block using: ${NOTES_COLOR_OPTIONS.join(', ')}.
+- Use styling intentionally for hierarchy and variety, for example yellow or blue callouts, gray supporting notes, red warnings, and green status summaries.
+- For structured blocks (todo, callout, code, math, mermaid, image, ai_image, bookmark, database, ai), use structured objects rather than plain strings.
+- When improving layout or variety, prefer mixing headings, callouts, quotes, lists, databases, images, dividers, and tasteful color/textColor choices instead of only plain paragraphs`;
     }
 
     function normalizeActionContent(type, content) {
@@ -253,6 +293,14 @@ GUIDELINES:
                     };
                 }
                 return { text: String(value || ''), checked: false };
+            case 'callout':
+                if (value && typeof value === 'object') {
+                    return {
+                        text: String(value.text || value.content || value.message || ''),
+                        icon: String(value.icon || '!')
+                    };
+                }
+                return { text: String(value || ''), icon: '!' };
             case 'code':
                 if (value && typeof value === 'object') {
                     return {
@@ -308,7 +356,12 @@ GUIDELINES:
                         imageUrl: value.imageUrl || null,
                         model: value.model || null,
                         size: value.size || '1024x1024',
-                        quality: value.quality || 'standard'
+                        quality: value.quality || 'standard',
+                        style: value.style || 'vivid',
+                        source: value.source === 'unsplash' ? 'unsplash' : 'ai',
+                        status: value.status || 'pending',
+                        unsplashPhotographer: value.unsplashPhotographer || null,
+                        unsplashPhotographerUrl: value.unsplashPhotographerUrl || null
                     };
                 }
                 return {
@@ -316,7 +369,12 @@ GUIDELINES:
                     imageUrl: null,
                     model: null,
                     size: '1024x1024',
-                    quality: 'standard'
+                    quality: 'standard',
+                    style: 'vivid',
+                    source: 'ai',
+                    status: 'pending',
+                    unsplashPhotographer: null,
+                    unsplashPhotographerUrl: null
                 };
             case 'bookmark':
                 if (value && typeof value === 'object') {
@@ -376,13 +434,24 @@ GUIDELINES:
             bullet_list: 'bulleted_list',
             'bullet-list': 'bulleted_list',
             bulletedlist: 'bulleted_list',
+            togglelist: 'toggle',
+            collapsible: 'toggle',
             numberedlist: 'numbered_list',
             number_list: 'numbered_list',
             numberlist: 'numbered_list',
             'number-list': 'numbered_list',
             checklist: 'todo',
             to_do: 'todo',
-            todo: 'todo'
+            todo: 'todo',
+            calloutbox: 'callout',
+            equation: 'math',
+            formula: 'math',
+            diagram: 'mermaid',
+            aiimage: 'ai_image',
+            'ai-image': 'ai_image',
+            image_generation: 'ai_image',
+            imagegeneration: 'ai_image',
+            table: 'database'
         };
 
         return aliases[normalized] || normalized || 'text';
@@ -538,7 +607,16 @@ GUIDELINES:
                             content: Object.prototype.hasOwnProperty.call(rawAction, 'content')
                                 ? rawAction.content
                                 : existing.content,
-                            children: rawAction.keepChildren === false ? [] : (existing.children || [])
+                            children: rawAction.keepChildren === false ? [] : (existing.children || []),
+                            color: Object.prototype.hasOwnProperty.call(rawAction, 'color')
+                                ? rawAction.color
+                                : existing.color,
+                            textColor: Object.prototype.hasOwnProperty.call(rawAction, 'textColor')
+                                ? rawAction.textColor
+                                : existing.textColor,
+                            icon: Object.prototype.hasOwnProperty.call(rawAction, 'icon')
+                                ? rawAction.icon
+                                : existing.icon
                         }, { defaultType: nextType });
                         editor.replaceBlockWithBlocks?.(targetBlockId, [replacement]);
                         focusBlockId = replacement.id;
@@ -1214,7 +1292,9 @@ GUIDELINES:
                     type: block.type,
                     content: extractBlockTextValue(block),
                     depth: depth,
-                    hasChildren: block.children && block.children.length > 0
+                    hasChildren: block.children && block.children.length > 0,
+                    color: block.color || null,
+                    textColor: block.textColor || null
                 });
                 if (block.children && block.children.length > 0) {
                     result.push(...flattenBlocks(block.children, depth + 1));
