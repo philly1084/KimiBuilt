@@ -103,7 +103,11 @@ function serializeCookie(name, value, options = {}) {
 }
 
 function isAuthEnabled() {
-    return Boolean(config.auth.username && config.auth.password && config.auth.jwtSecret);
+    return Boolean(
+        config.auth.username
+        && config.auth.password
+        && config.auth.jwtSecret,
+    );
 }
 
 function safeEqualString(left, right) {

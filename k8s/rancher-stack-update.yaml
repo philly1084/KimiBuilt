@@ -492,13 +492,13 @@ spec:
               subPath: default.conf
           readinessProbe:
             httpGet:
-              path: /
+              path: /login
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /
+              path: /login
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 30

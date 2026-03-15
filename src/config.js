@@ -76,11 +76,12 @@ function validate() {
         config.auth.jwtSecret,
     ].filter(Boolean).length;
 
-    if (authConfigCount > 0 && authConfigCount < 3) {
-        errors.push('Auth requires username, password, and jwt secret together (LILLYBUILT_AUTH_* or KIMIBUILT_AUTH_*)');
-    }
     if (errors.length > 0) {
         throw new Error(`Config validation failed:\n  - ${errors.join('\n  - ')}`);
+    }
+
+    if (authConfigCount > 0 && authConfigCount < 3) {
+        console.warn('[Config] Partial auth configuration detected. Auth is disabled until username, password, and jwt secret are all set.');
     }
 }
 

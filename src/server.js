@@ -41,6 +41,11 @@ validate();
 const app = express();
 app.set('trust proxy', 1);
 
+let startupState = {
+    ready: false,
+    startedAt: new Date().toISOString(),
+};
+
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -133,6 +138,21 @@ app.get('/health', async (_req, res) => {
     res.status(allOk ? 200 : 503).json({
         status: allOk ? 'healthy' : 'degraded',
         components: checks,
+        timestamp: new Date().toISOString(),
+    });
+});
+
+app.get('/live', (_req, res) => {
+    res.status(200).json({
+        status: 'live',
+        timestamp: new Date().toISOString(),
+    });
+});
+
+app.get('/ready', (_req, res) => {
+    res.status(startupState.ready ? 200 : 503).json({
+        status: startupState.ready ? 'ready' : 'starting',
+        startedAt: startupState.startedAt,
         timestamp: new Date().toISOString(),
     });
 });
@@ -317,8 +337,10 @@ async function start() {
         app.locals.agentOrchestrator = agentOrchestrator;
         app.locals.dashboardController = new DashboardController(agentOrchestrator);
         setDashboardController(app.locals.dashboardController);
+        startupState.ready = true;
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);
+        startupState.ready = true;
     }
 
     server.listen(config.port, '0.0.0.0', () => {
