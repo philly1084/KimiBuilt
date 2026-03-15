@@ -510,14 +510,15 @@ const Sidebar = (function() {
         if (!page) return;
         
         Storage.setCurrentPageId(pageId);
-        
-        // Update UI
-        updatePageHeader(page);
-        
-        // Load into editor
+
+        // Load into editor first so any internal page-switch save logic still
+        // sees the previous page header values, not the next page's values.
         if (window.Editor) {
             window.Editor.loadPage(page);
         }
+
+        // Update UI
+        updatePageHeader(page);
         
         // Update active state in sidebar
         document.querySelectorAll('.page-tree-item').forEach(el => {

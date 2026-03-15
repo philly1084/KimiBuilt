@@ -758,6 +758,11 @@ const Editor = (function() {
      * Load a page into the editor
      */
     function loadPage(page) {
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+        }
+
         if (currentPage && currentPage.id !== page?.id) {
             flushActiveBlockContent({ scheduleSave: false });
             savePage();
