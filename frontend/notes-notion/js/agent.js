@@ -601,6 +601,145 @@ GUIDELINES:
         return null;
     }
 
+    function isNotesBlockDefinition(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return false;
+        }
+
+        return typeof value.type === 'string' &&
+            Object.prototype.hasOwnProperty.call(value, 'content');
+    }
+
+    function detectMermaidDiagramType(text) {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) return 'flowchart';
+        if (normalized.startsWith('sequencediagram')) return 'sequence';
+        if (normalized.startsWith('classdiagram')) return 'class';
+        if (normalized.startsWith('statediagram')) return 'state';
+        if (normalized.startsWith('erdiagram')) return 'er';
+        if (normalized.startsWith('gantt')) return 'gantt';
+        if (normalized.startsWith('pie')) return 'pie';
+        if (normalized.startsWith('mindmap')) return 'mindmap';
+        if (normalized.startsWith('gitgraph')) return 'gitgraph';
+        return 'flowchart';
+    }
+
+    function extractLeadingMermaidBlock(text, stopIndex = null) {
+        const source = String(text || '');
+        const slice = source.slice(0, stopIndex == null ? source.length : stopIndex).trim();
+        if (!slice) return null;
+
+        const cleaned = slice
+            .replace(/^[\s"'`]+/, '')
+            .replace(/[\s"',}]+$/, '')
+            .trim();
+        const decoded = cleaned
+            .replace(/^mermaid\\n/i, '')
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"')
+            .trim();
+
+        if (!decoded) return null;
+        if (!/^(flowchart|graph|sequencediagram|classdiagram|statediagram|erdiagram|gantt|pie|mindmap|gitgraph)\b/i.test(decoded)) {
+            return null;
+        }
+
+        return {
+            type: 'mermaid',
+            content: {
+                text: decoded,
+                diagramType: detectMermaidDiagramType(decoded),
+            },
+        };
+    }
+
+    function extractBlockFragmentActions(text) {
+        const source = String(text || '');
+        const blockMatches = [];
+
+        for (let start = 0; start < source.length; start++) {
+            if (source[start] !== '{') continue;
+
+            let depth = 0;
+            let inString = false;
+            let isEscaped = false;
+
+            for (let index = start; index < source.length; index++) {
+                const char = source[index];
+
+                if (inString) {
+                    if (isEscaped) {
+                        isEscaped = false;
+                    } else if (char === '\\') {
+                        isEscaped = true;
+                    } else if (char === '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (char === '"') {
+                    inString = true;
+                    continue;
+                }
+
+                if (char === '{') {
+                    depth += 1;
+                    continue;
+                }
+
+                if (char === '}') {
+                    depth -= 1;
+                    if (depth === 0) {
+                        const candidate = source.slice(start, index + 1);
+                        try {
+                            const parsed = JSON.parse(candidate);
+                            if (isNotesBlockDefinition(parsed)) {
+                                blockMatches.push({ parsed, start, end: index + 1 });
+                            }
+                        } catch (error) {
+                            // Ignore malformed candidates and continue scanning.
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        const recoveredBlocks = [];
+        if (blockMatches.length > 0) {
+            const leadingMermaid = extractLeadingMermaidBlock(source, blockMatches[0].start);
+            if (leadingMermaid) {
+                recoveredBlocks.push(leadingMermaid);
+            }
+
+            let previousEnd = blockMatches[0].start;
+            blockMatches.forEach((match, index) => {
+                const separator = source.slice(index === 0 ? blockMatches[0].start : previousEnd, match.start);
+                if (index > 0 && /[^\s,\]\[]/.test(separator)) {
+                    return;
+                }
+
+                recoveredBlocks.push(match.parsed);
+                previousEnd = match.end;
+            });
+        } else {
+            const mermaidOnly = extractLeadingMermaidBlock(source);
+            if (mermaidOnly) {
+                recoveredBlocks.push(mermaidOnly);
+            }
+        }
+
+        if (!recoveredBlocks.length) {
+            return null;
+        }
+
+        return [{
+            op: 'append_to_page',
+            blocks: recoveredBlocks,
+        }];
+    }
+
     function findBalancedNotesActionPayload(text) {
         const source = String(text || '');
         if (!source.includes('"actions"')) {
@@ -663,12 +802,15 @@ GUIDELINES:
         return /```notes-actions/i.test(value) ||
             /```json/i.test(value) ||
             /"assistant_reply"\s*:/i.test(value) ||
-            /"actions"\s*:/i.test(value);
+            /"actions"\s*:/i.test(value) ||
+            (/"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i.test(value) &&
+                /"content"\s*:/i.test(value)) ||
+            /^\s*["'`]*mermaid\\n(?:flowchart|graph|sequencediagram|classdiagram|statediagram|erdiagram|gantt|pie|mindmap|gitgraph)\b/i.test(value.trim());
     }
 
     function stripStructuredResponseText(text) {
         const value = String(text || '');
-        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:/i);
+        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"|^\s*["'`]*mermaid\\n(?:flowchart|graph|sequencediagram|classdiagram|statediagram|erdiagram|gantt|pie|mindmap|gitgraph)\b/i);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
         }
@@ -683,7 +825,10 @@ GUIDELINES:
             const directPayload = tryParseNotesActionPayload(text.trim());
             const fencedPayload = jsonFenceMatch ? tryParseNotesActionPayload(jsonFenceMatch[1].trim()) : null;
             const balancedPayload = findBalancedNotesActionPayload(text);
-            const parsed = directPayload || fencedPayload || balancedPayload?.parsed || null;
+            const fragmentActions = extractBlockFragmentActions(text);
+            const parsed = directPayload || fencedPayload || balancedPayload?.parsed || (fragmentActions
+                ? { displayText: '', actions: fragmentActions }
+                : null);
 
             if (parsed) {
                 const visibleText = parsed.displayText || text

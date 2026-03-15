@@ -501,6 +501,11 @@ const Sidebar = (function() {
      * Load a page
      */
     function loadPage(pageId) {
+        const currentPageId = window.Editor?.getCurrentPage?.()?.id || null;
+        if (currentPageId && currentPageId !== pageId) {
+            window.Editor?.savePage?.();
+        }
+
         const page = Storage.getPage(pageId);
         if (!page) return;
         
