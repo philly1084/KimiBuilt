@@ -222,7 +222,9 @@ function requireAuth(req, res, next) {
         return next();
     }
 
-    if (isApiRequest(req) || req.accepts(['json', 'html']) === 'json' || req.xhr) {
+    const isBrowserNavigation = (req.method === 'GET' || req.method === 'HEAD') && !isApiRequest(req) && !req.xhr;
+
+    if (!isBrowserNavigation) {
         return res.status(401).json({
             error: {
                 message: 'Authentication required',

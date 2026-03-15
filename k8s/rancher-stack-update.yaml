@@ -57,6 +57,12 @@ data:
 
       client_max_body_size 25m;
 
+      location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+      }
+
       location /ws {
         proxy_pass http://backend:3000/ws;
         proxy_http_version 1.1;
@@ -419,13 +425,13 @@ spec:
                 name: kimibuilt-secrets
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /live
               port: 3000
             initialDelaySeconds: 20
             periodSeconds: 30
@@ -492,13 +498,13 @@ spec:
               subPath: default.conf
           readinessProbe:
             httpGet:
-              path: /login
+              path: /healthz
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /login
+              path: /healthz
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 30
