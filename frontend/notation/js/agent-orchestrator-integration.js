@@ -1,7 +1,7 @@
 /**
  * Agent SDK Integration for Notation Helper Frontend
  * 
- * Integrates the KimiBuilt Agent SDK with the notation helper
+ * Integrates the LillyBuilt Agent SDK with the notation helper
  * providing enhanced AI capabilities for notation expansion, explanation, and validation.
  */
 

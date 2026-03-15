@@ -1,5 +1,5 @@
 /**
- * Import/Export Module for KimiBuilt AI Chat
+ * Import/Export Module for LillyBuilt AI Chat
  * Handles DOCX, PDF, HTML, Markdown, JSON, and TXT formats
  */
 
@@ -15,7 +15,7 @@ class ImportExportManager {
     getGenericFilenameWords() {
         return new Set([
             'a', 'an', 'all', 'assistant', 'chat', 'conversation', 'default', 'document',
-            'download', 'export', 'file', 'generated', 'generic', 'kimibuilt', 'new',
+            'download', 'export', 'file', 'generated', 'generic', 'lillybuilt', 'new',
             'notes', 'output', 'pdf', 'report', 'response', 'result', 'session', 'temp',
             'test', 'text', 'tmp', 'untitled', 'web'
         ]);
@@ -144,7 +144,7 @@ class ImportExportManager {
 
     exportAsJSON(messages, session, sessionTitle) {
         const exportData = {
-            exportFormat: 'kimibuilt-conversation',
+            exportFormat: 'lillybuilt-conversation',
             version: '2.0',
             session: {
                 id: session?.id,
@@ -273,7 +273,7 @@ class ImportExportManager {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${this.escapeHtml(session?.title || 'Conversation')} - KimiBuilt AI</title>
+    <title>${this.escapeHtml(session?.title || 'Conversation')} - LillyBuilt AI</title>
     <style>
         :root {
             --bg-primary: #0d0d0d;
@@ -418,7 +418,7 @@ class ImportExportManager {
         ${messagesHtml}
     </div>
     <div class="footer">
-        Exported from KimiBuilt AI
+        Exported from LillyBuilt AI
     </div>
 </body>
 </html>`;
@@ -908,8 +908,8 @@ class ImportExportManager {
         const text = await file.text();
         const data = JSON.parse(text);
         
-        // Check if it's a KimiBuilt export
-        if (data.exportFormat === 'kimibuilt-conversation' && data.messages) {
+        // Check if it's a LillyBuilt export
+        if ((data.exportFormat === 'lillybuilt-conversation' || data.exportFormat === 'kimibuilt-conversation') && data.messages) {
             return {
                 format: 'json',
                 title: data.session?.title || file.name.replace(/\.json$/i, ''),
@@ -956,7 +956,7 @@ class ImportExportManager {
             };
         }
         
-        throw new Error('Unrecognized JSON format. Expected KimiBuilt export, OpenAI format, or array of messages.');
+        throw new Error('Unrecognized JSON format. Expected LillyBuilt export, OpenAI format, or an array of messages.');
     }
 
     // ============================================

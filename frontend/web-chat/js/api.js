@@ -1,6 +1,6 @@
 /**
- * API Client for KimiBuilt AI Chat using OpenAI SDK
- * Handles API communication with the KimiBuilt backend
+ * API Client for LillyBuilt AI Chat using OpenAI SDK
+ * Handles API communication with the LillyBuilt backend
  */
 
 // Configuration
@@ -11,7 +11,7 @@ const CURRENT_ORIGIN = `${window.location.protocol}//${window.location.host}`;
 const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     ? 'http://localhost:3000/v1'
     : `${CURRENT_ORIGIN}/v1`;
-const API_KEY = 'any-key'; // Required by SDK but not validated by KimiBuilt
+const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 
 // Retry configuration
@@ -85,7 +85,7 @@ class OpenAIAPIClient extends EventTarget {
             return 'Invalid request. Please check your message format and try again.';
         }
         if (response?.status === 401) {
-            return 'Authentication failed. Please check your API key.';
+            return 'Your login session is missing or expired. Sign in again.';
         }
         if (response?.status === 403) {
             return 'Access denied. You may not have permission to use this feature.';

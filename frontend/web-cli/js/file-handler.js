@@ -644,7 +644,7 @@ class FileHandler {
      */
     exportAsTxt(session, content) {
         const timestamp = new Date().toLocaleString();
-        const output = `KimiBuilt Session Export
+        const output = `LillyBuilt Session Export
 ========================
 Exported: ${timestamp}
 Session ID: ${session.sessionId}
@@ -653,7 +653,7 @@ Messages: ${session.history?.length || 0}
 
 ${content}`;
         
-        this.downloadFile(output, `kimibuilt-session-${this.getDateStamp()}.txt`, 'text/plain');
+        this.downloadFile(output, `lillybuilt-session-${this.getDateStamp()}.txt`, 'text/plain');
         return true;
     }
 
@@ -662,7 +662,7 @@ ${content}`;
      */
     exportAsJson(session) {
         const output = JSON.stringify(session, null, 2);
-        this.downloadFile(output, `kimibuilt-session-${this.getDateStamp()}.json`, 'application/json');
+        this.downloadFile(output, `lillybuilt-session-${this.getDateStamp()}.json`, 'application/json');
         return true;
     }
 
@@ -671,7 +671,7 @@ ${content}`;
      */
     exportAsMarkdown(session, content) {
         const timestamp = new Date().toLocaleString();
-        let md = `# KimiBuilt Session Export
+        let md = `# LillyBuilt Session Export
 
 **Exported:** ${timestamp}  
 **Session ID:** ${session.sessionId}  
@@ -693,7 +693,7 @@ ${content}`;
             });
         }
         
-        this.downloadFile(md, `kimibuilt-session-${this.getDateStamp()}.md`, 'text/markdown');
+        this.downloadFile(md, `lillybuilt-session-${this.getDateStamp()}.md`, 'text/markdown');
         return true;
     }
 
@@ -709,7 +709,7 @@ ${content}`;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KimiBuilt Session Export</title>
+    <title>LillyBuilt Session Export</title>
     <style>
         body {
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -781,7 +781,7 @@ ${content}`;
 </head>
 <body>
     <div class="header">
-        <h1>KimiBuilt Session Export</h1>
+        <h1>LillyBuilt Session Export</h1>
         <div class="meta">
             <div>Exported: ${timestamp}</div>
             <div>Session ID: ${session.sessionId}</div>
@@ -795,7 +795,7 @@ ${content}`;
 </body>
 </html>`;
         
-        this.downloadFile(html, `kimibuilt-session-${this.getDateStamp()}.html`, 'text/html');
+        this.downloadFile(html, `lillybuilt-session-${this.getDateStamp()}.html`, 'text/html');
         return true;
     }
 
@@ -811,7 +811,7 @@ ${content}`;
         const wordHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
 <head>
     <meta charset="utf-8">
-    <title>KimiBuilt Session</title>
+    <title>LillyBuilt Session</title>
     <style>
         body { font-family: Calibri, Arial, sans-serif; }
         .header { margin-bottom: 20px; }
@@ -823,7 +823,7 @@ ${content}`;
 </head>
 <body>
     <div class="header">
-        <h1>KimiBuilt Session Export</h1>
+        <h1>LillyBuilt Session Export</h1>
         <p><strong>Exported:</strong> ${timestamp}</p>
         <p><strong>Session ID:</strong> ${session.sessionId}</p>
         <p><strong>Mode:</strong> ${session.mode}</p>
@@ -836,7 +836,7 @@ ${content}`;
 </body>
 </html>`;
         
-        this.downloadFile(wordHtml, `kimibuilt-session-${this.getDateStamp()}.doc`, 'application/msword');
+        this.downloadFile(wordHtml, `lillybuilt-session-${this.getDateStamp()}.doc`, 'application/msword');
         return true;
     }
 
@@ -853,7 +853,7 @@ ${content}`;
 <!DOCTYPE html>
 <html>
 <head>
-    <title>KimiBuilt Session Export</title>
+    <title>LillyBuilt Session Export</title>
     <style>
         @page { size: A4; margin: 20mm; }
         body {
@@ -890,7 +890,7 @@ ${content}`;
 </head>
 <body>
     <div class="header">
-        <h1>KimiBuilt Session Export</h1>
+        <h1>LillyBuilt Session Export</h1>
         <div class="meta">
             <div>Exported: ${timestamp}</div>
             <div>Session ID: ${session.sessionId}</div>

@@ -5,12 +5,13 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const { config } = require('../../config');
 
 class SettingsController {
   constructor() {
     this.settings = {
       general: {
-        appName: 'KimiBuilt Agent SDK',
+        appName: 'LillyBuilt Agent SDK',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         dateFormat: 'YYYY-MM-DD HH:mm:ss',
         dataRetention: 30, // days
@@ -272,6 +273,7 @@ class SettingsController {
   getPublicSettings() {
     const publicSettings = JSON.parse(JSON.stringify(this.settings));
     const ssh = publicSettings.integrations?.ssh;
+    const authEnabled = Boolean(config.auth.username && config.auth.password && config.auth.jwtSecret);
 
     if (ssh) {
       const effective = this.getEffectiveSshConfig();
@@ -284,6 +286,10 @@ class SettingsController {
       ssh.host = effective.host || '';
       ssh.port = effective.port || 22;
       ssh.username = effective.username || '';
+    }
+
+    if (publicSettings.security) {
+      publicSettings.security.requireAuth = authEnabled;
     }
 
     return publicSettings;
@@ -322,7 +328,7 @@ class SettingsController {
   getDefaultSettings() {
     return {
       general: {
-        appName: 'KimiBuilt Agent SDK',
+        appName: 'LillyBuilt Agent SDK',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         dateFormat: 'YYYY-MM-DD HH:mm:ss',
         dataRetention: 30,

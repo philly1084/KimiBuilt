@@ -1,5 +1,5 @@
 /**
- * KimiBuilt Canvas - Main Application
+ * LillyBuilt Canvas - Main Application
  * Front-end #3 of 4 - Side-by-side editor for structured content
  */
 
@@ -57,7 +57,7 @@ class CanvasApp {
         // Setup help modal
         this.setupHelpModal();
 
-        console.log('KimiBuilt Canvas initialized');
+        console.log('LillyBuilt Canvas initialized');
     }
 
     /**

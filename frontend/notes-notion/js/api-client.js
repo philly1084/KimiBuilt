@@ -1,5 +1,5 @@
 /**
- * API Client for KimiBuilt Notes Notion
+ * API Client for LillyBuilt Notes
  * Mirrors web-chat API client for making AI calls to the backend
  * Supports streaming chat, model fetching, and health checks
  */
@@ -75,7 +75,7 @@ function parseErrorMessage(error, response) {
         return 'Invalid request. Please check your message format and try again.';
     }
     if (response?.status === 401) {
-        return 'Authentication failed. Please check your API key.';
+        return 'Your login session is missing or expired. Sign in again.';
     }
     if (response?.status === 403) {
         return 'Access denied. You may not have permission to use this feature.';

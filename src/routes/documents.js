@@ -54,6 +54,11 @@ const convertSchema = {
   toFormat: { required: true, type: 'string' }
 };
 
+const exportNotesPagePdfSchema = {
+  page: { required: true, type: 'object' },
+  options: { required: false, type: 'object' }
+};
+
 /**
  * GET /api/documents/templates
  * List all available templates
@@ -419,6 +424,36 @@ router.post('/preview', async (req, res, next) => {
       preview,
       metadata: document.metadata
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/documents/export-notes-page-pdf
+ * Render a Notes page object into a styled PDF document
+ */
+router.post('/export-notes-page-pdf', validate(exportNotesPagePdfSchema), async (req, res, next) => {
+  try {
+    const { page, options = {} } = req.body;
+    const documentService = req.app.locals.documentService;
+    const pdfGenerator = documentService?.generators?.pdf;
+
+    if (!pdfGenerator?.generateFromNotesPage) {
+      return res.status(503).json({
+        error: { message: 'Notes PDF export is not available' }
+      });
+    }
+
+    const document = await pdfGenerator.generateFromNotesPage(page, options);
+    const filename = documentService.generateFilename(page?.title || 'notes-export', 'pdf');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Document-Filename', filename);
+    res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata || {}));
+
+    res.send(document.buffer);
   } catch (err) {
     next(err);
   }

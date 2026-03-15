@@ -1,5 +1,5 @@
 /**
- * Storage Module - LocalStorage persistence for Notion-style notes
+ * Storage Module - LocalStorage persistence for Lilly-style notes
  * Enhanced with error handling for Tracking Prevention and quota limits
  */
 
@@ -37,7 +37,7 @@ const Storage = (function() {
                     {
                         id: 'block-2',
                         type: 'text',
-                        content: 'This is a Notion-style block-based editor with AI support. Here\'s what you can do:',
+                        content: 'This is a Lilly-style block-based editor with AI support. Here\'s what you can do:',
                         children: [],
                         formatting: {},
                         color: null,

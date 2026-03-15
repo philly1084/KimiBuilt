@@ -50,6 +50,14 @@ const config = {
         pdfTimeoutMs: parseInt(process.env.ARTIFACT_PDF_TIMEOUT_MS, 10) || 15000,
     },
 
+    auth: {
+        username: process.env.LILLYBUILT_AUTH_USERNAME || process.env.KIMIBUILT_AUTH_USERNAME || '',
+        password: process.env.LILLYBUILT_AUTH_PASSWORD || process.env.KIMIBUILT_AUTH_PASSWORD || '',
+        jwtSecret: process.env.LILLYBUILT_JWT_SECRET || process.env.KIMIBUILT_JWT_SECRET || '',
+        cookieName: process.env.LILLYBUILT_AUTH_COOKIE || 'lillybuilt_auth',
+        tokenTtlSeconds: parseInt(process.env.LILLYBUILT_AUTH_TTL_SECONDS || process.env.KIMIBUILT_AUTH_TTL_SECONDS, 10) || (12 * 60 * 60),
+    },
+
     search: {
         provider: process.env.SEARCH_PROVIDER || 'perplexity',
         perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
@@ -61,6 +69,15 @@ function validate() {
     const errors = [];
     if (!config.openai.apiKey) {
         errors.push('OPENAI_API_KEY is required');
+    }
+    const authConfigCount = [
+        config.auth.username,
+        config.auth.password,
+        config.auth.jwtSecret,
+    ].filter(Boolean).length;
+
+    if (authConfigCount > 0 && authConfigCount < 3) {
+        errors.push('Auth requires username, password, and jwt secret together (LILLYBUILT_AUTH_* or KIMIBUILT_AUTH_*)');
     }
     if (errors.length > 0) {
         throw new Error(`Config validation failed:\n  - ${errors.join('\n  - ')}`);

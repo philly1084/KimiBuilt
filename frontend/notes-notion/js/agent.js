@@ -225,7 +225,7 @@ const Agent = (function() {
             ? pageContext.outline.map((heading) => `- [${heading.id}] ${heading.content}`).join('\n')
             : '- No headings yet';
 
-        return `You are an AI assistant editing a Notion-style block-based document.
+        return `You are an AI assistant editing a Lilly-style block-based document.
 
 CURRENT PAGE: "${pageContext?.title || 'Untitled'}"
 
@@ -624,23 +624,54 @@ GUIDELINES:
         return 'flowchart';
     }
 
+    const MERMAID_DIAGRAM_START_PATTERN = /^(flowchart|graph|sequencediagram|classdiagram|statediagram(?:-v2)?|erdiagram|gantt|pie|mindmap|gitgraph)\b/i;
+
+    function normalizeMermaidSourceText(text) {
+        let value = String(text || '').trim();
+        if (!value) return '';
+
+        const fencedMatch = value.match(/```mermaid\s*([\s\S]*?)```/i);
+        if (fencedMatch?.[1]) {
+            value = fencedMatch[1].trim();
+        } else {
+            value = value
+                .replace(/^```mermaid\s*/i, '')
+                .replace(/```$/, '')
+                .trim();
+        }
+
+        return value
+            .replace(/^[\s"'`]+/, '')
+            .replace(/[\s"',}]+$/, '')
+            .replace(/^mermaid(?:\\r\\n|\\n|\r?\n)+/i, '')
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"')
+            .trim();
+    }
+
+    function looksLikeMermaidSource(text) {
+        return MERMAID_DIAGRAM_START_PATTERN.test(normalizeMermaidSourceText(text));
+    }
+
+    function startsWithMermaidResponse(text) {
+        const value = String(text || '').trim();
+        if (!value) return false;
+
+        return /^```mermaid\b/i.test(value) ||
+            /^["'`]*mermaid(?:\\r\\n|\\n|\r?\n)+/i.test(value) ||
+            looksLikeMermaidSource(value);
+    }
+
     function extractLeadingMermaidBlock(text, stopIndex = null) {
         const source = String(text || '');
         const slice = source.slice(0, stopIndex == null ? source.length : stopIndex).trim();
         if (!slice) return null;
 
-        const cleaned = slice
-            .replace(/^[\s"'`]+/, '')
-            .replace(/[\s"',}]+$/, '')
-            .trim();
-        const decoded = cleaned
-            .replace(/^mermaid\\n/i, '')
-            .replace(/\\n/g, '\n')
-            .replace(/\\"/g, '"')
-            .trim();
+        const decoded = normalizeMermaidSourceText(slice);
 
         if (!decoded) return null;
-        if (!/^(flowchart|graph|sequencediagram|classdiagram|statediagram|erdiagram|gantt|pie|mindmap|gitgraph)\b/i.test(decoded)) {
+        if (!MERMAID_DIAGRAM_START_PATTERN.test(decoded)) {
             return null;
         }
 
@@ -805,12 +836,16 @@ GUIDELINES:
             /"actions"\s*:/i.test(value) ||
             (/"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i.test(value) &&
                 /"content"\s*:/i.test(value)) ||
-            /^\s*["'`]*mermaid\\n(?:flowchart|graph|sequencediagram|classdiagram|statediagram|erdiagram|gantt|pie|mindmap|gitgraph)\b/i.test(value.trim());
+            startsWithMermaidResponse(value);
     }
 
     function stripStructuredResponseText(text) {
         const value = String(text || '');
-        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"|^\s*["'`]*mermaid\\n(?:flowchart|graph|sequencediagram|classdiagram|statediagram|erdiagram|gantt|pie|mindmap|gitgraph)\b/i);
+        if (startsWithMermaidResponse(value)) {
+            return '';
+        }
+
+        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
         }
@@ -831,10 +866,12 @@ GUIDELINES:
                 : null);
 
             if (parsed) {
-                const visibleText = parsed.displayText || text
-                    .replace(jsonFenceMatch?.[0] || '', '')
-                    .replace(balancedPayload?.candidate || '', '')
-                    .trim();
+                const visibleText = typeof parsed.displayText === 'string'
+                    ? parsed.displayText
+                    : text
+                        .replace(jsonFenceMatch?.[0] || '', '')
+                        .replace(balancedPayload?.candidate || '', '')
+                        .trim();
                 return {
                     displayText: visibleText,
                     actions: parsed.actions
@@ -1281,8 +1318,8 @@ GUIDELINES:
         'o1-mini': 'o1 Mini',
         'o3-mini': 'o3 Mini',
         'o4-mini': 'o4 Mini',
-        'kimi-k2': 'Kimi K2',
-        'kimi-k2-mini': 'Kimi K2 Mini',
+        'kimi-k2': 'Lilly K2',
+        'kimi-k2-mini': 'Lilly K2 Mini',
         'claude-sonnet-4': 'Claude Sonnet 4',
         'claude-haiku-4': 'Claude Haiku 4',
         'claude-3-opus': 'Claude 3 Opus',
@@ -1329,13 +1366,13 @@ GUIDELINES:
         },
         { 
             id: 'kimi-k2', 
-            name: 'Kimi K2', 
+            name: 'Lilly K2', 
             provider: 'kimi',
             description: 'Advanced reasoning and coding'
         },
         { 
             id: 'kimi-k2-mini', 
-            name: 'Kimi K2 Mini', 
+            name: 'Lilly K2 Mini', 
             provider: 'kimi',
             description: 'Quick responses, everyday tasks'
         },

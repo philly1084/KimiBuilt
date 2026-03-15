@@ -153,7 +153,7 @@ class ExportManager {
     _generateFilename(canvasType, extension) {
         const now = new Date();
         const timestamp = now.toISOString().slice(0, 19).replace(/:/g, '-');
-        return `kimibuilt-${canvasType}-${timestamp}${extension}`;
+        return `lillybuilt-${canvasType}-${timestamp}${extension}`;
     }
 
     /**
@@ -173,7 +173,7 @@ class ExportManager {
         // Create print-only content
         const printContent = `
             <div class="print-header">
-                <h1>Exported from KimiBuilt Canvas</h1>
+                <h1>Exported from LillyBuilt Canvas</h1>
                 <p>Generated on ${new Date().toLocaleString()}</p>
             </div>
             <div class="print-content">${element.innerHTML}</div>

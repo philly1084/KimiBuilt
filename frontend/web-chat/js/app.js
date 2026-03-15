@@ -1,5 +1,5 @@
 /**
- * Main Application for KimiBuilt AI Chat
+ * Main Application for LillyBuilt AI Chat
  * Orchestrates all components and handles user interactions
  * Now using OpenAI SDK for API communication
  */
@@ -1409,7 +1409,7 @@ class ChatApp {
     exportAllConversations() {
         const content = sessionManager.exportAll();
         const timestamp = new Date().toISOString().split('T')[0];
-        const filename = `kimibuilt_all_conversations_${timestamp}.json`;
+        const filename = `lillybuilt_all_conversations_${timestamp}.json`;
         
         this.downloadFile(content, filename, 'application/json');
         uiHelpers.closeExportModal();

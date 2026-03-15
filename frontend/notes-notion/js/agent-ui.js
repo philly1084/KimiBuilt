@@ -671,7 +671,7 @@ const AgentUI = (function() {
         const names = {
             anthropic: 'Anthropic',
             google: 'Google',
-            kimi: 'Kimi',
+            kimi: 'Lilly',
             meta: 'Meta',
             mistral: 'Mistral',
             openai: 'OpenAI',

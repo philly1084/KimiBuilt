@@ -78,6 +78,26 @@ class PdfGenerator {
     });
   }
 
+  async generateFromNotesPage(page, options = {}) {
+    await this.initialize();
+
+    const docDefinition = this.buildNotesPageDefinition(page, options);
+    const pdfDocGenerator = this.pdfMake.createPdf(docDefinition);
+
+    return new Promise((resolve, reject) => {
+      pdfDocGenerator.getBuffer((buffer) => {
+        resolve({
+          buffer,
+          metadata: {
+            format: 'pdf',
+            title: page?.title || 'Untitled',
+            blockCount: Array.isArray(page?.blocks) ? page.blocks.length : 0,
+          }
+        });
+      });
+    });
+  }
+
   /**
    * Build document definition from template
    * @param {Object} template - Template data
@@ -259,6 +279,609 @@ class PdfGenerator {
         margin: [0, 20, 0, 0]
       }) : undefined
     };
+  }
+
+  buildNotesPageDefinition(page, options = {}) {
+    const safePage = page && typeof page === 'object' ? page : {};
+    const blocks = Array.isArray(safePage.blocks) ? safePage.blocks : [];
+    const properties = Array.isArray(safePage.properties) ? safePage.properties : [];
+    const title = this.safeText(safePage.title) || 'Untitled';
+    const titleLine = [this.safeText(safePage.icon), title].filter(Boolean).join(' ');
+    const outline = this.collectOutline(blocks);
+    const exportedAt = new Date().toLocaleString();
+    const updatedAt = safePage.updatedAt || safePage.lastEditedAt || safePage.lastModifiedAt || Date.now();
+
+    const content = [
+      { text: 'LillyBuilt Notes Export', style: 'notesEyebrow' },
+      { text: titleLine, style: 'notesTitle' },
+      {
+        columns: [
+          {
+            width: '*',
+            stack: [
+              {
+                text: this.safeText(safePage.cover)
+                  ? 'Styled PDF export generated from your Notes page.'
+                  : 'Styled PDF export generated from your Notes page.',
+                style: 'notesSubtitle'
+              }
+            ]
+          },
+          {
+            width: 180,
+            table: {
+              widths: ['*'],
+              body: [[{
+                stack: [
+                  {
+                    columns: [
+                      { width: 64, text: 'Updated', style: 'notesMetaLabel' },
+                      { width: '*', text: this.formatDate(updatedAt), style: 'notesMetaValue' }
+                    ]
+                  },
+                  {
+                    columns: [
+                      { width: 64, text: 'Blocks', style: 'notesMetaLabel' },
+                      { width: '*', text: String(this.countBlocks(blocks)), style: 'notesMetaValue' }
+                    ],
+                    margin: [0, 6, 0, 0]
+                  },
+                  {
+                    columns: [
+                      { width: 64, text: 'Exported', style: 'notesMetaLabel' },
+                      { width: '*', text: exportedAt, style: 'notesMetaValue' }
+                    ],
+                    margin: [0, 6, 0, 0]
+                  }
+                ],
+                fillColor: '#F7F8FC',
+                margin: [10, 10, 10, 10],
+                border: [false, false, false, false]
+              }]]
+            },
+            layout: this.createCardLayout('#D8E1F0')
+          }
+        ],
+        columnGap: 20,
+        margin: [0, 0, 0, 20]
+      }
+    ];
+
+    if (properties.length > 0) {
+      content.push({ text: 'Page Properties', style: 'notesSectionLabel' });
+      content.push(this.buildNotesPropertiesTable(properties));
+    }
+
+    if (outline.length >= 3 && options.includeOutline !== false) {
+      content.push({ text: 'Contents', style: 'notesSectionLabel' });
+      content.push({
+        ol: outline.map((item) => item.text),
+        margin: [0, 0, 0, 16],
+        color: '#30425A'
+      });
+    }
+
+    content.push({
+      canvas: [{
+        type: 'line',
+        x1: 0,
+        y1: 0,
+        x2: 515,
+        y2: 0,
+        lineWidth: 1,
+        lineColor: '#D8E1F0'
+      }],
+      margin: [0, 0, 0, 18]
+    });
+
+    content.push(...this.buildNotesBlocks(blocks, 0));
+
+    if (content.length <= 4) {
+      content.push({
+        text: 'This page is currently empty.',
+        style: 'notesMuted'
+      });
+    }
+
+    return {
+      pageSize: 'A4',
+      pageMargins: [48, 56, 48, 54],
+      defaultStyle: {
+        font: 'Roboto',
+        fontSize: 11,
+        lineHeight: 1.45,
+        color: '#1F2937'
+      },
+      styles: {
+        notesEyebrow: {
+          fontSize: 9,
+          bold: true,
+          color: '#5B6F8A',
+          characterSpacing: 1.2,
+          margin: [0, 0, 0, 6]
+        },
+        notesTitle: {
+          fontSize: 26,
+          bold: true,
+          color: '#132238',
+          margin: [0, 0, 0, 8]
+        },
+        notesSubtitle: {
+          fontSize: 11,
+          color: '#516173',
+          margin: [0, 2, 0, 0]
+        },
+        notesSectionLabel: {
+          fontSize: 10,
+          bold: true,
+          color: '#5B6F8A',
+          margin: [0, 12, 0, 8]
+        },
+        notesHeading1: {
+          fontSize: 19,
+          bold: true,
+          color: '#132238',
+          margin: [0, 20, 0, 10]
+        },
+        notesHeading2: {
+          fontSize: 15,
+          bold: true,
+          color: '#1D3557',
+          margin: [0, 16, 0, 8]
+        },
+        notesHeading3: {
+          fontSize: 12.5,
+          bold: true,
+          color: '#274C77',
+          margin: [0, 12, 0, 6]
+        },
+        notesParagraph: {
+          margin: [0, 0, 0, 8]
+        },
+        notesListItem: {
+          margin: [0, 0, 0, 4]
+        },
+        notesCodeLabel: {
+          fontSize: 9,
+          bold: true,
+          color: '#64748B',
+          margin: [0, 0, 0, 4]
+        },
+        notesCode: {
+          fontSize: 9,
+          color: '#E5EEF8'
+        },
+        notesMetaLabel: {
+          fontSize: 9,
+          bold: true,
+          color: '#62748A'
+        },
+        notesMetaValue: {
+          fontSize: 9,
+          color: '#213247'
+        },
+        notesMuted: {
+          fontSize: 10,
+          color: '#6B7280',
+          italics: true,
+          margin: [0, 0, 0, 8]
+        },
+        notesLinkTitle: {
+          color: '#0F4C81',
+          bold: true
+        },
+        notesLinkUrl: {
+          fontSize: 9,
+          color: '#3B82F6'
+        }
+      },
+      content,
+      footer: (currentPage, pageCount) => ({
+        margin: [48, 10, 48, 0],
+        columns: [
+          { text: `${title} - PDF export`, fontSize: 9, color: '#6B7280' },
+          { text: `Page ${currentPage} of ${pageCount}`, alignment: 'right', fontSize: 9, color: '#6B7280' }
+        ]
+      })
+    };
+  }
+
+  buildNotesPropertiesTable(properties = []) {
+    const rows = properties
+      .filter((property) => property && (property.key || property.value))
+      .map((property) => ([
+        { text: this.safeText(property.key), bold: true, color: '#334155' },
+        { text: this.safeText(property.value), color: '#1F2937' }
+      ]));
+
+    return {
+      table: {
+        widths: [120, '*'],
+        body: rows.length > 0 ? rows : [[{ text: 'No properties', colSpan: 2, color: '#6B7280' }, {}]]
+      },
+      layout: this.createCardLayout('#E3E8F2'),
+      margin: [0, 0, 0, 14]
+    };
+  }
+
+  buildNotesBlocks(blocks = [], depth = 0) {
+    const nodes = [];
+
+    blocks.forEach((block) => {
+      nodes.push(...this.buildNotesBlock(block, depth));
+    });
+
+    return nodes;
+  }
+
+  buildNotesBlock(block, depth = 0) {
+    if (!block || typeof block !== 'object') {
+      return [];
+    }
+
+    const indent = Math.min(depth * 16, 72);
+    const text = this.extractNotesBlockText(block);
+    const nodes = [];
+    const appendChildren = () => {
+      if (Array.isArray(block.children) && block.children.length > 0) {
+        nodes.push(...this.buildNotesBlocks(block.children, depth + 1));
+      }
+    };
+
+    switch (block.type) {
+      case 'heading_1':
+        if (text) {
+          nodes.push({ text, style: 'notesHeading1', margin: [indent, 20, 0, 10] });
+        }
+        appendChildren();
+        return nodes;
+
+      case 'heading_2':
+        if (text) {
+          nodes.push({ text, style: 'notesHeading2', margin: [indent, 16, 0, 8] });
+        }
+        appendChildren();
+        return nodes;
+
+      case 'heading_3':
+        if (text) {
+          nodes.push({ text, style: 'notesHeading3', margin: [indent, 12, 0, 6] });
+        }
+        appendChildren();
+        return nodes;
+
+      case 'bulleted_list':
+        if (text) {
+          nodes.push({ text: `- ${text}`, style: 'notesListItem', margin: [indent + 8, 0, 0, 4] });
+        }
+        appendChildren();
+        return nodes;
+
+      case 'numbered_list':
+        if (text) {
+          nodes.push({ text: `1. ${text}`, style: 'notesListItem', margin: [indent + 8, 0, 0, 4] });
+        }
+        appendChildren();
+        return nodes;
+
+      case 'todo': {
+        const checked = block.content && typeof block.content === 'object' && block.content.checked;
+        const todoText = this.safeText(block.content && typeof block.content === 'object' ? block.content.text : block.content);
+        if (todoText) {
+          nodes.push({ text: `${checked ? '[x]' : '[ ]'} ${todoText}`, style: 'notesListItem', margin: [indent + 8, 0, 0, 5] });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'quote':
+        if (text) {
+          nodes.push({
+            table: {
+              widths: [4, '*'],
+              body: [[
+                { text: '', fillColor: '#8FB3D9', border: [false, false, false, false] },
+                {
+                  text,
+                  italics: true,
+                  color: '#334155',
+                  fillColor: '#F8FAFC',
+                  margin: [12, 10, 10, 10],
+                  border: [false, false, false, false]
+                }
+              ]]
+            },
+            layout: 'noBorders',
+            margin: [indent, 4, 0, 12]
+          });
+        }
+        appendChildren();
+        return nodes;
+
+      case 'callout': {
+        const palette = this.getColorPalette(block.color || 'yellow');
+        const icon = this.safeText(block.icon || block.content?.icon || '!');
+        const calloutText = this.safeText(block.content && typeof block.content === 'object' ? block.content.text : block.content);
+        if (calloutText) {
+          nodes.push({
+            table: {
+              widths: [22, '*'],
+              body: [[
+                {
+                  text: icon || '!',
+                  bold: true,
+                  color: palette.accent,
+                  fillColor: palette.background,
+                  margin: [0, 10, 0, 0],
+                  alignment: 'center',
+                  border: [false, false, false, false]
+                },
+                {
+                  text: calloutText,
+                  fillColor: palette.background,
+                  color: '#243447',
+                  margin: [0, 10, 12, 10],
+                  border: [false, false, false, false]
+                }
+              ]]
+            },
+            layout: this.createCardLayout(palette.border),
+            margin: [indent, 6, 0, 12]
+          });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'code': {
+        const codeText = this.safeText(block.content && typeof block.content === 'object' ? block.content.text : block.content);
+        const language = this.safeText(block.content && typeof block.content === 'object' ? block.content.language : '');
+        if (codeText) {
+          nodes.push({
+            table: {
+              widths: ['*'],
+              body: [[{
+                stack: [
+                  language ? { text: language.toUpperCase(), style: 'notesCodeLabel' } : null,
+                  { text: codeText, style: 'notesCode' }
+                ].filter(Boolean),
+                fillColor: '#0F172A',
+                margin: [12, 10, 12, 10],
+                border: [false, false, false, false]
+              }]]
+            },
+            layout: this.createCardLayout('#1E293B'),
+            margin: [indent, 6, 0, 14]
+          });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'divider':
+        nodes.push({
+          canvas: [{
+            type: 'line',
+            x1: indent,
+            y1: 0,
+            x2: 515,
+            y2: 0,
+            lineWidth: 1,
+            lineColor: '#E2E8F0'
+          }],
+          margin: [0, 10, 0, 10]
+        });
+        appendChildren();
+        return nodes;
+
+      case 'bookmark': {
+        const url = this.safeText(block.content?.url);
+        const title = this.safeText(block.content?.title) || url || 'Link';
+        const description = this.safeText(block.content?.description);
+        if (url || title) {
+          nodes.push({
+            table: {
+              widths: ['*'],
+              body: [[{
+                stack: [
+                  { text: title, style: 'notesLinkTitle', link: url || undefined },
+                  description ? { text: description, margin: [0, 4, 0, 0], color: '#475569' } : null,
+                  url ? { text: url, style: 'notesLinkUrl', link: url, margin: [0, 6, 0, 0] } : null
+                ].filter(Boolean),
+                fillColor: '#F8FBFF',
+                margin: [12, 10, 12, 10],
+                border: [false, false, false, false]
+              }]]
+            },
+            layout: this.createCardLayout('#C7DBF4'),
+            margin: [indent, 6, 0, 12]
+          });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'image':
+      case 'ai_image': {
+        const label = block.type === 'ai_image' ? 'AI Image' : 'Image';
+        const prompt = this.safeText(block.content?.prompt || block.content?.caption || block.content?.alt);
+        const url = this.safeText(block.content?.imageUrl || block.content?.url);
+        nodes.push({
+          table: {
+            widths: ['*'],
+            body: [[{
+              stack: [
+                { text: label, style: 'notesCodeLabel' },
+                prompt ? { text: prompt, color: '#1F2937' } : null,
+                url ? { text: url, style: 'notesLinkUrl', link: url, margin: [0, 6, 0, 0] } : { text: 'No linked asset available.', style: 'notesMuted' }
+              ].filter(Boolean),
+              fillColor: '#F8FAFC',
+              margin: [12, 10, 12, 10],
+              border: [false, false, false, false]
+            }]]
+          },
+          layout: this.createCardLayout('#D7E0EA'),
+          margin: [indent, 6, 0, 12]
+        });
+        appendChildren();
+        return nodes;
+      }
+
+      case 'database': {
+        const columns = Array.isArray(block.content?.columns) ? block.content.columns : [];
+        const rows = Array.isArray(block.content?.rows) ? block.content.rows : [];
+        if (columns.length > 0) {
+          const body = [
+            columns.map((column) => ({
+              text: this.safeText(column),
+              bold: true,
+              fillColor: '#EAF1FB',
+              color: '#1E3A5F'
+            })),
+            ...rows.map((row) => columns.map((_, index) => this.safeText(Array.isArray(row) ? row[index] : '')))
+          ];
+          nodes.push({
+            table: {
+              headerRows: 1,
+              widths: columns.map(() => '*'),
+              body
+            },
+            layout: 'lightHorizontalLines',
+            margin: [indent, 6, 0, 14]
+          });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'mermaid': {
+        const mermaidText = this.safeText(block.content?.text || block.content);
+        const diagramType = this.safeText(block.content?.diagramType || 'diagram');
+        if (mermaidText) {
+          nodes.push({
+            table: {
+              widths: ['*'],
+              body: [[{
+                stack: [
+                  { text: `Mermaid diagram (${diagramType})`, style: 'notesCodeLabel' },
+                  { text: mermaidText, fontSize: 9, color: '#334155' }
+                ],
+                fillColor: '#F8FAFC',
+                margin: [12, 10, 12, 10],
+                border: [false, false, false, false]
+              }]]
+            },
+            layout: this.createCardLayout('#D7E0EA'),
+            margin: [indent, 6, 0, 12]
+          });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'math': {
+        const mathText = this.safeText(block.content?.text || block.content?.latex || block.content);
+        if (mathText) {
+          nodes.push({
+            text: mathText,
+            fontSize: 10,
+            margin: [indent, 2, 0, 10],
+            color: '#1D3557'
+          });
+        }
+        appendChildren();
+        return nodes;
+      }
+
+      case 'toggle':
+        if (text) {
+          nodes.push({ text: `Toggle: ${text}`, style: 'notesParagraph', margin: [indent, 0, 0, 8], bold: true });
+        }
+        appendChildren();
+        return nodes;
+
+      default:
+        if (text) {
+          nodes.push({ text, style: 'notesParagraph', margin: [indent, 0, 0, 8] });
+        }
+        appendChildren();
+        return nodes;
+    }
+  }
+
+  extractNotesBlockText(block) {
+    if (!block) return '';
+    if (typeof block.content === 'string') return block.content;
+    if (!block.content || typeof block.content !== 'object') return '';
+
+    if (typeof block.content.text === 'string') return block.content.text;
+    if (typeof block.content.prompt === 'string') return block.content.prompt;
+    if (typeof block.content.result === 'string') return block.content.result;
+    if (typeof block.content.caption === 'string') return block.content.caption;
+    if (typeof block.content.title === 'string') return block.content.title;
+    if (typeof block.content.url === 'string') return block.content.url;
+    return '';
+  }
+
+  collectOutline(blocks = [], depth = 0, items = []) {
+    blocks.forEach((block) => {
+      if (block?.type === 'heading_1' || block?.type === 'heading_2' || block?.type === 'heading_3') {
+        const text = this.extractNotesBlockText(block);
+        if (text) {
+          items.push({ text, depth });
+        }
+      }
+      if (Array.isArray(block?.children) && block.children.length > 0) {
+        this.collectOutline(block.children, depth + 1, items);
+      }
+    });
+
+    return items;
+  }
+
+  countBlocks(blocks = []) {
+    return blocks.reduce((count, block) => {
+      const childCount = Array.isArray(block?.children) ? this.countBlocks(block.children) : 0;
+      return count + 1 + childCount;
+    }, 0);
+  }
+
+  safeText(value) {
+    if (value == null) return '';
+    return String(value).replace(/\s+/g, ' ').trim();
+  }
+
+  formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return 'Unknown';
+    }
+    return date.toLocaleString();
+  }
+
+  createCardLayout(strokeColor = '#D8E1F0') {
+    return {
+      hLineWidth: () => 1,
+      vLineWidth: () => 1,
+      hLineColor: () => strokeColor,
+      vLineColor: () => strokeColor,
+    };
+  }
+
+  getColorPalette(colorName = 'gray') {
+    const palettes = {
+      gray: { background: '#F3F4F6', border: '#D1D5DB', accent: '#4B5563' },
+      brown: { background: '#F5ECE3', border: '#D6B89A', accent: '#8B5E3C' },
+      orange: { background: '#FFF1E8', border: '#FDBA8C', accent: '#C2410C' },
+      yellow: { background: '#FEF9C3', border: '#FCD34D', accent: '#A16207' },
+      green: { background: '#ECFDF3', border: '#86EFAC', accent: '#15803D' },
+      blue: { background: '#EFF6FF', border: '#93C5FD', accent: '#1D4ED8' },
+      purple: { background: '#F5F3FF', border: '#C4B5FD', accent: '#6D28D9' },
+      pink: { background: '#FDF2F8', border: '#F9A8D4', accent: '#BE185D' },
+      red: { background: '#FEF2F2', border: '#FCA5A5', accent: '#B91C1C' },
+    };
+
+    return palettes[colorName] || palettes.gray;
   }
 
   /**

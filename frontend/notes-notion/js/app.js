@@ -18,7 +18,7 @@
     async function init() {
         if (state.initialized) return;
         
-        console.log('[Notes] Initializing Notes - Notion Style');
+        console.log('[Notes] Initializing Notes - Lilly Style');
         
         // Initialize connection status UI
         updateConnectionStatus('checking');

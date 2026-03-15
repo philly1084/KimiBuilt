@@ -1,5 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
+const { getRuntimeSupport } = require('./runtime-support');
 
 const TOOL_DOCS_DIR = path.join(__dirname);
 
@@ -43,7 +44,15 @@ async function readToolDoc(toolId) {
 }
 
 async function getToolDocMetadata(toolId) {
-  const support = TOOL_SUPPORT[toolId] || { status: 'unknown', notes: [] };
+  const staticSupport = TOOL_SUPPORT[toolId] || { status: 'unknown', notes: [] };
+  const runtimeSupport = await getRuntimeSupport(toolId);
+  const support = runtimeSupport
+    ? {
+        status: runtimeSupport.status,
+        notes: [...new Set([...(staticSupport.notes || []), ...(runtimeSupport.notes || [])])],
+        runtime: runtimeSupport.runtime || null,
+      }
+    : staticSupport;
   const docAvailable = await hasToolDoc(toolId);
   return {
     toolId,

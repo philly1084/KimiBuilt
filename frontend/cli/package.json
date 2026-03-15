@@ -1,7 +1,7 @@
 {
   "name": "kimibuilt-cli",
   "version": "2.2.0",
-  "description": "A premium Node.js CLI client for KimiBuilt AI backend with interactive REPL, streaming responses, session persistence, and support for multiple interaction modes",
+  "description": "A premium Node.js CLI client for LillyBuilt AI backend with interactive REPL, streaming responses, session persistence, and support for multiple interaction modes",
   "main": "cli.js",
   "bin": {
     "kimibuilt": "./cli.js",
@@ -17,13 +17,13 @@
     "cli",
     "ai",
     "chat",
-    "kimibuilt",
+    "lillybuilt",
     "terminal",
     "repl",
     "streaming",
     "assistant"
   ],
-  "author": "KimiBuilt",
+  "author": "LillyBuilt",
   "license": "MIT",
   "dependencies": {
     "chalk": "^4.1.2",

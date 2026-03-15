@@ -90,7 +90,7 @@ const FILENAME_NOUNS = [
 const GENERIC_FILENAME_WORDS = new Set([
     'a', 'an', 'all', 'artifact', 'assistant', 'chat', 'conversation', 'copy',
     'default', 'diagram', 'document', 'download', 'export', 'file', 'final',
-    'generated', 'generic', 'image', 'kimibuilt', 'latest', 'mermaid', 'new',
+    'generated', 'generic', 'image', 'lillybuilt', 'latest', 'mermaid', 'new',
     'notes', 'output', 'page', 'pdf', 'report', 'response', 'result', 'session',
     'temp', 'test', 'text', 'tmp', 'untitled', 'web',
 ]);

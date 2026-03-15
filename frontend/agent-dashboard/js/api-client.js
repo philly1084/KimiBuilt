@@ -186,7 +186,7 @@ class ApiClient {
                 error.userMessage = 'Invalid request. Please check your input.';
                 break;
             case 401:
-                error.userMessage = 'Authentication failed. Please check your API key.';
+                error.userMessage = 'Your login session is missing or expired. Sign in again.';
                 break;
             case 403:
                 error.userMessage = 'You don\'t have permission to perform this action.';

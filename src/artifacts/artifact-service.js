@@ -269,7 +269,7 @@ class ArtifactService {
     getGenerationInstructions(format, existingContent = '', promptContext = '') {
         const normalizedFormat = normalizeFormat(format);
         const base = [
-            'You are the KimiBuilt Business Agent.',
+            'You are the LillyBuilt Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
             'Do not use external tools, function calls, or tool invocation syntax.',
             'Do not mention environment limitations, permissions, API keys, or inability to create files.',

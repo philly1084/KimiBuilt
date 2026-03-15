@@ -1,5 +1,5 @@
 /**
- * API Module - OpenAI SDK integration for KimiBuilt AI
+ * API Module - OpenAI SDK integration for LillyBuilt AI
  * Handles SDK loading gracefully with fallbacks
  */
 

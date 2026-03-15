@@ -59,7 +59,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const instructions = await buildInstructionsWithArtifacts(
             session,
             effectiveOutputFormat
-                ? `You are the KimiBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
+                ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
                 : 'You are a helpful AI assistant. Be concise and informative.',
             artifactIds,
         );

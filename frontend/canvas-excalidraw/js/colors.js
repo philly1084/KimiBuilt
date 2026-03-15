@@ -54,20 +54,20 @@ const ColorSystem = {
             { name: 'Red Pastel', value: '#ffa8a8' }
         ],
         
-        // Excalidraw-specific colors
+        // Lilly-specific colors
         excalidraw: [
-            { name: 'Excalidraw Red', value: '#ff6b6b' },
-            { name: 'Excalidraw Pink', value: '#ff9ff3' },
-            { name: 'Excalidraw Purple', value: '#a29bfe' },
-            { name: 'Excalidraw Blue', value: '#74b9ff' },
-            { name: 'Excalidraw Cyan', value: '#81ecec' },
-            { name: 'Excalidraw Teal', value: '#00b894' },
-            { name: 'Excalidraw Green', value: '#55efc4' },
-            { name: 'Excalidraw Yellow', value: '#ffeaa7' },
-            { name: 'Excalidraw Orange', value: '#fdcb6e' },
-            { name: 'Excalidraw Coral', value: '#e17055' },
-            { name: 'Excalidraw Brown', value: '#d63031' },
-            { name: 'Excalidraw Gray', value: '#636e72' }
+            { name: 'Lilly Red', value: '#ff6b6b' },
+            { name: 'Lilly Pink', value: '#ff9ff3' },
+            { name: 'Lilly Purple', value: '#a29bfe' },
+            { name: 'Lilly Blue', value: '#74b9ff' },
+            { name: 'Lilly Cyan', value: '#81ecec' },
+            { name: 'Lilly Teal', value: '#00b894' },
+            { name: 'Lilly Green', value: '#55efc4' },
+            { name: 'Lilly Yellow', value: '#ffeaa7' },
+            { name: 'Lilly Orange', value: '#fdcb6e' },
+            { name: 'Lilly Coral', value: '#e17055' },
+            { name: 'Lilly Brown', value: '#d63031' },
+            { name: 'Lilly Gray', value: '#636e72' }
         ]
     },
     

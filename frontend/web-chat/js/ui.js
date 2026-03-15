@@ -1,5 +1,5 @@
 /**
- * UI Helpers for KimiBuilt AI Chat
+ * UI Helpers for LillyBuilt AI Chat
  * Handles rendering, markdown parsing, code highlighting, and UI utilities
  */
 
@@ -57,7 +57,7 @@ class UIHelpers {
         return new Set([
             'a', 'an', 'all', 'artifact', 'assistant', 'chat', 'conversation', 'copy',
             'default', 'diagram', 'document', 'download', 'export', 'file', 'final',
-            'generated', 'generic', 'image', 'kimibuilt', 'latest', 'mermaid', 'new',
+            'generated', 'generic', 'image', 'lillybuilt', 'latest', 'mermaid', 'new',
             'notes', 'output', 'page', 'pdf', 'report', 'response', 'result', 'session',
             'temp', 'test', 'text', 'tmp', 'untitled', 'web',
         ]);
@@ -466,8 +466,8 @@ class UIHelpers {
         if (source === 'unsplash' && message.author) {
             attributionHtml = `
                 <div class="image-attribution">
-                    Photo by <a href="${message.author.link}?utm_source=kimibuilt&utm_medium=referral" target="_blank" rel="noopener">${this.escapeHtml(message.author.name)}</a> on 
-                    <a href="${message.unsplashLink}?utm_source=kimibuilt&utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>
+                    Photo by <a href="${message.author.link}?utm_source=lillybuilt&utm_medium=referral" target="_blank" rel="noopener">${this.escapeHtml(message.author.name)}</a> on 
+                    <a href="${message.unsplashLink}?utm_source=lillybuilt&utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>
                 </div>
             `;
         }
@@ -503,7 +503,7 @@ class UIHelpers {
                     <span>Copy URL</span>
                 </button>
                 ${source === 'unsplash' ? `
-                <button class="image-action-btn" onclick="window.open('${message.unsplashLink}?utm_source=kimibuilt&utm_medium=referral', '_blank')" aria-label="View on Unsplash">
+                <button class="image-action-btn" onclick="window.open('${message.unsplashLink}?utm_source=lillybuilt&utm_medium=referral', '_blank')" aria-label="View on Unsplash">
                     <i data-lucide="external-link" class="w-4 h-4" aria-hidden="true"></i>
                     <span>View on Unsplash</span>
                 </button>

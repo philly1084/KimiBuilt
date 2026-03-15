@@ -17,14 +17,14 @@ class APIError extends Error {
 }
 
 /**
- * OpenAI Client wrapper for KimiBuilt backend.
+ * OpenAI Client wrapper for LillyBuilt backend.
  */
 class OpenAIClient {
   constructor() {
     this.baseURL = getApiBaseUrl();
     this.client = new OpenAI({
       baseURL: this.baseURL,
-      apiKey: 'any-key', // KimiBuilt doesn't require auth, but OpenAI SDK needs a key
+      apiKey: 'any-key', // LillyBuilt doesn't require auth, but OpenAI SDK needs a key
       timeout: DEFAULT_TIMEOUT,
     });
   }
@@ -151,7 +151,7 @@ class OpenAIClient {
     this.refreshClient();
     
     // Canvas is handled via chat with a system prompt for now
-    // KimiBuilt backend can handle this via custom endpoint or through chat
+    // LillyBuilt backend can handle this via custom endpoint or through chat
     const systemPrompt = `You are in canvas mode. Generate ${canvasType} content. ${existingContent ? 'Modify the existing content provided.' : ''}`;
     
     const messages = [
@@ -239,7 +239,7 @@ class OpenAIClient {
    * @returns {Promise<Object>} Session data
    */
   async createSession(metadata = {}) {
-    // Sessions are managed via custom KimiBuilt endpoints
+    // Sessions are managed via custom LillyBuilt endpoints
     // Fall back to HTTP request for session management
     return this._legacyRequest('/api/sessions', { method: 'POST', body: { metadata } });
   }
@@ -382,7 +382,7 @@ class OpenAIClient {
     }
     
     if (err.code === 'ECONNREFUSED') {
-      return new APIError(`Connection refused. Please ensure the KimiBuilt server is running at ${this.baseURL}`);
+      return new APIError(`Connection refused. Please ensure the LillyBuilt server is running at ${this.baseURL}`);
     }
     
     if (err.code === 'ENOTFOUND') {
@@ -428,7 +428,7 @@ class OpenAIClient {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'User-Agent': 'KimiBuilt-CLI/2.1.0',
+          'User-Agent': 'LillyBuilt-CLI/2.2.0',
           ...(postData && { 'Content-Length': Buffer.byteLength(postData) }),
         },
       };
@@ -486,7 +486,7 @@ function uploadArtifact(filePath, sessionId, mode = 'chat') {
   return new Promise((resolve, reject) => {
     const fileBuffer = fs.readFileSync(filePath);
     const filename = path.basename(filePath);
-    const boundary = `----KimiBuilt${Date.now().toString(16)}`;
+    const boundary = `----LillyBuilt${Date.now().toString(16)}`;
     const head = Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="sessionId"\r\n\r\n${sessionId}\r\n` +
       `--${boundary}\r\nContent-Disposition: form-data; name="mode"\r\n\r\n${mode}\r\n` +
@@ -508,7 +508,7 @@ function uploadArtifact(filePath, sessionId, mode = 'chat') {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': body.length,
         'Accept': 'application/json',
-        'User-Agent': 'KimiBuilt-CLI/2.2.0',
+        'User-Agent': 'LillyBuilt-CLI/2.2.0',
       },
     }, (res) => {
       const chunks = [];
@@ -553,7 +553,7 @@ function downloadArtifact(artifactId, outputPath) {
       path: `/api/artifacts/${artifactId}/download`,
       method: 'GET',
       headers: {
-        'User-Agent': 'KimiBuilt-CLI/2.2.0',
+        'User-Agent': 'LillyBuilt-CLI/2.2.0',
       },
     }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -598,7 +598,7 @@ function downloadImage(imageUrl, outputPath) {
       path: `${targetUrl.pathname}${targetUrl.search}`,
       method: 'GET',
       headers: {
-        'User-Agent': 'KimiBuilt-CLI/2.2.0',
+        'User-Agent': 'LillyBuilt-CLI/2.2.0',
         Referer: 'https://unsplash.com/',
       },
     }, (res) => {

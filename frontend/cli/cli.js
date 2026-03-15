@@ -19,7 +19,7 @@ const api = require('./lib/api');
 
 // CLI metadata
 const CLI_VERSION = '2.2.0';
-const CLI_NAME = 'KimiBuilt CLI';
+const CLI_NAME = 'LillyBuilt CLI';
 
 // Gradient presets
 const titleGradient = gradient(['#FF6B6B', '#4ECDC4', '#45B7D1']);
@@ -78,7 +78,7 @@ marked.setOptions({
  */
 function printBanner() {
   try {
-    const asciiTitle = figlet.textSync('KimiBuilt', {
+    const asciiTitle = figlet.textSync('LillyBuilt', {
       font: 'Small',
       horizontalLayout: 'default',
     });
@@ -86,7 +86,7 @@ function printBanner() {
   } catch {
     // Fallback if figlet fails
     console.log(chalk.magenta.bold('\n╔════════════════════════════════════════╗'));
-    console.log(chalk.magenta.bold('║         🤖 KimiBuilt CLI v2.1          ║'));
+    console.log(chalk.magenta.bold('║         LillyBuilt CLI v2.2.0        ║'));
     console.log(chalk.magenta.bold('╚════════════════════════════════════════╝'));
   }
   

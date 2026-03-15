@@ -1,6 +1,6 @@
 /**
  * API Module - Backend integration using OpenAI SDK
- * Updated: Uses OpenAI SDK to connect to KimiBuilt backend at /v1
+ * Updated: Uses OpenAI SDK to connect to LillyBuilt backend at /v1
  */
 
 class OpenAICanvasAPI {

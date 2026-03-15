@@ -1,6 +1,6 @@
 /**
  * Import/Export Module - Comprehensive file format support
- * Handles DOCX, PDF, HTML, Markdown, JSON (Notion), and TXT formats
+ * Handles DOCX, PDF, HTML, Markdown, JSON (Lilly), and TXT formats
  */
 
 const ImportExport = (function() {
@@ -12,7 +12,7 @@ const ImportExport = (function() {
             pdf: { name: 'PDF Document', ext: 'pdf', mime: 'application/pdf' },
             html: { name: 'HTML Document', ext: 'html', mime: 'text/html' },
             md: { name: 'Markdown', ext: 'md', mime: 'text/markdown' },
-            json: { name: 'Notion JSON', ext: 'json', mime: 'application/json' },
+            json: { name: 'Lilly JSON', ext: 'json', mime: 'application/json' },
             txt: { name: 'Plain Text', ext: 'txt', mime: 'text/plain' }
         },
         import: {
@@ -20,7 +20,7 @@ const ImportExport = (function() {
             pdf: { name: 'PDF Document', ext: 'pdf', mime: 'application/pdf' },
             html: { name: 'HTML Document', ext: 'html', mime: 'text/html' },
             md: { name: 'Markdown', ext: 'md', mime: 'text/markdown' },
-            json: { name: 'Notion JSON', ext: 'json', mime: 'application/json' },
+            json: { name: 'Lilly JSON', ext: 'json', mime: 'application/json' },
             txt: { name: 'Plain Text', ext: 'txt', mime: 'text/plain' }
         }
     };
@@ -261,26 +261,55 @@ const ImportExport = (function() {
     }
 
     /**
-     * Export to PDF using pdf-lib.js
+     * Export to a real PDF using the backend Notes PDF renderer
      */
     async function exportToPDF(page) {
-        // Use browser print for simplicity with better formatting
-        return new Promise((resolve, reject) => {
-            const htmlContent = generatePDFHTML(page);
-            
-            const printWindow = window.open('', '_blank');
-            if (!printWindow) {
-                reject(new Error('Popup blocked. Please allow popups for PDF export.'));
-                return;
-            }
-
-            printWindow.document.write(htmlContent);
-            printWindow.document.close();
-            
-            // Return a blob for consistent API
-            const blob = new Blob([htmlContent], { type: 'text/html' });
-            resolve(blob);
+        const response = await fetch('/api/documents/export-notes-page-pdf', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                page,
+                options: {
+                    includeOutline: true,
+                    includePageNumbers: true
+                }
+            })
         });
+
+        if (!response.ok) {
+            let message = 'Failed to generate PDF export';
+            try {
+                const error = await response.json();
+                message = error?.error?.message || message;
+            } catch (parseError) {
+                // Keep the default message when the error payload is not JSON.
+            }
+            throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const filename = response.headers.get('X-Document-Filename') ||
+            `${String(page?.title || 'page').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'page'}.pdf`;
+
+        return {
+            blob,
+            filename,
+            mimeType: 'application/pdf'
+        };
+    }
+
+    function openPrintFriendlyFallback(page) {
+        const htmlContent = generatePDFHTML(page);
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            return false;
+        }
+
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        return true;
     }
 
     /**
@@ -717,7 +746,7 @@ const ImportExport = (function() {
     }
 
     /**
-     * Export to Notion-compatible JSON
+     * Export to Lilly-compatible JSON
      */
     function exportToJSON(page) {
         const notionFormat = {
@@ -1506,7 +1535,7 @@ const ImportExport = (function() {
     }
 
     /**
-     * Import from Notion JSON
+     * Import from Lilly JSON
      */
     function importFromJSON(json) {
         let data;
@@ -1522,7 +1551,7 @@ const ImportExport = (function() {
             blocks: []
         };
 
-        // Handle Notion format
+        // Handle page-oriented JSON format
         if (data.object === 'page' || data.object === 'database') {
             // Extract title
             if (data.properties?.title?.title) {
@@ -1782,6 +1811,7 @@ const ImportExport = (function() {
         exportPage,
         importFile,
         download,
+        openPrintFriendlyFallback,
         getFormats,
         isFormatSupported,
         // Individual export functions for direct use

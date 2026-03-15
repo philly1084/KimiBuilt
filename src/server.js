@@ -24,11 +24,13 @@ const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
 const unsplashRouter = require('./routes/unsplash');
 const adminRouter = require('./routes/admin');
+const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
 const { ToolDefinition, ToolSideEffect } = require('./agent-sdk/tools/ToolDefinition');
+const { getAuthenticatedUser, getSafeReturnTo, requireAuth } = require('./auth/service');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -37,6 +39,7 @@ const { createResponse } = require('./openai-client');
 validate();
 
 const app = express();
+app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
@@ -135,6 +138,18 @@ app.get('/health', async (_req, res) => {
 });
 
 const frontendPath = process.env.FRONTEND_PATH || path.join(__dirname, '../frontend');
+
+app.get('/login', (req, res) => {
+    const authState = getAuthenticatedUser(req);
+    if (authState.authenticated) {
+        return res.redirect(getSafeReturnTo(req.query.returnTo || '/'));
+    }
+    return res.sendFile(path.join(frontendPath, 'auth', 'login.html'));
+});
+
+app.use('/api/auth', authRouter);
+app.use(requireAuth);
+
 // Serve only the 4 active frontends
 app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat')));
 app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli')));
@@ -147,7 +162,7 @@ app.get('/', (_req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>KimiBuilt AI</title>
+    <title>LillyBuilt AI</title>
     <meta charset="UTF-8">
     <style>
         body {
@@ -186,7 +201,7 @@ app.get('/', (_req, res) => {
     </style>
 </head>
 <body>
-    <h1>KimiBuilt AI Platform</h1>
+    <h1>LillyBuilt AI Platform</h1>
     <p>Choose your interface:</p>
     <div class="grid">
         <a href="/web-chat/" class="card">
@@ -199,11 +214,11 @@ app.get('/', (_req, res) => {
         </a>
         <a href="/notes/" class="card">
             <h3>Notes</h3>
-            <p>Notion-style note taking with AI</p>
+            <p>Lilly-style note taking with AI</p>
         </a>
         <a href="/canvas/" class="card">
             <h3>Canvas</h3>
-            <p>Visual canvas with Excalidraw integration</p>
+            <p>Visual canvas with Lilly drawing tools</p>
         </a>
         <a href="/admin/" class="card" style="border-color: #22c55e;">
             <h3>🎛️ Admin Dashboard</h3>
@@ -307,7 +322,7 @@ async function start() {
     }
 
     server.listen(config.port, '0.0.0.0', () => {
-        console.log(`KimiBuilt AI backend listening on http://0.0.0.0:${config.port}`);
+        console.log(`LillyBuilt AI backend listening on http://0.0.0.0:${config.port}`);
     });
 }
 

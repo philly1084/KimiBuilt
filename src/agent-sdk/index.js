@@ -1,5 +1,5 @@
 /**
- * KimiBuilt Agent SDK
+ * LillyBuilt Agent SDK
  * 
  * A sophisticated AI Agent SDK providing:
  * - Structured task execution

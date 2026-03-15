@@ -37,7 +37,7 @@ const Sidebar = (function() {
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'custom-model-input';
-        input.placeholder = 'e.g., kimi-for-coding';
+        input.placeholder = 'e.g., lilly-for-coding';
         input.style.cssText = 'margin-top: 8px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; width: 100%;';
         
         input.addEventListener('change', () => {
@@ -605,7 +605,7 @@ const Sidebar = (function() {
         }
         
         // Update document title
-        document.title = page.title ? `${page.title} - Notes` : 'Notes - Notion Style';
+        document.title = page.title ? `${page.title} - Notes` : 'Notes - Lilly Style';
     }
     
     /**
@@ -960,8 +960,8 @@ const Sidebar = (function() {
                             <button class="settings-btn" data-action="export-json">
                                 <span>📋</span>
                                 <div>
-                                    <div>Notion JSON (.json)</div>
-                                    <div class="settings-btn-subtitle">Notion-compatible format</div>
+                                    <div>Lilly JSON (.json)</div>
+                                    <div class="settings-btn-subtitle">LillyBuilt-compatible format</div>
                                 </div>
                             </button>
                             <button class="settings-btn" data-action="export-txt">
@@ -1144,6 +1144,74 @@ const Sidebar = (function() {
     }
     
     /**
+     * Persist a generated PDF as an artifact when backend storage is available.
+     * Falls back to a blob URL for the current session if persistence is unavailable.
+     */
+    async function createPdfExportLink(blob, filename, page) {
+        if (!(blob instanceof Blob)) {
+            return null;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('sessionId', page?.id || `notes-${Date.now()}`);
+            formData.append('mode', 'notes');
+            formData.append('label', `PDF export: ${page?.title || 'Untitled'}`);
+            formData.append('file', new File([blob], filename, { type: 'application/pdf' }));
+
+            const response = await fetch('/api/artifacts/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error(`Artifact upload failed with status ${response.status}`);
+            }
+
+            const artifact = await response.json();
+            if (artifact?.downloadUrl) {
+                return new URL(artifact.downloadUrl, window.location.origin).toString();
+            }
+        } catch (error) {
+            console.warn('Failed to persist PDF export artifact:', error);
+        }
+
+        return URL.createObjectURL(blob);
+    }
+
+    function updatePdfExportBlock(downloadUrl, filename) {
+        const page = window.Editor?.getCurrentPage?.();
+        if (!page || !window.Blocks?.createBlock) {
+            return;
+        }
+
+        const existingBlock = (page.blocks || []).find((block) => block?.exportMarker === 'notes-pdf-export-link');
+        const bookmarkBlock = window.Blocks.createBlock('bookmark', {
+            url: downloadUrl,
+            title: `Download PDF export: ${filename}`,
+            description: `Latest PDF export generated ${new Date().toLocaleString()}`,
+            favicon: '',
+            image: ''
+        }, {
+            exportMarker: 'notes-pdf-export-link'
+        });
+
+        if (existingBlock?.content?.url && existingBlock.content.url.startsWith('blob:') && existingBlock.content.url !== downloadUrl) {
+            URL.revokeObjectURL(existingBlock.content.url);
+        }
+
+        if (existingBlock) {
+            bookmarkBlock.id = existingBlock.id;
+            window.Editor.replaceBlockWithBlocks?.(existingBlock.id, [bookmarkBlock]);
+            return;
+        }
+
+        const blocks = page.blocks || [];
+        const lastBlockId = blocks.length ? blocks[blocks.length - 1].id : null;
+        window.Editor.insertBlocksAfter?.(lastBlockId, [bookmarkBlock]);
+    }
+
+    /**
      * Export current page to specific format
      */
     async function exportCurrentPage(format) {
@@ -1158,12 +1226,25 @@ const Sidebar = (function() {
             const result = await ImportExport.exportPage(page, format);
             const formats = ImportExport.getFormats().export;
             const formatInfo = formats[format];
-            const filename = `${page.title || 'page'}.${formatInfo.ext}`;
-            
-            ImportExport.download(result, filename, formatInfo.mime);
+            const filename = result?.filename || `${page.title || 'page'}.${formatInfo.ext}`;
+            const exportBlob = result?.blob instanceof Blob ? result.blob : result;
+
+            ImportExport.download(exportBlob, filename, result?.mimeType || formatInfo.mime);
+
+            if (format === 'pdf' && exportBlob instanceof Blob) {
+                const downloadUrl = await createPdfExportLink(exportBlob, filename, page);
+                if (downloadUrl) {
+                    updatePdfExportBlock(downloadUrl, filename);
+                }
+            }
+
             showToast(`Exported as ${formatInfo.name}`, 'success');
         } catch (error) {
             console.error('Export error:', error);
+            if (format === 'pdf' && ImportExport.openPrintFriendlyFallback?.(page)) {
+                showToast('Server PDF export unavailable. Opened a printable fallback view.', 'info');
+                return;
+            }
             showToast(`Export failed: ${error.message}`, 'error');
         }
     }
@@ -1217,7 +1298,7 @@ const Sidebar = (function() {
                     <div class="file-drop-zone" id="file-drop-zone">
                         <div class="file-drop-zone-icon">📁</div>
                         <div class="file-drop-zone-text">Drop a file here or click to browse</div>
-                        <div class="file-drop-zone-hint">Supports DOCX, PDF, HTML, Markdown, Notion JSON, and TXT</div>
+                        <div class="file-drop-zone-hint">Supports DOCX, PDF, HTML, Markdown, Lilly JSON, and TXT</div>
                         <input type="file" class="file-input" id="file-input" accept=".docx,.pdf,.html,.md,.json,.txt">
                     </div>
                     
@@ -1242,7 +1323,7 @@ const Sidebar = (function() {
                             </div>
                             <div class="import-format-item" data-format="json">
                                 <span class="import-format-icon">📋</span>
-                                <span class="import-format-name">Notion</span>
+                                <span class="import-format-name">Lilly</span>
                             </div>
                             <div class="import-format-item" data-format="txt">
                                 <span class="import-format-icon">📃</span>

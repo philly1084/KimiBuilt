@@ -1,7 +1,7 @@
 /**
  * Agent SDK Integration for Notes-Notion Frontend
  * 
- * Integrates the KimiBuilt Agent SDK with the notes-notion editor
+ * Integrates the LillyBuilt Agent SDK with the notes editor
  * providing enhanced AI capabilities with traceability and skill learning.
  */
 

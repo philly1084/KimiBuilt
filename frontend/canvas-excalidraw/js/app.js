@@ -51,7 +51,7 @@ class App {
             // Setup touch/long-press for mobile
             this.setupTouchHandling();
             
-            console.log('Kimi Canvas initialized with OpenAI SDK');
+            console.log('Lilly Canvas initialized with OpenAI SDK');
         });
     }
 
@@ -1482,7 +1482,7 @@ class App {
     
     importElements(elements) {
         if (!Array.isArray(elements)) {
-            // Try to handle Excalidraw format
+            // Try to handle Lilly sketch format
             if (elements.elements && Array.isArray(elements.elements)) {
                 elements = elements.elements;
             } else {
@@ -1528,7 +1528,7 @@ class App {
                 
                 if (navigator.canShare({ files: [file] })) {
                     await navigator.share({
-                        title: 'My Kimi Canvas',
+                        title: 'My Lilly Canvas',
                         text: 'Check out my canvas!',
                         files: [file]
                     });

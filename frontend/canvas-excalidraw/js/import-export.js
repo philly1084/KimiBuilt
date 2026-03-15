@@ -226,7 +226,7 @@ class ImportExportManager {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kimi Canvas Export</title>
+    <title>Lilly Canvas Export</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -328,7 +328,7 @@ class ImportExportManager {
 </head>
 <body>
     <div class="toolbar">
-        <h1>📋 Kimi Canvas Export</h1>
+        <h1>📋 Lilly Canvas Export</h1>
         <button onclick="downloadSVG()">Download SVG</button>
         <button onclick="downloadJSON()">Download JSON</button>
         <button class="primary" onclick="window.print()">Print</button>
@@ -404,9 +404,9 @@ class ImportExportManager {
         const pptx = new PptxGenJS();
         
         // Set presentation properties
-        pptx.title = 'Kimi Canvas Export';
-        pptx.author = 'Kimi Canvas';
-        pptx.company = 'KimiBuilt';
+        pptx.title = 'Lilly Canvas Export';
+        pptx.author = 'Lilly Canvas';
+        pptx.company = 'LillyBuilt';
         pptx.subject = 'Canvas Export';
         
         // Get canvas bounds

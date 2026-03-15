@@ -1,6 +1,6 @@
 /**
  * Code CLI App
- * Terminal-style coding interface for KimiBuilt AI
+ * Terminal-style coding interface for LillyBuilt AI
  */
 
 class CodeCLIApp {
@@ -512,7 +512,7 @@ Session Statistics:
     
     printWelcome() {
         this.terminalOutput.innerHTML = '';
-        this.printSystem('Welcome to KimiBuilt Code CLI v3.0');
+        this.printSystem('Welcome to LillyBuilt Code CLI v3.0');
         this.printSystem('Type /help for available commands');
         this.printSystem(`Session started: ${new Date().toLocaleString()}`);
         this.terminalOutput.appendChild(document.createElement('div')).style.height = '8px';

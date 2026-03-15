@@ -20,7 +20,7 @@ async function ensureToolManagerInitialized() {
 function buildToolExecutionContext(toolManager, req, sessionId = null) {
   return {
     sessionId,
-    userId: req.user?.id,
+    userId: req.user?.id || req.user?.username,
     timestamp: new Date().toISOString(),
     toolManager,
     tools: {

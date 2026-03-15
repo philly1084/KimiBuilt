@@ -1,5 +1,5 @@
 /**
- * Session Management for KimiBuilt AI Chat
+ * Session Management for LillyBuilt AI Chat
  * Handles session state, local storage, and session operations with enhanced persistence
  * Now works client-side only with OpenAI SDK backend
  */

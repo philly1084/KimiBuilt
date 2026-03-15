@@ -24,7 +24,7 @@ class PptxGenerator {
     // Set metadata
     pptx.title = variables.title || template.name || 'Presentation';
     pptx.subject = variables.subject || '';
-    pptx.author = variables.author || 'KimiBuilt AI';
+    pptx.author = variables.author || 'LillyBuilt AI';
     
     // Build slides based on template type
     switch (template.id) {
@@ -263,7 +263,7 @@ class PptxGenerator {
     const pptx = new PptxGenJS();
     
     pptx.title = options.title || 'Generated Presentation';
-    pptx.author = 'KimiBuilt AI';
+    pptx.author = 'LillyBuilt AI';
     
     // Title slide
     const titleSlide = pptx.addSlide();

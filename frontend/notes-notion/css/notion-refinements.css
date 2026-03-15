@@ -1,4 +1,4 @@
-/* ===== Notion-Style Refinements ===== */
+/* ===== Lilly-Style Refinements ===== */
 
 /* Breadcrumbs Navigation */
 .breadcrumbs {
@@ -242,7 +242,7 @@
     padding-top: 0;
 }
 
-/* Page Icon - More Notion-like */
+/* Page Icon - More Lilly-like */
 .page-icon-wrapper {
     margin-bottom: 16px;
 }
@@ -285,7 +285,7 @@
     opacity: 1;
 }
 
-/* Page Title - Notion-style */
+/* Page Title - Lilly-style */
 .page-title-wrapper {
     margin-bottom: 8px;
 }
@@ -309,7 +309,7 @@
     font-weight: 500;
 }
 
-/* Enhanced Block Styling - Notion-style */
+/* Enhanced Block Styling - Lilly-style */
 .block {
     position: relative;
     margin: 2px 0;
@@ -326,7 +326,7 @@
     background: var(--bg-selected);
 }
 
-/* Block Handle - Notion-style subtle grip */
+/* Block Handle - Lilly-style subtle grip */
 .block-handle {
     position: absolute;
     left: -32px;
@@ -362,7 +362,7 @@
     pointer-events: none;
 }
 
-/* Block Input - Notion-style spacing */
+/* Block Input - Lilly-style spacing */
 .block-input {
     padding: 3px 0;
     min-height: 24px;
@@ -374,7 +374,7 @@
     cursor: text;
 }
 
-/* Placeholder styling - Notion-style lighter */
+/* Placeholder styling - Lilly-style lighter */
 .block-input:empty::before {
     content: attr(data-placeholder);
     color: rgba(55, 53, 47, 0.35);
@@ -382,7 +382,7 @@
     font-weight: 400;
 }
 
-/* Heading blocks - Notion-style typography */
+/* Heading blocks - Lilly-style typography */
 .block[data-block-type="heading_1"] .block-input,
 .block[data-type="heading_1"] .block-input {
     font-family: var(--font-heading);
@@ -416,7 +416,7 @@
     padding-bottom: 4px;
 }
 
-/* Slash Menu - Notion-style command palette */
+/* Slash Menu - Lilly-style command palette */
 .slash-menu {
     position: fixed;
     width: 324px;
@@ -523,7 +523,7 @@
     color: var(--text-primary);
 }
 
-/* Page Tree - Notion-style cleaner design */
+/* Page Tree - Lilly-style cleaner design */
 .page-tree-item {
     display: flex;
     align-items: center;

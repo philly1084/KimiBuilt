@@ -1,7 +1,7 @@
 /**
  * Agent SDK Integration for Canvas Frontend
  * 
- * Integrates the KimiBuilt Agent SDK with the canvas editor
+ * Integrates the LillyBuilt Agent SDK with the canvas editor
  * providing enhanced AI capabilities for code, document, and diagram editing.
  */
 

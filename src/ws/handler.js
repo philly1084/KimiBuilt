@@ -3,6 +3,7 @@ const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 
 // Admin dashboard event emitter
 const EventEmitter = require('events');
@@ -27,7 +28,16 @@ function inferOutputFormatFromText(text = '') {
 }
 
 function setupWebSocket(wss, app = null) {
-    wss.on('connection', (ws) => {
+    wss.on('connection', (ws, req) => {
+        if (isAuthEnabled()) {
+            const authState = getAuthenticatedUser(req);
+            if (!authState.authenticated) {
+                ws.close(4401, 'Authentication required');
+                return;
+            }
+            ws.user = authState.user;
+        }
+
         console.log('[WS] Client connected');
 
         ws.on('message', async (raw) => {
@@ -98,7 +108,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     const instructions = await buildInstructionsWithArtifacts(
         session,
         effectiveOutputFormat
-            ? `You are the KimiBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
+            ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
             : 'You are a helpful AI assistant. Be concise and informative.',
         artifactIds,
     );

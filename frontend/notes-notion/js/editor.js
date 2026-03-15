@@ -1719,7 +1719,7 @@ const Editor = (function() {
             }
         }
 
-        document.title = currentPage.title ? `${currentPage.title} - Notes` : 'Notes - Notion Style';
+        document.title = currentPage.title ? `${currentPage.title} - Notes` : 'Notes - Lilly Style';
         savePage();
     }
 

@@ -253,7 +253,7 @@ body {
     padding: 8px 14px;
 }
 
-/* New page button - Notion-style */
+/* New page button - Lilly-style */
 .new-page-btn {
     width: 100%;
     padding: 6px 12px;
@@ -277,7 +277,7 @@ body {
     color: var(--text-primary);
 }
 
-/* Sidebar section - Notion-style cleaner */
+/* Sidebar section - Lilly-style cleaner */
 .sidebar-section {
     flex: 1;
     overflow-y: auto;
@@ -293,7 +293,7 @@ body {
     letter-spacing: 0.06em;
 }
 
-/* Page Tree - Notion-style cleaner design */
+/* Page Tree - Lilly-style cleaner design */
 .page-tree {
     padding: 6px 0;
 }
@@ -369,7 +369,7 @@ body {
     border-left: 1px solid var(--border-color);
 }
 
-/* Sidebar Footer - Notion-style */
+/* Sidebar Footer - Lilly-style */
 .sidebar-footer {
     padding: 8px;
     border-top: 1px solid rgba(55, 53, 47, 0.06);
@@ -818,7 +818,7 @@ body {
     color: var(--accent-color);
 }
 
-/* Block Base Styles - Notion-style minimal design */
+/* Block Base Styles - Lilly-style minimal design */
 .block {
     position: relative;
     display: flex;
@@ -847,7 +847,7 @@ body {
     border: 2px dashed var(--accent-color);
 }
 
-/* Add Block Button (+) - Notion-style subtle */
+/* Add Block Button (+) - Lilly-style subtle */
 .block-add-btn {
     position: absolute;
     left: -48px;
@@ -886,7 +886,7 @@ body {
     background: rgba(55, 53, 47, 0.12);
 }
 
-/* Block Handle (⋮⋮) - Notion-style subtle drag handle */
+/* Block Handle (⋮⋮) - Lilly-style subtle drag handle */
 .block-handle {
     position: absolute;
     left: -32px;
@@ -951,7 +951,7 @@ body {
     letter-spacing: -0.01em;
 }
 
-/* IMPROVED: Better placeholder behavior - Notion-style */
+/* IMPROVED: Better placeholder behavior - Lilly-style */
 .block-input:empty::before,
 .block-input[data-placeholder]:empty::before {
     content: attr(data-placeholder);
@@ -962,7 +962,7 @@ body {
 }
 
 /* Block Types */
-/* Heading 1 - Notion-style typography */
+/* Heading 1 - Lilly-style typography */
 .block[data-type="heading_1"] .block-input {
     font-family: var(--font-heading);
     font-size: 30px;
@@ -974,7 +974,7 @@ body {
     padding: 3px 0;
 }
 
-/* Heading 2 - Notion-style typography */
+/* Heading 2 - Lilly-style typography */
 .block[data-type="heading_2"] .block-input {
     font-family: var(--font-heading);
     font-size: 24px;
@@ -986,7 +986,7 @@ body {
     padding: 3px 0;
 }
 
-/* Heading 3 - Notion-style typography */
+/* Heading 3 - Lilly-style typography */
 .block[data-type="heading_3"] .block-input {
     font-family: var(--font-heading);
     font-size: 20px;
@@ -1923,7 +1923,7 @@ body {
     to { opacity: 1; }
 }
 
-/* ===== Slash Menu - Notion-style command palette ===== */
+/* ===== Slash Menu - Lilly-style command palette ===== */
 .slash-menu {
     position: fixed;
     width: 324px;
@@ -2785,7 +2785,7 @@ body {
     margin: 0 !important;
 }
 
-/* ===== Drag Preview - Notion-style ghost ===== */
+/* ===== Drag Preview - Lilly-style ghost ===== */
 .drag-preview {
     position: fixed;
     pointer-events: none;

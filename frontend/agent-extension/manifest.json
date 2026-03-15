@@ -1,10 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "KimiBuilt Agent SDK Controller",
+  "name": "LillyBuilt Agent SDK Controller",
   "version": "1.0.0",
   "description": "Control and monitor the OpenAI Agent SDK from your browser",
-  "author": "KimiBuilt",
-  "homepage_url": "https://github.com/KimiBuilt/agent-sdk",
+  "author": "LillyBuilt",
   
   "permissions": [
     "storage",
@@ -26,7 +25,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "KimiBuilt Agent SDK"
+    "default_title": "LillyBuilt Agent SDK"
   },
   
   "background": {

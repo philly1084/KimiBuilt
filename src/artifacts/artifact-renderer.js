@@ -316,8 +316,8 @@ function buildDocxBufferFromHtml(html, title = 'Document') {
             data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>${escapeXml(title)}</dc:title>
-  <dc:creator>KimiBuilt</dc:creator>
-  <cp:lastModifiedBy>KimiBuilt</cp:lastModifiedBy>
+  <dc:creator>LillyBuilt</dc:creator>
+  <cp:lastModifiedBy>LillyBuilt</cp:lastModifiedBy>
   <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
 </cp:coreProperties>`,
         },
@@ -325,7 +325,7 @@ function buildDocxBufferFromHtml(html, title = 'Document') {
             name: 'docProps/app.xml',
             data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>KimiBuilt</Application>
+  <Application>LillyBuilt</Application>
 </Properties>`,
         },
         {
@@ -430,7 +430,7 @@ function buildXlsxBufferFromWorkbookSpec(spec = {}) {
             data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>${escapeXml(spec.title || 'Workbook')}</dc:title>
-  <dc:creator>KimiBuilt</dc:creator>
+  <dc:creator>LillyBuilt</dc:creator>
   <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
 </cp:coreProperties>`,
         },
@@ -438,7 +438,7 @@ function buildXlsxBufferFromWorkbookSpec(spec = {}) {
             name: 'docProps/app.xml',
             data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>KimiBuilt</Application>
+  <Application>LillyBuilt</Application>
 </Properties>`,
         },
         {
@@ -531,7 +531,7 @@ async function renderPdfViaBrowser(html, title) {
         return null;
     }
 
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-pdf-'));
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lillybuilt-pdf-'));
     const baseName = createFriendlyFilenameBase(title || 'document', 'document');
     const htmlPath = path.join(tempDir, `${baseName}.html`);
     const pdfPath = path.join(tempDir, `${baseName}.pdf`);

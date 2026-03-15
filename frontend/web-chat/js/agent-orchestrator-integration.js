@@ -1,7 +1,7 @@
 /**
  * Agent SDK Integration for Web Chat Frontend
  * 
- * Integrates the KimiBuilt Agent SDK with the web chat interface
+ * Integrates the LillyBuilt Agent SDK with the web chat interface
  * providing enhanced AI capabilities with traceability and skill learning.
  */
 
@@ -119,7 +119,7 @@
      * Get system prompt for chat context
      */
     getSystemPrompt() {
-      return `You are an AI assistant integrated into the KimiBuilt Web Chat interface. 
+      return `You are an AI assistant integrated into the LillyBuilt Web Chat interface. 
 You have access to tools for enhanced task execution.
 When appropriate, use the available tools to provide better responses.
 Always be helpful, accurate, and concise.`;
