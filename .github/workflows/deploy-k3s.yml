@@ -80,8 +80,8 @@ jobs:
           # Apply backend with updated image
           kubectl apply -f k8s/backend-deployment.yaml
           
-          # Apply production ingress for the Rancher/k3s domain
-          kubectl apply -f k8s/rancher-ingress.yaml
+          # Apply ingress
+          kubectl apply -f k8s/ingress.yaml
 
       - name: Wait for rollout
         run: |
@@ -97,6 +97,3 @@ jobs:
           echo ""
           echo "=== Deployment Status ==="
           kubectl get deployment backend -n ${{ env.KUBE_NAMESPACE }}
-          echo ""
-          echo "=== Ingress ==="
-          kubectl get ingress -n ${{ env.KUBE_NAMESPACE }}

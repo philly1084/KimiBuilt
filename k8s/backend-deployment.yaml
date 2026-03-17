@@ -31,13 +31,13 @@ spec:
                 name: kimibuilt-secrets
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /health
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /live
+              path: /health
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 30
