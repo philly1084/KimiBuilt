@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const { config } = require('./config');
+const settingsController = require('./routes/admin/settings.controller');
 
 let chatClient = null;
 
@@ -574,6 +575,15 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'ssh-execute')) {
         guidance.push('- Use `ssh-execute` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.');
+        const sshConfig = settingsController.getEffectiveSshConfig();
+        const hasUsableSshDefaults = sshConfig.enabled
+            && sshConfig.host
+            && sshConfig.username
+            && (sshConfig.password || sshConfig.privateKeyPath);
+
+        if (hasUsableSshDefaults) {
+            guidance.push(`- SSH defaults are configured for \`${sshConfig.username}@${sshConfig.host}:${sshConfig.port || 22}\`. Use these defaults unless the user asks for a different target.`);
+        }
     }
 
     if (automaticTools.some((entry) => entry.id === 'docker-exec')) {
