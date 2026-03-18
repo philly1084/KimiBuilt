@@ -35,6 +35,41 @@ function buildContinuityInstructions(extra = '') {
     ].filter(Boolean).join('\n');
 }
 
+function getHeaderValue(req, headerName) {
+    const value = req.headers?.[headerName];
+    if (Array.isArray(value)) {
+        return value.find(Boolean) || null;
+    }
+    return value || null;
+}
+
+function resolveSessionId(req) {
+    const body = req.body || {};
+    const candidates = [
+        body.session_id,
+        body.sessionId,
+        body.conversation_id,
+        body.conversationId,
+        body.thread_id,
+        body.threadId,
+        getHeaderValue(req, 'x-session-id'),
+        getHeaderValue(req, 'x-conversation-id'),
+        getHeaderValue(req, 'x-thread-id'),
+    ];
+
+    return candidates.find((value) => typeof value === 'string' && value.trim()) || null;
+}
+
+function setSessionHeaders(res, sessionId) {
+    if (!sessionId) {
+        return;
+    }
+
+    res.setHeader('X-Session-Id', sessionId);
+    res.setHeader('X-Conversation-Id', sessionId);
+    res.setHeader('X-Thread-Id', sessionId);
+}
+
 function shouldInjectRecentMessages(inputMessages = []) {
     if (!Array.isArray(inputMessages)) {
         return true;
@@ -85,7 +120,6 @@ router.post('/chat/completions', async (req, res, next) => {
             model,
             messages,
             stream = false,
-            session_id,
             artifact_ids = [],
             output_format = null,
         } = req.body;
@@ -99,7 +133,7 @@ router.post('/chat/completions', async (req, res, next) => {
             });
         }
 
-        let sessionId = session_id;
+        let sessionId = resolveSessionId(req);
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'chat' });
@@ -151,7 +185,7 @@ router.post('/chat/completions', async (req, res, next) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Session-Id', sessionId);
+            setSessionHeaders(res, sessionId);
 
             const response = await createResponse({
                 input,
@@ -227,6 +261,8 @@ router.post('/chat/completions', async (req, res, next) => {
             res.end();
             return;
         }
+
+        setSessionHeaders(res, sessionId);
 
         const response = await createResponse({
             input,
@@ -312,12 +348,11 @@ router.post('/responses', async (req, res, next) => {
             input,
             instructions,
             stream = false,
-            session_id,
             artifact_ids = [],
             output_format = null,
         } = req.body;
 
-        let sessionId = session_id;
+        let sessionId = resolveSessionId(req);
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'chat' });
@@ -367,7 +402,7 @@ router.post('/responses', async (req, res, next) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Session-Id', sessionId);
+            setSessionHeaders(res, sessionId);
 
             const response = await createResponse({
                 input,
@@ -425,6 +460,8 @@ router.post('/responses', async (req, res, next) => {
             res.end();
             return;
         }
+
+        setSessionHeaders(res, sessionId);
 
         const response = await createResponse({
             input,
@@ -493,10 +530,9 @@ router.post('/images/generations', async (req, res, next) => {
             size = '1024x1024',
             quality = 'standard',
             style = 'vivid',
-            session_id,
         } = req.body;
 
-        let sessionId = session_id;
+        let sessionId = resolveSessionId(req);
         let session;
         if (!sessionId) {
             session = await sessionStore.create({ mode: 'image' });
@@ -527,6 +563,7 @@ router.post('/images/generations', async (req, res, next) => {
         });
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
+        setSessionHeaders(res, sessionId);
 
         res.json({
             ...response,
