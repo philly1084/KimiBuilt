@@ -9,4 +9,16 @@ function getBusinessAgentProfile(overrides = {}) {
     };
 }
 
-module.exports = { getBusinessAgentProfile };
+function isDefaultBusinessAgentProfile(agent = {}) {
+    const defaults = getBusinessAgentProfile();
+
+    return agent?.id === defaults.id
+        && agent?.name === defaults.name
+        && String(agent?.instructions || '').trim() === defaults.instructions
+        && JSON.stringify(Array.isArray(agent?.tools) ? agent.tools : []) === JSON.stringify(defaults.tools);
+}
+
+module.exports = {
+    getBusinessAgentProfile,
+    isDefaultBusinessAgentProfile,
+};

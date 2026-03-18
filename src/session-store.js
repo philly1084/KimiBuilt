@@ -1,6 +1,8 @@
 const { v4: uuidv4 } = require('uuid');
 const { postgres } = require('./postgres');
-const { getBusinessAgentProfile } = require('./business-agent');
+
+const MAX_RECENT_MESSAGES = 12;
+const MAX_RECENT_MESSAGE_LENGTH = 4000;
 
 class SessionStore {
     constructor() {
@@ -9,20 +11,66 @@ class SessionStore {
         this.usePostgres = false;
     }
 
+    trimRecentMessageContent(content = '') {
+        const value = String(content || '').trim();
+        if (!value) {
+            return '';
+        }
+
+        if (value.length <= MAX_RECENT_MESSAGE_LENGTH) {
+            return value;
+        }
+
+        const hiddenCharacters = value.length - MAX_RECENT_MESSAGE_LENGTH;
+        return `${value.slice(0, MAX_RECENT_MESSAGE_LENGTH)}\n...[truncated ${hiddenCharacters} chars]`;
+    }
+
+    normalizeRecentMessages(messages = []) {
+        if (!Array.isArray(messages)) {
+            return [];
+        }
+
+        return messages
+            .map((entry) => {
+                const role = ['user', 'assistant', 'system', 'tool'].includes(entry?.role)
+                    ? entry.role
+                    : null;
+                const content = this.trimRecentMessageContent(entry?.content || '');
+                const timestamp = entry?.timestamp || new Date().toISOString();
+
+                if (!role || !content) {
+                    return null;
+                }
+
+                return {
+                    role,
+                    content,
+                    timestamp,
+                };
+            })
+            .filter(Boolean)
+            .slice(-MAX_RECENT_MESSAGES);
+    }
+
     normalizeMetadata(metadata = {}) {
-        const agent = metadata.agent
-            ? {
+        const normalized = {
+            ...metadata,
+        };
+
+        if (metadata.agent) {
+            normalized.agent = {
                 id: metadata.agent.id || null,
                 name: metadata.agent.name || null,
                 instructions: metadata.agent.instructions || '',
                 tools: Array.isArray(metadata.agent.tools) ? metadata.agent.tools : [],
-            }
-            : getBusinessAgentProfile();
+            };
+        }
 
-        return {
-            ...metadata,
-            agent,
-        };
+        if ('recentMessages' in metadata) {
+            normalized.recentMessages = this.normalizeRecentMessages(metadata.recentMessages);
+        }
+
+        return normalized;
     }
 
     toSession(row) {
@@ -169,6 +217,35 @@ class SessionStore {
         );
 
         return this.toSession(result.rows[0]);
+    }
+
+    getRecentMessages(session, limit = MAX_RECENT_MESSAGES) {
+        const recentMessages = Array.isArray(session?.metadata?.recentMessages)
+            ? session.metadata.recentMessages
+            : [];
+
+        return this.normalizeRecentMessages(recentMessages).slice(-Math.max(0, limit));
+    }
+
+    async appendMessages(id, messages = []) {
+        const normalizedMessages = this.normalizeRecentMessages(messages);
+        if (normalizedMessages.length === 0) {
+            return this.get(id);
+        }
+
+        const current = await this.get(id);
+        if (!current) {
+            return null;
+        }
+
+        const existingMessages = this.getRecentMessages(current);
+        const recentMessages = [...existingMessages, ...normalizedMessages].slice(-MAX_RECENT_MESSAGES);
+
+        return this.update(id, {
+            metadata: {
+                recentMessages,
+            },
+        });
     }
 
     async recordResponse(id, responseId) {

@@ -367,6 +367,7 @@ function buildMessages({
     input,
     instructions = null,
     contextMessages = [],
+    recentMessages = [],
 }) {
     const messages = [];
 
@@ -380,8 +381,18 @@ function buildMessages({
     if (contextMessages.length > 0) {
         messages.push({
             role: 'system',
-            content: `[Relevant context from memory]\n${contextMessages.join('\n---\n')}`,
+            content: `[Supplemental recalled memory]\nUse this only as supporting context when it helps resolve references or recover older details.\n${contextMessages.join('\n---\n')}`,
         });
+    }
+
+    if (recentMessages.length > 0) {
+        messages.push(...recentMessages
+            .filter((entry) => ['user', 'assistant', 'system', 'tool'].includes(entry?.role))
+            .map((entry) => ({
+                role: entry.role,
+                content: normalizeMessageContent(entry.content),
+            }))
+            .filter((entry) => entry.content));
     }
 
     if (typeof input === 'string') {
@@ -893,6 +904,7 @@ async function createResponse({
     input,
     previousResponseId = null,
     contextMessages = [],
+    recentMessages = [],
     instructions = null,
     stream = false,
     model = null,
@@ -905,6 +917,7 @@ async function createResponse({
         input,
         instructions,
         contextMessages,
+        recentMessages,
     });
 
     const params = {
@@ -1006,6 +1019,7 @@ module.exports = {
     createResponse,
     generateImage,
     __testUtils: {
+        buildMessages,
         buildAutomaticToolDefinitions,
         normalizeToolResultForModel,
         sanitizeToolSchema,

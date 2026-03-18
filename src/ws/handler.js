@@ -104,12 +104,13 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     }
 
     const contextMessages = await memoryService.process(session.id, message);
+    const recentMessages = sessionStore.getRecentMessages(session, 8);
     const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
     const instructions = await buildInstructionsWithArtifacts(
         session,
         effectiveOutputFormat
             ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
-            : 'You are a helpful AI assistant. Be concise and informative.',
+            : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
         artifactIds,
     );
     runtimeTask = startRuntimeTask({
@@ -126,6 +127,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             input: message,
             previousResponseId: session.previousResponseId,
             contextMessages,
+            recentMessages,
             instructions,
             stream: true,
             model,
@@ -149,6 +151,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             if (event.type === 'response.completed') {
                 await sessionStore.recordResponse(session.id, event.response.id);
                 memoryService.rememberResponse(session.id, fullText);
+                await sessionStore.appendMessages(session.id, [
+                    { role: 'user', content: message },
+                    { role: 'assistant', content: fullText },
+                ]);
                 const artifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,
                     session,

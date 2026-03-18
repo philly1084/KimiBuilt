@@ -55,12 +55,13 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
 
         const contextMessages = await memoryService.process(sessionId, message);
+        const recentMessages = sessionStore.getRecentMessages(session, 8);
         const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
         const instructions = await buildInstructionsWithArtifacts(
             session,
             effectiveOutputFormat
                 ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
-                : 'You are a helpful AI assistant. Be concise and informative.',
+                : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
             artifactIds,
         );
 
@@ -83,6 +84,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 input: message,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
+                recentMessages,
                 instructions,
                 stream: true,
                 model,
@@ -106,6 +108,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 if (event.type === 'response.completed') {
                     await sessionStore.recordResponse(sessionId, event.response.id);
                     memoryService.rememberResponse(sessionId, fullText);
+                    await sessionStore.appendMessages(sessionId, [
+                        { role: 'user', content: message },
+                        { role: 'assistant', content: fullText },
+                    ]);
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
@@ -136,6 +142,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             input: message,
             previousResponseId: session.previousResponseId,
             contextMessages,
+            recentMessages,
             instructions,
             stream: false,
             model,
@@ -156,6 +163,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             .join('\n');
 
         memoryService.rememberResponse(sessionId, outputText);
+        await sessionStore.appendMessages(sessionId, [
+            { role: 'user', content: message },
+            { role: 'assistant', content: outputText },
+        ]);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,

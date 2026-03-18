@@ -126,4 +126,35 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(normalized.data.body.length).toBeLessThan(12550);
         expect(normalized.data.body).toContain('[truncated');
     });
+
+    test('builds prompt messages with supplemental memory and recent session transcript', () => {
+        const messages = __testUtils.buildMessages({
+            input: 'Use the same directory as before.',
+            instructions: 'You are a helpful AI assistant.',
+            contextMessages: ['Earlier the user worked with C:\\repo\\scripts'],
+            recentMessages: [
+                { role: 'user', content: 'Work in C:\\repo\\scripts and list the files.' },
+                { role: 'assistant', content: 'I will work in C:\\repo\\scripts.' },
+            ],
+        });
+
+        expect(messages[0]).toEqual({
+            role: 'system',
+            content: 'You are a helpful AI assistant.',
+        });
+        expect(messages[1].role).toBe('system');
+        expect(messages[1].content).toContain('Supplemental recalled memory');
+        expect(messages[2]).toEqual({
+            role: 'user',
+            content: 'Work in C:\\repo\\scripts and list the files.',
+        });
+        expect(messages[3]).toEqual({
+            role: 'assistant',
+            content: 'I will work in C:\\repo\\scripts.',
+        });
+        expect(messages[4]).toEqual({
+            role: 'user',
+            content: 'Use the same directory as before.',
+        });
+    });
 });
