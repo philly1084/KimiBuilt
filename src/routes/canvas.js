@@ -47,8 +47,6 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        session = await sessionStore.syncModel(session, model);
-
         const contextMessages = await memoryService.process(sessionId, message);
         const instructions = await buildInstructionsWithArtifacts(
             session,

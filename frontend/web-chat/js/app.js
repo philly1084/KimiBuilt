@@ -148,9 +148,6 @@ class ChatApp {
         // Handle model change event
         window.addEventListener('modelChanged', (e) => {
             console.log('Model changed to:', e.detail.modelId);
-            if (sessionManager.currentSessionId) {
-                sessionManager.setSessionModel(sessionManager.currentSessionId, e.detail.modelId);
-            }
         });
         
         // Handle visibility change for resuming

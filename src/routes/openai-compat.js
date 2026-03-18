@@ -154,8 +154,6 @@ router.post('/chat/completions', async (req, res, next) => {
             });
         }
 
-        session = await sessionStore.syncModel(session, model);
-
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
         const effectiveOutputFormat = output_format || inferOutputFormatFromText(lastUserMessage?.content || '');
         const contextMessages = lastUserMessage
@@ -374,8 +372,6 @@ router.post('/responses', async (req, res, next) => {
                 },
             });
         }
-
-        session = await sessionStore.syncModel(session, model);
 
         const userInput = typeof input === 'string'
             ? input

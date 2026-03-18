@@ -103,7 +103,6 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         return;
     }
 
-    session = await sessionStore.syncModel(session, model);
     const contextMessages = await memoryService.process(session.id, message);
     const recentMessages = await sessionStore.getRecentMessages(session, 8);
     const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
@@ -209,7 +208,6 @@ async function handleCanvas(ws, session, payload = {}) {
         return;
     }
 
-    session = await sessionStore.syncModel(session, model);
     const contextMessages = await memoryService.process(session.id, message);
     const instructions = await buildInstructionsWithArtifacts(
         session,
@@ -300,7 +298,6 @@ async function handleNotation(ws, session, payload = {}) {
         return;
     }
 
-    session = await sessionStore.syncModel(session, model);
     const contextMessages = await memoryService.process(session.id, notation);
     const instructions = await buildInstructionsWithArtifacts(
         session,
