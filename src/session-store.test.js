@@ -22,7 +22,7 @@ describe('SessionStore recent message continuity', () => {
         ]);
 
         const updated = await store.get(session.id);
-        expect(store.getRecentMessages(updated)).toEqual([
+        await expect(store.getRecentMessages(updated)).resolves.toEqual([
             expect.objectContaining({ role: 'user', content: 'first' }),
             expect.objectContaining({ role: 'assistant', content: 'second' }),
         ]);

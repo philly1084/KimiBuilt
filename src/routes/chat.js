@@ -55,7 +55,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
 
         const contextMessages = await memoryService.process(sessionId, message);
-        const recentMessages = sessionStore.getRecentMessages(session, 8);
+        const recentMessages = await sessionStore.getRecentMessages(session, 8);
         const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
         const instructions = await buildInstructionsWithArtifacts(
             session,

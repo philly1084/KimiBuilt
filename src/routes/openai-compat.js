@@ -160,7 +160,7 @@ router.post('/chat/completions', async (req, res, next) => {
             ? await memoryService.process(sessionId, lastUserMessage.content)
             : [];
         const recentMessages = shouldInjectRecentMessages(messages)
-            ? sessionStore.getRecentMessages(session, 8)
+            ? await sessionStore.getRecentMessages(session, 8)
             : [];
 
         const artifactInstructions = effectiveOutputFormat
@@ -379,7 +379,7 @@ router.post('/responses', async (req, res, next) => {
         const effectiveOutputFormat = output_format || inferOutputFormatFromText(userInput);
         const contextMessages = await memoryService.process(sessionId, userInput);
         const recentMessages = typeof input === 'string' || shouldInjectRecentMessages(input)
-            ? sessionStore.getRecentMessages(session, 8)
+            ? await sessionStore.getRecentMessages(session, 8)
             : [];
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)

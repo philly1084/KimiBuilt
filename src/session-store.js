@@ -52,6 +52,16 @@ class SessionStore {
             .slice(-MAX_RECENT_MESSAGES);
     }
 
+    normalizeRecentMessageRow(row) {
+        const normalized = this.normalizeRecentMessages([{
+            role: row?.role,
+            content: row?.content,
+            timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
+        }]);
+
+        return normalized[0] || null;
+    }
+
     normalizeMetadata(metadata = {}) {
         const normalized = {
             ...metadata,
@@ -219,7 +229,36 @@ class SessionStore {
         return this.toSession(result.rows[0]);
     }
 
-    getRecentMessages(session, limit = MAX_RECENT_MESSAGES) {
+    async getRecentMessages(sessionOrId, limit = MAX_RECENT_MESSAGES) {
+        await this.initialize();
+
+        const session = typeof sessionOrId === 'string'
+            ? await this.get(sessionOrId)
+            : sessionOrId;
+        const sessionId = typeof sessionOrId === 'string' ? sessionOrId : session?.id;
+
+        if (!sessionId) {
+            return [];
+        }
+
+        if (this.usePostgres) {
+            const result = await postgres.query(
+                `
+                    SELECT role, content, created_at
+                    FROM session_messages
+                    WHERE session_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                `,
+                [sessionId, Math.max(0, limit)],
+            );
+
+            return result.rows
+                .map((row) => this.normalizeRecentMessageRow(row))
+                .filter(Boolean)
+                .reverse();
+        }
+
         const recentMessages = Array.isArray(session?.metadata?.recentMessages)
             ? session.metadata.recentMessages
             : [];
@@ -228,9 +267,51 @@ class SessionStore {
     }
 
     async appendMessages(id, messages = []) {
+        await this.initialize();
+
         const normalizedMessages = this.normalizeRecentMessages(messages);
         if (normalizedMessages.length === 0) {
             return this.get(id);
+        }
+
+        if (this.usePostgres) {
+            const current = await this.get(id);
+            if (!current) {
+                return null;
+            }
+
+            for (const message of normalizedMessages) {
+                await postgres.query(
+                    `
+                        INSERT INTO session_messages (id, session_id, role, content, created_at)
+                        VALUES ($1, $2, $3, $4, $5)
+                    `,
+                    [
+                        uuidv4(),
+                        id,
+                        message.role,
+                        message.content,
+                        message.timestamp,
+                    ],
+                );
+            }
+
+            await postgres.query(
+                `
+                    DELETE FROM session_messages
+                    WHERE session_id = $1
+                    AND id IN (
+                        SELECT id
+                        FROM session_messages
+                        WHERE session_id = $1
+                        ORDER BY created_at DESC
+                        OFFSET $2
+                    )
+                `,
+                [id, MAX_RECENT_MESSAGES],
+            );
+
+            return current;
         }
 
         const current = await this.get(id);
@@ -238,7 +319,7 @@ class SessionStore {
             return null;
         }
 
-        const existingMessages = this.getRecentMessages(current);
+        const existingMessages = await this.getRecentMessages(current);
         const recentMessages = [...existingMessages, ...normalizedMessages].slice(-MAX_RECENT_MESSAGES);
 
         return this.update(id, {
