@@ -54,6 +54,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
+        session = await sessionStore.syncModel(session, model);
+
         const contextMessages = await memoryService.process(sessionId, message);
         const recentMessages = await sessionStore.getRecentMessages(session, 8);
         const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);

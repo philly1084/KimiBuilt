@@ -329,6 +329,35 @@ class SessionStore {
         });
     }
 
+    async syncModel(sessionOrId, model) {
+        await this.initialize();
+
+        const requestedModel = typeof model === 'string' ? model.trim() : '';
+        const session = typeof sessionOrId === 'string'
+            ? await this.get(sessionOrId)
+            : sessionOrId;
+
+        if (!session || !requestedModel) {
+            return session;
+        }
+
+        const currentModel = typeof session.metadata?.model === 'string'
+            ? session.metadata.model.trim()
+            : '';
+
+        if (currentModel === requestedModel) {
+            return session;
+        }
+
+        // Preserve transcript continuity, but clear response lineage when the active model changes.
+        return this.update(session.id, {
+            previousResponseId: null,
+            metadata: {
+                model: requestedModel,
+            },
+        });
+    }
+
     async recordResponse(id, responseId) {
         await this.initialize();
 
