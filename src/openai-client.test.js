@@ -157,4 +157,24 @@ describe('openai-client automatic tool orchestration helpers', () => {
             content: 'Use the same directory as before.',
         });
     });
+
+    test('merges route instructions with client-provided system prompts instead of stacking them', () => {
+        const messages = __testUtils.buildMessages({
+            input: [
+                { role: 'system', content: 'You are editing a notes page.' },
+                { role: 'user', content: 'Summarize the page.' },
+            ],
+            instructions: 'You are a helpful AI assistant.',
+        });
+
+        expect(messages[0]).toEqual({
+            role: 'system',
+            content: 'You are a helpful AI assistant.\n\nYou are editing a notes page.',
+        });
+        expect(messages[1]).toEqual({
+            role: 'user',
+            content: 'Summarize the page.',
+        });
+        expect(messages).toHaveLength(2);
+    });
 });

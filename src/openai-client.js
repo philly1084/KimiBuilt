@@ -55,6 +55,18 @@ const AUTO_TOOL_ALLOWLIST = new Set([
 const AUTO_TOOL_MAX_ROUNDS = 3;
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 
+class ToolOrchestrationError extends Error {
+    constructor(message, options = {}) {
+        super(message);
+        this.name = 'ToolOrchestrationError';
+        this.code = 'tool_orchestration_failed';
+        this.status = 502;
+        this.statusCode = 502;
+        this.model = options.model || null;
+        this.cause = options.cause || null;
+    }
+}
+
 function hasDedicatedMediaConfig() {
     return Boolean(normalizeModelId(config.media.apiKey));
 }
@@ -370,11 +382,21 @@ function buildMessages({
     recentMessages = [],
 }) {
     const messages = [];
+    const inputMessages = Array.isArray(input) ? input : null;
+    const inputSystemMessages = inputMessages
+        ? inputMessages
+            .filter((entry) => entry?.role === 'system')
+            .map((entry) => normalizeMessageContent(entry.content))
+            .filter(Boolean)
+        : [];
+    const mergedInstructions = [instructions, ...inputSystemMessages]
+        .filter(Boolean)
+        .join('\n\n');
 
-    if (instructions) {
+    if (mergedInstructions) {
         messages.push({
             role: 'system',
-            content: instructions,
+            content: mergedInstructions,
         });
     }
 
@@ -400,8 +422,8 @@ function buildMessages({
             role: 'user',
             content: input,
         });
-    } else if (Array.isArray(input)) {
-        messages.push(...input);
+    } else if (inputMessages) {
+        messages.push(...inputMessages.filter((entry) => entry?.role !== 'system'));
     } else {
         messages.push(input);
     }
@@ -947,7 +969,14 @@ async function createResponse({
                     return stream ? synthesizeStreamResponse(toolResponse) : normalizeChatResponse(toolResponse);
                 }
             } catch (toolError) {
-                console.warn('[OpenAI] Automatic tool orchestration unavailable, falling back to plain chat:', toolError.message);
+                console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
+                throw new ToolOrchestrationError(
+                    `Automatic tool orchestration failed for model '${params.model}': ${toolError.message}`,
+                    {
+                        model: params.model,
+                        cause: toolError,
+                    },
+                );
             }
         }
 
@@ -1024,5 +1053,6 @@ module.exports = {
         normalizeToolResultForModel,
         sanitizeToolSchema,
         shouldAutoUseTool,
+        ToolOrchestrationError,
     },
 };
