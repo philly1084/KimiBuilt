@@ -8,6 +8,27 @@ const { Executor } = require('./execution/Executor');
 const { RetryEngine } = require('./execution/RetryEngine');
 const { Verifier } = require('./execution/Verifier');
 const { Planner } = require('./execution/Planner');
+const { VALID_TASK_TYPES } = require('./core/TaskSchema');
+
+function createNoopVectorStore() {
+  return {
+    async upsert() {
+      return [];
+    },
+    async retrieve() {
+      return null;
+    },
+    async search() {
+      return [];
+    },
+    async scroll() {
+      return [];
+    },
+    async delete() {
+      return undefined;
+    }
+  };
+}
 
 /**
  * @typedef {Object} AgentOrchestratorConfig
@@ -92,13 +113,16 @@ class AgentOrchestrator {
     if (!embedder) {
       throw new Error('AgentOrchestrator requires an embedder');
     }
+
+    const resolvedVectorStore = vectorStore || createNoopVectorStore();
+    const skillsEnabled = vectorStore ? config.enableSkills !== false : false;
     if (!vectorStore) {
-      throw new Error('AgentOrchestrator requires a vectorStore');
+      console.warn('AgentOrchestrator started without a vectorStore; skill persistence is disabled');
     }
 
     this.llmClient = llmClient;
     this.embedder = embedder;
-    this.vectorStore = vectorStore;
+    this.vectorStore = resolvedVectorStore;
 
     // Initialize core execution components
     /**
@@ -142,7 +166,7 @@ class AgentOrchestrator {
      * @type {SkillMemory}
      * @private
      */
-    this.skillMemory = new SkillMemory(vectorStore);
+    this.skillMemory = new SkillMemory(resolvedVectorStore);
 
     /**
      * Extractor for capturing skills from successful tasks.
@@ -168,9 +192,9 @@ class AgentOrchestrator {
       maxRetries: 3,
       defaultTimeout: 30000,
       enableTracing: true,
-      enableSkills: true,
       ...config
     };
+    this.config.enableSkills = skillsEnabled && this.config.enableSkills !== false;
 
     // Event handling system
     /**
@@ -212,7 +236,7 @@ class AgentOrchestrator {
     const workingMemory = this.getWorkingMemory(sessionId);
 
     // Create task from input
-    const task = new Task(taskInput);
+    const task = new Task(this.normalizeTaskInput(taskInput, sessionId));
     workingMemory.setCurrentTask(task);
 
     // Retrieve relevant skills to provide context
@@ -268,7 +292,7 @@ class AgentOrchestrator {
         success: result.success,
         task: task.toJSON(),
         output: result.output,
-        trace: result.trace?.toJSON(),
+        trace: typeof result.trace?.toJSON === 'function' ? result.trace.toJSON() : result.trace,
         sessionId
       };
 
@@ -364,10 +388,85 @@ class AgentOrchestrator {
    * @returns {WorkingMemory} The working memory instance for this session
    */
   getWorkingMemory(sessionId) {
+    const existingMemory = this.workingMemories.get(sessionId);
+    if (existingMemory?.isExpired()) {
+      this.workingMemories.delete(sessionId);
+    }
+
     if (!this.workingMemories.has(sessionId)) {
       this.workingMemories.set(sessionId, new WorkingMemory(sessionId));
     }
     return this.workingMemories.get(sessionId);
+  }
+
+  normalizeTaskInput(taskInput, sessionId) {
+    const normalized = typeof taskInput === 'string'
+      ? {
+          type: 'chat',
+          objective: taskInput,
+          input: {
+            content: taskInput,
+            format: 'text'
+          }
+        }
+      : {
+          ...(taskInput || {})
+        };
+
+    const inferredObjective = typeof normalized.objective === 'string' && normalized.objective.trim()
+      ? normalized.objective.trim()
+      : typeof normalized.input?.content === 'string' && normalized.input.content.trim()
+        ? normalized.input.content.trim()
+        : '';
+
+    const normalizedType = VALID_TASK_TYPES.includes(normalized.type)
+      ? normalized.type
+      : normalized.type === 'chat-interaction'
+        ? 'chat'
+        : 'multi-step';
+
+    const normalizedConditions = Array.isArray(normalized.completionCriteria?.conditions)
+      ? normalized.completionCriteria.conditions.map((condition) => {
+          if (typeof condition === 'string') {
+            return {
+              type: 'custom-function',
+              fn: async (_task, executionResult) => ({
+                valid: condition === 'response-delivered'
+                  ? Boolean(executionResult?.output)
+                  : condition === 'no-errors'
+                    ? !executionResult?.error
+                    : true,
+                message: `Normalized legacy condition "${condition}"`,
+              }),
+            };
+          }
+
+          return condition;
+        })
+      : normalized.completionCriteria?.conditions;
+
+    return {
+      ...normalized,
+      type: normalizedType,
+      objective: inferredObjective,
+      input: {
+        format: 'text',
+        ...(normalized.input || {}),
+        content: typeof normalized.input?.content === 'string'
+          ? normalized.input.content
+          : inferredObjective,
+      },
+      context: {
+        ...(normalized.context || {}),
+        sessionId: normalized.context?.sessionId || sessionId,
+      },
+      completionCriteria: normalized.completionCriteria
+        ? {
+            ...normalized.completionCriteria,
+            conditions: normalizedConditions,
+          }
+        : normalized.completionCriteria,
+    };
   }
 
   /**

@@ -47,7 +47,18 @@ class MemoryService {
             scoreThreshold,
         });
 
-        return results.map((r) => r.text);
+        const seen = new Set();
+
+        return results
+            .map((result) => this.formatResult(result))
+            .filter((entry) => {
+                if (!entry || seen.has(entry)) {
+                    return false;
+                }
+
+                seen.add(entry);
+                return true;
+            });
     }
 
     /**
@@ -99,6 +110,16 @@ class MemoryService {
      */
     async forget(sessionId) {
         await this.store.deleteSession(sessionId);
+    }
+
+    formatResult(result = {}) {
+        const text = String(result.text || '').trim();
+        if (!text) {
+            return null;
+        }
+
+        const role = String(result.metadata?.role || result.role || 'memory').trim();
+        return `[Past ${role} message] ${text}`;
     }
 }
 

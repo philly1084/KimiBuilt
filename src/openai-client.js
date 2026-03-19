@@ -970,13 +970,7 @@ async function createResponse({
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
-                throw new ToolOrchestrationError(
-                    `Automatic tool orchestration failed for model '${params.model}': ${toolError.message}`,
-                    {
-                        model: params.model,
-                        cause: toolError,
-                    },
-                );
+                console.warn(`[OpenAI] Falling back to a plain model response for '${params.model}'`);
             }
         }
 

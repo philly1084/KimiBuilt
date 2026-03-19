@@ -7,6 +7,7 @@ const { artifactService, extractResponseText } = require('../artifacts/artifact-
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
+const RECENT_TRANSCRIPT_LIMIT = 12;
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -160,7 +161,7 @@ router.post('/chat/completions', async (req, res, next) => {
             ? await memoryService.process(sessionId, lastUserMessage.content)
             : [];
         const recentMessages = shouldInjectRecentMessages(messages)
-            ? await sessionStore.getRecentMessages(session, 8)
+            ? await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT)
             : [];
 
         const artifactInstructions = effectiveOutputFormat
@@ -379,7 +380,7 @@ router.post('/responses', async (req, res, next) => {
         const effectiveOutputFormat = output_format || inferOutputFormatFromText(userInput);
         const contextMessages = await memoryService.process(sessionId, userInput);
         const recentMessages = typeof input === 'string' || shouldInjectRecentMessages(input)
-            ? await sessionStore.getRecentMessages(session, 8)
+            ? await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT)
             : [];
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)

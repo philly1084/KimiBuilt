@@ -11,6 +11,7 @@ const adminEvents = new EventEmitter();
 
 // Store admin dashboard connections
 const adminConnections = new Set();
+const RECENT_TRANSCRIPT_LIMIT = 12;
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -104,7 +105,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     }
 
     const contextMessages = await memoryService.process(session.id, message);
-    const recentMessages = await sessionStore.getRecentMessages(session, 8);
+    const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
     const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
     const instructions = await buildInstructionsWithArtifacts(
         session,
@@ -209,6 +210,7 @@ async function handleCanvas(ws, session, payload = {}) {
     }
 
     const contextMessages = await memoryService.process(session.id, message);
+    const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
     const instructions = await buildInstructionsWithArtifacts(
         session,
         `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
@@ -228,6 +230,7 @@ async function handleCanvas(ws, session, payload = {}) {
             input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
             previousResponseId: session.previousResponseId,
             contextMessages,
+            recentMessages,
             instructions,
             stream: false,
             model,
@@ -241,6 +244,10 @@ async function handleCanvas(ws, session, payload = {}) {
             .join('\n');
 
         memoryService.rememberResponse(session.id, outputText);
+        await sessionStore.appendMessages(session.id, [
+            { role: 'user', content: message },
+            { role: 'assistant', content: outputText },
+        ]);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId: session.id,
             session,
@@ -299,6 +306,7 @@ async function handleNotation(ws, session, payload = {}) {
     }
 
     const contextMessages = await memoryService.process(session.id, notation);
+    const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
     const instructions = await buildInstructionsWithArtifacts(
         session,
         `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
@@ -318,6 +326,7 @@ async function handleNotation(ws, session, payload = {}) {
             input: notation,
             previousResponseId: session.previousResponseId,
             contextMessages,
+            recentMessages,
             instructions,
             stream: false,
             model,
@@ -331,6 +340,10 @@ async function handleNotation(ws, session, payload = {}) {
             .join('\n');
 
         memoryService.rememberResponse(session.id, outputText);
+        await sessionStore.appendMessages(session.id, [
+            { role: 'user', content: notation },
+            { role: 'assistant', content: outputText },
+        ]);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId: session.id,
             session,

@@ -7,6 +7,7 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require(
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
+const RECENT_TRANSCRIPT_LIMIT = 12;
 
 const canvasSchema = {
     message: { required: true, type: 'string' },
@@ -48,6 +49,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         }
 
         const contextMessages = await memoryService.process(sessionId, message);
+        const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
         const instructions = await buildInstructionsWithArtifacts(
             session,
             buildCanvasInstructions(canvasType, existingContent),
@@ -67,6 +69,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             input: message,
             previousResponseId: session.previousResponseId,
             contextMessages,
+            recentMessages,
             instructions,
             stream: false,
             model,
@@ -80,6 +83,10 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             .join('\n');
 
         memoryService.rememberResponse(sessionId, outputText);
+        await sessionStore.appendMessages(sessionId, [
+            { role: 'user', content: message },
+            { role: 'assistant', content: outputText },
+        ]);
         const structured = parseCanvasResponse(outputText, canvasType);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,

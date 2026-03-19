@@ -443,6 +443,14 @@ class SkillMemory {
     const results = await this.vectorStore.scroll('skills', { limit: 1000 });
     return results.length;
   }
+
+  getStats() {
+    return {
+      total: this.cache.size,
+      cached: this.cache.size,
+      cacheTTL: this.cacheTTL,
+    };
+  }
 }
 
 module.exports = { Skill, SkillMemory };

@@ -7,6 +7,7 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require(
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
+const RECENT_TRANSCRIPT_LIMIT = 12;
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -55,7 +56,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
 
         const contextMessages = await memoryService.process(sessionId, message);
-        const recentMessages = await sessionStore.getRecentMessages(session, 8);
+        const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
         const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
         const instructions = await buildInstructionsWithArtifacts(
             session,

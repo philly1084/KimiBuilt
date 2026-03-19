@@ -296,6 +296,63 @@ class WorkingMemory {
   getMessages() {
     return [...this.conversationHistory];
   }
+
+  /**
+   * Resolves a value from working memory using dot-notation.
+   * Searches intermediate results first, then well-known top-level fields.
+   *
+   * @param {string} key - Dot-notation key
+   * @returns {any} Resolved value or undefined
+   * @throws {TypeError} If key is not a string
+   */
+  get(key) {
+    if (typeof key !== 'string') {
+      throw new TypeError('key must be a string');
+    }
+
+    if (this.intermediateResults.has(key)) {
+      return this.intermediateResults.get(key);
+    }
+
+    const segments = key.split('.').filter(Boolean);
+    if (segments.length === 0) {
+      return undefined;
+    }
+
+    let root;
+    const [firstSegment, ...rest] = segments;
+
+    if (firstSegment === 'currentTask') {
+      root = this.currentTask;
+    } else if (firstSegment === 'userPreferences') {
+      root = this.userPreferences;
+    } else if (firstSegment === 'tokenUsage') {
+      root = this.tokenUsage;
+    } else if (firstSegment === 'conversationHistory') {
+      root = this.conversationHistory;
+    } else if (firstSegment === 'contextWindow') {
+      root = this.contextWindow;
+    } else if (firstSegment === 'activeTools') {
+      root = this.activeTools;
+    } else if (firstSegment === 'sessionId') {
+      root = this.sessionId;
+    } else if (this.intermediateResults.has(firstSegment)) {
+      root = this.intermediateResults.get(firstSegment);
+    } else if (Object.prototype.hasOwnProperty.call(this.userPreferences, firstSegment)) {
+      root = this.userPreferences[firstSegment];
+    } else if (Object.prototype.hasOwnProperty.call(this.tokenUsage, firstSegment)) {
+      root = this.tokenUsage[firstSegment];
+    } else {
+      root = this[firstSegment];
+    }
+
+    return rest.reduce((value, segment) => {
+      if (value == null) {
+        return undefined;
+      }
+      return value[segment];
+    }, root);
+  }
   
   /**
    * Adds token usage to the running totals.

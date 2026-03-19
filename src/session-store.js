@@ -1,7 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { postgres } = require('./postgres');
 
-const MAX_RECENT_MESSAGES = 12;
+const MAX_RECENT_MESSAGES = 24;
 const MAX_RECENT_MESSAGE_LENGTH = 4000;
 
 class SessionStore {
