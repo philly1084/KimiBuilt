@@ -13,6 +13,17 @@ const adminEvents = new EventEmitter();
 const adminConnections = new Set();
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
+async function executeRuntimeResponse(app, params) {
+    const agentOrchestrator = app?.locals?.agentOrchestrator;
+    if (agentOrchestrator?.executeConversation) {
+        return agentOrchestrator.executeConversation(params);
+    }
+
+    return {
+        response: await createResponse(params),
+    };
+}
+
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
     const checks = [
@@ -30,6 +41,7 @@ function inferOutputFormatFromText(text = '') {
 
 function setupWebSocket(wss, app = null) {
     wss.on('connection', (ws, req) => {
+        ws.app = app;
         if (isAuthEnabled()) {
             const authState = getAuthenticatedUser(req);
             if (!authState.authenticated) {
@@ -124,7 +136,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     });
 
     try {
-        const response = await createResponse({
+        const execution = await executeRuntimeResponse(ws.app, {
             input: message,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -140,6 +152,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             },
             enableAutomaticToolCalls: true,
         });
+        const response = execution.response;
 
         let fullText = '';
 
@@ -226,7 +239,7 @@ async function handleCanvas(ws, session, payload = {}) {
     });
 
     try {
-        const response = await createResponse({
+        const execution = await executeRuntimeResponse(ws.app, {
             input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -234,7 +247,9 @@ async function handleCanvas(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            taskType: 'canvas',
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(session.id, response.id);
 
@@ -322,7 +337,7 @@ async function handleNotation(ws, session, payload = {}) {
     });
 
     try {
-        const response = await createResponse({
+        const execution = await executeRuntimeResponse(ws.app, {
             input: notation,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -330,7 +345,9 @@ async function handleNotation(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            taskType: 'notation',
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(session.id, response.id);
 

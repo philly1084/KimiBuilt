@@ -34,4 +34,52 @@ describe('AgentOrchestrator', () => {
             taskId: result.task.id,
         }));
     });
+
+    test('routes conversation execution through the orchestrator runtime path', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_1',
+                model: 'gpt-test',
+                output: [
+                    {
+                        type: 'message',
+                        content: [{ text: 'Runtime answer' }],
+                    },
+                ],
+            }),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                complexity: 'low',
+                requiredTools: [],
+                estimatedSteps: 1,
+                challenges: [],
+            })),
+        };
+        const embedder = {
+            embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        const result = await orchestrator.executeConversation({
+            sessionId: 'session-2',
+            input: 'Keep the same context.',
+            recentMessages: [
+                { role: 'assistant', content: 'Earlier answer' },
+            ],
+            instructions: 'Be concise.',
+            stream: false,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.output).toBe('Runtime answer');
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: 'Keep the same context.',
+            recentMessages: [
+                { role: 'assistant', content: 'Earlier answer' },
+            ],
+        }));
+    });
 });

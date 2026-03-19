@@ -9,6 +9,20 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const router = Router();
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
+async function executeCanvasResponse(app, params) {
+    const agentOrchestrator = app?.locals?.agentOrchestrator;
+    if (agentOrchestrator?.executeConversation) {
+        return agentOrchestrator.executeConversation({
+            ...params,
+            taskType: 'canvas',
+        });
+    }
+
+    return {
+        response: await createResponse(params),
+    };
+}
+
 const canvasSchema = {
     message: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
@@ -65,7 +79,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             metadata: { route: '/api/canvas', canvasType },
         });
 
-        const response = await createResponse({
+        const execution = await executeCanvasResponse(req.app, {
             input: message,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -74,6 +88,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             stream: false,
             model,
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(sessionId, response.id);
 

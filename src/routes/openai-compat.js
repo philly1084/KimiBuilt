@@ -9,6 +9,17 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const router = Router();
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
+async function executeRuntimeResponse(app, params) {
+    const agentOrchestrator = app?.locals?.agentOrchestrator;
+    if (agentOrchestrator?.executeConversation) {
+        return agentOrchestrator.executeConversation(params);
+    }
+
+    return {
+        response: await createResponse(params),
+    };
+}
+
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
     const checks = [
@@ -188,7 +199,7 @@ router.post('/chat/completions', async (req, res, next) => {
             res.setHeader('Connection', 'keep-alive');
             setSessionHeaders(res, sessionId);
 
-            const response = await createResponse({
+            const execution = await executeRuntimeResponse(req.app, {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
@@ -204,6 +215,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 },
                 enableAutomaticToolCalls: true,
             });
+            const response = execution.response;
 
             let fullText = '';
             let chunkIndex = 0;
@@ -265,7 +277,7 @@ router.post('/chat/completions', async (req, res, next) => {
 
         setSessionHeaders(res, sessionId);
 
-        const response = await createResponse({
+        const execution = await executeRuntimeResponse(req.app, {
             input,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -281,6 +293,7 @@ router.post('/chat/completions', async (req, res, next) => {
             },
             enableAutomaticToolCalls: true,
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(sessionId, response.id);
         const outputText = extractResponseText(response);
@@ -405,7 +418,7 @@ router.post('/responses', async (req, res, next) => {
             res.setHeader('Connection', 'keep-alive');
             setSessionHeaders(res, sessionId);
 
-            const response = await createResponse({
+            const execution = await executeRuntimeResponse(req.app, {
                 input,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
@@ -421,6 +434,7 @@ router.post('/responses', async (req, res, next) => {
                 },
                 enableAutomaticToolCalls: true,
             });
+            const response = execution.response;
 
             let fullText = '';
             for await (const event of response) {
@@ -464,7 +478,7 @@ router.post('/responses', async (req, res, next) => {
 
         setSessionHeaders(res, sessionId);
 
-        const response = await createResponse({
+        const execution = await executeRuntimeResponse(req.app, {
             input,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -480,6 +494,7 @@ router.post('/responses', async (req, res, next) => {
             },
             enableAutomaticToolCalls: true,
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(sessionId, response.id);
         const outputText = extractResponseText(response);

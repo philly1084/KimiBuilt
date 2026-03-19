@@ -9,6 +9,17 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const router = Router();
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
+async function executeChatResponse(app, params) {
+    const agentOrchestrator = app?.locals?.agentOrchestrator;
+    if (agentOrchestrator?.executeConversation) {
+        return agentOrchestrator.executeConversation(params);
+    }
+
+    return {
+        response: await createResponse(params),
+    };
+}
+
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
     const checks = [
@@ -81,7 +92,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('X-Session-Id', sessionId);
 
-            const response = await createResponse({
+            const execution = await executeChatResponse(req.app, {
                 input: message,
                 previousResponseId: session.previousResponseId,
                 contextMessages,
@@ -97,6 +108,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 },
                 enableAutomaticToolCalls: true,
             });
+            const response = execution.response;
 
             let fullText = '';
 
@@ -139,7 +151,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return;
         }
 
-        const response = await createResponse({
+        const execution = await executeChatResponse(req.app, {
             input: message,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -155,6 +167,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             },
             enableAutomaticToolCalls: true,
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(sessionId, response.id);
 

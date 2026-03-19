@@ -9,6 +9,20 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const router = Router();
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
+async function executeNotationResponse(app, params) {
+    const agentOrchestrator = app?.locals?.agentOrchestrator;
+    if (agentOrchestrator?.executeConversation) {
+        return agentOrchestrator.executeConversation({
+            ...params,
+            taskType: 'notation',
+        });
+    }
+
+    return {
+        response: await createResponse(params),
+    };
+}
+
 const notationSchema = {
     notation: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
@@ -65,7 +79,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             metadata: { route: '/api/notation', helperMode },
         });
 
-        const response = await createResponse({
+        const execution = await executeNotationResponse(req.app, {
             input: notation,
             previousResponseId: session.previousResponseId,
             contextMessages,
@@ -74,6 +88,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             stream: false,
             model,
         });
+        const response = execution.response;
 
         await sessionStore.recordResponse(sessionId, response.id);
 

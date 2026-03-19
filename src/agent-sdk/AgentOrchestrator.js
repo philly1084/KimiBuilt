@@ -1,4 +1,5 @@
 const { Task } = require('./core/Task');
+const { TaskStatus } = require('./core/TaskStatus');
 const { ToolRegistry } = require('./tools/ToolRegistry');
 const { WorkingMemory } = require('./memory/WorkingMemory');
 const { SkillMemory, Skill } = require('./memory/SkillMemory');
@@ -28,6 +29,28 @@ function createNoopVectorStore() {
       return undefined;
     }
   };
+}
+
+function normalizeMessageContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          return entry;
+        }
+        if (entry?.type === 'text') {
+          return entry.text || '';
+        }
+        return entry?.text || '';
+      })
+      .join('');
+  }
+
+  return '';
 }
 
 /**
@@ -309,6 +332,147 @@ class AgentOrchestrator {
     }
   }
 
+  async executeConversation({
+    input,
+    instructions = null,
+    contextMessages = [],
+    recentMessages = [],
+    previousResponseId = null,
+    stream = false,
+    model = null,
+    toolManager = null,
+    toolContext = {},
+    enableAutomaticToolCalls = false,
+    sessionId = 'default',
+    taskType = 'chat',
+    metadata = {},
+  } = {}) {
+    const workingMemory = this.getWorkingMemory(sessionId);
+    const objective = this.getConversationObjective(input);
+    const task = new Task(this.normalizeTaskInput({
+      type: this.normalizeConversationTaskType(taskType),
+      objective,
+      input: {
+        content: objective,
+        format: Array.isArray(input) ? 'json' : 'text',
+      },
+      context: {
+        sessionId,
+        metadata,
+      },
+      completionCriteria: {
+        conditions: ['output-not-empty', 'no-errors'],
+      },
+    }, sessionId));
+
+    workingMemory.setCurrentTask(task);
+    this.syncWorkingMemoryTranscript(workingMemory, recentMessages);
+    if (objective) {
+      workingMemory.addMessage('user', objective, { source: 'runtime' });
+    }
+
+    this.transitionRuntimeTask(task, TaskStatus.EXECUTING);
+    this.emit('task:start', {
+      task,
+      sessionId,
+      timestamp: Date.now(),
+      metadata: {
+        ...metadata,
+        stream,
+        taskType,
+      },
+    });
+
+    try {
+      const response = await this.llmClient.createResponse({
+        input,
+        previousResponseId,
+        contextMessages,
+        recentMessages,
+        instructions,
+        stream,
+        model,
+        toolManager,
+        toolContext: {
+          sessionId,
+          ...toolContext,
+        },
+        enableAutomaticToolCalls,
+      });
+
+      if (stream) {
+        return {
+          success: true,
+          sessionId,
+          task: task.toJSON(),
+          response: this.wrapConversationStream({
+            response,
+            task,
+            workingMemory,
+            sessionId,
+            model,
+            metadata: {
+              ...metadata,
+              taskType,
+            },
+          }),
+        };
+      }
+
+      const output = this.extractResponseOutput(response);
+      const duration = this.finalizeRuntimeTask(task, workingMemory, output);
+      const trace = this.buildConversationTrace({
+        task,
+        sessionId,
+        output,
+        responseId: response?.id || null,
+        model: response?.model || model || null,
+        duration,
+        metadata: {
+          ...metadata,
+          taskType,
+          stream,
+        },
+      });
+
+      this.emit('task:complete', {
+        task,
+        sessionId,
+        timestamp: Date.now(),
+        result: {
+          success: true,
+          output,
+          responseId: response?.id || null,
+          trace,
+          duration,
+        },
+      });
+
+      return {
+        success: true,
+        sessionId,
+        task: task.toJSON(),
+        output,
+        response,
+        trace,
+      };
+    } catch (error) {
+      this.failRuntimeTask(task);
+      this.emit('task:error', {
+        task,
+        sessionId,
+        timestamp: Date.now(),
+        error: error.message,
+        stack: error.stack,
+        metadata: {
+          ...metadata,
+          taskType,
+        },
+      });
+      throw error;
+    }
+  }
+
   /**
    * Capture a skill from a successfully completed task.
    * 
@@ -466,6 +630,185 @@ class AgentOrchestrator {
             conditions: normalizedConditions,
           }
         : normalized.completionCriteria,
+    };
+  }
+
+  normalizeConversationTaskType(taskType) {
+    if (VALID_TASK_TYPES.includes(taskType)) {
+      return taskType;
+    }
+
+    return 'chat';
+  }
+
+  getConversationObjective(input) {
+    if (typeof input === 'string') {
+      return input;
+    }
+
+    if (Array.isArray(input)) {
+      for (let index = input.length - 1; index >= 0; index -= 1) {
+        if (input[index]?.role === 'user') {
+          return normalizeMessageContent(input[index].content);
+        }
+      }
+    }
+
+    return '';
+  }
+
+  syncWorkingMemoryTranscript(workingMemory, recentMessages = []) {
+    if (!Array.isArray(recentMessages) || recentMessages.length === 0) {
+      return;
+    }
+
+    const existingKeys = new Set(
+      workingMemory.getMessages().map((message) => `${message.role}:${message.content}`)
+    );
+
+    for (const entry of recentMessages) {
+      if (!['user', 'assistant', 'system', 'tool'].includes(entry?.role)) {
+        continue;
+      }
+
+      const content = normalizeMessageContent(entry?.content);
+      if (!content) {
+        continue;
+      }
+
+      const key = `${entry.role}:${content}`;
+      if (existingKeys.has(key)) {
+        continue;
+      }
+
+      workingMemory.addMessage(entry.role, content, {
+        source: 'session-store',
+      });
+      existingKeys.add(key);
+    }
+  }
+
+  extractResponseOutput(response) {
+    return (response?.output || [])
+      .filter((item) => item.type === 'message')
+      .map((item) => (item.content || []).map((content) => content.text).join(''))
+      .join('\n');
+  }
+
+  wrapConversationStream({
+    response,
+    task,
+    workingMemory,
+    sessionId,
+    model,
+    metadata = {},
+  }) {
+    const orchestrator = this;
+
+    return (async function* wrappedStream() {
+      let fullText = '';
+
+      try {
+        for await (const event of response) {
+          if (event.type === 'response.output_text.delta') {
+            fullText += event.delta;
+          }
+
+          if (event.type === 'response.completed') {
+            const duration = orchestrator.finalizeRuntimeTask(task, workingMemory, fullText);
+            const trace = orchestrator.buildConversationTrace({
+              task,
+              sessionId,
+              output: fullText,
+              responseId: event.response?.id || null,
+              model: event.response?.model || model || null,
+              duration,
+              metadata: {
+                ...metadata,
+                stream: true,
+              },
+            });
+
+            orchestrator.emit('task:complete', {
+              task,
+              sessionId,
+              timestamp: Date.now(),
+              result: {
+                success: true,
+                output: fullText,
+                responseId: event.response?.id || null,
+                trace,
+                duration,
+              },
+            });
+          }
+
+          yield event;
+        }
+      } catch (error) {
+        orchestrator.failRuntimeTask(task);
+        orchestrator.emit('task:error', {
+          task,
+          sessionId,
+          timestamp: Date.now(),
+          error: error.message,
+          stack: error.stack,
+          metadata,
+        });
+        throw error;
+      }
+    }());
+  }
+
+  transitionRuntimeTask(task, nextStatus) {
+    try {
+      task.transitionStatus(nextStatus);
+    } catch (_error) {
+      task.status = nextStatus;
+    }
+  }
+
+  finalizeRuntimeTask(task, workingMemory, output) {
+    if (output) {
+      workingMemory.addMessage('assistant', output, { source: 'runtime' });
+    }
+
+    this.transitionRuntimeTask(task, TaskStatus.COMPLETED);
+    return task.metadata?.executionTime || 0;
+  }
+
+  failRuntimeTask(task) {
+    this.transitionRuntimeTask(task, TaskStatus.FAILED);
+  }
+
+  buildConversationTrace({
+    task,
+    sessionId,
+    output,
+    responseId,
+    model,
+    duration,
+    metadata = {},
+  }) {
+    return {
+      id: `runtime-${task.id}`,
+      taskId: task.id,
+      sessionId,
+      model,
+      responseId,
+      duration,
+      status: 'completed',
+      createdAt: task.metadata?.createdAt || new Date().toISOString(),
+      completedAt: task.metadata?.completedAt || new Date().toISOString(),
+      metadata,
+      steps: [
+        {
+          type: 'model_call',
+          status: 'completed',
+          description: `${metadata.taskType || task.type} runtime response`,
+          outputPreview: String(output || '').slice(0, 200),
+        },
+      ],
     };
   }
 
