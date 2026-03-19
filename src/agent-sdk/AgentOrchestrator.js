@@ -10,6 +10,7 @@ const { RetryEngine } = require('./execution/RetryEngine');
 const { Verifier } = require('./execution/Verifier');
 const { Planner } = require('./execution/Planner');
 const { VALID_TASK_TYPES } = require('./core/TaskSchema');
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function createNoopVectorStore() {
   return {
@@ -51,6 +52,10 @@ function normalizeMessageContent(content) {
   }
 
   return '';
+}
+
+function isUuidLike(value) {
+  return typeof value === 'string' && UUID_V4_REGEX.test(value.trim());
 }
 
 /**
@@ -655,7 +660,15 @@ class AgentOrchestrator {
       },
       context: {
         ...(normalized.context || {}),
-        sessionId: normalized.context?.sessionId || sessionId,
+        ...(isUuidLike(normalized.context?.sessionId)
+          ? { sessionId: normalized.context.sessionId }
+          : isUuidLike(sessionId)
+            ? { sessionId }
+            : {}),
+        metadata: {
+          ...(normalized.context?.metadata || {}),
+          runtimeSessionId: sessionId || null,
+        },
       },
       completionCriteria: normalized.completionCriteria
         ? {

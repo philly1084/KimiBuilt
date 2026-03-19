@@ -260,4 +260,30 @@ describe('AgentOrchestrator', () => {
             { type: 'output-present' },
         ]);
     });
+
+    test('keeps non-uuid runtime session IDs out of schema-validated task context', () => {
+        const llmClient = {
+            complete: jest.fn(),
+        };
+        const embedder = {
+            embed: jest.fn(),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        const normalized = orchestrator.normalizeTaskInput({
+            type: 'chat',
+            objective: 'Continue the session.',
+            input: {
+                content: 'Continue the session.',
+                format: 'text',
+            },
+        }, 'web-cli-session');
+
+        expect(normalized.context.sessionId).toBeUndefined();
+        expect(normalized.context.metadata.runtimeSessionId).toBe('web-cli-session');
+    });
 });
