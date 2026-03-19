@@ -780,6 +780,7 @@ async function runAutomaticToolLoop(openai, {
     const workingMessages = [...messages];
     let finalResponse = null;
     const toolGuidance = buildAutomaticToolGuidance(automaticTools);
+    const toolEvents = [];
 
     if (toolGuidance) {
         workingMessages.push({
@@ -803,6 +804,11 @@ async function runAutomaticToolLoop(openai, {
         const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
 
         if (toolCalls.length === 0) {
+            if (toolEvents.length > 0) {
+                finalResponse._kimibuilt = {
+                    toolEvents,
+                };
+            }
             return finalResponse;
         }
 
@@ -814,6 +820,10 @@ async function runAutomaticToolLoop(openai, {
 
         for (const toolCall of toolCalls) {
             const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
+            toolEvents.push({
+                toolCall: normalizeToolCall(toolCall),
+                result,
+            });
             workingMessages.push({
                 role: 'tool',
                 tool_call_id: toolCall.id,
@@ -827,6 +837,12 @@ async function runAutomaticToolLoop(openai, {
         messages: workingMessages,
         stream: false,
     });
+
+    if (toolEvents.length > 0) {
+        finalResponse._kimibuilt = {
+            toolEvents,
+        };
+    }
 
     return finalResponse;
 }
@@ -856,6 +872,7 @@ function normalizeChatResponse(response) {
             },
         ],
         session_id: response.session_id,
+        metadata: response?._kimibuilt || {},
     };
 }
 
@@ -888,6 +905,7 @@ async function* normalizeStreamResponse(stream) {
                     id: responseId,
                     model,
                     output: [],
+                    metadata: {},
                 },
             };
         }
@@ -918,6 +936,7 @@ async function* synthesizeStreamResponse(response) {
                 id: responseId,
                 model,
             }).output,
+            metadata: response?._kimibuilt || {},
         },
     };
 }

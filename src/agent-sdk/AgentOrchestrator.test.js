@@ -82,4 +82,96 @@ describe('AgentOrchestrator', () => {
             ],
         }));
     });
+
+    test('persists transcript and tool results through orchestrator-owned services', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_2',
+                model: 'gpt-test',
+                output: [
+                    {
+                        type: 'message',
+                        content: [{ text: 'Here is the result.' }],
+                    },
+                ],
+                metadata: {
+                    toolEvents: [
+                        {
+                            toolCall: {
+                                id: 'call_1',
+                                function: {
+                                    name: 'web-search',
+                                    arguments: '{"query":"latest update"}',
+                                },
+                            },
+                            result: {
+                                success: true,
+                                toolId: 'web-search',
+                                data: { results: ['a', 'b'] },
+                            },
+                        },
+                    ],
+                },
+            }),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                complexity: 'low',
+                requiredTools: [],
+                estimatedSteps: 1,
+                challenges: [],
+            })),
+        };
+        const embedder = {
+            embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        };
+        const sessionStore = {
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'assistant', content: 'Previous turn' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            recall: jest.fn().mockResolvedValue([
+                '[Past assistant message] Earlier context',
+            ]),
+            rememberResponse: jest.fn().mockResolvedValue(undefined),
+            remember: jest.fn().mockResolvedValue(undefined),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            sessionId: 'session-3',
+            input: 'Search for the latest update.',
+            stream: false,
+        });
+
+        expect(result.success).toBe(true);
+        expect(memoryService.recall).toHaveBeenCalledWith('Search for the latest update.', {
+            sessionId: 'session-3',
+        });
+        expect(sessionStore.getRecentMessages).toHaveBeenCalledWith('session-3', 12);
+        expect(sessionStore.recordResponse).toHaveBeenCalledWith('session-3', 'resp_2');
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-3', expect.arrayContaining([
+            expect.objectContaining({ role: 'user', content: 'Search for the latest update.' }),
+            expect.objectContaining({ role: 'tool' }),
+            expect.objectContaining({ role: 'assistant', content: 'Here is the result.' }),
+        ]));
+        expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-3', 'Here is the result.');
+        expect(memoryService.remember).toHaveBeenCalledWith(
+            'session-3',
+            'Search for the latest update.',
+            'user',
+        );
+        expect(memoryService.remember).toHaveBeenCalledWith(
+            'session-3',
+            expect.stringContaining('"tool":"web-search"'),
+            'tool',
+        );
+    });
 });

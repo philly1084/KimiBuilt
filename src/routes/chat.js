@@ -12,11 +12,30 @@ const RECENT_TRANSCRIPT_LIMIT = 12;
 async function executeChatResponse(app, params) {
     const agentOrchestrator = app?.locals?.agentOrchestrator;
     if (agentOrchestrator?.executeConversation) {
-        return agentOrchestrator.executeConversation(params);
+        return {
+            ...(await agentOrchestrator.executeConversation(params)),
+            handledPersistence: true,
+        };
     }
 
+    const contextMessages = params.contextMessages || (
+        params.loadContextMessages === false
+            ? []
+            : await memoryService.process(params.sessionId, params.memoryInput || '')
+    );
+    const recentMessages = params.recentMessages || (
+        params.loadRecentMessages === false
+            ? []
+            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
+    );
+
     return {
-        response: await createResponse(params),
+        response: await createResponse({
+            ...params,
+            contextMessages,
+            recentMessages,
+        }),
+        handledPersistence: false,
     };
 }
 
@@ -66,8 +85,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const contextMessages = await memoryService.process(sessionId, message);
-        const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
         const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
         const instructions = await buildInstructionsWithArtifacts(
             session,
@@ -94,9 +111,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
             const execution = await executeChatResponse(req.app, {
                 input: message,
+                sessionId,
+                memoryInput: message,
                 previousResponseId: session.previousResponseId,
-                contextMessages,
-                recentMessages,
                 instructions,
                 stream: true,
                 model,
@@ -119,12 +136,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
-                    await sessionStore.recordResponse(sessionId, event.response.id);
-                    memoryService.rememberResponse(sessionId, fullText);
-                    await sessionStore.appendMessages(sessionId, [
-                        { role: 'user', content: message },
-                        { role: 'assistant', content: fullText },
-                    ]);
+                    if (!execution.handledPersistence) {
+                        await sessionStore.recordResponse(sessionId, event.response.id);
+                        memoryService.rememberResponse(sessionId, fullText);
+                        await sessionStore.appendMessages(sessionId, [
+                            { role: 'user', content: message },
+                            { role: 'assistant', content: fullText },
+                        ]);
+                    }
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
@@ -153,9 +172,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         const execution = await executeChatResponse(req.app, {
             input: message,
+            sessionId,
+            memoryInput: message,
             previousResponseId: session.previousResponseId,
-            contextMessages,
-            recentMessages,
             instructions,
             stream: false,
             model,
@@ -168,19 +187,21 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             enableAutomaticToolCalls: true,
         });
         const response = execution.response;
-
-        await sessionStore.recordResponse(sessionId, response.id);
+        if (!execution.handledPersistence) {
+            await sessionStore.recordResponse(sessionId, response.id);
+        }
 
         const outputText = response.output
             .filter((item) => item.type === 'message')
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
-
-        memoryService.rememberResponse(sessionId, outputText);
-        await sessionStore.appendMessages(sessionId, [
-            { role: 'user', content: message },
-            { role: 'assistant', content: outputText },
-        ]);
+        if (!execution.handledPersistence) {
+            memoryService.rememberResponse(sessionId, outputText);
+            await sessionStore.appendMessages(sessionId, [
+                { role: 'user', content: message },
+                { role: 'assistant', content: outputText },
+            ]);
+        }
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,

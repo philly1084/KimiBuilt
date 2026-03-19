@@ -16,11 +16,30 @@ const RECENT_TRANSCRIPT_LIMIT = 12;
 async function executeRuntimeResponse(app, params) {
     const agentOrchestrator = app?.locals?.agentOrchestrator;
     if (agentOrchestrator?.executeConversation) {
-        return agentOrchestrator.executeConversation(params);
+        return {
+            ...(await agentOrchestrator.executeConversation(params)),
+            handledPersistence: true,
+        };
     }
 
+    const contextMessages = params.contextMessages || (
+        params.loadContextMessages === false
+            ? []
+            : await memoryService.process(params.sessionId, params.memoryInput || '')
+    );
+    const recentMessages = params.recentMessages || (
+        params.loadRecentMessages === false
+            ? []
+            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
+    );
+
     return {
-        response: await createResponse(params),
+        response: await createResponse({
+            ...params,
+            contextMessages,
+            recentMessages,
+        }),
+        handledPersistence: false,
     };
 }
 
@@ -116,8 +135,6 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         return;
     }
 
-    const contextMessages = await memoryService.process(session.id, message);
-    const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
     const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
     const instructions = await buildInstructionsWithArtifacts(
         session,
@@ -138,9 +155,9 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     try {
         const execution = await executeRuntimeResponse(ws.app, {
             input: message,
+            sessionId: session.id,
+            memoryInput: message,
             previousResponseId: session.previousResponseId,
-            contextMessages,
-            recentMessages,
             instructions,
             stream: true,
             model,
@@ -163,12 +180,14 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             }
 
             if (event.type === 'response.completed') {
-                await sessionStore.recordResponse(session.id, event.response.id);
-                memoryService.rememberResponse(session.id, fullText);
-                await sessionStore.appendMessages(session.id, [
-                    { role: 'user', content: message },
-                    { role: 'assistant', content: fullText },
-                ]);
+                if (!execution.handledPersistence) {
+                    await sessionStore.recordResponse(session.id, event.response.id);
+                    memoryService.rememberResponse(session.id, fullText);
+                    await sessionStore.appendMessages(session.id, [
+                        { role: 'user', content: message },
+                        { role: 'assistant', content: fullText },
+                    ]);
+                }
                 const artifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,
                     session,
@@ -222,8 +241,6 @@ async function handleCanvas(ws, session, payload = {}) {
         return;
     }
 
-    const contextMessages = await memoryService.process(session.id, message);
-    const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
     const instructions = await buildInstructionsWithArtifacts(
         session,
         `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
@@ -241,28 +258,30 @@ async function handleCanvas(ws, session, payload = {}) {
     try {
         const execution = await executeRuntimeResponse(ws.app, {
             input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
+            sessionId: session.id,
+            memoryInput: message,
             previousResponseId: session.previousResponseId,
-            contextMessages,
-            recentMessages,
             instructions,
             stream: false,
             model,
             taskType: 'canvas',
         });
         const response = execution.response;
-
-        await sessionStore.recordResponse(session.id, response.id);
+        if (!execution.handledPersistence) {
+            await sessionStore.recordResponse(session.id, response.id);
+        }
 
         const outputText = response.output
             .filter((item) => item.type === 'message')
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
-
-        memoryService.rememberResponse(session.id, outputText);
-        await sessionStore.appendMessages(session.id, [
-            { role: 'user', content: message },
-            { role: 'assistant', content: outputText },
-        ]);
+        if (!execution.handledPersistence) {
+            memoryService.rememberResponse(session.id, outputText);
+            await sessionStore.appendMessages(session.id, [
+                { role: 'user', content: message },
+                { role: 'assistant', content: outputText },
+            ]);
+        }
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId: session.id,
             session,
@@ -320,8 +339,6 @@ async function handleNotation(ws, session, payload = {}) {
         return;
     }
 
-    const contextMessages = await memoryService.process(session.id, notation);
-    const recentMessages = await sessionStore.getRecentMessages(session, RECENT_TRANSCRIPT_LIMIT);
     const instructions = await buildInstructionsWithArtifacts(
         session,
         `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
@@ -339,28 +356,30 @@ async function handleNotation(ws, session, payload = {}) {
     try {
         const execution = await executeRuntimeResponse(ws.app, {
             input: notation,
+            sessionId: session.id,
+            memoryInput: notation,
             previousResponseId: session.previousResponseId,
-            contextMessages,
-            recentMessages,
             instructions,
             stream: false,
             model,
             taskType: 'notation',
         });
         const response = execution.response;
-
-        await sessionStore.recordResponse(session.id, response.id);
+        if (!execution.handledPersistence) {
+            await sessionStore.recordResponse(session.id, response.id);
+        }
 
         const outputText = response.output
             .filter((item) => item.type === 'message')
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
-
-        memoryService.rememberResponse(session.id, outputText);
-        await sessionStore.appendMessages(session.id, [
-            { role: 'user', content: notation },
-            { role: 'assistant', content: outputText },
-        ]);
+        if (!execution.handledPersistence) {
+            memoryService.rememberResponse(session.id, outputText);
+            await sessionStore.appendMessages(session.id, [
+                { role: 'user', content: notation },
+                { role: 'assistant', content: outputText },
+            ]);
+        }
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId: session.id,
             session,

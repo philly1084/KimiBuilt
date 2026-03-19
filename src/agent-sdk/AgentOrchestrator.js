@@ -128,6 +128,8 @@ class AgentOrchestrator {
     llmClient,
     embedder,
     vectorStore,
+    sessionStore = null,
+    memoryService = null,
     config = {}
   }) {
     if (!llmClient) {
@@ -146,6 +148,8 @@ class AgentOrchestrator {
     this.llmClient = llmClient;
     this.embedder = embedder;
     this.vectorStore = resolvedVectorStore;
+    this.sessionStore = sessionStore;
+    this.memoryService = memoryService;
 
     // Initialize core execution components
     /**
@@ -343,12 +347,24 @@ class AgentOrchestrator {
     toolManager = null,
     toolContext = {},
     enableAutomaticToolCalls = false,
+    loadContextMessages = true,
+    loadRecentMessages = true,
     sessionId = 'default',
     taskType = 'chat',
     metadata = {},
   } = {}) {
     const workingMemory = this.getWorkingMemory(sessionId);
     const objective = this.getConversationObjective(input);
+    const resolvedContextMessages = contextMessages.length > 0
+      ? contextMessages
+      : loadContextMessages !== false
+        ? await this.loadContextMessages(sessionId, objective)
+        : [];
+    const resolvedRecentMessages = recentMessages.length > 0
+      ? recentMessages
+      : loadRecentMessages !== false
+        ? await this.loadRecentMessages(sessionId)
+        : [];
     const task = new Task(this.normalizeTaskInput({
       type: this.normalizeConversationTaskType(taskType),
       objective,
@@ -366,7 +382,7 @@ class AgentOrchestrator {
     }, sessionId));
 
     workingMemory.setCurrentTask(task);
-    this.syncWorkingMemoryTranscript(workingMemory, recentMessages);
+    this.syncWorkingMemoryTranscript(workingMemory, resolvedRecentMessages);
     if (objective) {
       workingMemory.addMessage('user', objective, { source: 'runtime' });
     }
@@ -387,8 +403,8 @@ class AgentOrchestrator {
       const response = await this.llmClient.createResponse({
         input,
         previousResponseId,
-        contextMessages,
-        recentMessages,
+        contextMessages: resolvedContextMessages,
+        recentMessages: resolvedRecentMessages,
         instructions,
         stream,
         model,
@@ -400,40 +416,50 @@ class AgentOrchestrator {
         enableAutomaticToolCalls,
       });
 
-      if (stream) {
-        return {
-          success: true,
-          sessionId,
-          task: task.toJSON(),
-          response: this.wrapConversationStream({
-            response,
-            task,
-            workingMemory,
+        if (stream) {
+          return {
+            success: true,
             sessionId,
-            model,
-            metadata: {
-              ...metadata,
-              taskType,
-            },
-          }),
-        };
-      }
-
-      const output = this.extractResponseOutput(response);
-      const duration = this.finalizeRuntimeTask(task, workingMemory, output);
-      const trace = this.buildConversationTrace({
-        task,
-        sessionId,
-        output,
-        responseId: response?.id || null,
-        model: response?.model || model || null,
-        duration,
-        metadata: {
-          ...metadata,
-          taskType,
-          stream,
-        },
-      });
+            task: task.toJSON(),
+            response: this.wrapConversationStream({
+              response,
+              task,
+              workingMemory,
+              sessionId,
+              model,
+              userText: objective,
+              metadata: {
+                ...metadata,
+                taskType,
+              },
+            }),
+          };
+        }
+  
+        const output = this.extractResponseOutput(response);
+        const toolEvents = this.extractToolEvents(response);
+        const duration = this.finalizeRuntimeTask(task, workingMemory, output);
+        await this.persistConversationState({
+          sessionId,
+          userText: objective,
+          assistantText: output,
+          responseId: response?.id || null,
+          toolEvents,
+        });
+        const trace = this.buildConversationTrace({
+          task,
+          sessionId,
+          output,
+          responseId: response?.id || null,
+          model: response?.model || model || null,
+          duration,
+          metadata: {
+            ...metadata,
+            taskType,
+            stream,
+            toolEventCount: toolEvents.length,
+          },
+        });
 
       this.emit('task:complete', {
         task,
@@ -657,6 +683,24 @@ class AgentOrchestrator {
     return '';
   }
 
+  async loadContextMessages(sessionId, objective) {
+    if (!objective || !this.memoryService?.recall) {
+      return [];
+    }
+
+    return this.memoryService.recall(objective, {
+      sessionId,
+    });
+  }
+
+  async loadRecentMessages(sessionId, limit = 12) {
+    if (!sessionId || !this.sessionStore?.getRecentMessages) {
+      return [];
+    }
+
+    return this.sessionStore.getRecentMessages(sessionId, limit);
+  }
+
   syncWorkingMemoryTranscript(workingMemory, recentMessages = []) {
     if (!Array.isArray(recentMessages) || recentMessages.length === 0) {
       return;
@@ -695,12 +739,19 @@ class AgentOrchestrator {
       .join('\n');
   }
 
+  extractToolEvents(response = {}) {
+    return Array.isArray(response?.metadata?.toolEvents)
+      ? response.metadata.toolEvents
+      : [];
+  }
+
   wrapConversationStream({
     response,
     task,
     workingMemory,
     sessionId,
     model,
+    userText = '',
     metadata = {},
   }) {
     const orchestrator = this;
@@ -715,7 +766,15 @@ class AgentOrchestrator {
           }
 
           if (event.type === 'response.completed') {
+            const toolEvents = orchestrator.extractToolEvents(event.response);
             const duration = orchestrator.finalizeRuntimeTask(task, workingMemory, fullText);
+            await orchestrator.persistConversationState({
+              sessionId,
+              userText,
+              assistantText: fullText,
+              responseId: event.response?.id || null,
+              toolEvents,
+            });
             const trace = orchestrator.buildConversationTrace({
               task,
               sessionId,
@@ -726,6 +785,7 @@ class AgentOrchestrator {
               metadata: {
                 ...metadata,
                 stream: true,
+                toolEventCount: toolEvents.length,
               },
             });
 
@@ -810,6 +870,70 @@ class AgentOrchestrator {
         },
       ],
     };
+  }
+
+  async persistConversationState({
+    sessionId,
+    userText,
+    assistantText,
+    responseId,
+    toolEvents = [],
+  }) {
+    if (!sessionId) {
+      return;
+    }
+
+    if (this.sessionStore?.recordResponse && responseId) {
+      await this.sessionStore.recordResponse(sessionId, responseId);
+    }
+
+    const transcriptMessages = [];
+    if (userText) {
+      transcriptMessages.push({ role: 'user', content: userText });
+    }
+
+    for (const toolEvent of toolEvents) {
+      const toolName = toolEvent?.toolCall?.function?.name || 'tool';
+      const argumentsJson = toolEvent?.toolCall?.function?.arguments || '{}';
+      transcriptMessages.push({
+        role: 'tool',
+        content: JSON.stringify({
+          tool: toolName,
+          arguments: argumentsJson,
+          result: toolEvent?.result || {},
+        }),
+      });
+    }
+
+    if (assistantText) {
+      transcriptMessages.push({ role: 'assistant', content: assistantText });
+    }
+
+    if (this.sessionStore?.appendMessages && transcriptMessages.length > 0) {
+      await this.sessionStore.appendMessages(sessionId, transcriptMessages);
+    }
+
+    if (this.memoryService?.remember && userText) {
+      await this.memoryService.remember(sessionId, userText, 'user');
+    }
+
+    if (this.memoryService?.rememberResponse && assistantText) {
+      await this.memoryService.rememberResponse(sessionId, assistantText);
+    }
+
+    if (this.memoryService?.remember) {
+      for (const toolEvent of toolEvents) {
+        const toolName = toolEvent?.toolCall?.function?.name || 'tool';
+        await this.memoryService.remember(
+          sessionId,
+          JSON.stringify({
+            tool: toolName,
+            result: toolEvent?.result || {},
+          }),
+          'tool',
+        );
+      }
+    }
   }
 
   /**

@@ -323,6 +323,8 @@ async function start() {
                 llmClient: openaiClient,
                 embedder: embedder,
                 vectorStore: vectorStore,
+                sessionStore,
+                memoryService,
                 config: {
                     enableTracing: true,
                     enableSkills: true
