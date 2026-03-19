@@ -228,4 +228,36 @@ describe('AgentOrchestrator', () => {
             recentMessages: [],
         }));
     });
+
+    test('normalizes legacy completion conditions to schema-valid values', () => {
+        const llmClient = {
+            complete: jest.fn(),
+        };
+        const embedder = {
+            embed: jest.fn(),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        const normalized = orchestrator.normalizeTaskInput({
+            type: 'chat',
+            objective: 'Keep talking coherently.',
+            input: {
+                content: 'Keep talking coherently.',
+                format: 'text',
+            },
+            completionCriteria: {
+                conditions: ['output-not-empty', 'no-errors', 'response-delivered'],
+            },
+        }, 'session-5');
+
+        expect(normalized.completionCriteria.conditions).toEqual([
+            { type: 'output-present' },
+            { type: 'custom-check', check: 'no-errors', expected: true },
+            { type: 'output-present' },
+        ]);
+    });
 });

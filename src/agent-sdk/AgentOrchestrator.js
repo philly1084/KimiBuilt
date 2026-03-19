@@ -618,16 +618,23 @@ class AgentOrchestrator {
     const normalizedConditions = Array.isArray(normalized.completionCriteria?.conditions)
       ? normalized.completionCriteria.conditions.map((condition) => {
           if (typeof condition === 'string') {
+            if (condition === 'output-not-empty' || condition === 'response-delivered') {
+              return {
+                type: 'output-present',
+              };
+            }
+
+            if (condition === 'no-errors') {
+              return {
+                type: 'custom-check',
+                check: 'no-errors',
+                expected: true,
+              };
+            }
+
             return {
-              type: 'custom-function',
-              fn: async (_task, executionResult) => ({
-                valid: condition === 'response-delivered'
-                  ? Boolean(executionResult?.output)
-                  : condition === 'no-errors'
-                    ? !executionResult?.error
-                    : true,
-                message: `Normalized legacy condition "${condition}"`,
-              }),
+              type: 'custom-check',
+              check: condition,
             };
           }
 
