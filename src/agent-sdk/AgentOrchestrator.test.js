@@ -174,4 +174,58 @@ describe('AgentOrchestrator', () => {
             'tool',
         );
     });
+
+    test('degrades gracefully when memory and session persistence fail', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_3',
+                model: 'gpt-test',
+                output: [
+                    {
+                        type: 'message',
+                        content: [{ text: 'Still answered.' }],
+                    },
+                ],
+            }),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                complexity: 'low',
+                requiredTools: [],
+                estimatedSteps: 1,
+                challenges: [],
+            })),
+        };
+        const embedder = {
+            embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        };
+        const sessionStore = {
+            getRecentMessages: jest.fn().mockRejectedValue(new Error('session offline')),
+            recordResponse: jest.fn().mockRejectedValue(new Error('write failed')),
+            appendMessages: jest.fn().mockRejectedValue(new Error('append failed')),
+        };
+        const memoryService = {
+            recall: jest.fn().mockRejectedValue(new Error('qdrant offline')),
+            rememberResponse: jest.fn().mockRejectedValue(new Error('remember response failed')),
+            remember: jest.fn().mockRejectedValue(new Error('remember failed')),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            sessionId: 'session-4',
+            input: 'Can you still answer?',
+            stream: false,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.output).toBe('Still answered.');
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            contextMessages: [],
+            recentMessages: [],
+        }));
+    });
 });

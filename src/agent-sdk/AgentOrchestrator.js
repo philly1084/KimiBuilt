@@ -688,9 +688,14 @@ class AgentOrchestrator {
       return [];
     }
 
-    return this.memoryService.recall(objective, {
-      sessionId,
-    });
+    try {
+      return await this.memoryService.recall(objective, {
+        sessionId,
+      });
+    } catch (error) {
+      console.error('[AgentOrchestrator] Failed to load recalled context:', error.message);
+      return [];
+    }
   }
 
   async loadRecentMessages(sessionId, limit = 12) {
@@ -698,7 +703,12 @@ class AgentOrchestrator {
       return [];
     }
 
-    return this.sessionStore.getRecentMessages(sessionId, limit);
+    try {
+      return await this.sessionStore.getRecentMessages(sessionId, limit);
+    } catch (error) {
+      console.error('[AgentOrchestrator] Failed to load recent transcript:', error.message);
+      return [];
+    }
   }
 
   syncWorkingMemoryTranscript(workingMemory, recentMessages = []) {
@@ -884,7 +894,11 @@ class AgentOrchestrator {
     }
 
     if (this.sessionStore?.recordResponse && responseId) {
-      await this.sessionStore.recordResponse(sessionId, responseId);
+      try {
+        await this.sessionStore.recordResponse(sessionId, responseId);
+      } catch (error) {
+        console.error('[AgentOrchestrator] Failed to record response ID:', error.message);
+      }
     }
 
     const transcriptMessages = [];
@@ -910,28 +924,44 @@ class AgentOrchestrator {
     }
 
     if (this.sessionStore?.appendMessages && transcriptMessages.length > 0) {
-      await this.sessionStore.appendMessages(sessionId, transcriptMessages);
+      try {
+        await this.sessionStore.appendMessages(sessionId, transcriptMessages);
+      } catch (error) {
+        console.error('[AgentOrchestrator] Failed to persist transcript:', error.message);
+      }
     }
 
     if (this.memoryService?.remember && userText) {
-      await this.memoryService.remember(sessionId, userText, 'user');
+      try {
+        await this.memoryService.remember(sessionId, userText, 'user');
+      } catch (error) {
+        console.error('[AgentOrchestrator] Failed to persist user memory:', error.message);
+      }
     }
 
     if (this.memoryService?.rememberResponse && assistantText) {
-      await this.memoryService.rememberResponse(sessionId, assistantText);
+      try {
+        await this.memoryService.rememberResponse(sessionId, assistantText);
+      } catch (error) {
+        console.error('[AgentOrchestrator] Failed to persist assistant memory:', error.message);
+      }
     }
 
     if (this.memoryService?.remember) {
       for (const toolEvent of toolEvents) {
         const toolName = toolEvent?.toolCall?.function?.name || 'tool';
-        await this.memoryService.remember(
-          sessionId,
-          JSON.stringify({
-            tool: toolName,
-            result: toolEvent?.result || {},
-          }),
-          'tool',
-        );
+        try {
+          await this.memoryService.remember(
+            sessionId,
+            JSON.stringify({
+              tool: toolName,
+              result: toolEvent?.result || {},
+            }),
+            'tool',
+          );
+        } catch (error) {
+          console.error(`[AgentOrchestrator] Failed to persist tool memory for '${toolName}':`, error.message);
+        }
       }
     }
   }
