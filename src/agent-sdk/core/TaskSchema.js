@@ -469,8 +469,19 @@ function validateProperty(value, propSchema, path) {
   // Type validation
   if (propSchema.type) {
     const actualType = Array.isArray(value) ? 'array' : typeof value;
-    if (actualType !== propSchema.type) {
-      errors.push(`${path}: expected type '${propSchema.type}', got '${actualType}'`);
+    const expectedTypes = Array.isArray(propSchema.type)
+      ? propSchema.type
+      : [propSchema.type];
+    const matchesExpectedType = expectedTypes.some((expectedType) => {
+      if (expectedType === 'integer') {
+        return actualType === 'number';
+      }
+
+      return actualType === expectedType;
+    });
+
+    if (!matchesExpectedType) {
+      errors.push(`${path}: expected type '${expectedTypes.join('|')}', got '${actualType}'`);
       return errors;
     }
   }
