@@ -81,20 +81,19 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const instructions = await buildInstructionsWithArtifacts(
-            session,
-            buildCanvasInstructions(canvasType, existingContent),
-            artifactIds,
-        );
-
         runtimeTask = startRuntimeTask({
             sessionId,
             input: message,
             model: model || null,
             mode: 'canvas',
             transport: 'http',
-            metadata: { route: '/api/canvas', canvasType },
+            metadata: { route: '/api/canvas', canvasType, phase: 'preflight' },
         });
+        const instructions = await buildInstructionsWithArtifacts(
+            session,
+            buildCanvasInstructions(canvasType, existingContent),
+            artifactIds,
+        );
 
         const execution = await executeCanvasResponse(req.app, {
             input: message,

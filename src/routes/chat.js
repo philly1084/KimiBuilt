@@ -86,6 +86,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
 
         const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: message,
+            model: model || session?.metadata?.model || null,
+            mode: 'chat',
+            transport: 'http',
+            metadata: { route: '/api/chat', stream, phase: 'preflight' },
+        });
         const instructions = await buildInstructionsWithArtifacts(
             session,
             effectiveOutputFormat
@@ -93,15 +101,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
             artifactIds,
         );
-
-        runtimeTask = startRuntimeTask({
-            sessionId,
-            input: message,
-            model: model || session?.metadata?.model || null,
-            mode: 'chat',
-            transport: 'http',
-            metadata: { route: '/api/chat', stream },
-        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');

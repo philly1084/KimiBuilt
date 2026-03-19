@@ -187,6 +187,14 @@ router.post('/chat/completions', async (req, res, next) => {
 
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
         const effectiveOutputFormat = output_format || inferOutputFormatFromText(lastUserMessage?.content || '');
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: lastUserMessage?.content || JSON.stringify(messages),
+            model: model || null,
+            mode: 'openai-chat',
+            transport: 'http',
+            metadata: { route: '/v1/chat/completions', stream, phase: 'preflight' },
+        });
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
@@ -196,14 +204,6 @@ router.post('/chat/completions', async (req, res, next) => {
             artifact_ids,
         );
         const input = messages.map((message) => ({ role: message.role, content: message.content }));
-        runtimeTask = startRuntimeTask({
-            sessionId,
-            input: lastUserMessage?.content || JSON.stringify(input),
-            model: model || null,
-            mode: 'openai-chat',
-            transport: 'http',
-            metadata: { route: '/v1/chat/completions', stream },
-        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -412,6 +412,14 @@ router.post('/responses', async (req, res, next) => {
             ? input
             : input.filter((item) => item.role === 'user').pop()?.content || '';
         const effectiveOutputFormat = output_format || inferOutputFormatFromText(userInput);
+        runtimeTask = startRuntimeTask({
+            sessionId,
+            input: userInput || JSON.stringify(input),
+            model: model || null,
+            mode: 'openai-responses',
+            transport: 'http',
+            metadata: { route: '/v1/responses', stream, phase: 'preflight' },
+        });
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
@@ -420,14 +428,6 @@ router.post('/responses', async (req, res, next) => {
             [buildContinuityInstructions(), instructions || '', artifactInstructions].filter(Boolean).join('\n\n'),
             artifact_ids,
         );
-        runtimeTask = startRuntimeTask({
-            sessionId,
-            input: userInput || JSON.stringify(input),
-            model: model || null,
-            mode: 'openai-responses',
-            transport: 'http',
-            metadata: { route: '/v1/responses', stream },
-        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');

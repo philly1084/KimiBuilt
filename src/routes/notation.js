@@ -81,20 +81,19 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const instructions = await buildInstructionsWithArtifacts(
-            session,
-            buildNotationInstructions(helperMode, context),
-            artifactIds,
-        );
-
         runtimeTask = startRuntimeTask({
             sessionId,
             input: notation,
             model: model || null,
             mode: 'notation',
             transport: 'http',
-            metadata: { route: '/api/notation', helperMode },
+            metadata: { route: '/api/notation', helperMode, phase: 'preflight' },
         });
+        const instructions = await buildInstructionsWithArtifacts(
+            session,
+            buildNotationInstructions(helperMode, context),
+            artifactIds,
+        );
 
         const execution = await executeNotationResponse(req.app, {
             input: notation,

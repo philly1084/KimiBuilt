@@ -136,23 +136,23 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     }
 
     const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
-    const instructions = await buildInstructionsWithArtifacts(
-        session,
-        effectiveOutputFormat
-            ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
-            : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
-        artifactIds,
-    );
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
         input: message,
         model,
         mode: 'chat',
         transport: 'ws',
-        metadata: { route: '/ws', stream: true },
+        metadata: { route: '/ws', stream: true, phase: 'preflight' },
     });
 
     try {
+        const instructions = await buildInstructionsWithArtifacts(
+            session,
+            effectiveOutputFormat
+                ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
+                : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
+            artifactIds,
+        );
         const execution = await executeRuntimeResponse(ws.app, {
             input: message,
             sessionId: session.id,
@@ -241,21 +241,21 @@ async function handleCanvas(ws, session, payload = {}) {
         return;
     }
 
-    const instructions = await buildInstructionsWithArtifacts(
-        session,
-        `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
-        artifactIds,
-    );
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
         input: message,
         model,
         mode: 'canvas',
         transport: 'ws',
-        metadata: { route: '/ws', canvasType },
+        metadata: { route: '/ws', canvasType, phase: 'preflight' },
     });
 
     try {
+        const instructions = await buildInstructionsWithArtifacts(
+            session,
+            `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
+            artifactIds,
+        );
         const execution = await executeRuntimeResponse(ws.app, {
             input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
             sessionId: session.id,
@@ -339,21 +339,21 @@ async function handleNotation(ws, session, payload = {}) {
         return;
     }
 
-    const instructions = await buildInstructionsWithArtifacts(
-        session,
-        `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
-        artifactIds,
-    );
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
         input: notation,
         model,
         mode: 'notation',
         transport: 'ws',
-        metadata: { route: '/ws', helperMode },
+        metadata: { route: '/ws', helperMode, phase: 'preflight' },
     });
 
     try {
+        const instructions = await buildInstructionsWithArtifacts(
+            session,
+            `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
+            artifactIds,
+        );
         const execution = await executeRuntimeResponse(ws.app, {
             input: notation,
             sessionId: session.id,
