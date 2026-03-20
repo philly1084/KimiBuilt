@@ -1,6 +1,4 @@
 const { v4: uuidv4 } = require('uuid');
-const runtimePromptRegistry = require('../prompts/runtime-prompt-registry');
-
 /**
  * Step status values.
  * @typedef {('pending'|'running'|'completed'|'failed'|'skipped')} StepStatus
@@ -428,39 +426,38 @@ class Planner {
    * @returns {Promise<TaskAnalysis>} Analysis result
    */
   async analyzeTask(task) {
-    const prompt = runtimePromptRegistry.render('agent-sdk-planner-analysis', {
-      objective: task.objective,
-      type: task.type,
-      input: JSON.stringify(task.input),
-      availableTools: JSON.stringify(task.tools || []),
-    });
-    
-    try {
-      if (this.llmClient) {
-        const response = await this.llmClient.complete(prompt, {
-          model: task.context?.metadata?.model || null,
-        });
-        const parsed = JSON.parse(response);
-        return {
-          complexity: parsed.complexity || 'medium',
-          requiredTools: parsed.requiredTools || task.tools || [],
-          estimatedSteps: parsed.estimatedSteps || 3,
-          challenges: parsed.challenges || [],
-          metadata: parsed
-        };
-      }
-    } catch (error) {
-      // Fall back to basic analysis
-      console.warn('LLM analysis failed, using basic analysis:', error.message);
+    const availableTools = Array.isArray(task.tools) ? task.tools : [];
+    const objective = String(task.objective || '');
+    const inputText = typeof task.input?.content === 'string'
+      ? task.input.content
+      : JSON.stringify(task.input || {});
+    const promptText = `${objective}\n${inputText}`.toLowerCase();
+    const estimatedSteps = Math.max(
+      1,
+      Math.min(
+        4,
+        (availableTools.length > 0 ? 1 : 0)
+          + (objective.length > 180 ? 1 : 0)
+          + (/\b(and|then|after|also|plus)\b/.test(promptText) ? 1 : 0)
+      )
+    );
+
+    const challenges = [];
+    if (availableTools.length > 0) {
+      challenges.push('Tool parameters may need to be inferred from incomplete user input.');
     }
-    
-    // Basic analysis fallback
+    if (objective.length > 300) {
+      challenges.push('Long objective may contain multiple sub-tasks.');
+    }
+
     return {
-      complexity: 'medium',
-      requiredTools: task.tools || [],
-      estimatedSteps: 3,
-      challenges: [],
-      metadata: {}
+      complexity: estimatedSteps >= 3 ? 'high' : (estimatedSteps === 2 ? 'medium' : 'low'),
+      requiredTools: availableTools,
+      estimatedSteps,
+      challenges,
+      metadata: {
+        strategy: 'heuristic',
+      }
     };
   }
   
@@ -685,57 +682,13 @@ class Planner {
   }
 
   async planConversationalAgent(task, plan, analysis) {
-    const availableTools = Array.isArray(task.tools) ? task.tools : [];
-    const metadata = task.context?.metadata || {};
-    let plannedSteps = [];
-
-    if (this.llmClient) {
-      try {
-        const response = await this.llmClient.complete(
-          runtimePromptRegistry.render('agent-sdk-planner-conversation-plan', {
-            objective: task.objective,
-            input: JSON.stringify(task.input || {}, null, 2),
-            availableTools: JSON.stringify(availableTools),
-            instructions: JSON.stringify(metadata.instructions || '', null, 2),
-            contextMessages: JSON.stringify(metadata.contextMessages || [], null, 2),
-            recentMessages: JSON.stringify(metadata.recentMessages || [], null, 2),
-          }),
-          {
-            model: metadata.model || null,
-          },
-        );
-        plannedSteps = this.normalizeConversationSteps(JSON.parse(response), availableTools);
-      } catch (error) {
-        console.warn('Conversation planning failed, using fallback plan:', error.message);
-      }
-    }
-
-    if (plannedSteps.length === 0) {
-      plannedSteps = [{
-        type: 'llm-call',
-        description: 'Draft the assistant response',
-        resultKey: 'finalResponse',
-        params: {
-          prompt: this.buildConversationSynthesisPrompt(),
-        },
-      }];
-    }
-
-    const hasFinalSynthesis = plannedSteps.some((step) => step.resultKey === 'finalResponse');
-    if (!hasFinalSynthesis) {
-      plannedSteps.push({
-        type: 'llm-call',
-        description: 'Synthesize the final assistant response',
-        resultKey: 'finalResponse',
-        params: {
-          prompt: this.buildConversationSynthesisPrompt(),
-        },
-      });
-    }
-
-    let previousStepId = null;
-    plannedSteps.forEach((step) => {
-      previousStepId = plan.addStep(step, previousStepId ? [previousStepId] : []);
+    plan.addStep({
+      type: 'llm-call',
+      description: 'Draft the assistant response',
+      resultKey: 'finalResponse',
+      params: {
+        prompt: this.buildConversationSynthesisPrompt(),
+      },
     });
   }
 

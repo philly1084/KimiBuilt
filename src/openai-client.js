@@ -489,45 +489,10 @@ function promptHasExplicitSshIntent(prompt = '') {
 }
 
 function shouldAutoUseTool(toolId, prompt = '', skill = null) {
-    const normalizedPrompt = String(prompt || '').toLowerCase();
-    if (!normalizedPrompt) {
-        return false;
-    }
-
     if (toolId === 'ssh-execute') {
-        if (!hasUsableSshDefaults()) {
-            return false;
-        }
-
-        return promptHasExplicitSshIntent(prompt);
+        return hasUsableSshDefaults();
     }
-
-    const hasUrl = /https?:\/\/\S+/i.test(prompt);
-    const mentionsCode = /```|function\s+\w+|const\s+\w+|let\s+\w+|class\s+\w+|import\s+|<script\b|SELECT\b|FROM\b/i.test(prompt);
-
-    const heuristics = {
-        'web-fetch': hasUrl && /\b(fetch|open|read|inspect|visit|download|load|check|look at)\b/i.test(prompt),
-        'web-search': /\b(search|look up|find|latest|recent|news|current|research|what is|who is)\b/i.test(prompt),
-        'web-scrape': hasUrl && /\b(scrape|extract|parse|crawl|collect|get data|pull data)\b/i.test(prompt),
-        'file-read': /\b(read|open|show|inspect|view|cat)\b/i.test(prompt) && /\b(file|folder|directory|path|project|workspace)\b/i.test(prompt),
-        'file-write': /\b(write|create file|save|update file|modify file|edit file|append)\b/i.test(prompt),
-        'file-search': /\b(find file|search files|locate file|glob|match files|list files)\b/i.test(prompt),
-        'file-mkdir': /\b(create folder|create directory|make folder|make directory|mkdir|new folder|new directory)\b/i.test(prompt),
-        'docker-exec': /\b(docker|container|docker exec|run in container|inside container|inside docker)\b/i.test(prompt),
-        'code-sandbox': /\b(sandbox|isolated|ephemeral|temp environment|run code|execute code|test this code|try this script)\b/i.test(prompt),
-        'security-scan': mentionsCode && /\b(security|vulnerab|secret|audit|scan|xss|sql injection|path traversal)\b/i.test(prompt),
-        'tool-doc-read': /\b(tool|tools|skill|skills)\b/i.test(prompt) && /\b(help|docs|documentation|how do i use|what can|capab|setup|parameters|args|usage)\b/i.test(prompt),
-    };
-
-    if (heuristics[toolId]) {
-        return true;
-    }
-
-    if (Array.isArray(skill?.triggerPatterns)) {
-        return skill.triggerPatterns.some((pattern) => promptMentionsPattern(normalizedPrompt, pattern));
-    }
-
-    return false;
+    return true;
 }
 
 function sanitizeToolSchema(schema) {
@@ -852,6 +817,8 @@ async function runAutomaticToolLoop(openai, {
         });
     }
 
+    const seenToolCalls = new Set();
+
     console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${automaticTools.map((entry) => entry.id).join(', ')}`);
 
     for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
@@ -874,6 +841,17 @@ async function runAutomaticToolLoop(openai, {
             }
             return finalResponse;
         }
+
+        // Prevent infinite loops on identical tool calls
+        const signature = JSON.stringify(toolCalls.map((tc) => ({ name: tc.function?.name, args: tc.function?.arguments })));
+        if (seenToolCalls.has(signature)) {
+            console.warn('[OpenAI] Endless tool loop detected (duplicate calls), breaking early.');
+            if (toolEvents.length > 0) {
+                finalResponse._kimibuilt = { toolEvents };
+            }
+            return finalResponse;
+        }
+        seenToolCalls.add(signature);
 
         workingMessages.push({
             role: 'assistant',

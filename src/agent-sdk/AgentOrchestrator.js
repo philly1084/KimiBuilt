@@ -677,7 +677,6 @@ class AgentOrchestrator {
   }
 
   getConversationToolIds(objective = '', instructions = '') {
-    const promptText = `${objective || ''}\n${instructions || ''}`.toLowerCase();
     const allTools = this.toolRegistry.list().map((tool) => tool.id);
     const sshConfig = settingsController.getEffectiveSshConfig();
     const hasUsableSshDefaults = Boolean(
@@ -686,25 +685,10 @@ class AgentOrchestrator {
       && sshConfig.username
       && (sshConfig.password || sshConfig.privateKeyPath)
     );
-    const explicitSshIntent = /\bssh\b/i.test(promptText)
-      || /\b(remote host|remote server|remote machine)\b/i.test(promptText)
-      || /\b(login to|log into|ssh into|ssh to|connect to)\b/i.test(promptText)
-      || (/\b(run|execute|deploy|inspect|troubleshoot|check)\b/i.test(promptText)
-        && /\b(over ssh|via ssh)\b/i.test(promptText));
-    const explicitDockerIntent = /\b(docker|container|docker exec|inside container|inside docker)\b/i.test(promptText);
-    const explicitSandboxIntent = /\b(sandbox|isolated|ephemeral|run code|execute code|test this code|try this script)\b/i.test(promptText);
 
     return allTools.filter((toolId) => {
       if (toolId === 'ssh-execute') {
-        return hasUsableSshDefaults && explicitSshIntent;
-      }
-
-      if (toolId === 'docker-exec') {
-        return explicitDockerIntent;
-      }
-
-      if (toolId === 'code-sandbox') {
-        return explicitSandboxIntent;
+        return hasUsableSshDefaults;
       }
 
       return true;
@@ -866,7 +850,11 @@ class AgentOrchestrator {
           : inferredObjective,
       },
       context: {
-        ...(normalized.context || {}),
+        ...(function() {
+          const ctx = { ...(normalized.context || {}) };
+          delete ctx.sessionId;
+          return ctx;
+        })(),
         ...(isUuidLike(normalized.context?.sessionId)
           ? { sessionId: normalized.context.sessionId }
           : isUuidLike(sessionId)

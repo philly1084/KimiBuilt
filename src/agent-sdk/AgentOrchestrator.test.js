@@ -206,7 +206,7 @@ describe('AgentOrchestrator', () => {
         expect(llmClient.complete).not.toHaveBeenCalled();
     });
 
-    test('conversation tool selection does not expose sandbox or ssh without explicit intent', () => {
+    test('conversation tool selection exposes sandbox unconditionally without requiring regex match', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: false,
             host: '',
@@ -256,9 +256,9 @@ describe('AgentOrchestrator', () => {
         const toolIds = orchestrator.getConversationToolIds('Inspect the Traefik resources for this cluster.', 'Use the current setup.');
 
         expect(toolIds).toContain('web-search');
-        expect(toolIds).not.toContain('code-sandbox');
-        expect(toolIds).not.toContain('docker-exec');
-        expect(toolIds).not.toContain('ssh-execute');
+        expect(toolIds).toContain('code-sandbox');
+        expect(toolIds).toContain('docker-exec');
+        expect(toolIds).not.toContain('ssh-execute'); // SSH requires valid config
     });
 
     test('persists transcript and tool results through orchestrator-owned services', async () => {

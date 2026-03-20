@@ -165,32 +165,32 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
-    test('selects web scraping tools only when the prompt looks like a scrape task', () => {
+    test('selects general tools generically instead of using prompt heuristics', () => {
         const toolManager = createToolManager();
         const selectedTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
-            'Scrape https://example.com and extract the product prices',
+            'Hello world',
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('web-scrape');
-        expect(selectedTools.map((tool) => tool.id)).not.toContain('security-scan');
+        expect(selectedTools.map((tool) => tool.id)).toContain('security-scan');
     });
 
-    test('selects security scan when the prompt includes code and security intent', () => {
+    test('provides security scan unconditionally', () => {
         const toolManager = createToolManager();
         const selectedTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
-            'Audit this code for secrets:\n```js\nconst apiKey = "sk-test-123";\n```',
+            'Say hello',
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('security-scan');
     });
 
-    test('exposes filesystem tools for explicit local file tasks', () => {
+    test('exposes filesystem tools automatically', () => {
         const toolManager = createToolManager();
         const selectedTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
-            'Create folder money and write a README file inside the project workspace.',
+            '',
         );
 
         const ids = selectedTools.map((tool) => tool.id);
@@ -209,7 +209,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('file-mkdir');
     });
 
-    test('does not auto-select ssh-execute for vague server wording', () => {
+    test('exposes ssh-execute unconditionally when defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -219,7 +219,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
             privateKeyPath: '',
         });
 
-        expect(__testUtils.shouldAutoUseTool('ssh-execute', 'Check the server health and summarize the issue.')).toBe(false);
+        expect(__testUtils.shouldAutoUseTool('ssh-execute', 'Say hello.')).toBe(true);
     });
 
     test('does not expose ssh-execute when SSH defaults are not configured', () => {
@@ -241,7 +241,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).not.toContain('ssh-execute');
     });
 
-    test('exposes ssh-execute only for explicit SSH intent when defaults exist', () => {
+    test('exposes ssh-execute even without explicit SSH intent if defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -254,7 +254,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         const toolManager = createToolManager();
         const selectedTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
-            'SSH into the remote host and run kubectl get ingressroute traefik-dashboard -n kube-system -o yaml',
+            'Say hello',
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('ssh-execute');

@@ -1,7 +1,5 @@
 const { TaskStatus } = require('../core/TaskStatus');
 const { ExecutionTrace, ExecutionStep } = require('./ExecutionTrace');
-const runtimePromptRegistry = require('../prompts/runtime-prompt-registry');
-
 /**
  * Result of executing a single step.
  * @typedef {Object} StepResult
@@ -498,14 +496,26 @@ class Executor {
    * @returns {string} Constructed prompt
    */
   constructPrompt(step, task, resolvedParams = null) {
-    return runtimePromptRegistry.render('agent-sdk-executor-llm-step', {
-      taskObjective: task.objective,
-      stepDescription: step.description,
-      stepType: step.type,
-      taskInputBlock: task.input ? `Input:\n${JSON.stringify(task.input, null, 2)}` : '',
-      stepParamsBlock: (resolvedParams || step.params) ? `Parameters:\n${JSON.stringify(resolvedParams || step.params, null, 2)}` : '',
-      skillContextBlock: this.skillContext ? `Relevant Skills:\n${this.skillContext}` : '',
-    }).trim();
+    const sections = [
+      'You are executing one step in an agent workflow.',
+      `Task: ${task.objective || ''}`,
+      `Step: ${step.description || step.type || 'llm-call'}`,
+      `Type: ${step.type || 'llm-call'}`,
+    ];
+
+    if (this.skillContext) {
+      sections.push(`Relevant Skills:\n${this.skillContext}`);
+    }
+
+    if (task.input) {
+      sections.push(`Input:\n${JSON.stringify(task.input, null, 2)}`);
+    }
+
+    if (resolvedParams || step.params) {
+      sections.push(`Parameters:\n${JSON.stringify(resolvedParams || step.params, null, 2)}`);
+    }
+
+    return sections.filter(Boolean).join('\n\n').trim();
   }
   
   /**
