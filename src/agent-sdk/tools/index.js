@@ -191,9 +191,12 @@ class ToolManager {
         description: 'Write content to files',
         backend: {
           handler: async (params) => {
+            const path = require('path');
             const fs = require('fs').promises;
-            await fs.writeFile(params.path, params.content);
-            return { path: params.path, bytesWritten: params.content.length };
+            const targetPath = path.resolve(params.path);
+            await fs.mkdir(path.dirname(targetPath), { recursive: true });
+            await fs.writeFile(targetPath, params.content);
+            return { path: targetPath, bytesWritten: params.content.length };
           },
           sideEffects: ['write'],
           timeout: 10000
@@ -228,6 +231,35 @@ class ToolManager {
             pattern: { type: 'string' },
             cwd: { type: 'string' }
           }
+        }
+      },
+      {
+        id: 'file-mkdir',
+        name: 'Directory Creator',
+        category: 'system',
+        description: 'Create a folder or directory',
+        backend: {
+          handler: async (params) => {
+            const path = require('path');
+            const fs = require('fs').promises;
+            const targetPath = path.resolve(params.path);
+            await fs.mkdir(targetPath, { recursive: params.recursive !== false });
+            return { path: targetPath, created: true };
+          },
+          sideEffects: ['write'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: { type: 'string' },
+            recursive: { type: 'boolean', default: true }
+          }
+        },
+        skill: {
+          triggerPatterns: ['create folder', 'create directory', 'make folder', 'make directory', 'mkdir'],
+          requiresConfirmation: false
         }
       }
     ];

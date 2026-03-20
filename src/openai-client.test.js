@@ -49,6 +49,55 @@ function createToolManager() {
                 },
             },
         }],
+        ['file-read', {
+            id: 'file-read',
+            name: 'File Reader',
+            description: 'Read file contents',
+            inputSchema: {
+                type: 'object',
+                required: ['path'],
+                properties: {
+                    path: { type: 'string' },
+                },
+            },
+        }],
+        ['file-write', {
+            id: 'file-write',
+            name: 'File Writer',
+            description: 'Write file contents',
+            inputSchema: {
+                type: 'object',
+                required: ['path', 'content'],
+                properties: {
+                    path: { type: 'string' },
+                    content: { type: 'string' },
+                },
+            },
+        }],
+        ['file-search', {
+            id: 'file-search',
+            name: 'File Search',
+            description: 'Search files',
+            inputSchema: {
+                type: 'object',
+                required: ['pattern'],
+                properties: {
+                    pattern: { type: 'string' },
+                },
+            },
+        }],
+        ['file-mkdir', {
+            id: 'file-mkdir',
+            name: 'Directory Creator',
+            description: 'Create directories',
+            inputSchema: {
+                type: 'object',
+                required: ['path'],
+                properties: {
+                    path: { type: 'string' },
+                },
+            },
+        }],
         ['security-scan', {
             id: 'security-scan',
             name: 'Security Scan',
@@ -81,6 +130,10 @@ function createToolManager() {
         ['web-fetch', { enabled: true, triggerPatterns: ['fetch', 'load page'] }],
         ['web-search', { enabled: true, triggerPatterns: ['search', 'look up'] }],
         ['web-scrape', { enabled: true, triggerPatterns: ['scrape', 'extract from'] }],
+        ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'] }],
+        ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'] }],
+        ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'] }],
+        ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'] }],
         ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'] }],
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'] }],
     ]);
@@ -131,6 +184,29 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('security-scan');
+    });
+
+    test('exposes filesystem tools for explicit local file tasks', () => {
+        const toolManager = createToolManager();
+        const selectedTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Create folder money and write a README file inside the project workspace.',
+        );
+
+        const ids = selectedTools.map((tool) => tool.id);
+        expect(ids).toContain('file-mkdir');
+        expect(ids).toContain('file-write');
+    });
+
+    test('filesystem tool guidance forbids invented availability excuses', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'file-read' },
+            { id: 'file-mkdir' },
+        ]);
+
+        expect(guidance).toContain('source of truth for tool availability');
+        expect(guidance).toContain('AVAILABLE_TOOLS_JSON');
+        expect(guidance).toContain('file-mkdir');
     });
 
     test('does not auto-select ssh-execute for vague server wording', () => {

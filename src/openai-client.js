@@ -45,6 +45,10 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'web-fetch',
     'web-search',
     'web-scrape',
+    'file-read',
+    'file-write',
+    'file-search',
+    'file-mkdir',
     'ssh-execute',
     'docker-exec',
     'code-sandbox',
@@ -505,6 +509,10 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null) {
         'web-fetch': hasUrl && /\b(fetch|open|read|inspect|visit|download|load|check|look at)\b/i.test(prompt),
         'web-search': /\b(search|look up|find|latest|recent|news|current|research|what is|who is)\b/i.test(prompt),
         'web-scrape': hasUrl && /\b(scrape|extract|parse|crawl|collect|get data|pull data)\b/i.test(prompt),
+        'file-read': /\b(read|open|show|inspect|view|cat)\b/i.test(prompt) && /\b(file|folder|directory|path|project|workspace)\b/i.test(prompt),
+        'file-write': /\b(write|create file|save|update file|modify file|edit file|append)\b/i.test(prompt),
+        'file-search': /\b(find file|search files|locate file|glob|match files|list files)\b/i.test(prompt),
+        'file-mkdir': /\b(create folder|create directory|make folder|make directory|mkdir|new folder|new directory)\b/i.test(prompt),
         'docker-exec': /\b(docker|container|docker exec|run in container|inside container|inside docker)\b/i.test(prompt),
         'code-sandbox': /\b(sandbox|isolated|ephemeral|temp environment|run code|execute code|test this code|try this script)\b/i.test(prompt),
         'security-scan': mentionsCode && /\b(security|vulnerab|secret|audit|scan|xss|sql injection|path traversal)\b/i.test(prompt),
@@ -625,6 +633,8 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     const guidance = [
         'You can use the provided tools whenever they will improve accuracy or gather missing data.',
+        'Treat the tool definitions attached to this request as the source of truth for tool availability.',
+        'Do not claim tools are unavailable because of external config names or missing meta variables such as AVAILABLE_TOOLS_JSON.',
     ];
 
     if (automaticTools.some((entry) => entry.id === 'web-search')) {
@@ -637,6 +647,22 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
         guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'file-read')) {
+        guidance.push('- Use `file-read` to inspect files from the local workspace when the user asks to read or review them.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'file-search')) {
+        guidance.push('- Use `file-search` to locate files in the workspace before answering filesystem questions.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'file-write')) {
+        guidance.push('- Use `file-write` to create or update files when the user asks for filesystem changes.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'file-mkdir')) {
+        guidance.push('- Use `file-mkdir` to create folders or directories when the user asks for them.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'ssh-execute')) {
@@ -1100,6 +1126,7 @@ module.exports = {
     __testUtils: {
         buildMessages,
         buildAutomaticToolDefinitions,
+        buildAutomaticToolGuidance,
         normalizeToolResultForModel,
         sanitizeToolSchema,
         shouldAutoUseTool,
