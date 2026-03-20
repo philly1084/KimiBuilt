@@ -497,9 +497,62 @@ function promptHasExplicitSshIntent(prompt = '') {
             && /\b(over ssh|via ssh)\b/i.test(normalizedPrompt));
 }
 
+function extractExplicitSshTarget(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    const loginMatch = text.match(/\b([a-z_][a-z0-9._-]*)@((?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9-]+\.)+[a-z]{2,}|[a-z0-9.-]+)(?::(\d+))?/i);
+    if (loginMatch) {
+        return {
+            username: loginMatch[1],
+            host: loginMatch[2],
+            port: loginMatch[3] ? Number(loginMatch[3]) : undefined,
+        };
+    }
+
+    const hostMatch = text.match(/\b(?:(?:host|server|machine)\s+)?((?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9-]+\.)+[a-z]{2,})\b(?::(\d+))?/i);
+    if (hostMatch) {
+        return {
+            host: hostMatch[1],
+            port: hostMatch[2] ? Number(hostMatch[2]) : undefined,
+        };
+    }
+
+    return null;
+}
+
+function extractRequestedSshCommand(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    const quotedCommandPatterns = [
+        /\b(?:run|execute)\s+`([^`]+)`/i,
+        /\b(?:run|execute)\s+"([^"]+)"/i,
+        /\b(?:run|execute)\s+'([^']+)'/i,
+    ];
+
+    for (const pattern of quotedCommandPatterns) {
+        const match = text.match(pattern);
+        if (match?.[1]) {
+            return match[1].trim();
+        }
+    }
+
+    if (/\b(?:check|inspect|verify|look at)\b[\s\S]{0,40}\b(?:health|status)\b/i.test(text)
+        || /\bhealth check\b/i.test(text)) {
+        return 'hostname && uptime && (df -h / || true) && (free -m || true)';
+    }
+
+    return null;
+}
+
 function shouldAutoUseTool(toolId, prompt = '', skill = null) {
     if (toolId === 'ssh-execute') {
-        return hasUsableSshDefaults();
+        return hasUsableSshDefaults() || promptHasExplicitSshIntent(prompt);
     }
     return true;
 }
@@ -568,6 +621,12 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const directoryPath = availableToolIds.has('file-mkdir')
         ? extractRequestedDirectoryPath(prompt)
         : null;
+    const sshCommand = availableToolIds.has('ssh-execute')
+        ? extractRequestedSshCommand(prompt)
+        : null;
+    const sshTarget = availableToolIds.has('ssh-execute')
+        ? extractExplicitSshTarget(prompt)
+        : null;
 
     if (webQuery) {
         actions.push({
@@ -589,6 +648,18 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
             params: {
                 path: directoryPath,
                 recursive: true,
+            },
+        });
+    }
+
+    if (sshCommand && promptHasExplicitSshIntent(prompt)) {
+        actions.push({
+            toolId: 'ssh-execute',
+            params: {
+                ...(sshTarget?.host ? { host: sshTarget.host } : {}),
+                ...(sshTarget?.username ? { username: sshTarget.username } : {}),
+                ...(sshTarget?.port ? { port: sshTarget.port } : {}),
+                command: sshCommand,
             },
         });
     }
@@ -846,10 +917,14 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'ssh-execute')) {
         guidance.push('- Use `ssh-execute` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.');
+        guidance.push('- Do not refer to internal tool names like `run_shell_command` or claim you lack generic shell access when `ssh-execute` is attached.');
+        guidance.push('- If `ssh-execute` fails, explain the actual SSH error from the tool result and ask only for the missing host or credentials if needed.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 
         if (hasUsableSshDefaults()) {
             guidance.push(`- SSH defaults are configured for \`${sshConfig.username}@${sshConfig.host}:${sshConfig.port || 22}\`. Use these defaults unless the user asks for a different target.`);
+        } else {
+            guidance.push('- No SSH defaults are configured, so use the host/username provided by the user when available.');
         }
     }
 
@@ -1045,7 +1120,7 @@ async function runDeterministicToolPreflight({
         toolEvents,
         summaryMessage: {
             role: 'system',
-            content: `[Automatic tool results]\nUse these verified tool results when answering.\n${JSON.stringify(toolEvents, null, 2)}`,
+            content: `[Automatic tool results]\nUse these verified tool results when answering. If any tool result contains an error, explain that exact error plainly instead of claiming the tool is unavailable.\n${JSON.stringify(toolEvents, null, 2)}`,
         },
     };
 }

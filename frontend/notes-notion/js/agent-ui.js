@@ -146,6 +146,7 @@ const AgentUI = (function() {
 
         window.addEventListener('modelChanged', updateModelUI);
         window.addEventListener('notes-agent-processing', handleProcessingEvent);
+        window.addEventListener('notes-agent-context-changed', handleConversationContextChange);
         document.addEventListener('click', scheduleContextRefresh, true);
         document.addEventListener('keyup', scheduleContextRefresh, true);
     }
@@ -471,6 +472,11 @@ const AgentUI = (function() {
     function handleProcessingEvent(event) {
         agentProcessing = Boolean(event?.detail?.isProcessing);
         syncProcessingUI();
+    }
+
+    function handleConversationContextChange() {
+        updateContextIndicator();
+        renderMessages();
     }
 
     function syncProcessingUI() {

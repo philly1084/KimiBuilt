@@ -195,16 +195,23 @@ const API = (function() {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
+
+            const responseSessionId = response.headers.get('X-Session-Id');
+            if (responseSessionId) {
+                currentSessionId = responseSessionId;
+            }
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
             
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
                 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
@@ -217,9 +224,7 @@ const API = (function() {
                         try {
                             const parsed = JSON.parse(data);
                             const content = parsed.choices?.[0]?.delta?.content || '';
-                            if (parsed.session_id) {
-                                currentSessionId = parsed.session_id;
-                            }
+                            currentSessionId = parsed.session_id || currentSessionId;
                             if (content) {
                                 yield { type: 'delta', content };
                             }

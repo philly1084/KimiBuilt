@@ -6,6 +6,8 @@
 const Agent = (function() {
     const SHARED_MODEL_STORAGE_KEY = 'kimibuilt_default_model';
     const LEGACY_MODEL_STORAGE_KEY = 'notes_agent_model';
+    const LEGACY_MESSAGES_STORAGE_KEY = 'notes_agent_messages';
+    const PAGE_MESSAGES_STORAGE_PREFIX = 'notes_agent_messages:';
     const NOTES_COLOR_OPTIONS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
     let initPromise = null;
 
@@ -25,11 +27,69 @@ const Agent = (function() {
         
         return null;
     }
+
+    function getCurrentPageSessionId() {
+        return window.Editor?.getCurrentPage?.()?.id || null;
+    }
+
+    function syncAPIClientSession(apiClient, pageContext = null) {
+        if (!apiClient?.setSessionId) {
+            return null;
+        }
+
+        const sessionId = pageContext?.pageId || getCurrentPageSessionId();
+        if (sessionId) {
+            apiClient.setSessionId(sessionId);
+        }
+
+        return sessionId;
+    }
+
+    function getMessagesStorageKey(pageId) {
+        return pageId ? `${PAGE_MESSAGES_STORAGE_PREFIX}${pageId}` : LEGACY_MESSAGES_STORAGE_KEY;
+    }
+
+    function readStoredMessages(pageId = null) {
+        const key = getMessagesStorageKey(pageId);
+
+        try {
+            const savedMessages = localStorage.getItem(key);
+            if (savedMessages) {
+                const parsed = JSON.parse(savedMessages);
+                return Array.isArray(parsed) ? parsed : [];
+            }
+
+            if (pageId) {
+                const legacyMessages = localStorage.getItem(LEGACY_MESSAGES_STORAGE_KEY);
+                if (legacyMessages) {
+                    const parsedLegacy = JSON.parse(legacyMessages);
+                    return Array.isArray(parsedLegacy) ? parsedLegacy : [];
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to read saved messages:', error);
+        }
+
+        return [];
+    }
+
+    function saveMessagesForPage(pageId, messages) {
+        try {
+            localStorage.setItem(getMessagesStorageKey(pageId), JSON.stringify(messages));
+            if (pageId) {
+                localStorage.removeItem(LEGACY_MESSAGES_STORAGE_KEY);
+            }
+        } catch (error) {
+            console.warn('Failed to save messages:', error);
+        }
+    }
     
     // Check if backend is available
     async function isBackendAvailable() {
         const apiClient = getAPIClient();
         if (!apiClient) return false;
+
+        syncAPIClientSession(apiClient);
         
         try {
             // Try to fetch models as a health check
@@ -1286,11 +1346,55 @@ GUIDELINES:
         selectedModel: getStoredModelId(),
         isActive: false,
         messages: [],
+        activePageId: null,
         isProcessing: false,
         streamingEnabled: true,
         cachedModels: null,
         modelsCacheTime: null
     };
+
+    function emitConversationChange(detail = {}) {
+        try {
+            window.dispatchEvent(new CustomEvent('notes-agent-context-changed', {
+                detail: {
+                    pageId: state.activePageId,
+                    messageCount: state.messages.length,
+                    ...detail
+                }
+            }));
+        } catch (error) {
+            console.warn('Failed to dispatch conversation change event:', error);
+        }
+    }
+
+    function syncConversationWithCurrentPage(options = {}) {
+        const {
+            pageId = getCurrentPageSessionId(),
+            emitEvent = true
+        } = options;
+
+        if (!pageId) {
+            return state.messages;
+        }
+
+        if (state.activePageId === pageId) {
+            syncAPIClientSession(getAPIClient(), { pageId });
+            if (emitEvent) {
+                emitConversationChange({ reason: 'page-sync' });
+            }
+            return state.messages;
+        }
+
+        state.activePageId = pageId;
+        state.messages = readStoredMessages(pageId).slice(-100);
+        syncAPIClientSession(getAPIClient(), { pageId });
+
+        if (emitEvent) {
+            emitConversationChange({ reason: 'page-switch' });
+        }
+
+        return state.messages;
+    }
 
     function setProcessingState(isProcessing, detail = {}) {
         state.isProcessing = Boolean(isProcessing);
@@ -1524,22 +1628,8 @@ GUIDELINES:
         }
 
         initPromise = (async () => {
-            // Load conversation history from localStorage
-            let savedMessages = null;
-            try {
-                savedMessages = localStorage.getItem('notes_agent_messages');
-            } catch (error) {
-                console.warn('Failed to read saved messages:', error);
-            }
-
-            if (savedMessages) {
-                try {
-                    state.messages = JSON.parse(savedMessages);
-                } catch (error) {
-                    console.warn('Failed to load saved messages:', error);
-                    state.messages = [];
-                }
-            }
+            state.messages = readStoredMessages();
+            syncConversationWithCurrentPage({ emitEvent: false });
 
             // Try to fetch models from API first
             try {
@@ -1565,6 +1655,8 @@ GUIDELINES:
     async function refreshModelsFromAPI() {
         const apiClient = getAPIClient();
         if (!apiClient) return false;
+
+        syncAPIClientSession(apiClient);
         
         // Check cache (cache for 5 minutes)
         const cacheExpiry = 5 * 60 * 1000;
@@ -1904,6 +1996,8 @@ GUIDELINES:
     // Chat Interface
     // ============================================
     function addMessage(role, content, metadata = {}) {
+        syncConversationWithCurrentPage({ emitEvent: false });
+
         const message = {
             id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
             role: role, // 'user' or 'assistant'
@@ -1927,20 +2021,26 @@ GUIDELINES:
     }
     
     function saveMessages() {
-        try {
-            localStorage.setItem('notes_agent_messages', JSON.stringify(state.messages));
-        } catch (e) {
-            console.warn('Failed to save messages:', e);
-        }
+        saveMessagesForPage(state.activePageId, state.messages);
     }
     
     function getMessages() {
+        syncConversationWithCurrentPage({ emitEvent: false });
         return [...state.messages];
     }
     
     function clearConversation() {
+        syncConversationWithCurrentPage({ emitEvent: false });
         state.messages = [];
-        localStorage.removeItem('notes_agent_messages');
+        try {
+            localStorage.removeItem(getMessagesStorageKey(state.activePageId));
+            if (!state.activePageId) {
+                localStorage.removeItem(LEGACY_MESSAGES_STORAGE_KEY);
+            }
+        } catch (error) {
+            console.warn('Failed to clear messages:', error);
+        }
+        emitConversationChange({ reason: 'clear' });
         showToast('Conversation cleared', 'info');
     }
     
@@ -2292,6 +2392,8 @@ GUIDELINES:
             if (onError) onError(error);
             throw error;
         }
+
+        syncConversationWithCurrentPage({ emitEvent: false });
         
         if (!hiddenUserMessage) {
             addMessage('user', question);
@@ -2355,6 +2457,7 @@ GUIDELINES:
     async function askWithAPI(question, context, options) {
         const { onChunk, onComplete, onError, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
+        syncAPIClientSession(apiClient, context);
         const requestedArtifactFormat = isArtifactGenerationIntent(question)
             ? inferRequestedArtifactFormat(question)
             : null;
@@ -2971,12 +3074,15 @@ GUIDELINES:
     // Advanced Features
     // ============================================
     function getConversationHistory(limit = 10) {
+        syncConversationWithCurrentPage({ emitEvent: false });
         return state.messages.slice(-limit);
     }
     
     function exportConversation() {
+        syncConversationWithCurrentPage({ emitEvent: false });
         const data = {
             exportedAt: new Date().toISOString(),
+            pageId: state.activePageId,
             model: state.selectedModel,
             messages: state.messages
         };
@@ -3060,6 +3166,7 @@ GUIDELINES:
         ask,
         getMessages,
         clearConversation,
+        syncConversationWithCurrentPage,
         formatMessageForDisplay,
         getConversationHistory,
         exportConversation,

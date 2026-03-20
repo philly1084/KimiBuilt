@@ -247,6 +247,26 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
     });
 
+    test('builds deterministic ssh preflight actions for explicit health checks', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'ssh-execute' },
+            ],
+            'Can you ssh into root@77.42.44.98 and check its health?',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'ssh-execute',
+                params: {
+                    host: '77.42.44.98',
+                    username: 'root',
+                    command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+                },
+            },
+        ]);
+    });
+
     test('narrows tool exposure to relevant tools for the current prompt', () => {
         const toolManager = createToolManager();
         const automaticTools = __testUtils.buildAutomaticToolDefinitions(
@@ -280,6 +300,19 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
 
         expect(__testUtils.shouldAutoUseTool('ssh-execute', 'Say hello.')).toBe(true);
+    });
+
+    test('exposes ssh-execute for explicit SSH intent without defaults', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
+
+        expect(__testUtils.shouldAutoUseTool('ssh-execute', 'SSH into root@77.42.44.98 and check its health.')).toBe(true);
     });
 
     test('does not expose ssh-execute when SSH defaults are not configured', () => {
@@ -318,6 +351,24 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('ssh-execute');
+    });
+
+    test('ssh tool guidance forbids made-up shell tool excuses', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
+
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'ssh-execute' },
+        ]);
+
+        expect(guidance).toContain('run_shell_command');
+        expect(guidance).toContain('actual SSH error');
     });
 
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {

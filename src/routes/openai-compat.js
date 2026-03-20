@@ -106,8 +106,10 @@ function shouldInjectRecentMessages(inputMessages = []) {
         return true;
     }
 
-    const conversationalMessages = inputMessages.filter((message) => ['user', 'assistant', 'system', 'tool'].includes(message?.role));
-    return conversationalMessages.length <= 1;
+    // Many clients send only a system prompt plus the latest user turn. Treat that
+    // as an incremental turn so the server still injects the stored session transcript.
+    const transcriptMessages = inputMessages.filter((message) => ['user', 'assistant', 'tool'].includes(message?.role));
+    return transcriptMessages.length <= 1;
 }
 
 function isChatCapableModel(modelId = '') {

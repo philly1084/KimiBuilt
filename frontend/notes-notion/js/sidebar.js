@@ -517,6 +517,17 @@ const Sidebar = (function() {
             window.Editor.loadPage(page);
         }
 
+        if (window.Agent?.syncConversationWithCurrentPage) {
+            window.Agent.syncConversationWithCurrentPage({ pageId: page.id });
+        } else {
+            if (window.notesAPIClient?.setSessionId) {
+                window.notesAPIClient.setSessionId(page.id);
+            }
+            if (window.API?.setSessionId) {
+                window.API.setSessionId(page.id);
+            }
+        }
+
         // Update UI
         updatePageHeader(page);
         
