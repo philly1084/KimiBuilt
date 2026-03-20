@@ -228,7 +228,6 @@ router.post('/chat/completions', async (req, res, next) => {
                     transport: 'http',
                 },
                 enableAutomaticToolCalls: true,
-                useAgentExecutor: true,
             });
             const response = execution.response;
 
@@ -311,7 +310,6 @@ router.post('/chat/completions', async (req, res, next) => {
                 transport: 'http',
             },
             enableAutomaticToolCalls: true,
-            useAgentExecutor: true,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -454,7 +452,6 @@ router.post('/responses', async (req, res, next) => {
                     transport: 'http',
                 },
                 enableAutomaticToolCalls: true,
-                useAgentExecutor: true,
             });
             const response = execution.response;
 
@@ -519,7 +516,6 @@ router.post('/responses', async (req, res, next) => {
                 transport: 'http',
             },
             enableAutomaticToolCalls: true,
-            useAgentExecutor: true,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {

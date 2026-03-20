@@ -127,6 +127,9 @@ describe('AgentOrchestrator', () => {
         const orchestrator = new AgentOrchestrator({
             llmClient,
             embedder,
+            config: {
+                enableConversationAgentExecutor: true,
+            },
         });
 
         orchestrator.registerTool(new ToolDefinition({
@@ -165,6 +168,42 @@ describe('AgentOrchestrator', () => {
                 }),
             }),
         ]));
+    });
+
+    test('ignores conversation agent executor unless it is explicitly enabled in config', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_runtime_only',
+                model: 'gpt-test',
+                output: [
+                    {
+                        type: 'message',
+                        content: [{ text: 'Runtime path answer' }],
+                    },
+                ],
+            }),
+            complete: jest.fn(),
+        };
+        const embedder = {
+            embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        const result = await orchestrator.executeConversation({
+            sessionId: 'session-runtime-default',
+            input: 'Answer directly.',
+            stream: false,
+            useAgentExecutor: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.output).toBe('Runtime path answer');
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(1);
+        expect(llmClient.complete).not.toHaveBeenCalled();
     });
 
     test('conversation tool selection does not expose sandbox or ssh without explicit intent', () => {

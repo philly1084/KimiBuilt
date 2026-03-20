@@ -75,8 +75,8 @@ Rules:
 - Prefer 1-3 steps.
 - The final step should usually be an llm-call that writes the user-facing answer.
 - Do not invent unavailable tools.
-- Do not substitute `code-sandbox` or `docker-exec` for remote SSH access.
-- Use `ssh-execute` only when the request explicitly involves SSH or a remote host and the tool is listed as available.
+  - Do not substitute \`code-sandbox\` or \`docker-exec\` for remote SSH access.
+  - Use \`ssh-execute\` only when the request explicitly involves SSH or a remote host and the tool is listed as available.
 
 Objective: {{objective}}
 Input: {{input}}

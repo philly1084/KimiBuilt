@@ -225,6 +225,7 @@ class AgentOrchestrator {
       maxRetries: 3,
       defaultTimeout: 30000,
       enableTracing: true,
+      enableConversationAgentExecutor: false,
       ...config
     };
     this.config.enableSkills = skillsEnabled && this.config.enableSkills !== false;
@@ -410,7 +411,11 @@ class AgentOrchestrator {
     });
 
     try {
-      if (useAgentExecutor) {
+      const shouldUseAgentExecutor = Boolean(
+        useAgentExecutor && this.config.enableConversationAgentExecutor === true
+      );
+
+      if (shouldUseAgentExecutor) {
         try {
           return await this.executeConversationWithAgentExecutor({
             task,

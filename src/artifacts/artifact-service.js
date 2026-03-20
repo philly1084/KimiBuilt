@@ -60,6 +60,30 @@ class ArtifactService {
         }
     }
 
+    async ensureSessionRecord(sessionId, session = null) {
+        this.ensureEnabled();
+
+        if (!sessionId) {
+            const error = new Error('sessionId is required for artifact storage');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        await postgres.initialize();
+        await postgres.query(
+            `
+                INSERT INTO sessions (id, previous_response_id, metadata)
+                VALUES ($1, $2, $3::jsonb)
+                ON CONFLICT (id) DO NOTHING
+            `,
+            [
+                sessionId,
+                session?.previousResponseId || null,
+                JSON.stringify(session?.metadata || {}),
+            ],
+        );
+    }
+
     serializeArtifact(artifact) {
         if (!artifact) return null;
 
@@ -105,6 +129,7 @@ class ArtifactService {
 
     async createStoredArtifact({
         sessionId,
+        session = null,
         parentArtifactId = null,
         direction,
         sourceMode,
@@ -118,6 +143,7 @@ class ArtifactService {
         vectorize = true,
     }) {
         this.ensureEnabled();
+        await this.ensureSessionRecord(sessionId, session);
 
         const artifact = await artifactStore.create({
             id: uuidv4(),
@@ -348,6 +374,7 @@ class ArtifactService {
 
         const artifact = await this.createStoredArtifact({
             sessionId,
+            session,
             parentArtifactId,
             direction: 'generated',
             sourceMode: mode,
