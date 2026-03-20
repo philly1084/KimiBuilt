@@ -41,6 +41,15 @@ function normalizeModelId(modelId = '') {
     return String(modelId || '').trim();
 }
 
+function shouldUseResponsesAPI() {
+    try {
+        const parsed = new URL(String(config.openai.baseURL || 'https://api.openai.com/v1'));
+        return /(^|\.)openai\.com$/i.test(parsed.hostname);
+    } catch (_error) {
+        return false;
+    }
+}
+
 const AUTO_TOOL_ALLOWLIST = new Set([
     'web-fetch',
     'web-search',
@@ -1413,6 +1422,15 @@ async function runAutomaticToolLoop(openai, {
         toolManager,
     };
 
+    if (!shouldUseResponsesAPI()) {
+        return runAutomaticToolLoopWithChatCompletions(openai, {
+            model,
+            messages,
+            selectedTools,
+            toolContext: context,
+        });
+    }
+
     try {
         return await runAutomaticToolLoopWithResponses(openai, {
             model,
@@ -1612,23 +1630,18 @@ async function createResponse({
             }
         }
 
-        try {
+        if (shouldUseResponsesAPI()) {
             const response = await openai.responses.create(params);
             return stream ? normalizeStreamResponse(response) : normalizeModelResponse(response);
-        } catch (responseError) {
-            if (!isResponsesApiUnsupportedError(responseError)) {
-                throw responseError;
-            }
-
-            console.warn(`[OpenAI] Responses API unavailable, falling back to chat completions: ${responseError.message}`);
-            const chatParams = {
-                model: params.model,
-                messages,
-                stream,
-            };
-            const response = await openai.chat.completions.create(chatParams);
-            return stream ? normalizeChatCompletionsStream(response) : normalizeChatResponse(response);
         }
+
+        const chatParams = {
+            model: params.model,
+            messages,
+            stream,
+        };
+        const response = await openai.chat.completions.create(chatParams);
+        return stream ? normalizeChatCompletionsStream(response) : normalizeChatResponse(response);
     } catch (error) {
         console.error('[OpenAI] Error creating response:', error.message);
         console.error('[OpenAI] Error type:', error.type);
