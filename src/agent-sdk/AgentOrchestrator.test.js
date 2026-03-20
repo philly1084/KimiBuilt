@@ -1,7 +1,12 @@
 const { AgentOrchestrator } = require('./AgentOrchestrator');
 const { ToolDefinition } = require('./tools/ToolDefinition');
+const settingsController = require('../routes/admin/settings.controller');
 
 describe('AgentOrchestrator', () => {
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
     test('executes a string task input without requiring a vector store', async () => {
         const llmClient = {
             complete: jest.fn()
@@ -160,6 +165,61 @@ describe('AgentOrchestrator', () => {
                 }),
             }),
         ]));
+    });
+
+    test('conversation tool selection does not expose sandbox or ssh without explicit intent', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            complete: jest.fn(),
+        };
+        const embedder = {
+            embed: jest.fn(),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'web-search',
+            name: 'Web Search',
+            description: 'Search the web',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'code-sandbox',
+            name: 'Code Sandbox',
+            description: 'Run code in a sandbox',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'docker-exec',
+            name: 'Docker Exec',
+            description: 'Run commands in a container',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'ssh-execute',
+            name: 'SSH Execute',
+            description: 'Run commands over SSH',
+            handler: async () => ({}),
+        }));
+
+        const toolIds = orchestrator.getConversationToolIds('Inspect the Traefik resources for this cluster.', 'Use the current setup.');
+
+        expect(toolIds).toContain('web-search');
+        expect(toolIds).not.toContain('code-sandbox');
+        expect(toolIds).not.toContain('docker-exec');
+        expect(toolIds).not.toContain('ssh-execute');
     });
 
     test('persists transcript and tool results through orchestrator-owned services', async () => {

@@ -11,6 +11,7 @@ const { Verifier } = require('./execution/Verifier');
 const { Planner } = require('./execution/Planner');
 const { VALID_TASK_TYPES } = require('./core/TaskSchema');
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const settingsController = require('../routes/admin/settings.controller');
 
 function createNoopVectorStore() {
   return {
@@ -547,7 +548,7 @@ class AgentOrchestrator {
         )
       : '';
 
-    task.tools = this.toolRegistry.list().map((tool) => tool.id);
+    task.tools = this.getConversationToolIds(task.objective, instructions);
     task.context = {
       ...(task.context || {}),
       metadata: {
@@ -668,6 +669,41 @@ class AgentOrchestrator {
       response,
       trace: conversationTrace,
     };
+  }
+
+  getConversationToolIds(objective = '', instructions = '') {
+    const promptText = `${objective || ''}\n${instructions || ''}`.toLowerCase();
+    const allTools = this.toolRegistry.list().map((tool) => tool.id);
+    const sshConfig = settingsController.getEffectiveSshConfig();
+    const hasUsableSshDefaults = Boolean(
+      sshConfig.enabled
+      && sshConfig.host
+      && sshConfig.username
+      && (sshConfig.password || sshConfig.privateKeyPath)
+    );
+    const explicitSshIntent = /\bssh\b/i.test(promptText)
+      || /\b(remote host|remote server|remote machine)\b/i.test(promptText)
+      || /\b(login to|log into|ssh into|ssh to|connect to)\b/i.test(promptText)
+      || (/\b(run|execute|deploy|inspect|troubleshoot|check)\b/i.test(promptText)
+        && /\b(over ssh|via ssh)\b/i.test(promptText));
+    const explicitDockerIntent = /\b(docker|container|docker exec|inside container|inside docker)\b/i.test(promptText);
+    const explicitSandboxIntent = /\b(sandbox|isolated|ephemeral|run code|execute code|test this code|try this script)\b/i.test(promptText);
+
+    return allTools.filter((toolId) => {
+      if (toolId === 'ssh-execute') {
+        return hasUsableSshDefaults && explicitSshIntent;
+      }
+
+      if (toolId === 'docker-exec') {
+        return explicitDockerIntent;
+      }
+
+      if (toolId === 'code-sandbox') {
+        return explicitSandboxIntent;
+      }
+
+      return true;
+    });
   }
 
   /**
