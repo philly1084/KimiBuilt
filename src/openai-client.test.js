@@ -247,6 +247,28 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
     });
 
+    test('narrows tool exposure to relevant tools for the current prompt', () => {
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Please web research tigers and cats differences and make a folder called folder.',
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Please web research tigers and cats differences and make a folder called folder.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(['web-search', 'file-mkdir']);
+    });
+
+    test('forces a specific tool when only one relevant tool remains', () => {
+        expect(__testUtils.buildAutomaticToolChoice([{ id: 'web-search' }], 'responses')).toEqual({
+            type: 'function',
+            name: 'web-search',
+        });
+    });
+
     test('exposes ssh-execute unconditionally when defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,

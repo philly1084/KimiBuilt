@@ -670,6 +670,8 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '') {
             return {
                 id: toolId,
                 skill,
+                description: tool.description || tool.name || toolId,
+                parameters: sanitizeToolSchema(tool.inputSchema),
                 definition: {
                     type: 'function',
                     function: {
@@ -678,9 +680,120 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '') {
                         parameters: sanitizeToolSchema(tool.inputSchema),
                     },
                 },
+                chatDefinition: {
+                    type: 'function',
+                    function: {
+                        name: toolId,
+                        description: tool.description || tool.name || toolId,
+                        parameters: sanitizeToolSchema(tool.inputSchema),
+                    },
+                },
+                responseDefinition: {
+                    type: 'function',
+                    name: toolId,
+                    description: tool.description || tool.name || toolId,
+                    parameters: sanitizeToolSchema(tool.inputSchema),
+                    strict: true,
+                },
             };
         })
         .filter(Boolean);
+}
+
+function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
+    if (!automaticTools.length) {
+        return [];
+    }
+
+    const selectedIds = new Set();
+    const normalizedPrompt = String(prompt || '').toLowerCase();
+    const hasUrl = /https?:\/\//i.test(normalizedPrompt);
+    const hasWebResearchIntent = Boolean(
+        extractExplicitWebResearchQuery(prompt)
+        || /\b(latest|current|today|news|web research|research|look up|search for|search the web|browse)\b/i.test(normalizedPrompt)
+    );
+
+    if (hasWebResearchIntent) {
+        selectedIds.add('web-search');
+    }
+
+    if (hasUrl) {
+        if (/\b(scrape|extract|selector|structured|parse)\b/i.test(normalizedPrompt)) {
+            selectedIds.add('web-scrape');
+        } else {
+            selectedIds.add('web-fetch');
+        }
+    }
+
+    if (extractRequestedDirectoryPath(prompt)) {
+        selectedIds.add('file-mkdir');
+    }
+
+    if (/\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
+        selectedIds.add('file-read');
+    }
+
+    if (/\b(write|save|create|update|edit)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
+        selectedIds.add('file-write');
+    }
+
+    if (/\b(find|search|locate|list)\b[\s\S]{0,40}\bfiles?\b/i.test(normalizedPrompt)) {
+        selectedIds.add('file-search');
+    }
+
+    if (promptHasExplicitSshIntent(prompt)) {
+        selectedIds.add('ssh-execute');
+    }
+
+    if (/\b(docker|container)\b/i.test(normalizedPrompt)) {
+        selectedIds.add('docker-exec');
+    }
+
+    if (/\b(run|execute|test)\b[\s\S]{0,40}\b(code|script|snippet)\b/i.test(normalizedPrompt) || /\bsandbox\b/i.test(normalizedPrompt)) {
+        selectedIds.add('code-sandbox');
+    }
+
+    if (/\b(security|vulnerab|audit|scan|secret)\b/i.test(normalizedPrompt)) {
+        selectedIds.add('security-scan');
+    }
+
+    if (/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/i.test(normalizedPrompt)
+        || /\bhow do i use\b[\s\S]{0,40}\btool\b/i.test(normalizedPrompt)) {
+        selectedIds.add('tool-doc-read');
+    }
+
+    if (selectedIds.size === 0) {
+        automaticTools.forEach((entry) => {
+            const triggerPatterns = entry.skill?.triggerPatterns || [];
+            if (triggerPatterns.some((pattern) => promptMentionsPattern(prompt, pattern))) {
+                selectedIds.add(entry.id);
+            }
+        });
+    }
+
+    return automaticTools.filter((entry) => selectedIds.has(entry.id));
+}
+
+function buildAutomaticToolChoice(selectedTools = [], api = 'responses') {
+    if (!selectedTools.length) {
+        return 'none';
+    }
+
+    if (selectedTools.length === 1) {
+        return api === 'chat'
+            ? {
+                type: 'function',
+                function: {
+                    name: selectedTools[0].id,
+                },
+            }
+            : {
+                type: 'function',
+                name: selectedTools[0].id,
+            };
+    }
+
+    return 'auto';
 }
 
 function buildAutomaticToolGuidance(automaticTools = []) {
@@ -928,23 +1041,106 @@ async function runDeterministicToolPreflight({
     };
 }
 
-async function runAutomaticToolLoop(openai, {
+function buildResponsesInput(messages = []) {
+    return messages.map((message) => ({
+        type: 'message',
+        role: message.role,
+        content: message.content,
+    }));
+}
+
+function buildResponsesToolOutputItems(toolCalls = [], toolResults = []) {
+    return toolCalls.map((toolCall, index) => ({
+        type: 'function_call_output',
+        call_id: toolCall.call_id,
+        output: JSON.stringify(toolResults[index] || {
+            success: false,
+            toolId: toolCall.name || 'unknown',
+            error: 'Tool output missing',
+        }),
+    }));
+}
+
+function getResponseApiText(response) {
+    if (typeof response?.output_text === 'string') {
+        return response.output_text;
+    }
+
+    if (!Array.isArray(response?.output)) {
+        return '';
+    }
+
+    return response.output
+        .filter((item) => item?.type === 'message' && item?.role === 'assistant')
+        .flatMap((item) => item.content || [])
+        .filter((content) => content?.type === 'output_text')
+        .map((content) => content.text || '')
+        .join('');
+}
+
+function getResponseFunctionCalls(response) {
+    if (!Array.isArray(response?.output)) {
+        return [];
+    }
+
+    return response.output.filter((item) => item?.type === 'function_call');
+}
+
+function isResponsesApiResponse(response) {
+    return Boolean(response && (response.object === 'response' || Object.prototype.hasOwnProperty.call(response, 'output_text')));
+}
+
+function normalizeResponsesApiResponse(response) {
+    const outputText = getResponseApiText(response);
+
+    return {
+        id: response.id,
+        object: 'response',
+        created: response.created_at,
+        model: response.model,
+        output: [
+            {
+                type: 'message',
+                role: 'assistant',
+                content: [
+                    {
+                        type: 'text',
+                        text: outputText,
+                    },
+                ],
+            },
+        ],
+        session_id: response.session_id,
+        metadata: response?._kimibuilt || {},
+    };
+}
+
+function isResponsesApiUnsupportedError(error) {
+    const status = Number(error?.status || error?.statusCode || 0);
+    const message = String(error?.message || '').toLowerCase();
+
+    return status === 404
+        || status === 405
+        || message.includes('/responses')
+        || message.includes('unknown url')
+        || message.includes('not found')
+        || message.includes('unsupported');
+}
+
+async function runAutomaticToolLoopWithResponses(openai, {
     model,
     messages,
-    toolManager,
+    selectedTools,
     toolContext = {},
 }) {
     const prompt = getLastUserText(messages);
-    const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);
-
-    if (automaticTools.length === 0) {
+    if (selectedTools.length === 0) {
         return null;
     }
 
-    const availableTools = automaticTools.map((entry) => entry.definition);
     const workingMessages = [...messages];
     let finalResponse = null;
-    const toolGuidance = buildAutomaticToolGuidance(automaticTools);
+    const toolGuidance = buildAutomaticToolGuidance(selectedTools);
     const toolEvents = [];
 
     if (toolGuidance) {
@@ -955,8 +1151,8 @@ async function runAutomaticToolLoop(openai, {
     }
 
     const preflight = await runDeterministicToolPreflight({
-        toolManager,
-        automaticTools,
+        toolManager: toolContext.toolManager || null,
+        automaticTools: selectedTools,
         prompt,
         toolContext,
     });
@@ -967,16 +1163,177 @@ async function runAutomaticToolLoop(openai, {
         toolEvents.push(...preflight.toolEvents);
     }
 
+    const remainingTools = selectedTools.filter((entry) => !preflight.toolEvents.some(
+        (event) => event.toolCall?.function?.name === entry.id,
+    ));
+
+    if (remainingTools.length === 0) {
+        finalResponse = await openai.responses.create({
+            model,
+            input: buildResponsesInput(workingMessages),
+            tool_choice: 'none',
+        });
+
+        if (toolEvents.length > 0) {
+            finalResponse._kimibuilt = {
+                toolEvents,
+            };
+        }
+
+        return finalResponse;
+    }
+
+    const seenToolCalls = new Set();
+    let nextInput = buildResponsesInput(workingMessages);
+    let previousResponseId = null;
+
+    console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${remainingTools.map((entry) => entry.id).join(', ')}`);
+
+    for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
+        finalResponse = await openai.responses.create({
+            model,
+            input: nextInput,
+            previous_response_id: previousResponseId,
+            tools: remainingTools.map((entry) => entry.responseDefinition),
+            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses') : 'auto',
+            parallel_tool_calls: false,
+        });
+
+        const toolCalls = getResponseFunctionCalls(finalResponse);
+
+        if (toolCalls.length === 0) {
+            if (toolEvents.length > 0) {
+                finalResponse._kimibuilt = {
+                    toolEvents,
+                };
+            }
+            return finalResponse;
+        }
+
+        const signature = JSON.stringify(toolCalls.map((toolCall) => ({
+            name: toolCall.name,
+            args: toolCall.arguments,
+        })));
+        if (seenToolCalls.has(signature)) {
+            console.warn('[OpenAI] Endless tool loop detected (duplicate calls), breaking early.');
+            if (toolEvents.length > 0) {
+                finalResponse._kimibuilt = { toolEvents };
+            }
+            return finalResponse;
+        }
+        seenToolCalls.add(signature);
+
+        const toolResults = [];
+        for (const toolCall of toolCalls) {
+            const result = await executeAutomaticToolCall(toolContext.toolManager, {
+                id: toolCall.id || toolCall.call_id,
+                type: 'function',
+                function: {
+                    name: toolCall.name,
+                    arguments: toolCall.arguments,
+                },
+            }, toolContext);
+            toolResults.push(result);
+            toolEvents.push({
+                toolCall: normalizeToolCall({
+                    id: toolCall.id || toolCall.call_id,
+                    type: 'function',
+                    function: {
+                        name: toolCall.name,
+                        arguments: toolCall.arguments,
+                    },
+                }),
+                result,
+            });
+        }
+
+        previousResponseId = finalResponse.id;
+        nextInput = buildResponsesToolOutputItems(toolCalls, toolResults);
+    }
+
+    finalResponse = await openai.responses.create({
+        model,
+        input: nextInput,
+        previous_response_id: previousResponseId,
+        tools: remainingTools.map((entry) => entry.responseDefinition),
+        tool_choice: 'none',
+    });
+
+    if (toolEvents.length > 0) {
+        finalResponse._kimibuilt = {
+            toolEvents,
+        };
+    }
+
+    return finalResponse;
+}
+
+async function runAutomaticToolLoopWithChatCompletions(openai, {
+    model,
+    messages,
+    selectedTools,
+    toolContext = {},
+}) {
+    if (selectedTools.length === 0) {
+        return null;
+    }
+
+    const prompt = getLastUserText(messages);
+    const workingMessages = [...messages];
+    let finalResponse = null;
+    const toolGuidance = buildAutomaticToolGuidance(selectedTools);
+    const toolEvents = [];
+
+    if (toolGuidance) {
+        workingMessages.push({
+            role: 'system',
+            content: toolGuidance,
+        });
+    }
+
+    const preflight = await runDeterministicToolPreflight({
+        toolManager: toolContext.toolManager || null,
+        automaticTools: selectedTools,
+        prompt,
+        toolContext,
+    });
+    if (preflight.summaryMessage) {
+        workingMessages.push(preflight.summaryMessage);
+    }
+    if (preflight.toolEvents.length > 0) {
+        toolEvents.push(...preflight.toolEvents);
+    }
+
+    const remainingTools = selectedTools.filter((entry) => !preflight.toolEvents.some(
+        (event) => event.toolCall?.function?.name === entry.id,
+    ));
+
+    if (remainingTools.length === 0) {
+        finalResponse = await openai.chat.completions.create({
+            model,
+            messages: workingMessages,
+            stream: false,
+        });
+
+        if (toolEvents.length > 0) {
+            finalResponse._kimibuilt = {
+                toolEvents,
+            };
+        }
+
+        return finalResponse;
+    }
+
     const seenToolCalls = new Set();
 
-    console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${automaticTools.map((entry) => entry.id).join(', ')}`);
+    console.log(`[OpenAI] Automatic tools enabled for prompt. Candidates: ${remainingTools.map((entry) => entry.id).join(', ')}`);
 
     for (let round = 0; round < AUTO_TOOL_MAX_ROUNDS; round += 1) {
         finalResponse = await openai.chat.completions.create({
             model,
             messages: workingMessages,
-            tools: availableTools,
-            tool_choice: 'auto',
+            tools: remainingTools.map((entry) => entry.chatDefinition),
+            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat') : 'auto',
             stream: false,
         });
 
@@ -992,7 +1349,6 @@ async function runAutomaticToolLoop(openai, {
             return finalResponse;
         }
 
-        // Prevent infinite loops on identical tool calls
         const signature = JSON.stringify(toolCalls.map((tc) => ({ name: tc.function?.name, args: tc.function?.arguments })));
         if (seenToolCalls.has(signature)) {
             console.warn('[OpenAI] Endless tool loop detected (duplicate calls), breaking early.');
@@ -1010,7 +1366,7 @@ async function runAutomaticToolLoop(openai, {
         });
 
         for (const toolCall of toolCalls) {
-            const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
+            const result = await executeAutomaticToolCall(toolContext.toolManager, toolCall, toolContext);
             toolEvents.push({
                 toolCall: normalizeToolCall(toolCall),
                 result,
@@ -1038,8 +1394,55 @@ async function runAutomaticToolLoop(openai, {
     return finalResponse;
 }
 
+async function runAutomaticToolLoop(openai, {
+    model,
+    messages,
+    toolManager,
+    toolContext = {},
+}) {
+    const prompt = getLastUserText(messages);
+    const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);
+    const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
+
+    if (selectedTools.length === 0) {
+        return null;
+    }
+
+    const context = {
+        ...toolContext,
+        toolManager,
+    };
+
+    try {
+        return await runAutomaticToolLoopWithResponses(openai, {
+            model,
+            messages,
+            selectedTools,
+            toolContext: context,
+        });
+    } catch (error) {
+        if (!isResponsesApiUnsupportedError(error)) {
+            throw error;
+        }
+
+        console.warn(`[OpenAI] Responses API tool loop unavailable, falling back to chat completions: ${error.message}`);
+        return runAutomaticToolLoopWithChatCompletions(openai, {
+            model,
+            messages,
+            selectedTools,
+            toolContext: context,
+        });
+    }
+}
+
 function getChatCompletionText(response) {
     return normalizeMessageContent(response?.choices?.[0]?.message?.content || '');
+}
+
+function getModelResponseText(response) {
+    return isResponsesApiResponse(response)
+        ? getResponseApiText(response)
+        : getChatCompletionText(response);
 }
 
 function normalizeChatResponse(response) {
@@ -1067,7 +1470,13 @@ function normalizeChatResponse(response) {
     };
 }
 
-async function* normalizeStreamResponse(stream) {
+function normalizeModelResponse(response) {
+    return isResponsesApiResponse(response)
+        ? normalizeResponsesApiResponse(response)
+        : normalizeChatResponse(response);
+}
+
+async function* normalizeChatCompletionsStream(stream) {
     let responseId = null;
     let model = null;
 
@@ -1103,10 +1512,32 @@ async function* normalizeStreamResponse(stream) {
     }
 }
 
+async function* normalizeStreamResponse(stream) {
+    for await (const chunk of stream) {
+        if (chunk.type === 'response.output_text.delta' && chunk.delta) {
+            yield {
+                type: 'response.output_text.delta',
+                delta: chunk.delta,
+            };
+        }
+
+        if (chunk.type === 'response.completed' && chunk.response) {
+            yield {
+                type: 'response.completed',
+                response: normalizeResponsesApiResponse(chunk.response),
+            };
+        }
+
+        if (chunk.type === 'response.failed') {
+            throw new Error(chunk.response?.error?.message || 'Response generation failed');
+        }
+    }
+}
+
 async function* synthesizeStreamResponse(response) {
     const responseId = response?.id || `resp_${Date.now()}`;
     const model = response?.model || null;
-    const text = getChatCompletionText(response);
+    const text = getModelResponseText(response);
 
     if (text) {
         for (let index = 0; index < text.length; index += SYNTHETIC_STREAM_CHUNK_SIZE) {
@@ -1120,14 +1551,11 @@ async function* synthesizeStreamResponse(response) {
     yield {
         type: 'response.completed',
         response: {
-            id: responseId,
-            model,
-            output: normalizeChatResponse({
+            ...normalizeModelResponse({
                 ...response,
                 id: responseId,
                 model,
-            }).output,
-            metadata: response?._kimibuilt || {},
+            }),
         },
     };
 }
@@ -1154,11 +1582,11 @@ async function createResponse({
 
     const params = {
         model: model || config.openai.model,
-        messages,
+        input: buildResponsesInput(messages),
         stream,
     };
 
-    console.log(`[OpenAI] Creating chat completion: model=${params.model}, stream=${stream}, messages=${messages.length}`);
+    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}`);
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
 
     try {
@@ -1176,7 +1604,7 @@ async function createResponse({
 
                 if (toolResponse) {
                     console.log('[OpenAI] Automatic tool orchestration completed');
-                    return stream ? synthesizeStreamResponse(toolResponse) : normalizeChatResponse(toolResponse);
+                    return stream ? synthesizeStreamResponse(toolResponse) : normalizeModelResponse(toolResponse);
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
@@ -1184,10 +1612,25 @@ async function createResponse({
             }
         }
 
-        const response = await openai.chat.completions.create(params);
-        return stream ? normalizeStreamResponse(response) : normalizeChatResponse(response);
+        try {
+            const response = await openai.responses.create(params);
+            return stream ? normalizeStreamResponse(response) : normalizeModelResponse(response);
+        } catch (responseError) {
+            if (!isResponsesApiUnsupportedError(responseError)) {
+                throw responseError;
+            }
+
+            console.warn(`[OpenAI] Responses API unavailable, falling back to chat completions: ${responseError.message}`);
+            const chatParams = {
+                model: params.model,
+                messages,
+                stream,
+            };
+            const response = await openai.chat.completions.create(chatParams);
+            return stream ? normalizeChatCompletionsStream(response) : normalizeChatResponse(response);
+        }
     } catch (error) {
-        console.error('[OpenAI] Error creating chat completion:', error.message);
+        console.error('[OpenAI] Error creating response:', error.message);
         console.error('[OpenAI] Error type:', error.type);
         console.error('[OpenAI] Error code:', error.code);
         throw error;
@@ -1255,11 +1698,16 @@ module.exports = {
         buildMessages,
         buildAutomaticToolDefinitions,
         buildAutomaticToolGuidance,
+        buildAutomaticToolChoice,
         buildDeterministicPreflightActions,
+        buildResponsesInput,
         extractExplicitWebResearchQuery,
         extractRequestedDirectoryPath,
+        getResponseApiText,
+        normalizeModelResponse,
         normalizeToolResultForModel,
         sanitizeToolSchema,
+        selectAutomaticToolDefinitions,
         shouldAutoUseTool,
         promptHasExplicitSshIntent,
         hasUsableSshDefaults,
