@@ -28,6 +28,8 @@ const RETRY_CONFIG = {
     maxDelay: 10000
 };
 
+const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+
 // ============================================
 // Utility Functions
 // ============================================
@@ -64,6 +66,14 @@ function isRetryableError(error) {
         return false;
     }
     return true;
+}
+
+function isTerminalFinishReason(finishReason) {
+    if (!finishReason) {
+        return false;
+    }
+
+    return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
 }
 
 /**
@@ -263,7 +273,7 @@ class NotesAPIClient {
                                     }
 
                                     // Check if generation is complete
-                                    if (parsed.choices?.[0]?.finish_reason) {
+                                    if (isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
                                         yield { type: 'done', sessionId: this.currentSessionId, artifacts: finalArtifacts };
                                         return;
                                     }

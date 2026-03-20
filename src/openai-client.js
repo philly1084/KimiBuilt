@@ -52,8 +52,9 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'tool-doc-read',
 ]);
 
-const AUTO_TOOL_MAX_ROUNDS = 3;
+const AUTO_TOOL_MAX_ROUNDS = 6;
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
+const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
 
 class ToolOrchestrationError extends Error {
     constructor(message, options = {}) {
@@ -739,6 +740,14 @@ function normalizeToolCall(toolCall = {}) {
     };
 }
 
+function isTerminalFinishReason(finishReason = null) {
+    if (!finishReason) {
+        return false;
+    }
+
+    return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
+}
+
 function parseToolArguments(rawArguments = '{}') {
     if (!rawArguments) {
         return {};
@@ -926,7 +935,7 @@ async function* normalizeStreamResponse(stream) {
             };
         }
 
-        if (finishReason) {
+        if (isTerminalFinishReason(finishReason)) {
             yield {
                 type: 'response.completed',
                 response: {
@@ -1096,6 +1105,7 @@ module.exports = {
         shouldAutoUseTool,
         promptHasExplicitSshIntent,
         hasUsableSshDefaults,
+        isTerminalFinishReason,
         ToolOrchestrationError,
     },
 };

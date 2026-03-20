@@ -184,6 +184,11 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).toContain('ssh-execute');
     });
 
+    test('treats tool_calls as non-terminal in streaming normalization logic', () => {
+        expect(__testUtils.isTerminalFinishReason('tool_calls')).toBe(false);
+        expect(__testUtils.isTerminalFinishReason('stop')).toBe(true);
+    });
+
     test('truncates oversized tool payloads before returning them to the model loop', () => {
         const normalized = __testUtils.normalizeToolResultForModel({
             success: true,

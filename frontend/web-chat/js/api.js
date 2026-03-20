@@ -22,6 +22,8 @@ const RETRY_CONFIG = {
     maxDelay: 10000
 };
 
+const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+
 class OpenAIAPIClient extends EventTarget {
     constructor() {
         super();
@@ -74,6 +76,14 @@ class OpenAIAPIClient extends EventTarget {
             return false;
         }
         return true;
+    }
+
+    isTerminalFinishReason(finishReason) {
+        if (!finishReason) {
+            return false;
+        }
+
+        return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
     }
 
     /**
@@ -236,7 +246,7 @@ class OpenAIAPIClient extends EventTarget {
                                     }
                                     
                                     // Check finish reason
-                                    if (parsed.choices?.[0]?.finish_reason) {
+                                    if (this.isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
                                         yield { type: 'done', sessionId: this.currentSessionId };
                                         return;
                                     }
@@ -317,7 +327,7 @@ class OpenAIAPIClient extends EventTarget {
                     this.currentSessionId = chunk.session_id;
                 }
                 
-                if (chunk.choices[0]?.finish_reason) {
+                if (this.isTerminalFinishReason(chunk.choices[0]?.finish_reason)) {
                     yield {
                         type: 'done',
                         sessionId: this.currentSessionId,

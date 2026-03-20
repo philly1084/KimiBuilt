@@ -357,6 +357,7 @@ class AgentOrchestrator {
     sessionId = 'default',
     taskType = 'chat',
     metadata = {},
+    useAgentExecutor = false,
   } = {}) {
     const workingMemory = this.getWorkingMemory(sessionId);
     const objective = this.getConversationObjective(input);
@@ -379,7 +380,10 @@ class AgentOrchestrator {
       },
       context: {
         sessionId,
-        metadata,
+        metadata: {
+          ...metadata,
+          model,
+        },
       },
       completionCriteria: {
         conditions: ['output-not-empty', 'no-errors'],
@@ -405,6 +409,26 @@ class AgentOrchestrator {
     });
 
     try {
+      if (useAgentExecutor) {
+        try {
+          return await this.executeConversationWithAgentExecutor({
+            task,
+            input,
+            instructions,
+            contextMessages: resolvedContextMessages,
+            recentMessages: resolvedRecentMessages,
+            stream,
+            model,
+            sessionId,
+            taskType,
+            metadata,
+            workingMemory,
+          });
+        } catch (agentError) {
+          console.warn('[AgentOrchestrator] Agent executor failed, falling back to conversation runtime:', agentError.message);
+        }
+      }
+
       const response = await this.llmClient.createResponse({
         input,
         previousResponseId,
@@ -502,6 +526,148 @@ class AgentOrchestrator {
       });
       throw error;
     }
+  }
+
+  async executeConversationWithAgentExecutor({
+    task,
+    input,
+    instructions,
+    contextMessages = [],
+    recentMessages = [],
+    stream = false,
+    model = null,
+    sessionId,
+    taskType,
+    metadata = {},
+    workingMemory,
+  }) {
+    const skillContext = this.config.enableSkills
+      ? this.skillRetriever.formatForPrompt(
+          await this.skillRetriever.retrieveForTask(task).catch(() => [])
+        )
+      : '';
+
+    task.tools = this.toolRegistry.list().map((tool) => tool.id);
+    task.context = {
+      ...(task.context || {}),
+      metadata: {
+        ...(task.context?.metadata || {}),
+        ...metadata,
+        model,
+        instructions: instructions || '',
+        contextMessages,
+        recentMessages,
+      },
+    };
+
+    this.seedConversationExecutionContext(workingMemory, {
+      instructions,
+      contextMessages,
+      recentMessages,
+      input,
+    });
+
+    const executor = new Executor({
+      toolRegistry: this.toolRegistry,
+      workingMemory,
+      retryEngine: this.retryEngine,
+      verifier: this.verifier,
+      planner: this.planner,
+      llmClient: this.llmClient,
+      skillContext,
+    });
+
+    const result = await executor.execute(task);
+    if (!result.success) {
+      throw new Error(result.error || 'Agent execution failed');
+    }
+
+    const output = typeof result.output === 'string'
+      ? result.output
+      : result.output == null
+        ? ''
+        : JSON.stringify(result.output, null, 2);
+    const trace = typeof result.trace?.toJSON === 'function' ? result.trace.toJSON() : result.trace;
+    const toolEvents = this.buildToolEventsFromTrace(trace);
+    const response = this.buildSyntheticConversationResponse({
+      sessionId,
+      model,
+      output,
+      metadata: {
+        toolEvents,
+        trace,
+        agentExecutor: true,
+        taskType,
+      },
+    });
+
+    if (stream) {
+      return {
+        success: true,
+        sessionId,
+        task: task.toJSON(),
+        response: this.wrapConversationStream({
+          response: this.createSyntheticConversationStream(response),
+          task,
+          workingMemory,
+          sessionId,
+          model,
+          userText: this.getConversationObjective(input),
+          metadata: {
+            ...metadata,
+            taskType,
+            agentExecutor: true,
+          },
+        }),
+      };
+    }
+
+    const duration = this.finalizeRuntimeTask(task, workingMemory, output);
+    await this.persistConversationState({
+      sessionId,
+      userText: this.getConversationObjective(input),
+      assistantText: output,
+      responseId: response.id,
+      toolEvents,
+    });
+    const conversationTrace = this.buildConversationTrace({
+      task,
+      sessionId,
+      output,
+      responseId: response.id,
+      model: response.model || model || null,
+      duration,
+      metadata: {
+        ...metadata,
+        taskType,
+        stream,
+        toolEventCount: toolEvents.length,
+        agentExecutor: true,
+        executionTrace: trace,
+      },
+    });
+
+    this.emit('task:complete', {
+      task,
+      sessionId,
+      timestamp: Date.now(),
+      result: {
+        success: true,
+        output,
+        responseId: response.id,
+        trace: conversationTrace,
+        duration,
+      },
+    });
+
+    return {
+      success: true,
+      sessionId,
+      task: task.toJSON(),
+      output,
+      response,
+      trace: conversationTrace,
+    };
   }
 
   /**
@@ -869,6 +1035,135 @@ class AgentOrchestrator {
 
   failRuntimeTask(task) {
     this.transitionRuntimeTask(task, TaskStatus.FAILED);
+  }
+
+  seedConversationExecutionContext(workingMemory, {
+    instructions = '',
+    contextMessages = [],
+    recentMessages = [],
+    input = null,
+  } = {}) {
+    if (!workingMemory) {
+      return;
+    }
+
+    const inputSummary = Array.isArray(input)
+      ? input.map((entry) => `${entry?.role || 'unknown'}: ${normalizeMessageContent(entry?.content)}`).join('\n')
+      : normalizeMessageContent(input);
+
+    workingMemory.setIntermediateResult('runtimeInstructions', instructions || '');
+    workingMemory.setIntermediateResult('contextMessages', contextMessages);
+    workingMemory.setIntermediateResult('recentMessages', recentMessages);
+    workingMemory.setIntermediateResult('contextMessagesText', this.formatConversationMessages(contextMessages));
+    workingMemory.setIntermediateResult('recentMessagesText', this.formatConversationMessages(recentMessages));
+    workingMemory.setIntermediateResult('inputSummary', inputSummary || '');
+    workingMemory.setIntermediateResult('results', {});
+    workingMemory.setIntermediateResult('stepResults', []);
+    workingMemory.setIntermediateResult('resultsJson', JSON.stringify({}, null, 2));
+    workingMemory.setIntermediateResult('stepResultsJson', JSON.stringify([], null, 2));
+  }
+
+  formatConversationMessages(messages = []) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return '';
+    }
+
+    return messages
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          return entry;
+        }
+
+        return `${entry?.role || 'context'}: ${normalizeMessageContent(entry?.content || entry)}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  buildToolEventsFromTrace(trace = {}) {
+    const steps = Array.isArray(trace?.steps) ? trace.steps : [];
+
+    return steps
+      .filter((step) => step?.type === 'tool-call')
+      .map((step) => {
+        const input = step.input && typeof step.input === 'object' ? step.input : {};
+        const params = input.params && typeof input.params === 'object'
+          ? input.params
+          : input;
+        const toolName = input.tool || 'tool';
+
+        return {
+          toolCall: {
+            id: step.id || `tool_${Date.now()}`,
+            type: 'function',
+            function: {
+              name: toolName,
+              arguments: JSON.stringify(params || {}),
+            },
+          },
+          result: {
+            success: !step.error,
+            toolId: toolName,
+            data: step.output,
+            error: step.error || null,
+          },
+        };
+      });
+  }
+
+  buildSyntheticConversationResponse({
+    sessionId,
+    model = null,
+    output = '',
+    metadata = {},
+  } = {}) {
+    return {
+      id: `resp_${Date.now()}`,
+      object: 'response',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: output,
+            },
+          ],
+        },
+      ],
+      session_id: sessionId,
+      metadata,
+    };
+  }
+
+  createSyntheticConversationStream(response = {}) {
+    const text = this.extractResponseOutput(response);
+    const responseId = response?.id || `resp_${Date.now()}`;
+    const model = response?.model || null;
+    const metadata = response?.metadata || {};
+    const chunkSize = 120;
+
+    return (async function* syntheticStream() {
+      for (let index = 0; index < text.length; index += chunkSize) {
+        yield {
+          type: 'response.output_text.delta',
+          delta: text.slice(index, index + chunkSize),
+        };
+      }
+
+      yield {
+        type: 'response.completed',
+        response: {
+          id: responseId,
+          model,
+          output: response.output || [],
+          metadata,
+        },
+      };
+    }());
   }
 
   buildConversationTrace({

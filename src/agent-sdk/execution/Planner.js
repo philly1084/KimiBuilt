@@ -395,6 +395,10 @@ class Planner {
       case 'analysis':
         this.planAnalysis(task, plan, analysis);
         break;
+      case 'chat':
+      case 'reasoning':
+        await this.planConversationalAgent(task, plan, analysis);
+        break;
       case 'refactoring':
         this.planRefactoring(task, plan, analysis);
         break;
@@ -433,7 +437,9 @@ class Planner {
     
     try {
       if (this.llmClient) {
-        const response = await this.llmClient.complete(prompt);
+        const response = await this.llmClient.complete(prompt, {
+          model: task.context?.metadata?.model || null,
+        });
         const parsed = JSON.parse(response);
         return {
           complexity: parsed.complexity || 'medium',
@@ -676,6 +682,114 @@ class Planner {
         estimatedTokens: 1500
       });
     }
+  }
+
+  async planConversationalAgent(task, plan, analysis) {
+    const availableTools = Array.isArray(task.tools) ? task.tools : [];
+    const metadata = task.context?.metadata || {};
+    let plannedSteps = [];
+
+    if (this.llmClient) {
+      try {
+        const response = await this.llmClient.complete(
+          runtimePromptRegistry.render('agent-sdk-planner-conversation-plan', {
+            objective: task.objective,
+            input: JSON.stringify(task.input || {}, null, 2),
+            availableTools: JSON.stringify(availableTools),
+            instructions: JSON.stringify(metadata.instructions || '', null, 2),
+            contextMessages: JSON.stringify(metadata.contextMessages || [], null, 2),
+            recentMessages: JSON.stringify(metadata.recentMessages || [], null, 2),
+          }),
+          {
+            model: metadata.model || null,
+          },
+        );
+        plannedSteps = this.normalizeConversationSteps(JSON.parse(response), availableTools);
+      } catch (error) {
+        console.warn('Conversation planning failed, using fallback plan:', error.message);
+      }
+    }
+
+    if (plannedSteps.length === 0) {
+      plannedSteps = [{
+        type: 'llm-call',
+        description: 'Draft the assistant response',
+        resultKey: 'finalResponse',
+        params: {
+          prompt: this.buildConversationSynthesisPrompt(),
+        },
+      }];
+    }
+
+    const hasFinalSynthesis = plannedSteps.some((step) => step.resultKey === 'finalResponse');
+    if (!hasFinalSynthesis) {
+      plannedSteps.push({
+        type: 'llm-call',
+        description: 'Synthesize the final assistant response',
+        resultKey: 'finalResponse',
+        params: {
+          prompt: this.buildConversationSynthesisPrompt(),
+        },
+      });
+    }
+
+    let previousStepId = null;
+    plannedSteps.forEach((step) => {
+      previousStepId = plan.addStep(step, previousStepId ? [previousStepId] : []);
+    });
+  }
+
+  normalizeConversationSteps(planSpec, availableTools = []) {
+    const requestedSteps = Array.isArray(planSpec?.steps) ? planSpec.steps : [];
+
+    return requestedSteps
+      .map((step, index) => {
+        const normalizedType = step?.type === 'tool-call' ? 'tool-call' : 'llm-call';
+        const tool = typeof step?.tool === 'string' ? step.tool.trim() : '';
+        if (normalizedType === 'tool-call' && (!tool || !availableTools.includes(tool))) {
+          return null;
+        }
+
+        return {
+          type: normalizedType,
+          description: step?.description || `Conversation step ${index + 1}`,
+          tool: normalizedType === 'tool-call' ? tool : undefined,
+          params: step?.params && typeof step.params === 'object' ? step.params : {},
+          prompt: normalizedType === 'llm-call' && typeof step?.prompt === 'string' ? step.prompt : undefined,
+          resultKey: typeof step?.resultKey === 'string' && step.resultKey.trim() ? step.resultKey.trim() : null,
+          optional: Boolean(step?.optional),
+          continueOnError: Boolean(step?.continueOnError),
+          estimatedTokens: Number.isFinite(step?.estimatedTokens) ? step.estimatedTokens : 1000,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  buildConversationSynthesisPrompt() {
+    return [
+      'You are preparing the final assistant reply for the user.',
+      'Follow any runtime instructions if they are present.',
+      '',
+      'Runtime instructions:',
+      '{{runtimeInstructions}}',
+      '',
+      'User request:',
+      '{{currentTask.objective}}',
+      '',
+      'Supplemental recalled context:',
+      '{{contextMessagesText}}',
+      '',
+      'Recent transcript:',
+      '{{recentMessagesText}}',
+      '',
+      'Tool and intermediate results:',
+      '{{resultsJson}}',
+      '',
+      'Execution log:',
+      '{{stepResultsJson}}',
+      '',
+      'Respond directly to the user with the final answer. Do not mention internal planning unless it helps the user.',
+    ].join('\n');
   }
   
   /**

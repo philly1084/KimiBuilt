@@ -1,4 +1,5 @@
 const { AgentOrchestrator } = require('./AgentOrchestrator');
+const { ToolDefinition } = require('./tools/ToolDefinition');
 
 describe('AgentOrchestrator', () => {
     test('executes a string task input without requiring a vector store', async () => {
@@ -81,6 +82,84 @@ describe('AgentOrchestrator', () => {
                 { role: 'assistant', content: 'Earlier answer' },
             ],
         }));
+    });
+
+    test('can execute a planned multi-step conversation with tool usage and synthesis', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    complexity: 'medium',
+                    requiredTools: ['lookup-status'],
+                    estimatedSteps: 2,
+                    challenges: [],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            type: 'tool-call',
+                            description: 'Look up the current status',
+                            tool: 'lookup-status',
+                            params: { target: 'cluster-a' },
+                            resultKey: 'status',
+                        },
+                        {
+                            type: 'llm-call',
+                            description: 'Write the final answer',
+                            params: {
+                                prompt: 'User request: {{currentTask.objective}}\nStatus: {{results.status}}\nRespond directly to the user.',
+                            },
+                            resultKey: 'finalResponse',
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce('Cluster A is healthy.'),
+        };
+        const embedder = {
+            embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'lookup-status',
+            name: 'Lookup Status',
+            description: 'Returns cluster status',
+            inputSchema: {
+                type: 'object',
+                required: ['target'],
+                properties: {
+                    target: { type: 'string' },
+                },
+            },
+            handler: async ({ target }) => ({ target, state: 'healthy' }),
+        }));
+
+        const result = await orchestrator.executeConversation({
+            sessionId: 'session-agent-1',
+            input: 'Is cluster-a healthy?',
+            instructions: 'Be concise.',
+            stream: false,
+            useAgentExecutor: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.output).toBe('Cluster A is healthy.');
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).toHaveBeenCalledTimes(3);
+        expect(result.response.metadata.agentExecutor).toBe(true);
+        expect(result.response.metadata.toolEvents).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                toolCall: expect.objectContaining({
+                    function: expect.objectContaining({
+                        name: 'lookup-status',
+                    }),
+                }),
+            }),
+        ]));
     });
 
     test('persists transcript and tool results through orchestrator-owned services', async () => {

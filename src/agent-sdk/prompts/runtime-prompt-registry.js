@@ -42,6 +42,47 @@ Type: {{stepType}}
 {{taskInputBlock}}
 {{stepParamsBlock}}`,
   },
+  {
+    id: 'agent-sdk-planner-conversation-plan',
+    name: 'Conversation Agent Plan',
+    description: 'Live prompt used by Planner.planConversationalAgent() to create multi-step chat plans.',
+    assignment: 'agent-sdk.execution.Planner.planConversationalAgent',
+    category: 'agent-sdk',
+    live: true,
+    editable: true,
+    variables: ['objective', 'input', 'availableTools', 'instructions', 'contextMessages', 'recentMessages'],
+    content: `Create a concise execution plan for this chat task.
+
+Return valid JSON only with this shape:
+{
+  "steps": [
+    {
+      "type": "tool-call" | "llm-call",
+      "description": "short description",
+      "tool": "tool-id when type is tool-call",
+      "params": { "toolParam": "value" },
+      "prompt": "prompt text for llm-call steps when needed",
+      "resultKey": "shortResultKey",
+      "optional": false,
+      "continueOnError": false
+    }
+  ]
+}
+
+Rules:
+- Only use tool ids from Available Tools.
+- Only include tool-call steps when you can infer concrete params from the request and context.
+- Prefer 1-3 steps.
+- The final step should usually be an llm-call that writes the user-facing answer.
+- Do not invent unavailable tools.
+
+Objective: {{objective}}
+Input: {{input}}
+Runtime instructions: {{instructions}}
+Supplemental recalled context: {{contextMessages}}
+Recent transcript: {{recentMessages}}
+Available Tools: {{availableTools}}`,
+  },
 ];
 
 class RuntimePromptRegistry {

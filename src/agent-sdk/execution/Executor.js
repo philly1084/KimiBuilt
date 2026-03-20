@@ -236,6 +236,13 @@ class Executor {
    */
   async executePlan(task, plan, trace) {
     const results = [];
+
+    if (this.workingMemory) {
+      this.workingMemory.setIntermediateResult('results', this.workingMemory.get('results') || {});
+      this.workingMemory.setIntermediateResult('stepResults', this.workingMemory.get('stepResults') || []);
+      this.workingMemory.setIntermediateResult('resultsJson', JSON.stringify(this.workingMemory.get('results') || {}, null, 2));
+      this.workingMemory.setIntermediateResult('stepResultsJson', JSON.stringify(this.workingMemory.get('stepResults') || [], null, 2));
+    }
     
     while (!plan.isComplete() && !plan.hasFailed()) {
       const readySteps = plan.getReadySteps();
@@ -256,7 +263,13 @@ class Executor {
         const stepTrace = new ExecutionStep({
           type: step.type,
           description: step.description,
-          input: step.params || step
+          input: {
+            tool: step.tool || null,
+            params: step.params || {},
+            resultKey: step.resultKey || null,
+            prompt: step.prompt || null,
+            stepId: step.id,
+          }
         });
         
         const startTime = Date.now();
@@ -274,6 +287,7 @@ class Executor {
             }
             
             plan.markStepComplete(step.id, retryResult.result);
+            this.storeStepResult(step, retryResult.result);
             results.push({
               step: step.id,
               success: true,
@@ -461,9 +475,11 @@ class Executor {
     if (!this.llmClient) {
       throw new Error('LLM client not available for llm-call step');
     }
-    
-    // Construct prompt from step or use provided prompt
-    const prompt = step.prompt || step.params?.prompt || this.constructPrompt(step, task);
+
+    const resolvedParams = this.resolveTemplates(step.params || {}, task);
+    const prompt = step.prompt
+      ? this.resolveTemplateString(step.prompt, task)
+      : resolvedParams.prompt || this.constructPrompt(step, task, resolvedParams);
     
     const options = {
       temperature: step.temperature,
@@ -481,13 +497,13 @@ class Executor {
    * @param {Object} task - The task
    * @returns {string} Constructed prompt
    */
-  constructPrompt(step, task) {
+  constructPrompt(step, task, resolvedParams = null) {
     return runtimePromptRegistry.render('agent-sdk-executor-llm-step', {
       taskObjective: task.objective,
       stepDescription: step.description,
       stepType: step.type,
       taskInputBlock: task.input ? `Input:\n${JSON.stringify(task.input, null, 2)}` : '',
-      stepParamsBlock: step.params ? `Parameters:\n${JSON.stringify(step.params, null, 2)}` : '',
+      stepParamsBlock: (resolvedParams || step.params) ? `Parameters:\n${JSON.stringify(resolvedParams || step.params, null, 2)}` : '',
       skillContextBlock: this.skillContext ? `Relevant Skills:\n${this.skillContext}` : '',
     }).trim();
   }
@@ -500,19 +516,47 @@ class Executor {
    * @returns {Object} Resolved parameters
    */
   resolveParams(params, task) {
-    const resolved = {};
-    
-    for (const [key, value] of Object.entries(params)) {
-      if (typeof value === 'string' && value.startsWith('{{') && value.endsWith('}}')) {
-        // Resolve placeholder from task or working memory
-        const path = value.slice(2, -2).trim();
-        resolved[key] = this.resolveValue(path, task);
-      } else {
-        resolved[key] = value;
-      }
+    return this.resolveTemplates(params, task);
+  }
+
+  resolveTemplates(value, task) {
+    if (typeof value === 'string') {
+      return this.resolveTemplateString(value, task);
     }
-    
-    return resolved;
+
+    if (Array.isArray(value)) {
+      return value.map((entry) => this.resolveTemplates(entry, task));
+    }
+
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [key, this.resolveTemplates(entry, task)])
+      );
+    }
+
+    return value;
+  }
+
+  resolveTemplateString(template, task) {
+    if (typeof template !== 'string') {
+      return template;
+    }
+
+    const exactMatch = template.match(/^\{\{([^{}]+)\}\}$/);
+    if (exactMatch) {
+      return this.resolveValue(exactMatch[1].trim(), task);
+    }
+
+    return template.replace(/\{\{([^{}]+)\}\}/g, (_match, path) => {
+      const value = this.resolveValue(String(path || '').trim(), task);
+      if (value == null) {
+        return '';
+      }
+      if (typeof value === 'string') {
+        return value;
+      }
+      return JSON.stringify(value, null, 2);
+    });
   }
   
   /**
@@ -539,6 +583,44 @@ class Executor {
     }
     
     return value;
+  }
+
+  storeStepResult(step, result) {
+    if (!this.workingMemory) {
+      return;
+    }
+
+    const stepResults = this.workingMemory.get('stepResults') || [];
+    const results = this.workingMemory.get('results') || {};
+    const steps = this.workingMemory.get('steps') || {};
+    const normalizedOutput = result == null
+      ? null
+      : typeof result === 'string'
+        ? result
+        : result;
+
+    const stepRecord = {
+      id: step.id,
+      type: step.type,
+      tool: step.tool || null,
+      description: step.description,
+      resultKey: step.resultKey || null,
+      output: normalizedOutput,
+    };
+
+    stepResults.push(stepRecord);
+    steps[step.id] = stepRecord;
+
+    if (step.resultKey) {
+      results[step.resultKey] = normalizedOutput;
+    }
+
+    this.workingMemory.setIntermediateResult('lastStepOutput', normalizedOutput);
+    this.workingMemory.setIntermediateResult('stepResults', stepResults);
+    this.workingMemory.setIntermediateResult('steps', steps);
+    this.workingMemory.setIntermediateResult('results', results);
+    this.workingMemory.setIntermediateResult('stepResultsJson', JSON.stringify(stepResults, null, 2));
+    this.workingMemory.setIntermediateResult('resultsJson', JSON.stringify(results, null, 2));
   }
   
   /**

@@ -123,6 +123,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     transport: 'http',
                 },
                 enableAutomaticToolCalls: true,
+                useAgentExecutor: true,
             });
             const response = execution.response;
 

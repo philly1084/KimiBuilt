@@ -168,6 +168,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 transport: 'ws',
             },
             enableAutomaticToolCalls: true,
+            useAgentExecutor: true,
         });
         const response = execution.response;
 

@@ -9,6 +9,7 @@
         ? 'http://localhost:3000'
         : `${window.location.protocol}//${window.location.host}`;
     const V1_BASE = `${API_BASE}/v1`;
+    const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
 
     const state = {
         artifacts: [],
@@ -16,6 +17,14 @@
         outputFormat: '',
         lastDone: null,
     };
+
+    function isTerminalFinishReason(finishReason) {
+        if (!finishReason) {
+            return false;
+        }
+
+        return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
+    }
 
     function injectStyles() {
         const style = document.createElement('style');
@@ -625,7 +634,7 @@
                             if (content) {
                                 yield { type: 'delta', content };
                             }
-                            if (parsed.choices?.[0]?.finish_reason) {
+                            if (isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
                                 state.lastDone = { sessionId: this.currentSessionId, artifacts: parsed.artifacts || [] };
                                 yield { type: 'done', sessionId: this.currentSessionId, artifacts: parsed.artifacts || [] };
                             }
