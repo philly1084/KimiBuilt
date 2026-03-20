@@ -1,4 +1,5 @@
 const { __testUtils } = require('./openai-client');
+const settingsController = require('./routes/admin/settings.controller');
 
 function createToolManager() {
     const tools = new Map([
@@ -61,6 +62,19 @@ function createToolManager() {
                 },
             },
         }],
+        ['ssh-execute', {
+            id: 'ssh-execute',
+            name: 'SSH Command',
+            description: 'Execute commands on remote servers via SSH',
+            inputSchema: {
+                type: 'object',
+                required: ['command'],
+                properties: {
+                    command: { type: 'string' },
+                    host: { type: 'string' },
+                },
+            },
+        }],
     ]);
 
     const skills = new Map([
@@ -68,6 +82,7 @@ function createToolManager() {
         ['web-search', { enabled: true, triggerPatterns: ['search', 'look up'] }],
         ['web-scrape', { enabled: true, triggerPatterns: ['scrape', 'extract from'] }],
         ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'] }],
+        ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'] }],
     ]);
 
     return {
@@ -79,6 +94,10 @@ function createToolManager() {
 }
 
 describe('openai-client automatic tool orchestration helpers', () => {
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
     test('sanitizes union schema types into a single tool-compatible type', () => {
         expect(__testUtils.sanitizeToolSchema({
             type: 'object',
@@ -112,6 +131,57 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('security-scan');
+    });
+
+    test('does not auto-select ssh-execute for vague server wording', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        expect(__testUtils.shouldAutoUseTool('ssh-execute', 'Check the server health and summarize the issue.')).toBe(false);
+    });
+
+    test('does not expose ssh-execute when SSH defaults are not configured', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const selectedTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'SSH into the server and run kubectl get pods',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('ssh-execute');
+    });
+
+    test('exposes ssh-execute only for explicit SSH intent when defaults exist', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const selectedTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'SSH into the remote host and run kubectl get ingressroute traefik-dashboard -n kube-system -o yaml',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('ssh-execute');
     });
 
     test('truncates oversized tool payloads before returning them to the model loop', () => {

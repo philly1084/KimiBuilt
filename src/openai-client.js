@@ -458,10 +458,43 @@ function promptMentionsPattern(prompt, pattern) {
     return normalizedPrompt.includes(normalizedPattern);
 }
 
+function hasUsableSshDefaults() {
+    const sshConfig = settingsController.getEffectiveSshConfig();
+
+    return Boolean(
+        sshConfig.enabled
+        && sshConfig.host
+        && sshConfig.username
+        && (sshConfig.password || sshConfig.privateKeyPath)
+    );
+}
+
+function promptHasExplicitSshIntent(prompt = '') {
+    const normalizedPrompt = String(prompt || '').toLowerCase();
+
+    if (!normalizedPrompt) {
+        return false;
+    }
+
+    return /\bssh\b/i.test(normalizedPrompt)
+        || /\b(remote host|remote server|remote machine)\b/i.test(normalizedPrompt)
+        || /\b(login to|log into|ssh into|ssh to|connect to)\b/i.test(normalizedPrompt)
+        || (/\b(run|execute|deploy|inspect|troubleshoot|check)\b/i.test(normalizedPrompt)
+            && /\b(over ssh|via ssh)\b/i.test(normalizedPrompt));
+}
+
 function shouldAutoUseTool(toolId, prompt = '', skill = null) {
     const normalizedPrompt = String(prompt || '').toLowerCase();
     if (!normalizedPrompt) {
         return false;
+    }
+
+    if (toolId === 'ssh-execute') {
+        if (!hasUsableSshDefaults()) {
+            return false;
+        }
+
+        return promptHasExplicitSshIntent(prompt);
     }
 
     const hasUrl = /https?:\/\/\S+/i.test(prompt);
@@ -471,7 +504,6 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null) {
         'web-fetch': hasUrl && /\b(fetch|open|read|inspect|visit|download|load|check|look at)\b/i.test(prompt),
         'web-search': /\b(search|look up|find|latest|recent|news|current|research|what is|who is)\b/i.test(prompt),
         'web-scrape': hasUrl && /\b(scrape|extract|parse|crawl|collect|get data|pull data)\b/i.test(prompt),
-        'ssh-execute': /\b(ssh|server|remote host|remote server|remote machine|login to|log into|run on server|execute on server|deploy on server)\b/i.test(prompt),
         'docker-exec': /\b(docker|container|docker exec|run in container|inside container|inside docker)\b/i.test(prompt),
         'code-sandbox': /\b(sandbox|isolated|ephemeral|temp environment|run code|execute code|test this code|try this script)\b/i.test(prompt),
         'security-scan': mentionsCode && /\b(security|vulnerab|secret|audit|scan|xss|sql injection|path traversal)\b/i.test(prompt),
@@ -609,12 +641,8 @@ function buildAutomaticToolGuidance(automaticTools = []) {
     if (automaticTools.some((entry) => entry.id === 'ssh-execute')) {
         guidance.push('- Use `ssh-execute` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.');
         const sshConfig = settingsController.getEffectiveSshConfig();
-        const hasUsableSshDefaults = sshConfig.enabled
-            && sshConfig.host
-            && sshConfig.username
-            && (sshConfig.password || sshConfig.privateKeyPath);
 
-        if (hasUsableSshDefaults) {
+        if (hasUsableSshDefaults()) {
             guidance.push(`- SSH defaults are configured for \`${sshConfig.username}@${sshConfig.host}:${sshConfig.port || 22}\`. Use these defaults unless the user asks for a different target.`);
         }
     }
@@ -1066,6 +1094,8 @@ module.exports = {
         normalizeToolResultForModel,
         sanitizeToolSchema,
         shouldAutoUseTool,
+        promptHasExplicitSshIntent,
+        hasUsableSshDefaults,
         ToolOrchestrationError,
     },
 };
