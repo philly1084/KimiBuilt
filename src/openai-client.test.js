@@ -209,6 +209,44 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('file-mkdir');
     });
 
+    test('extracts explicit web research queries for deterministic preflight', () => {
+        expect(
+            __testUtils.extractExplicitWebResearchQuery('Still not working, can you web research tigers and cats differences.'),
+        ).toBe('tigers and cats differences');
+    });
+
+    test('extracts requested folder names for deterministic preflight', () => {
+        expect(
+            __testUtils.extractRequestedDirectoryPath('Can you make a folder put our designs in, called folder'),
+        ).toBe('folder');
+    });
+
+    test('builds deterministic preflight actions for mixed research and folder requests', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'web-search' },
+                { id: 'file-mkdir' },
+            ],
+            'Please web research tigers and cats differences. Then make a folder called folder.',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'web-search',
+                params: expect.objectContaining({
+                    query: 'tigers and cats differences',
+                }),
+            },
+            {
+                toolId: 'file-mkdir',
+                params: {
+                    path: 'folder',
+                    recursive: true,
+                },
+            },
+        ]);
+    });
+
     test('exposes ssh-execute unconditionally when defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,

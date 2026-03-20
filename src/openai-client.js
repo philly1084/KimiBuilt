@@ -495,6 +495,98 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null) {
     return true;
 }
 
+function extractExplicitWebResearchQuery(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    const patterns = [
+        /\bweb research\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bresearch\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\blook up\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bsearch for\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bsearch the web for\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match?.[1]) {
+            return match[1].trim();
+        }
+    }
+
+    return null;
+}
+
+function extractRequestedDirectoryPath(prompt = '') {
+    const text = String(prompt || '');
+    if (!text.trim()) {
+        return null;
+    }
+
+    const creationIntent = /\b(create|make|mkdir)\b[\s\S]{0,80}\b(folder|directory)\b/i.test(text)
+        || /\b(folder|directory)\b[\s\S]{0,40}\b(called|named|name it)\b/i.test(text);
+
+    if (!creationIntent) {
+        return null;
+    }
+
+    const quotedMatch = text.match(/\b(?:folder|directory)\b[\s\S]{0,40}["'`]+([^"'`\r\n]+)["'`]+/i);
+    if (quotedMatch?.[1]) {
+        return quotedMatch[1].trim();
+    }
+
+    const namedMatch = text.match(/\b(?:called|named|name it)\s+([a-zA-Z0-9._/-]+)/i);
+    if (namedMatch?.[1]) {
+        return namedMatch[1].trim();
+    }
+
+    const directMatch = text.match(/\b(?:create|make|mkdir)\s+(?:a\s+)?(?:folder|directory)\s+(?:called\s+|named\s+)?([a-zA-Z0-9._/-]+)/i);
+    if (directMatch?.[1]) {
+        return directMatch[1].trim();
+    }
+
+    return null;
+}
+
+function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
+    const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
+    const actions = [];
+    const webQuery = availableToolIds.has('web-search')
+        ? extractExplicitWebResearchQuery(prompt)
+        : null;
+    const directoryPath = availableToolIds.has('file-mkdir')
+        ? extractRequestedDirectoryPath(prompt)
+        : null;
+
+    if (webQuery) {
+        actions.push({
+            toolId: 'web-search',
+            params: {
+                query: webQuery,
+                limit: 5,
+                region: 'us-en',
+                timeRange: 'all',
+                includeSnippets: true,
+                includeUrls: true,
+            },
+        });
+    }
+
+    if (directoryPath) {
+        actions.push({
+            toolId: 'file-mkdir',
+            params: {
+                path: directoryPath,
+                recursive: true,
+            },
+        });
+    }
+
+    return actions;
+}
+
 function sanitizeToolSchema(schema) {
     if (!schema || typeof schema !== 'object') {
         return { type: 'object', properties: {} };
@@ -791,6 +883,51 @@ async function executeAutomaticToolCall(toolManager, toolCall, context = {}) {
     }
 }
 
+async function runDeterministicToolPreflight({
+    toolManager,
+    automaticTools,
+    prompt,
+    toolContext = {},
+}) {
+    const actions = buildDeterministicPreflightActions(automaticTools, prompt);
+
+    if (!actions.length) {
+        return {
+            toolEvents: [],
+            summaryMessage: null,
+        };
+    }
+
+    const toolEvents = [];
+    console.log(`[OpenAI] Deterministic tool preflight: ${actions.map((action) => action.toolId).join(', ')}`);
+
+    for (let index = 0; index < actions.length; index += 1) {
+        const action = actions[index];
+        const toolCall = {
+            id: `preflight_${index + 1}`,
+            type: 'function',
+            function: {
+                name: action.toolId,
+                arguments: JSON.stringify(action.params),
+            },
+        };
+
+        const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
+        toolEvents.push({
+            toolCall: normalizeToolCall(toolCall),
+            result,
+        });
+    }
+
+    return {
+        toolEvents,
+        summaryMessage: {
+            role: 'system',
+            content: `[Automatic tool results]\nUse these verified tool results when answering.\n${JSON.stringify(toolEvents, null, 2)}`,
+        },
+    };
+}
+
 async function runAutomaticToolLoop(openai, {
     model,
     messages,
@@ -815,6 +952,19 @@ async function runAutomaticToolLoop(openai, {
             role: 'system',
             content: toolGuidance,
         });
+    }
+
+    const preflight = await runDeterministicToolPreflight({
+        toolManager,
+        automaticTools,
+        prompt,
+        toolContext,
+    });
+    if (preflight.summaryMessage) {
+        workingMessages.push(preflight.summaryMessage);
+    }
+    if (preflight.toolEvents.length > 0) {
+        toolEvents.push(...preflight.toolEvents);
     }
 
     const seenToolCalls = new Set();
@@ -1105,6 +1255,9 @@ module.exports = {
         buildMessages,
         buildAutomaticToolDefinitions,
         buildAutomaticToolGuidance,
+        buildDeterministicPreflightActions,
+        extractExplicitWebResearchQuery,
+        extractRequestedDirectoryPath,
         normalizeToolResultForModel,
         sanitizeToolSchema,
         shouldAutoUseTool,
