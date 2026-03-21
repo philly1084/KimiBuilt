@@ -10,6 +10,7 @@ const { getToolManager } = require('../agent-sdk/tools');
 const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
+const { sessionStore } = require('../session-store');
 
 const registry = getUnifiedRegistry();
 
@@ -98,6 +99,18 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
       get: (toolId) => toolManager.getTool(toolId),
     },
   };
+}
+
+async function resolveToolSessionId(requestedSessionId = null) {
+  const normalized = typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '';
+
+  if (normalized && !normalized.startsWith('local_')) {
+    const session = await sessionStore.getOrCreate(normalized, { mode: 'chat' });
+    return session?.id || normalized;
+  }
+
+  const session = await sessionStore.create({ mode: 'chat' });
+  return session.id;
 }
 
 /**
@@ -273,14 +286,15 @@ router.post('/invoke', async (req, res) => {
     }
     
     const toolManager = await ensureToolManagerInitialized();
+    const resolvedSessionId = await resolveToolSessionId(sessionId);
     
     const result = await toolManager.executeTool(
       toolId,
       params,
-      buildToolExecutionContext(toolManager, req, sessionId),
+      buildToolExecutionContext(toolManager, req, resolvedSessionId),
     );
     
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
     console.error('Error invoking tool:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -297,14 +311,15 @@ router.post('/invoke/:id', async (req, res) => {
     const params = req.body;
     
     const toolManager = await ensureToolManagerInitialized();
+    const resolvedSessionId = await resolveToolSessionId(req.body.sessionId);
     
     const result = await toolManager.executeTool(
       id,
       params,
-      buildToolExecutionContext(toolManager, req, req.body.sessionId),
+      buildToolExecutionContext(toolManager, req, resolvedSessionId),
     );
     
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
     console.error('Error invoking tool:', error);
     res.status(500).json({ success: false, error: error.message });

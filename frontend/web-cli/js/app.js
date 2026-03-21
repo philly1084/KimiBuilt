@@ -661,8 +661,8 @@ Type any message to chat with the AI.
 
         this.setStatus('thinking');
         try {
-            const result = await api.invokeTool(toolId, params);
-            const serialized = JSON.stringify(result, null, 2);
+            const invocation = await api.invokeTool(toolId, params);
+            const serialized = JSON.stringify(invocation?.result, null, 2);
             this.printAI(`## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${serialized}\n\`\`\``);
         } catch (error) {
             this.printError(`Tool failed: ${error.message}`);

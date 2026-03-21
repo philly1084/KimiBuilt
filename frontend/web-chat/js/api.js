@@ -34,9 +34,62 @@ class OpenAIAPIClient extends EventTarget {
         this.modelsCacheDuration = 5 * 60 * 1000; // 5 minutes
         this.retryCount = 0;
         this.abortControllers = new Map(); // Track abort controllers for cancellation
+        this.storageAvailable = this.checkStorageAvailability();
         
         // Initialize OpenAI client
         this.initClient();
+    }
+
+    checkStorageAvailability() {
+        try {
+            const key = '__webchat_api_storage_test__';
+            localStorage.setItem(key, '1');
+            localStorage.removeItem(key);
+            return true;
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    safeStorageGet(key) {
+        if (!this.storageAvailable) {
+            return null;
+        }
+
+        try {
+            return localStorage.getItem(key);
+        } catch (_error) {
+            this.storageAvailable = false;
+            return null;
+        }
+    }
+
+    safeStorageSet(key, value) {
+        if (!this.storageAvailable) {
+            return false;
+        }
+
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (_error) {
+            this.storageAvailable = false;
+            return false;
+        }
+    }
+
+    safeStorageRemove(key) {
+        if (!this.storageAvailable) {
+            return false;
+        }
+
+        try {
+            localStorage.removeItem(key);
+            return true;
+        } catch (_error) {
+            this.storageAvailable = false;
+            return false;
+        }
     }
 
     async parseErrorPayload(response) {
@@ -500,15 +553,8 @@ class OpenAIAPIClient extends EventTarget {
 
         // Check localStorage cache (wrapped for Tracking Prevention compatibility)
         if (!forceRefresh) {
-            let cached, cachedExpiry;
-            try {
-                cached = localStorage.getItem('kimibuilt_models_cache');
-                cachedExpiry = localStorage.getItem('kimibuilt_models_cache_expiry');
-            } catch (e) {
-                // localStorage blocked by Tracking Prevention
-                cached = null;
-                cachedExpiry = null;
-            }
+            const cached = this.safeStorageGet('kimibuilt_models_cache');
+            const cachedExpiry = this.safeStorageGet('kimibuilt_models_cache_expiry');
             if (cached && cachedExpiry && parseInt(cachedExpiry) > Date.now()) {
                 try {
                     this.modelsCache = JSON.parse(cached);
@@ -549,13 +595,8 @@ class OpenAIAPIClient extends EventTarget {
             this.modelsCache = data;
             this.modelsCacheExpiry = Date.now() + this.modelsCacheDuration;
             
-            // Save to localStorage (wrapped for Tracking Prevention compatibility)
-            try {
-                localStorage.setItem('kimibuilt_models_cache', JSON.stringify(data));
-                localStorage.setItem('kimibuilt_models_cache_expiry', String(this.modelsCacheExpiry));
-            } catch (e) {
-                // localStorage blocked by Tracking Prevention - continue without caching
-            }
+            this.safeStorageSet('kimibuilt_models_cache', JSON.stringify(data));
+            this.safeStorageSet('kimibuilt_models_cache_expiry', String(this.modelsCacheExpiry));
             
             return data;
         } catch (error) {
@@ -835,7 +876,13 @@ class OpenAIAPIClient extends EventTarget {
         }
 
         const data = await response.json();
-        return data.data;
+        if (data.sessionId) {
+            this.currentSessionId = data.sessionId;
+        }
+        return {
+            result: data.data,
+            sessionId: data.sessionId || this.currentSessionId || null,
+        };
     }
 
     // ============================================
@@ -868,12 +915,8 @@ class OpenAIAPIClient extends EventTarget {
     clearModelsCache() {
         this.modelsCache = null;
         this.modelsCacheExpiry = null;
-        try {
-            localStorage.removeItem('kimibuilt_models_cache');
-            localStorage.removeItem('kimibuilt_models_cache_expiry');
-        } catch (e) {
-            // localStorage blocked - nothing to clear
-        }
+        this.safeStorageRemove('kimibuilt_models_cache');
+        this.safeStorageRemove('kimibuilt_models_cache_expiry');
     }
 
     setSessionId(sessionId) {

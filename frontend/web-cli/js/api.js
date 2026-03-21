@@ -546,7 +546,13 @@ class WebCLIAPI {
         }
 
         const data = await response.json();
-        return data.data;
+        if (data.sessionId) {
+            this.sessionId = data.sessionId;
+        }
+        return {
+            result: data.data,
+            sessionId: data.sessionId || this.sessionId || null,
+        };
     }
 
     setModel(model) {

@@ -689,7 +689,13 @@ class NotesAPIClient {
         }
 
         const data = await response.json();
-        return data.data;
+        if (data.sessionId) {
+            this.currentSessionId = data.sessionId;
+        }
+        return {
+            result: data.data,
+            sessionId: data.sessionId || this.currentSessionId || null,
+        };
     }
 }
 

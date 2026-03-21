@@ -611,8 +611,11 @@ class ChatApp {
                     params = JSON.parse(rawParams);
                 }
 
-                const result = await apiClient.invokeTool(toolId, params);
-                assistantContent = `## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+                const invocation = await apiClient.invokeTool(toolId, params);
+                if (invocation?.sessionId) {
+                    this.syncBackendSession(invocation.sessionId);
+                }
+                assistantContent = `## Tool Result: \`${toolId}\`\n\n\`\`\`json\n${JSON.stringify(invocation?.result, null, 2)}\n\`\`\``;
             }
 
             const assistantMessage = {
