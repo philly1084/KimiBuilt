@@ -13,6 +13,23 @@ const { VALID_TASK_TYPES } = require('./core/TaskSchema');
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const settingsController = require('../routes/admin/settings.controller');
 
+const DEFAULT_EXECUTION_PROFILE = 'default';
+const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
+const REMOTE_BUILD_TOOL_ALLOWLIST = new Set([
+  'ssh-execute',
+  'remote-command',
+  'docker-exec',
+  'web-search',
+  'web-fetch',
+  'web-scrape',
+  'file-read',
+  'file-write',
+  'file-search',
+  'file-mkdir',
+  'code-sandbox',
+  'tool-doc-read',
+]);
+
 function createNoopVectorStore() {
   return {
     async upsert() {
@@ -360,6 +377,7 @@ class AgentOrchestrator {
     taskType = 'chat',
     metadata = {},
     useAgentExecutor = false,
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
   } = {}) {
     const workingMemory = this.getWorkingMemory(sessionId);
     const objective = this.getConversationObjective(input);
@@ -385,6 +403,7 @@ class AgentOrchestrator {
         metadata: {
           ...metadata,
           model,
+          executionProfile,
         },
       },
       completionCriteria: {
@@ -429,6 +448,7 @@ class AgentOrchestrator {
             taskType,
             metadata,
             workingMemory,
+            executionProfile,
           });
         } catch (agentError) {
           console.warn('[AgentOrchestrator] Agent executor failed, falling back to conversation runtime:', agentError.message);
@@ -446,6 +466,7 @@ class AgentOrchestrator {
         toolManager,
         toolContext: {
           sessionId,
+          executionProfile,
           ...toolContext,
         },
         enableAutomaticToolCalls,
@@ -546,6 +567,7 @@ class AgentOrchestrator {
     taskType,
     metadata = {},
     workingMemory,
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
   }) {
     const skillContext = this.config.enableSkills
       ? this.skillRetriever.formatForPrompt(
@@ -553,13 +575,16 @@ class AgentOrchestrator {
         )
       : '';
 
-    task.tools = this.getConversationToolIds(task.objective, instructions);
+    task.tools = this.getConversationToolIds(task.objective, instructions, {
+      executionProfile,
+    });
     task.context = {
       ...(task.context || {}),
       metadata: {
         ...(task.context?.metadata || {}),
         ...metadata,
         model,
+        executionProfile,
         instructions: instructions || '',
         contextMessages,
         recentMessages,
@@ -676,7 +701,24 @@ class AgentOrchestrator {
     };
   }
 
-  getConversationToolIds(objective = '', instructions = '') {
+  normalizeExecutionProfile(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+
+    if ([
+      'remote-build',
+      'remote_builder',
+      'remote-builder',
+      'server-build',
+      'server-builder',
+      'software-builder',
+    ].includes(normalized)) {
+      return REMOTE_BUILD_EXECUTION_PROFILE;
+    }
+
+    return DEFAULT_EXECUTION_PROFILE;
+  }
+
+  getConversationToolIds(objective = '', instructions = '', options = {}) {
     const allTools = this.toolRegistry.list().map((tool) => tool.id);
     const sshConfig = settingsController.getEffectiveSshConfig();
     const hasUsableSshDefaults = Boolean(
@@ -686,13 +728,23 @@ class AgentOrchestrator {
       && (sshConfig.password || sshConfig.privateKeyPath)
     );
     const combinedPrompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
+    const executionProfile = this.normalizeExecutionProfile(options.executionProfile);
+    const remoteBuildProfile = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE;
     const hasExplicitSshIntent = /\bssh\b/.test(combinedPrompt)
       || /\b(remote host|remote server|remote machine)\b/.test(combinedPrompt)
       || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(combinedPrompt);
+    const hasRemoteOpsIntent = remoteBuildProfile
+      || hasExplicitSshIntent
+      || /\b(kubectl|kubernetes|k8s|docker compose|docker-compose|systemctl|journalctl|nginx|pm2)\b/.test(combinedPrompt)
+      || /\b(deploy|release|rollout|restart)\b[\s\S]{0,40}\b(server|host|container|cluster|pod|deployment)\b/.test(combinedPrompt);
 
     return allTools.filter((toolId) => {
-      if (toolId === 'ssh-execute') {
-        return hasUsableSshDefaults || hasExplicitSshIntent;
+      if (remoteBuildProfile && !REMOTE_BUILD_TOOL_ALLOWLIST.has(toolId)) {
+        return false;
+      }
+
+      if (toolId === 'ssh-execute' || toolId === 'remote-command') {
+        return hasRemoteOpsIntent && hasUsableSshDefaults;
       }
 
       return true;

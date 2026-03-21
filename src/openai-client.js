@@ -483,6 +483,23 @@ function hasUsableSshDefaults() {
     );
 }
 
+function normalizeExecutionProfile(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+
+    if ([
+        'remote-build',
+        'remote_builder',
+        'remote-builder',
+        'server-build',
+        'server-builder',
+        'software-builder',
+    ].includes(normalized)) {
+        return 'remote-build';
+    }
+
+    return 'default';
+}
+
 function promptHasExplicitSshIntent(prompt = '') {
     const normalizedPrompt = String(prompt || '').toLowerCase();
 
@@ -550,9 +567,15 @@ function extractRequestedSshCommand(prompt = '') {
     return null;
 }
 
-function shouldAutoUseTool(toolId, prompt = '', skill = null) {
-    if (toolId === 'ssh-execute') {
-        return hasUsableSshDefaults() || promptHasExplicitSshIntent(prompt);
+function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
+    const executionProfile = normalizeExecutionProfile(
+        options?.executionProfile
+        || options?.toolContext?.executionProfile,
+    );
+
+    if (toolId === 'ssh-execute' || toolId === 'remote-command') {
+        return promptHasExplicitSshIntent(prompt)
+            || (executionProfile === 'remote-build' && hasUsableSshDefaults());
     }
     return true;
 }
@@ -732,7 +755,7 @@ function sanitizeToolSchema(schema) {
     return sanitized;
 }
 
-function buildAutomaticToolDefinitions(toolManager, prompt = '') {
+function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
     if (!toolManager?.registry) {
         return [];
     }
@@ -743,7 +766,7 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '') {
             const skill = toolManager.registry.getSkill(toolId);
             const available = tool && (!skill || skill.enabled !== false);
 
-            if (!available || !shouldAutoUseTool(toolId, prompt, skill)) {
+            if (!available || !shouldAutoUseTool(toolId, prompt, skill, options)) {
                 return null;
             }
 
@@ -1596,7 +1619,7 @@ async function runAutomaticToolLoop(openai, {
     toolContext = {},
 }) {
     const prompt = getLastUserText(messages);
-    const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);
+    const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolContext);
     const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
 
     if (selectedTools.length === 0) {
@@ -1775,6 +1798,7 @@ async function createResponse({
     toolManager = null,
     toolContext = {},
     enableAutomaticToolCalls = false,
+    executionProfile = 'default',
 }) {
     const openai = getClient();
     const messages = buildMessages({
@@ -1808,7 +1832,12 @@ async function createResponse({
 
         if (enableAutomaticToolCalls && toolManager) {
             try {
-                const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);
+                const toolExecutionContext = {
+                    executionProfile,
+                    previousResponseId,
+                    ...toolContext,
+                };
+                const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolExecutionContext);
                 const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
                 const requiredToolId = inferRequiredAutomaticToolId(prompt);
 
@@ -1823,10 +1852,7 @@ async function createResponse({
                     requiredToolId,
                     selectedTools,
                     prompt,
-                    toolContext: {
-                        previousResponseId,
-                        ...toolContext,
-                    },
+                    toolContext: toolExecutionContext,
                     model: params.model,
                 });
 
@@ -1839,10 +1865,7 @@ async function createResponse({
                     model: params.model,
                     messages,
                     toolManager,
-                    toolContext: {
-                        previousResponseId,
-                        ...toolContext,
-                    },
+                    toolContext: toolExecutionContext,
                 });
 
                 if (toolResponse) {

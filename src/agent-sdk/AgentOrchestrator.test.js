@@ -261,6 +261,71 @@ describe('AgentOrchestrator', () => {
         expect(toolIds).not.toContain('ssh-execute'); // SSH requires valid config
     });
 
+    test('remote build profile narrows the available tool set and enables ssh only with usable config', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            complete: jest.fn(),
+        };
+        const embedder = {
+            embed: jest.fn(),
+        };
+
+        const orchestrator = new AgentOrchestrator({
+            llmClient,
+            embedder,
+        });
+
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'web-search',
+            name: 'Web Search',
+            description: 'Search the web',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'code-sandbox',
+            name: 'Code Sandbox',
+            description: 'Run code in a sandbox',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'docker-exec',
+            name: 'Docker Exec',
+            description: 'Run commands in a container',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'ssh-execute',
+            name: 'SSH Execute',
+            description: 'Run commands over SSH',
+            handler: async () => ({}),
+        }));
+        orchestrator.registerTool(new ToolDefinition({
+            id: 'architecture-design',
+            name: 'Architecture Design',
+            description: 'Generate design docs',
+            handler: async () => ({}),
+        }));
+
+        const toolIds = orchestrator.getConversationToolIds(
+            'Deploy the latest build to the remote host.',
+            'Use the current server setup.',
+            { executionProfile: 'remote-build' },
+        );
+
+        expect(toolIds).toContain('ssh-execute');
+        expect(toolIds).toContain('docker-exec');
+        expect(toolIds).toContain('web-search');
+        expect(toolIds).not.toContain('architecture-design');
+    });
+
     test('persists transcript and tool results through orchestrator-owned services', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue({

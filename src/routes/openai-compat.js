@@ -208,6 +208,7 @@ router.post('/chat/completions', async (req, res, next) => {
             stream = false,
             artifact_ids = [],
             output_format = null,
+            executionProfile = null,
         } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
@@ -434,6 +435,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     route: '/v1/chat/completions',
                     transport: 'http',
                 },
+                executionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType: 'chat',
@@ -584,6 +586,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 route: '/v1/chat/completions',
                 transport: 'http',
             },
+            executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType: 'chat',
@@ -666,6 +669,7 @@ router.post('/responses', async (req, res, next) => {
             stream = false,
             artifact_ids = [],
             output_format = null,
+            executionProfile = null,
         } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
@@ -881,6 +885,7 @@ router.post('/responses', async (req, res, next) => {
                     route: '/v1/responses',
                     transport: 'http',
                 },
+                executionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType: 'chat',
@@ -1002,6 +1007,7 @@ router.post('/responses', async (req, res, next) => {
                 route: '/v1/responses',
                 transport: 'http',
             },
+            executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType: 'chat',

@@ -18,6 +18,7 @@ const canvasSchema = {
     outputFormat: { required: false, type: 'string' },
     enableConversationExecutor: { required: false, type: 'boolean' },
     useAgentExecutor: { required: false, type: 'boolean' },
+    executionProfile: { required: false, type: 'string' },
 };
 
 router.post('/', validate(canvasSchema), async (req, res, next) => {
@@ -31,6 +32,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             model = null,
             artifactIds = [],
             outputFormat = null,
+            executionProfile = null,
         } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
@@ -72,6 +74,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
         });

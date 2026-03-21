@@ -108,7 +108,7 @@ function setupWebSocket(wss, app = null) {
 async function handleChat(ws, session, payload = {}, toolManager = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
-    const { message, model = null, artifactIds = [], outputFormat = null } = payload;
+    const { message, model = null, artifactIds = [], outputFormat = null, executionProfile = null } = payload;
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -236,6 +236,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 route: '/ws',
                 transport: 'ws',
             },
+            executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType: 'chat',
@@ -309,6 +310,7 @@ async function handleCanvas(ws, session, payload = {}) {
         model = null,
         artifactIds = [],
         outputFormat = null,
+        executionProfile = null,
     } = payload;
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
 
@@ -340,6 +342,7 @@ async function handleCanvas(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
         });
@@ -409,6 +412,7 @@ async function handleNotation(ws, session, payload = {}) {
         model = null,
         artifactIds = [],
         outputFormat = null,
+        executionProfile = null,
     } = payload;
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
 
@@ -440,6 +444,7 @@ async function handleNotation(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
         });

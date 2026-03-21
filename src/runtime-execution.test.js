@@ -17,7 +17,11 @@ jest.mock('./openai-client', () => ({
 const { sessionStore } = require('./session-store');
 const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
-const { executeConversationRuntime, resolveConversationExecutorFlag } = require('./runtime-execution');
+const {
+    executeConversationRuntime,
+    resolveConversationExecutorFlag,
+    inferExecutionProfile,
+} = require('./runtime-execution');
 
 describe('runtime-execution', () => {
     beforeEach(() => {
@@ -91,6 +95,33 @@ describe('runtime-execution', () => {
         expect(result.runtimeMode).toBe('executor');
     });
 
+    test('routes remote build requests to the executor even without the explicit flag', async () => {
+        const executeConversation = jest.fn().mockResolvedValue({
+            success: true,
+            response: { id: 'resp_executor_remote' },
+        });
+
+        const result = await executeConversationRuntime({
+            locals: {
+                agentOrchestrator: {
+                    executeConversation,
+                },
+            },
+        }, {
+            sessionId: 'session-remote-1',
+            input: 'SSH into the remote server and deploy the latest build.',
+            taskType: 'chat',
+        });
+
+        expect(executeConversation).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-remote-1',
+            executionProfile: 'remote-build',
+            useAgentExecutor: true,
+        }));
+        expect(createResponse).not.toHaveBeenCalled();
+        expect(result.runtimeMode).toBe('executor');
+    });
+
     test('falls back to direct runtime if the executor is requested but unavailable', async () => {
         const result = await executeConversationRuntime({
             locals: {},
@@ -111,5 +142,11 @@ describe('runtime-execution', () => {
         expect(resolveConversationExecutorFlag({ use_agent_executor: true })).toBe(true);
         expect(resolveConversationExecutorFlag({ enable_conversation_executor: true })).toBe(true);
         expect(resolveConversationExecutorFlag({})).toBe(false);
+    });
+
+    test('infers the remote build execution profile from explicit routing or remote-ops prompts', () => {
+        expect(inferExecutionProfile({ executionProfile: 'remote-builder' })).toBe('remote-build');
+        expect(inferExecutionProfile({ input: 'Use kubectl to inspect the cluster and restart the deployment.' })).toBe('remote-build');
+        expect(inferExecutionProfile({ input: 'Answer directly.' })).toBe('default');
     });
 });
