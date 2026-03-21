@@ -49,6 +49,42 @@ function createToolManager() {
                 },
             },
         }],
+        ['image-generate', {
+            id: 'image-generate',
+            name: 'Image Generator',
+            description: 'Generate images from a prompt',
+            inputSchema: {
+                type: 'object',
+                required: ['prompt'],
+                properties: {
+                    prompt: { type: 'string' },
+                },
+            },
+        }],
+        ['image-search-unsplash', {
+            id: 'image-search-unsplash',
+            name: 'Unsplash Image Search',
+            description: 'Search Unsplash for images',
+            inputSchema: {
+                type: 'object',
+                required: ['query'],
+                properties: {
+                    query: { type: 'string' },
+                },
+            },
+        }],
+        ['image-from-url', {
+            id: 'image-from-url',
+            name: 'Image URL Reference',
+            description: 'Normalize a direct image URL',
+            inputSchema: {
+                type: 'object',
+                required: ['url'],
+                properties: {
+                    url: { type: 'string' },
+                },
+            },
+        }],
         ['file-read', {
             id: 'file-read',
             name: 'File Reader',
@@ -130,6 +166,9 @@ function createToolManager() {
         ['web-fetch', { enabled: true, triggerPatterns: ['fetch', 'load page'] }],
         ['web-search', { enabled: true, triggerPatterns: ['search', 'look up'] }],
         ['web-scrape', { enabled: true, triggerPatterns: ['scrape', 'extract from'] }],
+        ['image-generate', { enabled: true, triggerPatterns: ['generate image', 'create image'] }],
+        ['image-search-unsplash', { enabled: true, triggerPatterns: ['unsplash', 'image search'] }],
+        ['image-from-url', { enabled: true, triggerPatterns: ['image url', 'embed image'] }],
         ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'] }],
         ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'] }],
         ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'] }],
@@ -224,7 +263,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
 
         expect(guidance).toContain('source of truth for tool availability');
-        expect(guidance).toContain('AVAILABLE_TOOLS_JSON');
+        expect(guidance).toContain('tool definitions are attached');
         expect(guidance).toContain('file-mkdir');
     });
 
@@ -299,6 +338,24 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toEqual(['web-search', 'file-mkdir']);
+    });
+
+    test('selects image tools for generation, unsplash, and direct URL prompts', () => {
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Use an Unsplash image for the hero and embed this image URL https://example.com/photo.png.',
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Use an Unsplash image for the hero and embed this image URL https://example.com/photo.png.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(expect.arrayContaining([
+            'image-search-unsplash',
+            'image-from-url',
+        ]));
     });
 
     test('forces a specific tool when only one relevant tool remains', () => {

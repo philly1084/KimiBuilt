@@ -19,6 +19,9 @@ const PROFILE_TOOL_ALLOWLISTS = {
         'web-search',
         'web-fetch',
         'web-scrape',
+        'image-generate',
+        'image-search-unsplash',
+        'image-from-url',
         'file-read',
         'file-write',
         'file-search',
@@ -32,6 +35,9 @@ const PROFILE_TOOL_ALLOWLISTS = {
         'web-search',
         'web-fetch',
         'web-scrape',
+        'image-generate',
+        'image-search-unsplash',
+        'image-from-url',
         'file-read',
         'file-write',
         'file-search',
@@ -460,6 +466,10 @@ class ConversationOrchestrator extends EventEmitter {
         const hasUrl = /https?:\/\//i.test(prompt);
         const hasExplicitWebResearchIntent = /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(prompt);
         const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/.test(prompt);
+        const hasImageIntent = /\b(image|images|visual|visuals|illustration|illustrations|photo|photos|hero image|background image|cover image)\b/.test(prompt);
+        const hasUnsplashIntent = /\bunsplash\b/.test(prompt);
+        const hasImageUrlIntent = hasImageIntent && /\b(url|link)\b/.test(prompt);
+        const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(prompt);
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
 
@@ -480,6 +490,15 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (allowedToolIds.includes('code-sandbox')) {
                 candidates.add('code-sandbox');
+            }
+            if (hasImageIntent && allowedToolIds.includes('image-generate')) {
+                candidates.add('image-generate');
+            }
+            if (hasUnsplashIntent && allowedToolIds.includes('image-search-unsplash')) {
+                candidates.add('image-search-unsplash');
+            }
+            if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
+                candidates.add('image-from-url');
             }
             if (allowedToolIds.includes('file-write') && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
                 candidates.add('file-write');
@@ -506,6 +525,15 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add(hasExplicitScrapeIntent && allowedToolIds.includes('web-scrape')
                     ? 'web-scrape'
                     : 'web-fetch');
+            }
+            if (hasImageIntent && /\b(generate|create|make|design)\b/.test(prompt) && allowedToolIds.includes('image-generate')) {
+                candidates.add('image-generate');
+            }
+            if ((hasUnsplashIntent || (hasImageIntent && /\b(search|find|browse|reference|stock)\b/.test(prompt))) && allowedToolIds.includes('image-search-unsplash')) {
+                candidates.add('image-search-unsplash');
+            }
+            if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
+                candidates.add('image-from-url');
             }
             if (/\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/.test(prompt) && allowedToolIds.includes('file-read')) {
                 candidates.add('file-read');
@@ -758,6 +786,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (toolEvents.length > 0) {
             parts.push('Use the verified tool results as the source of truth over guesses.');
+            parts.push('When a verified tool result includes image URLs or markdown image snippets, you may embed them with standard markdown image syntax.');
         }
 
         return parts.filter(Boolean).join('\n\n');

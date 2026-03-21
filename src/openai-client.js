@@ -54,6 +54,9 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'web-fetch',
     'web-search',
     'web-scrape',
+    'image-generate',
+    'image-search-unsplash',
+    'image-from-url',
     'file-read',
     'file-write',
     'file-search',
@@ -816,6 +819,9 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         extractExplicitWebResearchQuery(prompt)
         || /\b(latest|current|today|news|web research|research|look up|search for|search the web|browse)\b/i.test(normalizedPrompt)
     );
+    const hasImageIntent = /\b(image|images|visual|visuals|illustration|illustrations|photo|photos|hero image|background image|cover image)\b/i.test(normalizedPrompt);
+    const hasUnsplashIntent = /\bunsplash\b/i.test(normalizedPrompt);
+    const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(normalizedPrompt);
 
     if (hasWebResearchIntent) {
         selectedIds.add('web-search');
@@ -832,6 +838,18 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         } else {
             selectedIds.add('web-fetch');
         }
+    }
+
+    if (hasImageIntent && /\b(generate|create|make|design)\b/i.test(normalizedPrompt)) {
+        selectedIds.add('image-generate');
+    }
+
+    if (hasUnsplashIntent || (hasImageIntent && /\b(search|find|browse|reference|stock)\b/i.test(normalizedPrompt))) {
+        selectedIds.add('image-search-unsplash');
+    }
+
+    if ((hasImageIntent && /\b(url|link|embed|use this)\b/i.test(normalizedPrompt)) || hasDirectImageUrl) {
+        selectedIds.add('image-from-url');
     }
 
     if (extractRequestedDirectoryPath(prompt)) {
@@ -942,6 +960,18 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
         guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'image-generate')) {
+        guidance.push('- Use `image-generate` to create visual assets and return hosted image URLs the user can reuse.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'image-search-unsplash')) {
+        guidance.push('- Use `image-search-unsplash` to find reference or stock images with attribution when the user asks for visuals, photography, or inspiration.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'image-from-url')) {
+        guidance.push('- Use `image-from-url` when the user provides or requests a direct image URL to embed in the answer.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-read')) {

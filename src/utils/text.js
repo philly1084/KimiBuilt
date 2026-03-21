@@ -125,6 +125,19 @@ function createFriendlyFilenameBase(value = 'artifact', fallback = 'artifact') {
     return RESERVED_FILENAME_BASES.has(candidate) ? generatePleasantFilenamePair() : candidate;
 }
 
+function createShortUniqueSuffix(length = 6) {
+    const random = Math.random().toString(36).slice(2);
+    return (random || Date.now().toString(36)).slice(0, Math.max(4, length));
+}
+
+function createUniqueFilename(value = 'artifact', extension = '', fallback = 'artifact') {
+    const safeExtension = extension
+        ? `.${String(extension).replace(/^\./, '').toLowerCase()}`
+        : '';
+    const base = createFriendlyFilenameBase(value, fallback);
+    return `${base}-${createShortUniqueSuffix()}${safeExtension}`;
+}
+
 function chunkText(text = '', maxLength = 1200) {
     const normalized = normalizeWhitespace(text);
     if (!normalized) return [];
@@ -185,6 +198,8 @@ function chunkText(text = '', maxLength = 1200) {
 
 module.exports = {
     createFriendlyFilenameBase,
+    createShortUniqueSuffix,
+    createUniqueFilename,
     chunkText,
     decodeXmlEntities,
     escapeHtml,

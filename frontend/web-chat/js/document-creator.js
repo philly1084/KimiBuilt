@@ -519,7 +519,9 @@ class DocumentCreator {
       // Get filename from header
       const contentDisposition = response.headers.get('Content-Disposition');
       const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
-      const filename = filenameMatch ? filenameMatch[1] : `document.${format}`;
+      const filename = filenameMatch
+        ? filenameMatch[1]
+        : (window.uiHelpers?.createUniqueFilename?.(this.currentTemplate?.name || 'document', format, 'document') || `document.${format}`);
       
       // Download the file
       const blob = await response.blob();
@@ -683,7 +685,8 @@ class DocumentCreator {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `conversation-${new Date().toISOString().split('T')[0]}.${format}`;
+      a.download = window.uiHelpers?.createUniqueFilename?.(session?.title || 'conversation', format, 'conversation')
+        || `conversation.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

@@ -86,6 +86,28 @@ function buildToolRuntime(toolId) {
     };
   }
 
+  if (toolId === 'image-generate') {
+    return {
+      configured: Boolean(process.env.OPENAI_API_KEY),
+      provider: process.env.OPENAI_BASE_URL ? 'gateway' : 'openai',
+      model: process.env.OPENAI_MEDIA_IMAGE_MODEL || process.env.OPENAI_IMAGE_MODEL || '',
+    };
+  }
+
+  if (toolId === 'image-search-unsplash') {
+    return {
+      configured: Boolean(process.env.UNSPLASH_ACCESS_KEY),
+      provider: process.env.UNSPLASH_ACCESS_KEY ? 'unsplash' : 'unconfigured',
+    };
+  }
+
+  if (toolId === 'image-from-url') {
+    return {
+      configured: true,
+      provider: 'direct-url',
+    };
+  }
+
   return null;
 }
 

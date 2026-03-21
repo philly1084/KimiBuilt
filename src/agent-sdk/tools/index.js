@@ -6,6 +6,8 @@
 const { getUnifiedRegistry } = require('../registry/UnifiedRegistry');
 const { getAgentBus } = require('../agents/AgentBus');
 const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
+const { generateImage } = require('../../openai-client');
+const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -354,8 +356,174 @@ class ToolManager {
       }
     ];
 
+    const mediaTools = [
+      {
+        id: 'image-generate',
+        name: 'Image Generator',
+        category: 'system',
+        description: 'Generate one or more images from a prompt and return hosted image URLs',
+        backend: {
+          handler: async (params) => {
+            const response = await generateImage({
+              prompt: params.prompt,
+              model: params.model || null,
+              size: params.size || '1536x1024',
+              quality: params.quality || 'standard',
+              style: params.style || 'vivid',
+              n: Math.min(Math.max(params.n || 1, 1), 4),
+            });
+
+            const images = (response.data || []).map((image, index) => ({
+              url: image.url,
+              b64_json: image.b64_json,
+              revisedPrompt: image.revised_prompt,
+              alt: params.alt || `${params.prompt} ${index + 1}`.trim(),
+            }));
+
+            return {
+              source: 'generated',
+              prompt: params.prompt,
+              model: response.model,
+              images,
+              markdownImages: images
+                .filter((image) => image.url)
+                .map((image) => `![${image.alt}](${image.url})`),
+            };
+          },
+          sideEffects: ['network'],
+          timeout: 60000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['prompt'],
+          properties: {
+            prompt: { type: 'string' },
+            alt: { type: 'string' },
+            model: { type: 'string' },
+            size: { type: 'string' },
+            quality: { type: 'string' },
+            style: { type: 'string' },
+            n: { type: 'integer', minimum: 1, maximum: 4 },
+          },
+        },
+        skill: {
+          triggerPatterns: ['generate image', 'make an image', 'create image', 'hero image', 'illustration'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'image',
+        },
+      },
+      {
+        id: 'image-search-unsplash',
+        name: 'Unsplash Image Search',
+        category: 'system',
+        description: 'Search Unsplash for reference or stock images and return image URLs with attribution',
+        backend: {
+          handler: async (params) => {
+            if (!isUnsplashConfigured()) {
+              throw new Error('Unsplash integration is not configured. Set UNSPLASH_ACCESS_KEY.');
+            }
+
+            const results = await searchImages(params.query, {
+              page: params.page || 1,
+              perPage: Math.min(Math.max(params.perPage || 6, 1), 12),
+              orientation: params.orientation,
+            });
+
+            const images = (results.results || []).map((image) => ({
+              id: image.id,
+              url: image.urls?.regular || image.urls?.full || image.urls?.small,
+              thumbUrl: image.urls?.thumb || image.urls?.small,
+              alt: image.altDescription || image.description || params.query,
+              author: image.author?.name || image.user?.name || '',
+              authorLink: image.author?.link || image.user?.links?.html || '',
+              unsplashLink: image.links?.html || '',
+            }));
+
+            return {
+              source: 'unsplash',
+              query: params.query,
+              total: results.total,
+              totalPages: results.totalPages,
+              images,
+              markdownImages: images
+                .filter((image) => image.url)
+                .map((image) => `![${image.alt}](${image.url})`),
+            };
+          },
+          sideEffects: ['network'],
+          timeout: 30000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['query'],
+          properties: {
+            query: { type: 'string' },
+            page: { type: 'integer', minimum: 1 },
+            perPage: { type: 'integer', minimum: 1, maximum: 12 },
+            orientation: { type: 'string', enum: ['landscape', 'portrait', 'squarish'] },
+          },
+        },
+        skill: {
+          triggerPatterns: ['unsplash', 'stock photo', 'reference image', 'image search', 'photo search'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'image-plus',
+        },
+      },
+      {
+        id: 'image-from-url',
+        name: 'Image URL Reference',
+        category: 'system',
+        description: 'Validate and normalize a direct image URL so it can be embedded in the final output',
+        backend: {
+          handler: async (params) => {
+            const parsed = new URL(params.url);
+            if (!['http:', 'https:'].includes(parsed.protocol)) {
+              throw new Error('Only http and https image URLs are supported.');
+            }
+
+            const alt = params.alt || parsed.pathname.split('/').pop() || 'image';
+            return {
+              source: 'url',
+              image: {
+                url: parsed.toString(),
+                alt,
+                title: params.title || '',
+                host: parsed.host,
+              },
+              markdownImage: `![${alt}](${parsed.toString()})`,
+            };
+          },
+          sideEffects: ['read'],
+          timeout: 5000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['url'],
+          properties: {
+            url: { type: 'string' },
+            alt: { type: 'string' },
+            title: { type: 'string' },
+          },
+        },
+        skill: {
+          triggerPatterns: ['image url', 'use this image', 'embed image', 'reference image url'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'link',
+        },
+      },
+    ];
+
     // Register all system tools
-    [...fileTools, ...codeTools, ...docsTools].forEach(def => {
+    [...fileTools, ...codeTools, ...docsTools, ...mediaTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

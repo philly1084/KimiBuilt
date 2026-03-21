@@ -198,4 +198,40 @@ describe('ConversationOrchestrator', () => {
         expect(scrapePolicy.candidateToolIds).toContain('web-search');
         expect(scrapePolicy.candidateToolIds).toContain('web-scrape');
     });
+
+    test('treats image generation, unsplash, and direct image URLs as first-class tool intents', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const generatePolicy = orchestrator.buildToolPolicy({
+            objective: 'Generate a hero image for the landing page.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const unsplashPolicy = orchestrator.buildToolPolicy({
+            objective: 'Find me an Unsplash image for a coffee brand homepage.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const urlPolicy = orchestrator.buildToolPolicy({
+            objective: 'Use this image URL in the output: https://example.com/hero-image.png',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(generatePolicy.candidateToolIds).toContain('image-generate');
+        expect(unsplashPolicy.candidateToolIds).toContain('image-search-unsplash');
+        expect(urlPolicy.candidateToolIds).toContain('image-from-url');
+    });
 });

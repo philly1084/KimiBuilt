@@ -5,7 +5,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { pathToFileURL } = require('url');
 const { createZip } = require('../utils/zip');
-const { createFriendlyFilenameBase, escapeHtml, escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
+const { createFriendlyFilenameBase, createUniqueFilename, escapeHtml, escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
 const { FORMAT_EXTENSIONS, FORMAT_MIME_TYPES, normalizeFormat } = require('./constants');
 const { config } = require('../config');
 
@@ -556,7 +556,7 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
     const normalizedFormat = normalizeFormat(format);
     const extension = FORMAT_EXTENSIONS[normalizedFormat] || '.txt';
     const mimeType = FORMAT_MIME_TYPES[normalizedFormat] || 'application/octet-stream';
-    const filename = `${createFriendlyFilenameBase(title, 'artifact')}${extension}`;
+    const filename = createUniqueFilename(title, extension, 'artifact');
 
     if (normalizedFormat === 'html') {
         const html = ensureHtmlDocument(content, title);

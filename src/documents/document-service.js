@@ -8,13 +8,15 @@ const { PdfGenerator } = require('./generators/pdf-generator');
 const { PptxGenerator } = require('./generators/pptx-generator');
 const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
+const { ensureHtmlDocument } = require('../artifacts/artifact-renderer');
+const { createUniqueFilename } = require('../utils/text');
 
 class DocumentService {
   constructor(openaiClient) {
     this.generators = {
       docx: new DocxGenerator(),
       pdf: new PdfGenerator(),
-      pptx: new PptxGenerator()
+      pptx: new PptxGenerator(),
     };
 
     this.templateEngine = new TemplateEngine();
@@ -35,22 +37,22 @@ class DocumentService {
       throw new Error(`Template not found: ${templateId}`);
     }
 
-    const generator = this.generators[format];
-    if (!generator) {
-      throw new Error(`Unsupported format: ${format}`);
-    }
-
     // Populate template with variables
     const populated = await this.templateEngine.populate(template, variables);
 
     // Generate document
-    const document = await generator.generate(populated, options);
+    const document = await this.renderDocument({
+      format,
+      template: populated,
+      title: template.name,
+      options,
+    });
 
     return {
       id: this.generateId(),
       content: document.buffer || document.content,
       filename: this.generateFilename(template.name, format),
-      mimeType: generator.mimeType,
+      mimeType: document.mimeType,
       size: document.buffer?.length || document.content?.length,
       metadata: {
         template: templateId,
@@ -69,23 +71,23 @@ class DocumentService {
    */
   async aiGenerate(prompt, options = {}) {
     const format = options.format || 'docx';
-    const generator = this.generators[format];
-
-    if (!generator) {
-      throw new Error(`Unsupported format: ${format}`);
-    }
 
     // Generate structured content using AI
     const content = await this.aiGenerator.generate(prompt, options);
 
     // Generate document from content
-    const document = await generator.generateFromContent(content, options);
+    const document = await this.renderDocument({
+      format,
+      content,
+      title: content.title || 'document',
+      options,
+    });
 
     return {
       id: this.generateId(),
       content: document.buffer || document.content,
       filename: this.generateFilename(content.title || 'document', format),
-      mimeType: generator.mimeType,
+      mimeType: document.mimeType,
       size: document.buffer?.length || document.content?.length,
       metadata: {
         format,
@@ -110,7 +112,6 @@ class DocumentService {
    */
   async expandOutline(outline, options = {}) {
     const format = options.format || 'docx';
-    const generator = this.generators[format];
 
     // Expand outline using AI
     const expanded = await this.aiGenerator.expandOutline(outline, options);
@@ -119,13 +120,18 @@ class DocumentService {
     const content = this.outlineToDocument(expanded, options);
 
     // Generate document
-    const document = await generator.generateFromContent(content, options);
+    const document = await this.renderDocument({
+      format,
+      content,
+      title: content.title || 'document',
+      options,
+    });
 
     return {
       id: this.generateId(),
       content: document.buffer || document.content,
       filename: this.generateFilename(content.title || 'document', format),
-      mimeType: generator.mimeType,
+      mimeType: document.mimeType,
       size: document.buffer?.length || document.content?.length,
       metadata: {
         format,
@@ -166,13 +172,35 @@ class DocumentService {
     // For now, combine text sources into a single document
     const combined = sources.map(s => s.content || s.text || '').join('\n\n');
     const format = options.format || 'docx';
-    const generator = this.generators[format];
-    
-    if (!generator) {
-      throw new Error(`Unsupported format: ${format}`);
-    }
-    
-    return generator.generateFromText(combined, options);
+
+    const document = await this.renderDocument({
+      format,
+      content: {
+        title: options.title || 'document',
+        sections: [{
+          heading: options.title || 'Document',
+          content: combined,
+          level: 1,
+        }],
+      },
+      title: options.title || 'document',
+      options,
+      rawText: combined,
+    });
+
+    return {
+      id: this.generateId(),
+      content: document.buffer || document.content,
+      filename: this.generateFilename(options.title || 'document', format),
+      mimeType: document.mimeType,
+      size: document.buffer?.length || document.content?.length,
+      metadata: {
+        format,
+        generatedAt: new Date().toISOString(),
+        sourceCount: sources.length,
+        ...(document.metadata || {}),
+      },
+    };
   }
 
   /**
@@ -362,10 +390,140 @@ class DocumentService {
    * @returns {string} Generated filename
    */
   generateFilename(name, format) {
-    const sanitized = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    const timestamp = new Date().toISOString().split('T')[0];
-    const extensions = { docx: '.docx', pdf: '.pdf', pptx: '.pptx', html: '.html', md: '.md', markdown: '.md' };
-    return `${sanitized}_${timestamp}${extensions[format] || '.docx'}`;
+    return createUniqueFilename(name, format, 'document');
+  }
+
+  async renderDocument({ format, template = null, content = null, title = 'document', options = {}, rawText = '' }) {
+    const normalizedFormat = String(format || 'docx').toLowerCase();
+
+    if (normalizedFormat === 'html' || normalizedFormat === 'md' || normalizedFormat === 'markdown') {
+      const structuredContent = content || this.templateToContent(template);
+      const rendered = this.renderTextDocument(structuredContent, normalizedFormat);
+      return {
+        content: rendered.content,
+        mimeType: rendered.mimeType,
+        metadata: {
+          format: normalizedFormat === 'markdown' ? 'md' : normalizedFormat,
+          title: structuredContent.title || title,
+          sections: structuredContent.sections?.length || 0,
+        },
+      };
+    }
+
+    const generator = this.generators[normalizedFormat];
+    if (!generator) {
+      throw new Error(`Unsupported format: ${format}`);
+    }
+
+    if (content && typeof generator.generateFromContent === 'function') {
+      return generator.generateFromContent(content, options);
+    }
+
+    if (template && typeof generator.generate === 'function') {
+      return generator.generate(template, options);
+    }
+
+    if (rawText && typeof generator.generateFromText === 'function') {
+      return generator.generateFromText(rawText, options);
+    }
+
+    throw new Error(`Unsupported format: ${format}`);
+  }
+
+  renderTextDocument(content, format) {
+    const title = content?.title || 'Document';
+    const sections = Array.isArray(content?.sections) ? content.sections : [];
+    const normalizedFormat = format === 'markdown' ? 'md' : format;
+
+    if (normalizedFormat === 'html') {
+      const body = [
+        `<h1>${this.escapeHtml(title)}</h1>`,
+        ...sections.map((section) => this.renderSectionHtml(section)),
+      ].join('\n');
+
+      return {
+        content: ensureHtmlDocument(body, title),
+        mimeType: 'text/html',
+      };
+    }
+
+    const markdown = [
+      `# ${title}`,
+      '',
+      ...sections.flatMap((section) => this.renderSectionMarkdown(section)),
+    ].join('\n');
+
+    return {
+      content: markdown,
+      mimeType: 'text/markdown',
+    };
+  }
+
+  renderSectionHtml(section = {}) {
+    const level = Math.min(Math.max(Number(section.level) || 1, 1), 6);
+    const heading = section.heading ? `<h${level + 1}>${this.escapeHtml(section.heading)}</h${level + 1}>` : '';
+    const blocks = this.renderRichTextBlocks(String(section.content || ''));
+    return `${heading}\n${blocks}`.trim();
+  }
+
+  renderSectionMarkdown(section = {}) {
+    const level = Math.min(Math.max(Number(section.level) || 1, 1), 6) + 1;
+    const lines = [];
+
+    if (section.heading) {
+      lines.push(`${'#'.repeat(level)} ${section.heading}`);
+      lines.push('');
+    }
+
+    const contentLines = String(section.content || '').split('\n');
+    contentLines.forEach((line) => {
+      lines.push(line);
+    });
+    lines.push('');
+    return lines;
+  }
+
+  renderRichTextBlocks(text = '') {
+    const blocks = String(text || '')
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
+
+    return blocks.map((block) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+      if (lines.length > 0 && lines.every((line) => /^[-*]\s+/.test(line))) {
+        return `<ul>${lines.map((line) => `<li>${this.escapeHtml(line.replace(/^[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+      }
+      if (lines.length > 0 && lines.every((line) => /^\d+\.\s+/.test(line))) {
+        return `<ol>${lines.map((line) => `<li>${this.escapeHtml(line.replace(/^\d+\.\s+/, ''))}</li>`).join('')}</ol>`;
+      }
+      return lines.map((line) => `<p>${this.escapeHtml(line)}</p>`).join('\n');
+    }).join('\n');
+  }
+
+  templateToContent(template = {}) {
+    const variables = template?.variables || {};
+    const sections = Object.entries(variables)
+      .filter(([, value]) => value != null && String(value).trim())
+      .map(([key, value]) => ({
+        heading: key.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' '),
+        content: String(value),
+        level: 1,
+      }));
+
+    return {
+      title: template?.name || 'Document',
+      sections,
+    };
+  }
+
+  escapeHtml(value = '') {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   /**

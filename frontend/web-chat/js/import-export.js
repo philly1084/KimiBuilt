@@ -67,6 +67,16 @@ class ImportExportManager {
         return this.getReservedFilenameBases().has(candidate) ? this.generatePleasantFilenameBase() : candidate;
     }
 
+    createShortUniqueSuffix(length = 6) {
+        const random = Math.random().toString(36).slice(2);
+        return (random || Date.now().toString(36)).slice(0, Math.max(4, length));
+    }
+
+    createUniqueFilename(base, extension, fallback = 'conversation') {
+        const safeBase = this.createFriendlyFilenameBase(base, fallback);
+        return `${safeBase}-${this.createShortUniqueSuffix()}.${String(extension).replace(/^\./, '').toLowerCase()}`;
+    }
+
     // ============================================
     // Export Functions
     // ============================================
@@ -137,7 +147,7 @@ class ImportExportManager {
 
         return {
             content: md,
-            filename: `${sessionTitle}.md`,
+            filename: this.createUniqueFilename(sessionTitle, 'md'),
             mimeType: 'text/markdown'
         };
     }
@@ -167,7 +177,7 @@ class ImportExportManager {
 
         return {
             content: JSON.stringify(exportData, null, 2),
-            filename: `${sessionTitle}.json`,
+            filename: this.createUniqueFilename(sessionTitle, 'json'),
             mimeType: 'application/json'
         };
     }
@@ -210,7 +220,7 @@ class ImportExportManager {
 
         return {
             content: text,
-            filename: `${sessionTitle}.txt`,
+            filename: this.createUniqueFilename(sessionTitle, 'txt'),
             mimeType: 'text/plain'
         };
     }
@@ -425,7 +435,7 @@ class ImportExportManager {
 
         return {
             content: html,
-            filename: `${sessionTitle}.html`,
+            filename: this.createUniqueFilename(sessionTitle, 'html'),
             mimeType: 'text/html'
         };
     }
@@ -539,7 +549,7 @@ class ImportExportManager {
         const blob = await Packer.toBlob(doc);
         return {
             blob: blob,
-            filename: `${sessionTitle}.docx`,
+            filename: this.createUniqueFilename(sessionTitle, 'docx'),
             mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         };
     }
@@ -692,7 +702,7 @@ class ImportExportManager {
         try {
             const opt = {
                 margin: [15, 15],
-                filename: `${sessionTitle}.pdf`,
+                filename: this.createUniqueFilename(sessionTitle, 'pdf'),
                 image: { type: 'jpeg', quality: 0.98 },
                 html2canvas: { 
                     scale: 2,
@@ -710,7 +720,7 @@ class ImportExportManager {
             
             return {
                 blob: pdfBlob,
-                filename: `${sessionTitle}.pdf`,
+                filename: this.createUniqueFilename(sessionTitle, 'pdf'),
                 mimeType: 'application/pdf'
             };
         } finally {

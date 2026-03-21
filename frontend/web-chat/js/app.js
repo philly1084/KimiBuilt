@@ -1458,8 +1458,7 @@ class ChatApp {
      */
     exportAllConversations() {
         const content = sessionManager.exportAll();
-        const timestamp = new Date().toISOString().split('T')[0];
-        const filename = `lillybuilt_all_conversations_${timestamp}.json`;
+        const filename = uiHelpers.createUniqueFilename('all conversations', 'json', 'conversations');
         
         this.downloadFile(content, filename, 'application/json');
         uiHelpers.closeExportModal();
@@ -1475,7 +1474,7 @@ class ChatApp {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
+        a.download = uiHelpers.sanitizeDownloadFilename(filename, 'download');
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

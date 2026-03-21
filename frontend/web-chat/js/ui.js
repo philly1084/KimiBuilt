@@ -173,6 +173,17 @@ class UIHelpers {
         return `${truncatedBase}${extension}`;
     }
 
+    createShortUniqueSuffix(length = 6) {
+        const random = Math.random().toString(36).slice(2);
+        return (random || Date.now().toString(36)).slice(0, Math.max(4, length));
+    }
+
+    createUniqueFilename(value, extension = '', fallback = 'artifact') {
+        const safeExtension = extension ? `.${String(extension).replace(/^\./, '').toLowerCase()}` : '';
+        const safeBase = this.createFriendlyFilenameBase(value || fallback, fallback);
+        return this.sanitizeDownloadFilename(`${safeBase}-${this.createShortUniqueSuffix()}${safeExtension}`, fallback, extension);
+    }
+
     createFriendlyFilenameBaseFromMermaid(source, fallback = 'diagram') {
         const text = this.normalizeMermaidSource(source || '');
         const labelMatches = Array.from(text.matchAll(/\[(.*?)\]|\((.*?)\)|"(.*?)"/g))
