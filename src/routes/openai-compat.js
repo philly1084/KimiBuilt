@@ -1,8 +1,9 @@
 const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
-const { createResponse, generateImage, listModels } = require('../openai-client');
+const { generateImage, listModels } = require('../openai-client');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
+const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -18,37 +19,6 @@ const { artifactService, extractResponseText } = require('../artifacts/artifact-
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
-const RECENT_TRANSCRIPT_LIMIT = 12;
-
-async function executeRuntimeResponse(app, params) {
-    const agentOrchestrator = app?.locals?.agentOrchestrator;
-    if (agentOrchestrator?.executeConversation) {
-        return {
-            ...(await agentOrchestrator.executeConversation(params)),
-            handledPersistence: true,
-        };
-    }
-
-    const contextMessages = params.contextMessages || (
-        params.loadContextMessages === false
-            ? []
-            : await memoryService.process(params.sessionId, params.memoryInput || '')
-    );
-    const recentMessages = params.recentMessages || (
-        params.loadRecentMessages === false
-            ? []
-            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
-    );
-
-    return {
-        response: await createResponse({
-            ...params,
-            contextMessages,
-            recentMessages,
-        }),
-        handledPersistence: false,
-    };
-}
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -239,6 +209,7 @@ router.post('/chat/completions', async (req, res, next) => {
             artifact_ids = [],
             output_format = null,
         } = req.body;
+        const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({
@@ -443,7 +414,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 res.end();
                 return;
             }
-            const execution = await executeRuntimeResponse(req.app, {
+            const execution = await executeConversationRuntime(req.app, {
                 input: messages.map((message) => (
                     message.role === 'user' && message === lastUserMessage
                         ? { role: message.role, content: effectiveInput }
@@ -464,6 +435,8 @@ router.post('/chat/completions', async (req, res, next) => {
                     transport: 'http',
                 },
                 enableAutomaticToolCalls: true,
+                enableConversationExecutor,
+                taskType: 'chat',
             });
             const response = execution.response;
 
@@ -595,7 +568,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 : { role: message.role, content: message.content }
         ));
 
-        const execution = await executeRuntimeResponse(req.app, {
+        const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessages,
             sessionId,
             memoryInput: lastUserText,
@@ -612,6 +585,8 @@ router.post('/chat/completions', async (req, res, next) => {
                 transport: 'http',
             },
             enableAutomaticToolCalls: true,
+            enableConversationExecutor,
+            taskType: 'chat',
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -692,6 +667,7 @@ router.post('/responses', async (req, res, next) => {
             artifact_ids = [],
             output_format = null,
         } = req.body;
+        const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
         let sessionId = resolveSessionId(req);
         let session;
@@ -889,7 +865,7 @@ router.post('/responses', async (req, res, next) => {
                 res.end();
                 return;
             }
-            const execution = await executeRuntimeResponse(req.app, {
+            const execution = await executeConversationRuntime(req.app, {
                 input: runtimeInput,
                 sessionId,
                 memoryInput: userInput,
@@ -906,6 +882,8 @@ router.post('/responses', async (req, res, next) => {
                     transport: 'http',
                 },
                 enableAutomaticToolCalls: true,
+                enableConversationExecutor,
+                taskType: 'chat',
             });
             const response = execution.response;
 
@@ -1008,7 +986,7 @@ router.post('/responses', async (req, res, next) => {
             return;
         }
 
-        const execution = await executeRuntimeResponse(req.app, {
+        const execution = await executeConversationRuntime(req.app, {
             input: runtimeInput,
             sessionId,
             memoryInput: userInput,
@@ -1025,6 +1003,8 @@ router.post('/responses', async (req, res, next) => {
                 transport: 'http',
             },
             enableAutomaticToolCalls: true,
+            enableConversationExecutor,
+            taskType: 'chat',
         });
         const response = execution.response;
         if (!execution.handledPersistence) {

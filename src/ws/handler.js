@@ -1,7 +1,7 @@
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
-const { createResponse } = require('../openai-client');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
+const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -21,37 +21,6 @@ const adminEvents = new EventEmitter();
 
 // Store admin dashboard connections
 const adminConnections = new Set();
-const RECENT_TRANSCRIPT_LIMIT = 12;
-
-async function executeRuntimeResponse(app, params) {
-    const agentOrchestrator = app?.locals?.agentOrchestrator;
-    if (agentOrchestrator?.executeConversation) {
-        return {
-            ...(await agentOrchestrator.executeConversation(params)),
-            handledPersistence: true,
-        };
-    }
-
-    const contextMessages = params.contextMessages || (
-        params.loadContextMessages === false
-            ? []
-            : await memoryService.process(params.sessionId, params.memoryInput || '')
-    );
-    const recentMessages = params.recentMessages || (
-        params.loadRecentMessages === false
-            ? []
-            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
-    );
-
-    return {
-        response: await createResponse({
-            ...params,
-            contextMessages,
-            recentMessages,
-        }),
-        handledPersistence: false,
-    };
-}
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -140,6 +109,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
     const { message, model = null, artifactIds = [], outputFormat = null } = payload;
+    const enableConversationExecutor = resolveConversationExecutorFlag(payload);
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
@@ -252,7 +222,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
             effectiveArtifactIds,
         );
-        const execution = await executeRuntimeResponse(ws.app, {
+        const execution = await executeConversationRuntime(ws.app, {
             input: effectiveMessage,
             sessionId: session.id,
             memoryInput: message,
@@ -267,6 +237,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 transport: 'ws',
             },
             enableAutomaticToolCalls: true,
+            enableConversationExecutor,
+            taskType: 'chat',
         });
         const response = execution.response;
 
@@ -338,6 +310,7 @@ async function handleCanvas(ws, session, payload = {}) {
         artifactIds = [],
         outputFormat = null,
     } = payload;
+    const enableConversationExecutor = resolveConversationExecutorFlag(payload);
 
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -359,7 +332,7 @@ async function handleCanvas(ws, session, payload = {}) {
             `You are an AI canvas assistant generating ${canvasType} content. Respond with valid JSON: { "content": "...", "metadata": {...}, "suggestions": [...] }${existingContent ? `\n\nExisting content:\n${existingContent}` : ''}`,
             artifactIds,
         );
-        const execution = await executeRuntimeResponse(ws.app, {
+        const execution = await executeConversationRuntime(ws.app, {
             input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
             sessionId: session.id,
             memoryInput: message,
@@ -367,6 +340,7 @@ async function handleCanvas(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            enableConversationExecutor,
             taskType: 'canvas',
         });
         const response = execution.response;
@@ -436,6 +410,7 @@ async function handleNotation(ws, session, payload = {}) {
         artifactIds = [],
         outputFormat = null,
     } = payload;
+    const enableConversationExecutor = resolveConversationExecutorFlag(payload);
 
     if (!notation) {
         ws.send(JSON.stringify({ type: 'error', message: "'notation' is required" }));
@@ -457,7 +432,7 @@ async function handleNotation(ws, session, payload = {}) {
             `You are an AI notation helper in ${helperMode} mode. Respond with valid JSON: { "result": "...", "annotations": [...], "suggestions": [...] }${context ? `\nContext: ${context}` : ''}`,
             artifactIds,
         );
-        const execution = await executeRuntimeResponse(ws.app, {
+        const execution = await executeConversationRuntime(ws.app, {
             input: notation,
             sessionId: session.id,
             memoryInput: notation,
@@ -465,6 +440,7 @@ async function handleNotation(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            enableConversationExecutor,
             taskType: 'notation',
         });
         const response = execution.response;

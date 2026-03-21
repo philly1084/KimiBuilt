@@ -2,45 +2,11 @@ const { Router } = require('express');
 const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
-const { createResponse } = require('../openai-client');
+const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
-const RECENT_TRANSCRIPT_LIMIT = 12;
-
-async function executeCanvasResponse(app, params) {
-    const agentOrchestrator = app?.locals?.agentOrchestrator;
-    if (agentOrchestrator?.executeConversation) {
-        return {
-            ...(await agentOrchestrator.executeConversation({
-                ...params,
-                taskType: 'canvas',
-            })),
-            handledPersistence: true,
-        };
-    }
-
-    const contextMessages = params.contextMessages || (
-        params.loadContextMessages === false
-            ? []
-            : await memoryService.process(params.sessionId, params.memoryInput || '')
-    );
-    const recentMessages = params.recentMessages || (
-        params.loadRecentMessages === false
-            ? []
-            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
-    );
-
-    return {
-        response: await createResponse({
-            ...params,
-            contextMessages,
-            recentMessages,
-        }),
-        handledPersistence: false,
-    };
-}
 
 const canvasSchema = {
     message: { required: true, type: 'string' },
@@ -50,6 +16,8 @@ const canvasSchema = {
     model: { required: false, type: 'string' },
     artifactIds: { required: false, type: 'array' },
     outputFormat: { required: false, type: 'string' },
+    enableConversationExecutor: { required: false, type: 'boolean' },
+    useAgentExecutor: { required: false, type: 'boolean' },
 };
 
 router.post('/', validate(canvasSchema), async (req, res, next) => {
@@ -64,6 +32,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             artifactIds = [],
             outputFormat = null,
         } = req.body;
+        const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
 
         let session;
@@ -95,7 +64,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             artifactIds,
         );
 
-        const execution = await executeCanvasResponse(req.app, {
+        const execution = await executeConversationRuntime(req.app, {
             input: message,
             sessionId,
             memoryInput: message,
@@ -103,6 +72,8 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            enableConversationExecutor,
+            taskType: 'canvas',
         });
         const response = execution.response;
         if (!execution.handledPersistence) {

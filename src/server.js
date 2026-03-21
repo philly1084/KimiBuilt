@@ -327,7 +327,9 @@ async function start() {
                 memoryService,
                 config: {
                     enableTracing: true,
-                    enableSkills: true
+                    enableSkills: true,
+                    // Keep the planner/executor available for explicit requests only.
+                    enableConversationAgentExecutor: true,
                 }
             });
             const registeredTools = registerUnifiedToolsWithOrchestrator(agentOrchestrator, toolManager);

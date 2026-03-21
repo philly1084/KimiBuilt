@@ -2,8 +2,8 @@ const { Router } = require('express');
 const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
-const { createResponse } = require('../openai-client');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
+const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -17,37 +17,6 @@ const {
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
-const RECENT_TRANSCRIPT_LIMIT = 12;
-
-async function executeChatResponse(app, params) {
-    const agentOrchestrator = app?.locals?.agentOrchestrator;
-    if (agentOrchestrator?.executeConversation) {
-        return {
-            ...(await agentOrchestrator.executeConversation(params)),
-            handledPersistence: true,
-        };
-    }
-
-    const contextMessages = params.contextMessages || (
-        params.loadContextMessages === false
-            ? []
-            : await memoryService.process(params.sessionId, params.memoryInput || '')
-    );
-    const recentMessages = params.recentMessages || (
-        params.loadRecentMessages === false
-            ? []
-            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
-    );
-
-    return {
-        response: await createResponse({
-            ...params,
-            contextMessages,
-            recentMessages,
-        }),
-        handledPersistence: false,
-    };
-}
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -71,6 +40,8 @@ const chatSchema = {
     model: { required: false, type: 'string' },
     artifactIds: { required: false, type: 'array' },
     outputFormat: { required: false, type: 'string' },
+    enableConversationExecutor: { required: false, type: 'boolean' },
+    useAgentExecutor: { required: false, type: 'boolean' },
 };
 
 router.post('/', validate(chatSchema), async (req, res, next) => {
@@ -78,6 +49,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
     const startedAt = Date.now();
     try {
         const { message, stream = true, model = null, artifactIds = [], outputFormat = null } = req.body;
+        const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
 
         let session;
@@ -222,7 +194,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 return;
             }
 
-            const execution = await executeChatResponse(req.app, {
+            const execution = await executeConversationRuntime(req.app, {
                 input: effectiveMessage,
                 sessionId,
                 memoryInput: message,
@@ -237,6 +209,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     transport: 'http',
                 },
                 enableAutomaticToolCalls: true,
+                enableConversationExecutor,
+                taskType: 'chat',
             });
             const response = execution.response;
 
@@ -329,7 +303,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return;
         }
 
-        const execution = await executeChatResponse(req.app, {
+        const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessage,
             sessionId,
             memoryInput: message,
@@ -344,6 +318,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 transport: 'http',
             },
             enableAutomaticToolCalls: true,
+            enableConversationExecutor,
+            taskType: 'chat',
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
