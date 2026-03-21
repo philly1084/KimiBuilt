@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse, generateImage, listModels } = require('../openai-client');
+const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -309,6 +310,7 @@ router.post('/chat/completions', async (req, res, next) => {
             res.setHeader('Connection', 'keep-alive');
             setSessionHeaders(res, sessionId);
 
+            const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeRuntimeResponse(req.app, {
                 input,
                 sessionId,
@@ -319,7 +321,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 instructions,
                 stream: true,
                 model,
-                toolManager: req.app.locals.toolManager,
+                toolManager,
                 toolContext: {
                     sessionId,
                     route: '/v1/chat/completions',
@@ -401,7 +403,7 @@ router.post('/chat/completions', async (req, res, next) => {
             instructions,
             stream: false,
             model,
-            toolManager: req.app.locals.toolManager,
+            toolManager: await ensureRuntimeToolManager(req.app),
             toolContext: {
                 sessionId,
                 route: '/v1/chat/completions',
@@ -608,6 +610,7 @@ router.post('/responses', async (req, res, next) => {
             res.setHeader('Connection', 'keep-alive');
             setSessionHeaders(res, sessionId);
 
+            const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeRuntimeResponse(req.app, {
                 input,
                 sessionId,
@@ -618,7 +621,7 @@ router.post('/responses', async (req, res, next) => {
                 instructions: fullInstructions,
                 stream: true,
                 model,
-                toolManager: req.app.locals.toolManager,
+                toolManager,
                 toolContext: {
                     sessionId,
                     route: '/v1/responses',
@@ -682,7 +685,7 @@ router.post('/responses', async (req, res, next) => {
             instructions: fullInstructions,
             stream: false,
             model,
-            toolManager: req.app.locals.toolManager,
+            toolManager: await ensureRuntimeToolManager(req.app),
             toolContext: {
                 sessionId,
                 route: '/v1/responses',

@@ -1700,6 +1700,17 @@ async function createResponse({
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
 
     try {
+        if (enableAutomaticToolCalls) {
+            const requiredToolId = inferRequiredAutomaticToolId(prompt);
+
+            if (requiredToolId && !toolManager) {
+                throw new ToolOrchestrationError(
+                    `Required tool '${requiredToolId}' is unavailable because the runtime tool manager is not initialized.`,
+                    { model: params.model },
+                );
+            }
+        }
+
         if (enableAutomaticToolCalls && toolManager) {
             try {
                 const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);

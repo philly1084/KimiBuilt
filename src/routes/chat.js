@@ -3,6 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
+const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -176,6 +177,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             res.setHeader('Connection', 'keep-alive');
             res.setHeader('X-Session-Id', sessionId);
 
+            const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeChatResponse(req.app, {
                 input: message,
                 sessionId,
@@ -184,7 +186,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 instructions,
                 stream: true,
                 model,
-                toolManager: req.app.locals.toolManager,
+                toolManager,
                 toolContext: {
                     sessionId,
                     route: '/api/chat',
@@ -245,7 +247,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             instructions,
             stream: false,
             model,
-            toolManager: req.app.locals.toolManager,
+            toolManager: await ensureRuntimeToolManager(req.app),
             toolContext: {
                 sessionId,
                 route: '/api/chat',

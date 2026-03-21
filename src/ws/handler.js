@@ -1,6 +1,7 @@
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
+const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -155,6 +156,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     });
 
     try {
+        const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
+
         if (effectiveOutputFormat) {
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId: session.id,
@@ -210,7 +213,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             instructions,
             stream: true,
             model,
-            toolManager,
+            toolManager: runtimeToolManager,
             toolContext: {
                 sessionId: session.id,
                 route: '/ws',
