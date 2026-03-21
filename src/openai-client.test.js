@@ -371,6 +371,10 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('actual SSH error');
     });
 
+    test('detects ssh as a required tool for explicit ssh prompts', () => {
+        expect(__testUtils.promptHasExplicitSshIntent('Can you ssh into root@77.42.44.98 and check its health?')).toBe(true);
+    });
+
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {
         expect(__testUtils.isTerminalFinishReason('tool_calls')).toBe(false);
         expect(__testUtils.isTerminalFinishReason('stop')).toBe(true);

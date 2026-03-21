@@ -1,0 +1,76 @@
+jest.mock('./artifacts/artifact-service', () => ({
+    artifactService: {
+        buildPromptContext: jest.fn(),
+        generateArtifact: jest.fn(),
+    },
+}));
+
+const { artifactService } = require('./artifacts/artifact-service');
+const {
+    buildArtifactCompletionMessage,
+    generateOutputArtifactFromPrompt,
+} = require('./ai-route-utils');
+
+describe('ai-route-utils', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    test('buildArtifactCompletionMessage formats friendly labels', () => {
+        expect(buildArtifactCompletionMessage('pdf', { filename: 'space-zine.pdf' }))
+            .toBe('Created the PDF artifact (space-zine.pdf).');
+    });
+
+    test('generateOutputArtifactFromPrompt requires a user prompt', async () => {
+        await expect(generateOutputArtifactFromPrompt({
+            sessionId: 'session-1',
+            mode: 'chat',
+            outputFormat: 'pdf',
+            prompt: '',
+        })).rejects.toMatchObject({
+            message: 'A user prompt is required to generate an output artifact',
+            statusCode: 400,
+        });
+    });
+
+    test('generateOutputArtifactFromPrompt returns artifact metadata and completion text', async () => {
+        artifactService.generateArtifact.mockResolvedValue({
+            responseId: 'resp-1',
+            artifact: {
+                id: 'artifact-1',
+                filename: 'space-zine.pdf',
+            },
+            outputText: '<html><body>Space zine</body></html>',
+        });
+
+        await expect(generateOutputArtifactFromPrompt({
+            sessionId: 'session-1',
+            mode: 'chat',
+            outputFormat: 'pdf',
+            prompt: 'Make me a PDF about space',
+            artifactIds: ['artifact-a'],
+            model: 'gpt-test',
+        })).resolves.toEqual({
+            responseId: 'resp-1',
+            artifact: {
+                id: 'artifact-1',
+                filename: 'space-zine.pdf',
+            },
+            artifacts: [{
+                id: 'artifact-1',
+                filename: 'space-zine.pdf',
+            }],
+            outputText: '<html><body>Space zine</body></html>',
+            assistantMessage: 'Created the PDF artifact (space-zine.pdf).',
+        });
+
+        expect(artifactService.generateArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Make me a PDF about space',
+            format: 'pdf',
+            artifactIds: ['artifact-a'],
+            model: 'gpt-test',
+        }));
+    });
+});

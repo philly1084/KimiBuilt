@@ -685,10 +685,14 @@ class AgentOrchestrator {
       && sshConfig.username
       && (sshConfig.password || sshConfig.privateKeyPath)
     );
+    const combinedPrompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
+    const hasExplicitSshIntent = /\bssh\b/.test(combinedPrompt)
+      || /\b(remote host|remote server|remote machine)\b/.test(combinedPrompt)
+      || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(combinedPrompt);
 
     return allTools.filter((toolId) => {
       if (toolId === 'ssh-execute') {
-        return hasUsableSshDefaults;
+        return hasUsableSshDefaults || hasExplicitSshIntent;
       }
 
       return true;

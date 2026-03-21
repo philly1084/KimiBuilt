@@ -2,7 +2,11 @@ const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse, generateImage, listModels } = require('../openai-client');
-const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const {
+    buildInstructionsWithArtifacts,
+    maybeGenerateOutputArtifact,
+    generateOutputArtifactFromPrompt,
+} = require('../ai-route-utils');
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
@@ -197,6 +201,87 @@ router.post('/chat/completions', async (req, res, next) => {
             transport: 'http',
             metadata: { route: '/v1/chat/completions', stream, phase: 'preflight' },
         });
+        if (effectiveOutputFormat) {
+            setSessionHeaders(res, sessionId);
+
+            if (stream) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+            }
+
+            const generation = await generateOutputArtifactFromPrompt({
+                sessionId,
+                session,
+                mode: 'chat',
+                outputFormat: effectiveOutputFormat,
+                prompt: lastUserMessage?.content || '',
+                artifactIds: artifact_ids,
+                model,
+            });
+
+            await sessionStore.recordResponse(sessionId, generation.responseId);
+            memoryService.rememberResponse(sessionId, generation.assistantMessage);
+            await sessionStore.appendMessages(sessionId, [
+                { role: 'user', content: lastUserMessage?.content || '' },
+                { role: 'assistant', content: generation.assistantMessage },
+            ]);
+
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId: generation.responseId,
+                output: generation.assistantMessage,
+                model: model || null,
+                duration: Date.now() - startedAt,
+                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+            });
+
+            if (stream) {
+                res.write(`data: ${JSON.stringify({
+                    id: `chatcmpl-${sessionId}-0`,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(Date.now() / 1000),
+                    model: model || 'gpt-4o',
+                    choices: [{ index: 0, delta: { content: generation.assistantMessage }, finish_reason: null }],
+                })}\n\n`);
+                res.write(`data: ${JSON.stringify({
+                    id: `chatcmpl-${sessionId}`,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(Date.now() / 1000),
+                    model: model || 'gpt-4o',
+                    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                    session_id: sessionId,
+                    artifacts: generation.artifacts,
+                })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+                return;
+            }
+
+            res.json({
+                id: `chatcmpl-${generation.responseId}`,
+                object: 'chat.completion',
+                created: Math.floor(Date.now() / 1000),
+                model: model || 'gpt-4o',
+                choices: [{
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: generation.assistantMessage,
+                        artifacts: generation.artifacts,
+                    },
+                    finish_reason: 'stop',
+                }],
+                usage: {
+                    prompt_tokens: -1,
+                    completion_tokens: -1,
+                    total_tokens: -1,
+                },
+                session_id: sessionId,
+                artifacts: generation.artifacts,
+            });
+            return;
+        }
+
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
@@ -422,6 +507,72 @@ router.post('/responses', async (req, res, next) => {
             transport: 'http',
             metadata: { route: '/v1/responses', stream, phase: 'preflight' },
         });
+        if (effectiveOutputFormat) {
+            setSessionHeaders(res, sessionId);
+
+            if (stream) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+            }
+
+            const generation = await generateOutputArtifactFromPrompt({
+                sessionId,
+                session,
+                mode: 'chat',
+                outputFormat: effectiveOutputFormat,
+                prompt: userInput,
+                artifactIds: artifact_ids,
+                model,
+            });
+
+            await sessionStore.recordResponse(sessionId, generation.responseId);
+            memoryService.rememberResponse(sessionId, generation.assistantMessage);
+            await sessionStore.appendMessages(sessionId, [
+                { role: 'user', content: userInput },
+                { role: 'assistant', content: generation.assistantMessage },
+            ]);
+
+            const syntheticResponse = {
+                id: generation.responseId,
+                object: 'response',
+                created_at: Math.floor(Date.now() / 1000),
+                model: model || 'gpt-4o',
+                output: [{
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: generation.assistantMessage }],
+                }],
+            };
+
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId: generation.responseId,
+                output: generation.assistantMessage,
+                model: model || null,
+                duration: Date.now() - startedAt,
+                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+            });
+
+            if (stream) {
+                res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: generation.assistantMessage })}\n\n`);
+                res.write(`data: ${JSON.stringify({
+                    type: 'response.completed',
+                    response: syntheticResponse,
+                    session_id: sessionId,
+                    artifacts: generation.artifacts,
+                })}\n\n`);
+                res.end();
+                return;
+            }
+
+            res.json({
+                ...syntheticResponse,
+                session_id: sessionId,
+                artifacts: generation.artifacts,
+            });
+            return;
+        }
+
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';

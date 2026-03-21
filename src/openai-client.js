@@ -876,6 +876,22 @@ function buildAutomaticToolChoice(selectedTools = [], api = 'responses') {
     return 'auto';
 }
 
+function inferRequiredAutomaticToolId(prompt = '') {
+    if (promptHasExplicitSshIntent(prompt)) {
+        return 'ssh-execute';
+    }
+
+    if (extractExplicitWebResearchQuery(prompt)) {
+        return 'web-search';
+    }
+
+    if (extractRequestedDirectoryPath(prompt)) {
+        return 'file-mkdir';
+    }
+
+    return null;
+}
+
 function buildAutomaticToolGuidance(automaticTools = []) {
     if (!automaticTools.length) {
         return null;
@@ -1678,6 +1694,7 @@ async function createResponse({
         input: buildResponsesInput(messages),
         stream,
     };
+    const prompt = getLastUserText(messages);
 
     console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}`);
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
@@ -1685,6 +1702,16 @@ async function createResponse({
     try {
         if (enableAutomaticToolCalls && toolManager) {
             try {
+                const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt);
+                const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
+                const requiredToolId = inferRequiredAutomaticToolId(prompt);
+
+                if (requiredToolId && !selectedTools.some((tool) => tool.id === requiredToolId)) {
+                    throw new ToolOrchestrationError(`Required tool '${requiredToolId}' is unavailable for this request. Check tool setup and runtime registration.`, {
+                        model: params.model,
+                    });
+                }
+
                 const toolResponse = await runAutomaticToolLoop(openai, {
                     model: params.model,
                     messages,
@@ -1701,6 +1728,14 @@ async function createResponse({
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
+                if (inferRequiredAutomaticToolId(prompt)) {
+                    throw toolError instanceof ToolOrchestrationError
+                        ? toolError
+                        : new ToolOrchestrationError(toolError.message, {
+                            model: params.model,
+                            cause: toolError,
+                        });
+                }
                 console.warn(`[OpenAI] Falling back to a plain model response for '${params.model}'`);
             }
         }

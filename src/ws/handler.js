@@ -1,7 +1,11 @@
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
-const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const {
+    buildInstructionsWithArtifacts,
+    maybeGenerateOutputArtifact,
+    generateOutputArtifactFromPrompt,
+} = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 
@@ -146,11 +150,45 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     });
 
     try {
+        if (effectiveOutputFormat) {
+            const generation = await generateOutputArtifactFromPrompt({
+                sessionId: session.id,
+                session,
+                mode: 'chat',
+                outputFormat: effectiveOutputFormat,
+                prompt: message,
+                artifactIds,
+                model,
+            });
+
+            await sessionStore.recordResponse(session.id, generation.responseId);
+            memoryService.rememberResponse(session.id, generation.assistantMessage);
+            await sessionStore.appendMessages(session.id, [
+                { role: 'user', content: message },
+                { role: 'assistant', content: generation.assistantMessage },
+            ]);
+
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId: generation.responseId,
+                output: generation.assistantMessage,
+                model: model || null,
+                duration: Date.now() - startedAt,
+                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+            });
+
+            ws.send(JSON.stringify({ type: 'delta', content: generation.assistantMessage }));
+            ws.send(JSON.stringify({
+                type: 'done',
+                sessionId: session.id,
+                responseId: generation.responseId,
+                artifacts: generation.artifacts,
+            }));
+            return;
+        }
+
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            effectiveOutputFormat
-                ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
-                : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
+            'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
             artifactIds,
         );
         const execution = await executeRuntimeResponse(ws.app, {

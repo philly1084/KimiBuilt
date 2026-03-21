@@ -3,7 +3,11 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { createResponse } = require('../openai-client');
-const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const {
+    buildInstructionsWithArtifacts,
+    maybeGenerateOutputArtifact,
+    generateOutputArtifactFromPrompt,
+} = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
@@ -94,11 +98,64 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             transport: 'http',
             metadata: { route: '/api/chat', stream, phase: 'preflight' },
         });
+
+        if (effectiveOutputFormat) {
+            if (stream) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.setHeader('X-Session-Id', sessionId);
+            }
+
+            const generation = await generateOutputArtifactFromPrompt({
+                sessionId,
+                session,
+                mode: 'chat',
+                outputFormat: effectiveOutputFormat,
+                prompt: message,
+                artifactIds,
+                model,
+            });
+
+            await sessionStore.recordResponse(sessionId, generation.responseId);
+            memoryService.rememberResponse(sessionId, generation.assistantMessage);
+            await sessionStore.appendMessages(sessionId, [
+                { role: 'user', content: message },
+                { role: 'assistant', content: generation.assistantMessage },
+            ]);
+
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId: generation.responseId,
+                output: generation.assistantMessage,
+                model: model || session?.metadata?.model || null,
+                duration: Date.now() - startedAt,
+                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+            });
+
+            if (stream) {
+                res.write(`data: ${JSON.stringify({ type: 'delta', content: generation.assistantMessage })}\n\n`);
+                res.write(`data: ${JSON.stringify({
+                    type: 'done',
+                    sessionId,
+                    responseId: generation.responseId,
+                    artifacts: generation.artifacts,
+                })}\n\n`);
+                res.end();
+                return;
+            }
+
+            res.json({
+                sessionId,
+                responseId: generation.responseId,
+                message: generation.assistantMessage,
+                artifacts: generation.artifacts,
+            });
+            return;
+        }
+
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            effectiveOutputFormat
-                ? `You are the LillyBuilt Business Agent.\nProduce a concise confirmation for the user, but the actual file output will be generated as a downloadable artifact in ${effectiveOutputFormat} format. Do not claim that file creation is impossible.`
-                : 'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
+            'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
             artifactIds,
         );
 

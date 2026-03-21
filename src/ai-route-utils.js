@@ -1,4 +1,5 @@
 const { artifactService } = require('./artifacts/artifact-service');
+const { normalizeFormat } = require('./artifacts/constants');
 const { buildSessionInstructions } = require('./session-instructions');
 
 async function buildInstructionsWithArtifacts(session, baseInstructions = '', artifactIds = []) {
@@ -74,8 +75,68 @@ async function maybeGenerateOutputArtifact({
     return [artifact];
 }
 
+function buildArtifactCompletionMessage(outputFormat, artifact) {
+    const normalizedFormat = normalizeFormat(outputFormat) || 'file';
+    const formatLabel = {
+        pdf: 'PDF',
+        docx: 'Word document',
+        html: 'HTML document',
+        xml: 'XML file',
+        mermaid: 'Mermaid diagram',
+        xlsx: 'Excel workbook',
+        'power-query': 'Power Query script',
+    }[normalizedFormat] || normalizedFormat.toUpperCase();
+
+    const filename = artifact?.filename ? ` (${artifact.filename})` : '';
+    return `Created the ${formatLabel} artifact${filename}.`;
+}
+
+async function generateOutputArtifactFromPrompt({
+    sessionId,
+    session = null,
+    mode,
+    outputFormat,
+    prompt = '',
+    artifactIds = [],
+    existingContent = '',
+    model = null,
+    parentArtifactId = null,
+}) {
+    if (!outputFormat) {
+        return null;
+    }
+
+    if (!prompt) {
+        const error = new Error('A user prompt is required to generate an output artifact');
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const result = await artifactService.generateArtifact({
+        session,
+        sessionId,
+        mode,
+        prompt,
+        format: outputFormat,
+        artifactIds,
+        existingContent,
+        model,
+        parentArtifactId,
+    });
+
+    return {
+        responseId: result.responseId,
+        artifact: result.artifact,
+        artifacts: [result.artifact],
+        outputText: result.outputText,
+        assistantMessage: buildArtifactCompletionMessage(outputFormat, result.artifact),
+    };
+}
+
 module.exports = {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
+    generateOutputArtifactFromPrompt,
+    buildArtifactCompletionMessage,
 };
 
