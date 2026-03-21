@@ -18,6 +18,51 @@ const { registerSandboxTools } = require('./categories/sandbox');
 const { SSHExecuteTool } = require('./categories/ssh/SSHExecuteTool');
 const { DockerExecTool } = require('./categories/ssh/DockerExecTool');
 
+function normalizeCandidateUrl(value = '') {
+  let candidate = String(value || '').trim();
+  if (!candidate) {
+    throw new Error('Image URL is required.');
+  }
+
+  const markdownMatch = candidate.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)|\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/i);
+  if (markdownMatch) {
+    candidate = markdownMatch[1] || markdownMatch[2] || candidate;
+  }
+
+  const bracketMatch = candidate.match(/<(https?:\/\/[^>\s]+)>/i);
+  if (bracketMatch?.[1]) {
+    candidate = bracketMatch[1];
+  }
+
+  const plainUrlMatch = candidate.match(/https?:\/\/\S+/i);
+  if (plainUrlMatch?.[0]) {
+    candidate = plainUrlMatch[0];
+  }
+
+  while (/[),.;!?'"`\]]$/.test(candidate)) {
+    const next = candidate.slice(0, -1);
+    if (!next) break;
+    candidate = next;
+  }
+
+  return candidate;
+}
+
+function deriveImageAltText(urlString = '', fallback = 'image') {
+  try {
+    const parsed = new URL(urlString);
+    const fileName = parsed.pathname.split('/').pop() || '';
+    const normalized = fileName
+      .replace(/\.[a-z0-9]+$/i, '')
+      .replace(/[-_]+/g, ' ')
+      .trim();
+
+    return normalized || fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
 class ToolManager {
   constructor() {
     this.registry = getUnifiedRegistry();
@@ -482,12 +527,13 @@ class ToolManager {
         description: 'Validate and normalize a direct image URL so it can be embedded in the final output',
         backend: {
           handler: async (params) => {
-            const parsed = new URL(params.url);
+            const normalizedUrl = normalizeCandidateUrl(params.url);
+            const parsed = new URL(normalizedUrl);
             if (!['http:', 'https:'].includes(parsed.protocol)) {
               throw new Error('Only http and https image URLs are supported.');
             }
 
-            const alt = params.alt || parsed.pathname.split('/').pop() || 'image';
+            const alt = params.alt || deriveImageAltText(parsed.toString(), 'image');
             return {
               source: 'url',
               image: {
@@ -496,6 +542,7 @@ class ToolManager {
                 title: params.title || '',
                 host: parsed.host,
               },
+              normalizedUrl: parsed.toString(),
               markdownImage: `![${alt}](${parsed.toString()})`,
             };
           },
