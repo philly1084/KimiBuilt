@@ -1141,6 +1141,101 @@ async function runDeterministicToolPreflight({
     };
 }
 
+function formatDirectToolResultMessage(toolEvent = {}) {
+    const toolId = toolEvent?.toolCall?.function?.name || toolEvent?.result?.toolId || 'tool';
+    const result = toolEvent?.result || {};
+
+    if (toolId === 'ssh-execute') {
+        if (!result.success) {
+            return `SSH request failed: ${result.error || 'Unknown SSH error'}`;
+        }
+
+        const stdout = trimString(String(result?.data?.stdout || '').trim(), 8000);
+        const stderr = trimString(String(result?.data?.stderr || '').trim(), 4000);
+        const host = result?.data?.host || 'remote host';
+        const sections = [
+            `SSH command completed on ${host}.`,
+        ];
+
+        if (stdout) {
+            sections.push(`STDOUT:\n${stdout}`);
+        }
+
+        if (stderr) {
+            sections.push(`STDERR:\n${stderr}`);
+        }
+
+        return sections.join('\n\n');
+    }
+
+    if (!result.success) {
+        return `${toolId} failed: ${result.error || 'Unknown error'}`;
+    }
+
+    return JSON.stringify(result?.data || {}, null, 2);
+}
+
+function buildDirectToolResponse(toolEvent, model = null) {
+    return {
+        id: `resp_tool_${Date.now()}`,
+        object: 'response',
+        created_at: Math.floor(Date.now() / 1000),
+        model,
+        output: [
+            {
+                type: 'message',
+                role: 'assistant',
+                content: [
+                    {
+                        type: 'output_text',
+                        text: formatDirectToolResultMessage(toolEvent),
+                    },
+                ],
+            },
+        ],
+        _kimibuilt: {
+            toolEvents: [toolEvent],
+        },
+    };
+}
+
+async function runDirectRequiredToolAction({
+    toolManager,
+    requiredToolId,
+    selectedTools = [],
+    prompt = '',
+    toolContext = {},
+    model = null,
+}) {
+    if (requiredToolId !== 'ssh-execute') {
+        return null;
+    }
+
+    const actions = buildDeterministicPreflightActions(selectedTools, prompt)
+        .filter((action) => action.toolId === requiredToolId);
+
+    if (!actions.length) {
+        return null;
+    }
+
+    const toolCall = {
+        id: 'direct_required_tool_1',
+        type: 'function',
+        function: {
+            name: requiredToolId,
+            arguments: JSON.stringify(actions[0].params),
+        },
+    };
+
+    const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
+    const toolEvent = {
+        toolCall: normalizeToolCall(toolCall),
+        result,
+    };
+
+    return buildDirectToolResponse(toolEvent, model);
+}
+
 function buildResponsesInput(messages = []) {
     return messages.map((message) => ({
         type: 'message',
@@ -1723,6 +1818,23 @@ async function createResponse({
                     });
                 }
 
+                const directToolResponse = await runDirectRequiredToolAction({
+                    toolManager,
+                    requiredToolId,
+                    selectedTools,
+                    prompt,
+                    toolContext: {
+                        previousResponseId,
+                        ...toolContext,
+                    },
+                    model: params.model,
+                });
+
+                if (directToolResponse) {
+                    console.log(`[OpenAI] Direct required tool execution completed for '${requiredToolId}'`);
+                    return stream ? synthesizeStreamResponse(directToolResponse) : normalizeModelResponse(directToolResponse);
+                }
+
                 const toolResponse = await runAutomaticToolLoop(openai, {
                     model: params.model,
                     messages,
@@ -1840,6 +1952,7 @@ module.exports = {
         getResponseApiText,
         normalizeModelResponse,
         normalizeToolResultForModel,
+        runDirectRequiredToolAction,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,
         shouldAutoUseTool,

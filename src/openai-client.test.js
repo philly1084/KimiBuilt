@@ -140,6 +140,25 @@ function createToolManager() {
 
     return {
         getTool: (id) => tools.get(id),
+        executeTool: jest.fn(async (id, params) => {
+            if (id === 'ssh-execute') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        stdout: 'host\nup 10 days',
+                        stderr: '',
+                        host: `${params.host || 'default-host'}:${params.port || 22}`,
+                    },
+                };
+            }
+
+            return {
+                success: true,
+                toolId: id,
+                data: params,
+            };
+        }),
         registry: {
             getSkill: (id) => skills.get(id),
         },
@@ -373,6 +392,48 @@ describe('openai-client automatic tool orchestration helpers', () => {
 
     test('detects ssh as a required tool for explicit ssh prompts', () => {
         expect(__testUtils.promptHasExplicitSshIntent('Can you ssh into root@77.42.44.98 and check its health?')).toBe(true);
+    });
+
+    test('runs explicit ssh requests directly without asking the model for tool selection', async () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Can you ssh into root@77.42.44.98 and check its health?',
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Can you ssh into root@77.42.44.98 and check its health?',
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'ssh-execute',
+            selectedTools,
+            prompt: 'Can you ssh into root@77.42.44.98 and check its health?',
+            toolContext: {},
+            model: 'gemini-test',
+        });
+
+        expect(response.output[0].content[0].text).toContain('SSH command completed on 77.42.44.98:22.');
+        expect(response.output[0].content[0].text).toContain('STDOUT:');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'ssh-execute',
+            expect.objectContaining({
+                host: '77.42.44.98',
+                username: 'root',
+                command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+            }),
+            expect.any(Object),
+        );
     });
 
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {
