@@ -33,7 +33,7 @@ describe('runtime-execution', () => {
         createResponse.mockResolvedValue({ id: 'resp_direct' });
     });
 
-    test('keeps conversation executor disabled by default even when orchestrator exists', async () => {
+    test('uses the conversation orchestrator by default when it is available', async () => {
         const executeConversation = jest.fn().mockResolvedValue({
             success: true,
             response: { id: 'resp_executor' },
@@ -51,20 +51,17 @@ describe('runtime-execution', () => {
             memoryInput: 'Answer directly.',
         });
 
-        expect(executeConversation).not.toHaveBeenCalled();
-        expect(memoryService.process).toHaveBeenCalledWith('session-1', 'Answer directly.');
-        expect(sessionStore.getRecentMessages).toHaveBeenCalledWith('session-1', 12);
-        expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+        expect(executeConversation).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-1',
             input: 'Answer directly.',
-            contextMessages: ['Remembered context'],
-            recentMessages: [{ role: 'assistant', content: 'Earlier reply' }],
+            executionProfile: 'default',
         }));
-        expect(result.handledPersistence).toBe(false);
-        expect(result.runtimeMode).toBe('direct');
+        expect(createResponse).not.toHaveBeenCalled();
+        expect(result.handledPersistence).toBe(true);
+        expect(result.runtimeMode).toBe('orchestrated');
     });
 
-    test('routes to the multi-step executor only when explicitly requested', async () => {
+    test('passes explicit executor flags through to the orchestrator without needing a separate runtime mode', async () => {
         const executeConversation = jest.fn().mockResolvedValue({
             success: true,
             response: { id: 'resp_executor' },
@@ -87,12 +84,11 @@ describe('runtime-execution', () => {
             sessionId: 'session-2',
             input: 'Use the executor.',
             enableConversationExecutor: true,
-            useAgentExecutor: true,
             taskType: 'chat',
         }));
         expect(createResponse).not.toHaveBeenCalled();
         expect(result.handledPersistence).toBe(true);
-        expect(result.runtimeMode).toBe('executor');
+        expect(result.runtimeMode).toBe('orchestrated');
     });
 
     test('routes remote build requests to the executor even without the explicit flag', async () => {
@@ -116,10 +112,9 @@ describe('runtime-execution', () => {
         expect(executeConversation).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-remote-1',
             executionProfile: 'remote-build',
-            useAgentExecutor: true,
         }));
         expect(createResponse).not.toHaveBeenCalled();
-        expect(result.runtimeMode).toBe('executor');
+        expect(result.runtimeMode).toBe('orchestrated');
     });
 
     test('falls back to direct runtime if the executor is requested but unavailable', async () => {

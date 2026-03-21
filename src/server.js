@@ -29,8 +29,8 @@ const toolsRouter = require('./routes/tools');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
-const { ToolDefinition, ToolSideEffect } = require('./agent-sdk/tools/ToolDefinition');
 const { getAuthenticatedUser, getSafeReturnTo, requireAuth } = require('./auth/service');
+const { ConversationOrchestrator } = require('./conversation-orchestrator');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -49,60 +49,6 @@ let startupState = {
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-
-function mapToolSideEffects(sideEffects = []) {
-    const effectMap = {
-        read: ToolSideEffect.READ,
-        write: ToolSideEffect.WRITE,
-        network: ToolSideEffect.NETWORK,
-        execute: ToolSideEffect.EXECUTE,
-        none: ToolSideEffect.NONE,
-    };
-
-    return (Array.isArray(sideEffects) ? sideEffects : [])
-        .map((effect) => effectMap[String(effect || '').toLowerCase()])
-        .filter(Boolean);
-}
-
-function registerUnifiedToolsWithOrchestrator(orchestrator, toolManager) {
-    if (!orchestrator || !toolManager?.registry) {
-        return 0;
-    }
-
-    let registeredCount = 0;
-    const registryTools = toolManager.registry.getAllTools();
-
-    registryTools.forEach((tool) => {
-        if (!tool?.id || typeof tool?.backend?.handler !== 'function') {
-            return;
-        }
-
-        if (orchestrator.toolRegistry.has(tool.id)) {
-            return;
-        }
-
-        orchestrator.registerTool(new ToolDefinition({
-            id: tool.id,
-            name: tool.name || tool.id,
-            description: tool.description || '',
-            inputSchema: tool.inputSchema || { type: 'object', properties: {} },
-            outputSchema: tool.outputSchema || { type: 'object', properties: {} },
-            sideEffects: mapToolSideEffects(tool.backend.sideEffects),
-            handler: async (input, context = {}) => {
-                const result = await toolManager.executeTool(tool.id, input, context);
-                if (!result?.success) {
-                    throw new Error(result?.error || `Tool ${tool.id} failed`);
-                }
-                return result.data;
-            },
-            timeout: tool.backend.timeout || 30000,
-        }));
-
-        registeredCount += 1;
-    });
-
-    return registeredCount;
-}
 
 app.get('/health', async (_req, res) => {
     const checks = {
@@ -314,32 +260,20 @@ async function start() {
         app.locals.documentService = documentService;
         console.log('[Boot] Document service ready');
 
-        console.log('[Boot] Initializing Agent SDK...');
-        let agentOrchestrator = null;
+        console.log('[Boot] Initializing conversation orchestrator...');
+        const conversationOrchestrator = new ConversationOrchestrator({
+            llmClient: openaiClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+            embedder,
+            vectorStore,
+        });
+        console.log('[Boot] Conversation orchestrator ready');
 
-        try {
-            const { AgentOrchestrator } = require('./agent-sdk');
-            agentOrchestrator = new AgentOrchestrator({
-                llmClient: openaiClient,
-                embedder: embedder,
-                vectorStore: vectorStore,
-                sessionStore,
-                memoryService,
-                config: {
-                    enableTracing: true,
-                    enableSkills: true,
-                    // Keep the planner/executor available for explicit requests only.
-                    enableConversationAgentExecutor: true,
-                }
-            });
-            const registeredTools = registerUnifiedToolsWithOrchestrator(agentOrchestrator, toolManager);
-            console.log(`[Boot] Agent SDK ready (${registeredTools} tools registered)`);
-        } catch (sdkError) {
-            console.warn('[Boot] Agent SDK disabled:', sdkError.message);
-        }
-
-        app.locals.agentOrchestrator = agentOrchestrator;
-        app.locals.dashboardController = new DashboardController(agentOrchestrator);
+        app.locals.conversationOrchestrator = conversationOrchestrator;
+        app.locals.agentOrchestrator = conversationOrchestrator;
+        app.locals.dashboardController = new DashboardController(conversationOrchestrator);
         setDashboardController(app.locals.dashboardController);
         startupState.ready = true;
     } catch (err) {

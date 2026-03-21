@@ -104,21 +104,18 @@ function inferExecutionProfile(payload = {}) {
 
 async function executeConversationRuntime(app, params = {}) {
     const executionProfile = inferExecutionProfile(params);
-    const shouldUseExecutor = resolveConversationExecutorFlag(params)
-        || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE;
-    const agentOrchestrator = shouldUseExecutor
-        ? app?.locals?.agentOrchestrator
-        : null;
+    const orchestrator = app?.locals?.conversationOrchestrator
+        || app?.locals?.agentOrchestrator
+        || null;
 
-    if (agentOrchestrator?.executeConversation) {
+    if (orchestrator?.executeConversation) {
         return {
-            ...(await agentOrchestrator.executeConversation({
+            ...(await orchestrator.executeConversation({
                 ...params,
                 executionProfile,
-                useAgentExecutor: true,
             })),
             handledPersistence: true,
-            runtimeMode: 'executor',
+            runtimeMode: 'orchestrated',
         };
     }
 
