@@ -26,6 +26,24 @@ class WebCLIAPI {
         this.lastHealthCheck = null;
     }
 
+    async parseErrorResponse(response) {
+        if (!response) {
+            return '';
+        }
+
+        try {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                const data = await response.json();
+                return data?.error?.message || data?.message || JSON.stringify(data);
+            }
+
+            return (await response.text()).trim();
+        } catch (_error) {
+            return '';
+        }
+    }
+
     isLikelyLocalModel(modelId = '') {
         return /(ollama|llama|mistral|qwen|phi|gemma|deepseek|local)/i.test(String(modelId || ''));
     }
@@ -190,23 +208,26 @@ class WebCLIAPI {
         try {
             const response = await this.fetchWithRetry(`${API_BASE_URL}/chat/completions`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
+                },
                 body: JSON.stringify(params),
             }, MAX_RETRIES, this.getChatTimeout(params.model, true));
 
             if (!response.ok) {
-                const errorText = await response.text();
-                let errorMessage = `HTTP ${response.status}: ${errorText}`;
+                const errorText = await this.parseErrorResponse(response);
+                let errorMessage = errorText || `HTTP ${response.status}`;
                 let suggestions = [];
                 
                 if (response.status === 401) {
                     errorMessage = 'Authentication failed. Please check your API key.';
                     suggestions = ['Verify API key configuration', 'Check if API key has expired'];
                 } else if (response.status === 429) {
-                    errorMessage = 'Rate limit exceeded. Please wait a moment.';
+                    errorMessage = errorText || 'Rate limit exceeded. Please wait a moment.';
                     suggestions = ['Wait a few seconds before retrying', 'Consider reducing request frequency'];
-                } else if (response.status === 500) {
-                    errorMessage = 'Server error. The AI service may be experiencing issues.';
+                } else if (response.status >= 500) {
+                    errorMessage = errorText || 'Server error. The AI service may be experiencing issues.';
                     suggestions = ['Try again in a moment', 'Switch to a different model', 'Check server status'];
                 }
                 
@@ -214,15 +235,22 @@ class WebCLIAPI {
                 return;
             }
 
+            const responseSessionId = response.headers.get('X-Session-Id');
+            if (responseSessionId) {
+                this.sessionId = responseSessionId;
+            }
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
@@ -233,10 +261,16 @@ class WebCLIAPI {
                         }
                         try {
                             const parsed = JSON.parse(data);
-                            const content = parsed.choices?.[0]?.delta?.content || '';
-                            if (parsed.session_id) {
-                                this.sessionId = parsed.session_id;
+                            if (parsed.error) {
+                                yield {
+                                    type: 'error',
+                                    error: parsed.error.message || parsed.error || 'Stream error',
+                                    suggestions: ['Retry the request', 'Check backend logs if the problem persists'],
+                                };
+                                return;
                             }
+                            const content = parsed.choices?.[0]?.delta?.content || '';
+                            this.sessionId = parsed.session_id || this.sessionId;
                             if (content) {
                                 yield { type: 'delta', content };
                             }

@@ -38,6 +38,24 @@ class OpenAIAPIClient extends EventTarget {
         // Initialize OpenAI client
         this.initClient();
     }
+
+    async parseErrorPayload(response) {
+        if (!response) {
+            return null;
+        }
+
+        try {
+            const contentType = response.headers?.get?.('content-type') || '';
+            if (contentType.includes('application/json')) {
+                return await response.json();
+            }
+
+            const text = await response.text();
+            return text ? { error: { message: text } } : null;
+        } catch (_error) {
+            return null;
+        }
+    }
     
     initClient() {
         // Use fetch-only in the browser to avoid third-party SDK/CORS/tracking issues.
@@ -90,6 +108,15 @@ class OpenAIAPIClient extends EventTarget {
      * Parse error response to get user-friendly message
      */
     parseErrorMessage(error, response) {
+        const detailedMessage = error?.details?.error?.message
+            || error?.details?.message
+            || error?.response?.error?.message
+            || error?.response?.message;
+
+        if (detailedMessage) {
+            return detailedMessage;
+        }
+
         // Handle specific HTTP status codes
         if (response?.status === 400) {
             return 'Invalid request. Please check your message format and try again.';
@@ -197,12 +224,7 @@ class OpenAIAPIClient extends EventTarget {
                     error.response = response;
                     
                     // Try to get error details from response
-                    try {
-                        const errorData = await response.json();
-                        error.details = errorData;
-                    } catch (e) {
-                        // Ignore parsing errors
-                    }
+                    error.details = await this.parseErrorPayload(response);
                     
                     throw error;
                 }
@@ -437,6 +459,8 @@ class OpenAIAPIClient extends EventTarget {
                 if (!response.ok) {
                     const error = new Error(`HTTP ${response.status}`);
                     error.status = response.status;
+                    error.details = await this.parseErrorPayload(response);
+                    error.response = response;
                     throw error;
                 }
                 

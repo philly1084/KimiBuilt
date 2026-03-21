@@ -5,6 +5,7 @@
 
 class UIHelpers {
     constructor() {
+        this.storageAvailable = this.checkStorageAvailability();
         this.messageContainer = document.getElementById('messages-container');
         this.sessionsList = document.getElementById('sessions-list');
         this.searchResults = [];
@@ -84,6 +85,49 @@ class UIHelpers {
                 'palette', 'path', 'pocket', 'report', 'sketch', 'story', 'studio', 'summit', 'trail'
             ],
         };
+    }
+
+    checkStorageAvailability() {
+        try {
+            const key = '__webchat_ui_storage_test__';
+            localStorage.setItem(key, '1');
+            localStorage.removeItem(key);
+            return true;
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    storageGet(key) {
+        if (!this.storageAvailable) return null;
+        try {
+            return localStorage.getItem(key);
+        } catch (_error) {
+            this.storageAvailable = false;
+            return null;
+        }
+    }
+
+    storageSet(key, value) {
+        if (!this.storageAvailable) return false;
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (_error) {
+            this.storageAvailable = false;
+            return false;
+        }
+    }
+
+    storageRemove(key) {
+        if (!this.storageAvailable) return false;
+        try {
+            localStorage.removeItem(key);
+            return true;
+        } catch (_error) {
+            this.storageAvailable = false;
+            return false;
+        }
     }
 
     generatePleasantFilenameBase() {
@@ -3017,7 +3061,7 @@ class UIHelpers {
         }
         
         // Save preference
-        localStorage.setItem('webchat_input_hidden', isHidden ? 'true' : 'false');
+        this.storageSet('webchat_input_hidden', isHidden ? 'true' : 'false');
         
         // Scroll to bottom if showing input
         if (!isHidden) {
@@ -3029,7 +3073,7 @@ class UIHelpers {
     }
     
     restoreInputAreaState() {
-        const isHidden = localStorage.getItem('webchat_input_hidden') === 'true';
+        const isHidden = this.storageGet('webchat_input_hidden') === 'true';
         if (isHidden) {
             const inputArea = document.getElementById('input-area');
             const toggleBtn = document.getElementById('input-toggle-btn');
@@ -3069,8 +3113,8 @@ class UIHelpers {
     saveDraft(content) {
         try {
             if (content && content.trim()) {
-                localStorage.setItem('kimibuilt_message_draft', content);
-                localStorage.setItem('kimibuilt_message_draft_time', Date.now().toString());
+                this.storageSet('kimibuilt_message_draft', content);
+                this.storageSet('kimibuilt_message_draft_time', Date.now().toString());
             } else {
                 this.clearDraft();
             }
@@ -3081,8 +3125,8 @@ class UIHelpers {
     
     restoreDraft() {
         try {
-            const draft = localStorage.getItem('kimibuilt_message_draft');
-            const draftTime = localStorage.getItem('kimibuilt_message_draft_time');
+            const draft = this.storageGet('kimibuilt_message_draft');
+            const draftTime = this.storageGet('kimibuilt_message_draft_time');
             
             if (draft && draftTime) {
                 const age = Date.now() - parseInt(draftTime, 10);
@@ -3107,8 +3151,8 @@ class UIHelpers {
     
     clearDraft() {
         try {
-            localStorage.removeItem('kimibuilt_message_draft');
-            localStorage.removeItem('kimibuilt_message_draft_time');
+            this.storageRemove('kimibuilt_message_draft');
+            this.storageRemove('kimibuilt_message_draft_time');
         } catch (e) {
             console.warn('Failed to clear draft:', e);
         }

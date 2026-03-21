@@ -4,6 +4,8 @@
  */
 function errorHandler(err, req, res, _next) {
     console.error(`[Error] ${err.message}`, err.stack);
+    const isCompatApiRequest = typeof req?.path === 'string'
+        && (req.path.startsWith('/v1/') || req.path.startsWith('/api/chat'));
 
     // OpenAI API errors
     if (err.constructor?.name === 'APIError' || err.status) {
@@ -33,7 +35,7 @@ function errorHandler(err, req, res, _next) {
         error: {
             type: 'internal_error',
             message:
-                process.env.NODE_ENV === 'production'
+                process.env.NODE_ENV === 'production' && !isCompatApiRequest
                     ? 'An internal error occurred'
                     : err.message,
         },

@@ -968,16 +968,19 @@ class ChatApp {
         console.error('Chat error:', message, 'status:', status);
         
         // Check if this is a network/connection error that we should handle gracefully
-        const isNetworkError = !status || status === 0 || status === 408 ||
+        const normalizedMessage = String(message || '').toLowerCase();
+        const isNetworkError = status == null || status === 0 || status === 408 ||
             message?.includes('fetch') || 
-            message?.includes('network') ||
+            normalizedMessage.includes('network') ||
             message?.includes('Failed to fetch') ||
-            message?.includes('abort') ||
-            message?.includes('timeout') ||
-            message?.includes('disconnected');
+            normalizedMessage.includes('abort') ||
+            normalizedMessage.includes('timeout') ||
+            normalizedMessage.includes('disconnected');
+
+        const isServerError = typeof status === 'number' && status >= 500;
         
         // For network errors, try to retry instead of immediately failing
-        if (isNetworkError && this.retryAttempt < this.maxRetries) {
+        if (isNetworkError && !isServerError && this.retryAttempt < this.maxRetries) {
             this.retryAttempt++;
             console.log(`[ChatApp] Retrying after network error (attempt ${this.retryAttempt}/${this.maxRetries})...`);
             

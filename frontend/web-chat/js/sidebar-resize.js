@@ -16,12 +16,45 @@ class SidebarResizer {
     this.maxWidth = 500;
     this.defaultWidth = 300;
     this.collapsedWidth = 60; // Width when collapsed (just icons)
+    this.storageAvailable = this.checkStorageAvailability();
     
     // Load saved width
     this.currentWidth = this.loadWidth();
     this.isCollapsed = this.loadCollapsedState();
     
     this.init();
+  }
+
+  checkStorageAvailability() {
+    try {
+      const key = '__webchat_sidebar_storage_test__';
+      localStorage.setItem(key, '1');
+      localStorage.removeItem(key);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  storageGet(key) {
+    if (!this.storageAvailable) return null;
+    try {
+      return localStorage.getItem(key);
+    } catch (_error) {
+      this.storageAvailable = false;
+      return null;
+    }
+  }
+
+  storageSet(key, value) {
+    if (!this.storageAvailable) return false;
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (_error) {
+      this.storageAvailable = false;
+      return false;
+    }
   }
   
   init() {
@@ -391,27 +424,19 @@ class SidebarResizer {
    * Save width to localStorage
    */
   saveWidth(width) {
-    try {
-      localStorage.setItem('kimibuilt_sidebar_width', width.toString());
-    } catch (e) {
-      // Ignore storage errors
-    }
+    this.storageSet('kimibuilt_sidebar_width', width.toString());
   }
   
   /**
    * Load width from localStorage
    */
   loadWidth() {
-    try {
-      const saved = localStorage.getItem('kimibuilt_sidebar_width');
-      if (saved) {
-        const width = parseInt(saved, 10);
-        if (width >= this.minWidth && width <= this.maxWidth) {
-          return width;
-        }
+    const saved = this.storageGet('kimibuilt_sidebar_width');
+    if (saved) {
+      const width = parseInt(saved, 10);
+      if (width >= this.minWidth && width <= this.maxWidth) {
+        return width;
       }
-    } catch (e) {
-      // Ignore storage errors
     }
     return this.defaultWidth;
   }
@@ -420,22 +445,14 @@ class SidebarResizer {
    * Save collapsed state
    */
   saveCollapsedState(collapsed) {
-    try {
-      localStorage.setItem('kimibuilt_sidebar_collapsed', collapsed ? '1' : '0');
-    } catch (e) {
-      // Ignore storage errors
-    }
+    this.storageSet('kimibuilt_sidebar_collapsed', collapsed ? '1' : '0');
   }
   
   /**
    * Load collapsed state
    */
   loadCollapsedState() {
-    try {
-      return localStorage.getItem('kimibuilt_sidebar_collapsed') === '1';
-    } catch (e) {
-      return false;
-    }
+    return this.storageGet('kimibuilt_sidebar_collapsed') === '1';
   }
   
   /**
