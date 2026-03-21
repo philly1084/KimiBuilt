@@ -5,6 +5,8 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    inferOutputFormatFromSession,
+    resolveArtifactContextIds,
 } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
@@ -139,7 +141,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         return;
     }
 
-    const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
+    const effectiveOutputFormat = outputFormat
+        || inferOutputFormatFromText(message)
+        || inferOutputFormatFromSession(message, session);
+    const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
         input: message,
@@ -157,11 +162,17 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
                 prompt: message,
-                artifactIds,
+                artifactIds: effectiveArtifactIds,
                 model,
             });
 
             await sessionStore.recordResponse(session.id, generation.responseId);
+            await sessionStore.update(session.id, {
+                metadata: {
+                    lastOutputFormat: effectiveOutputFormat,
+                    lastGeneratedArtifactId: generation.artifact.id,
+                },
+            });
             memoryService.rememberResponse(session.id, generation.assistantMessage);
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: message },
@@ -189,7 +200,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         const instructions = await buildInstructionsWithArtifacts(
             session,
             'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
-            artifactIds,
+            effectiveArtifactIds,
         );
         const execution = await executeRuntimeResponse(ws.app, {
             input: message,

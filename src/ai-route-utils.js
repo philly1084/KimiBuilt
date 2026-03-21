@@ -91,6 +91,40 @@ function buildArtifactCompletionMessage(outputFormat, artifact) {
     return `Created the ${formatLabel} artifact${filename}.`;
 }
 
+function isArtifactContinuationPrompt(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const continuationPatterns = [
+        /^(continue|finish|refine|revise|update|improve|polish|expand|edit|redo|rework)\b/,
+        /\b(another pass|next pass|keep going|work on it|finish it|continue it|same one|current page content)\b/,
+        /\b(the pdf|this pdf|that pdf|the document|this document|that document|the file|this file|that file)\b/,
+    ];
+
+    return continuationPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function inferOutputFormatFromSession(text = '', session = null) {
+    const lastOutputFormat = normalizeFormat(session?.metadata?.lastOutputFormat || '');
+    const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId || '';
+    if (!lastOutputFormat || !lastGeneratedArtifactId) {
+        return null;
+    }
+
+    return isArtifactContinuationPrompt(text) ? lastOutputFormat : null;
+}
+
+function resolveArtifactContextIds(session = null, artifactIds = []) {
+    if (Array.isArray(artifactIds) && artifactIds.length > 0) {
+        return artifactIds;
+    }
+
+    const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId;
+    return lastGeneratedArtifactId ? [lastGeneratedArtifactId] : [];
+}
+
 async function generateOutputArtifactFromPrompt({
     sessionId,
     session = null,
@@ -138,5 +172,7 @@ module.exports = {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
+    inferOutputFormatFromSession,
+    resolveArtifactContextIds,
 };
 

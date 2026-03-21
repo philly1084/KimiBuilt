@@ -7,6 +7,8 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    inferOutputFormatFromSession,
+    resolveArtifactContextIds,
 } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
@@ -89,7 +91,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const effectiveOutputFormat = outputFormat || inferOutputFormatFromText(message);
+        const effectiveOutputFormat = outputFormat
+            || inferOutputFormatFromText(message)
+            || inferOutputFormatFromSession(message, session);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
         runtimeTask = startRuntimeTask({
             sessionId,
             input: message,
@@ -113,11 +118,17 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
                 prompt: message,
-                artifactIds,
+                artifactIds: effectiveArtifactIds,
                 model,
             });
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
+            await sessionStore.update(sessionId, {
+                metadata: {
+                    lastOutputFormat: effectiveOutputFormat,
+                    lastGeneratedArtifactId: generation.artifact.id,
+                },
+            });
             memoryService.rememberResponse(sessionId, generation.assistantMessage);
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
@@ -156,7 +167,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const instructions = await buildInstructionsWithArtifacts(
             session,
             'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. Be concise and informative.',
-            artifactIds,
+            effectiveArtifactIds,
         );
 
         if (stream) {

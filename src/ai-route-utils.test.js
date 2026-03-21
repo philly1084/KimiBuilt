@@ -9,6 +9,8 @@ const { artifactService } = require('./artifacts/artifact-service');
 const {
     buildArtifactCompletionMessage,
     generateOutputArtifactFromPrompt,
+    inferOutputFormatFromSession,
+    resolveArtifactContextIds,
 } = require('./ai-route-utils');
 
 describe('ai-route-utils', () => {
@@ -72,5 +74,22 @@ describe('ai-route-utils', () => {
             artifactIds: ['artifact-a'],
             model: 'gpt-test',
         }));
+    });
+
+    test('inferOutputFormatFromSession keeps artifact workflows sticky on continuation turns', () => {
+        expect(inferOutputFormatFromSession('another pass, keep the pacing quieter', {
+            metadata: {
+                lastOutputFormat: 'pdf',
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        })).toBe('pdf');
+    });
+
+    test('resolveArtifactContextIds falls back to the last generated artifact', () => {
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        }, [])).toEqual(['artifact-1']);
     });
 });

@@ -6,6 +6,8 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    inferOutputFormatFromSession,
+    resolveArtifactContextIds,
 } = require('../ai-route-utils');
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
@@ -192,7 +194,10 @@ router.post('/chat/completions', async (req, res, next) => {
         }
 
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
-        const effectiveOutputFormat = output_format || inferOutputFormatFromText(lastUserMessage?.content || '');
+        const effectiveOutputFormat = output_format
+            || inferOutputFormatFromText(lastUserMessage?.content || '')
+            || inferOutputFormatFromSession(lastUserMessage?.content || '', session);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
         runtimeTask = startRuntimeTask({
             sessionId,
             input: lastUserMessage?.content || JSON.stringify(messages),
@@ -216,11 +221,17 @@ router.post('/chat/completions', async (req, res, next) => {
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
                 prompt: lastUserMessage?.content || '',
-                artifactIds: artifact_ids,
+                artifactIds: effectiveArtifactIds,
                 model,
             });
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
+            await sessionStore.update(sessionId, {
+                metadata: {
+                    lastOutputFormat: effectiveOutputFormat,
+                    lastGeneratedArtifactId: generation.artifact.id,
+                },
+            });
             memoryService.rememberResponse(sessionId, generation.assistantMessage);
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: lastUserMessage?.content || '' },
@@ -288,7 +299,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const instructions = await buildInstructionsWithArtifacts(
             session,
             buildContinuityInstructions(artifactInstructions),
-            artifact_ids,
+            effectiveArtifactIds,
         );
         const input = messages.map((message) => ({ role: message.role, content: message.content }));
 
@@ -498,7 +509,10 @@ router.post('/responses', async (req, res, next) => {
         const userInput = typeof input === 'string'
             ? input
             : input.filter((item) => item.role === 'user').pop()?.content || '';
-        const effectiveOutputFormat = output_format || inferOutputFormatFromText(userInput);
+        const effectiveOutputFormat = output_format
+            || inferOutputFormatFromText(userInput)
+            || inferOutputFormatFromSession(userInput, session);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
         runtimeTask = startRuntimeTask({
             sessionId,
             input: userInput || JSON.stringify(input),
@@ -522,11 +536,17 @@ router.post('/responses', async (req, res, next) => {
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
                 prompt: userInput,
-                artifactIds: artifact_ids,
+                artifactIds: effectiveArtifactIds,
                 model,
             });
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
+            await sessionStore.update(sessionId, {
+                metadata: {
+                    lastOutputFormat: effectiveOutputFormat,
+                    lastGeneratedArtifactId: generation.artifact.id,
+                },
+            });
             memoryService.rememberResponse(sessionId, generation.assistantMessage);
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: userInput },
@@ -579,7 +599,7 @@ router.post('/responses', async (req, res, next) => {
         const fullInstructions = await buildInstructionsWithArtifacts(
             session,
             [buildContinuityInstructions(), instructions || '', artifactInstructions].filter(Boolean).join('\n\n'),
-            artifact_ids,
+            effectiveArtifactIds,
         );
 
         if (stream) {
