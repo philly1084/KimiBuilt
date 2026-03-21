@@ -811,6 +811,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const selectedIds = new Set();
     const normalizedPrompt = String(prompt || '').toLowerCase();
     const hasUrl = /https?:\/\//i.test(normalizedPrompt);
+    const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/i.test(normalizedPrompt);
     const hasWebResearchIntent = Boolean(
         extractExplicitWebResearchQuery(prompt)
         || /\b(latest|current|today|news|web research|research|look up|search for|search the web|browse)\b/i.test(normalizedPrompt)
@@ -820,8 +821,13 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         selectedIds.add('web-search');
     }
 
+    if (hasExplicitScrapeIntent) {
+        selectedIds.add('web-search');
+        selectedIds.add('web-scrape');
+    }
+
     if (hasUrl) {
-        if (/\b(scrape|extract|selector|structured|parse)\b/i.test(normalizedPrompt)) {
+        if (hasExplicitScrapeIntent) {
             selectedIds.add('web-scrape');
         } else {
             selectedIds.add('web-fetch');
@@ -923,7 +929,7 @@ function buildAutomaticToolGuidance(automaticTools = []) {
     const guidance = [
         'You can use the provided tools whenever they will improve accuracy or gather missing data.',
         'Treat the tool definitions attached to this request as the source of truth for tool availability.',
-        'Do not claim tools are unavailable because of external config names or missing meta variables such as AVAILABLE_TOOLS_JSON.',
+        'Do not claim tools are unavailable because of absent meta variables or guessed config names when the tool definitions are attached to the request.',
     ];
 
     if (automaticTools.some((entry) => entry.id === 'web-search')) {

@@ -167,4 +167,35 @@ describe('ConversationOrchestrator', () => {
         expect(result.response.metadata.executionProfile).toBe('remote-build');
         expect(result.output).toBe('Deployment is healthy.');
     });
+
+    test('treats explicit web research and scrape requests as first-class tool intents', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'web-fetch', 'web-scrape'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const researchPolicy = orchestrator.buildToolPolicy({
+            objective: 'Can you do web research on this company for me?',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const scrapePolicy = orchestrator.buildToolPolicy({
+            objective: 'Please scrape this site for the contact information.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(researchPolicy.candidateToolIds).toContain('web-search');
+        expect(scrapePolicy.candidateToolIds).toContain('web-search');
+        expect(scrapePolicy.candidateToolIds).toContain('web-scrape');
+    });
 });

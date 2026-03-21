@@ -458,6 +458,8 @@ class ConversationOrchestrator extends EventEmitter {
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
         const candidates = new Set();
         const hasUrl = /https?:\/\//i.test(prompt);
+        const hasExplicitWebResearchIntent = /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(prompt);
+        const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/.test(prompt);
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
 
@@ -486,11 +488,22 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('file-mkdir');
             }
         } else {
-            if (/\b(latest|current|today|news|research|look up|search|browse)\b/.test(prompt) && allowedToolIds.includes('web-search')) {
+            if ((hasExplicitWebResearchIntent || /\b(latest|current|today|news|research|look up|search|browse)\b/.test(prompt)) && allowedToolIds.includes('web-search')) {
                 candidates.add('web-search');
             }
+            if (hasExplicitScrapeIntent) {
+                if (allowedToolIds.includes('web-search')) {
+                    candidates.add('web-search');
+                }
+                if (allowedToolIds.includes('web-scrape')) {
+                    candidates.add('web-scrape');
+                }
+            }
+            if (hasExplicitWebResearchIntent && hasUrl && allowedToolIds.includes('web-fetch')) {
+                candidates.add('web-fetch');
+            }
             if (hasUrl && allowedToolIds.includes('web-fetch')) {
-                candidates.add(/\b(scrape|extract|selector|structured|parse)\b/.test(prompt) && allowedToolIds.includes('web-scrape')
+                candidates.add(hasExplicitScrapeIntent && allowedToolIds.includes('web-scrape')
                     ? 'web-scrape'
                     : 'web-fetch');
             }
