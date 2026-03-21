@@ -8,6 +8,9 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    resolveSshRequestContext,
+    formatSshToolResult,
+    extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
 } = require('../ai-route-utils');
@@ -92,6 +95,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
+        const sshContext = resolveSshRequestContext(message, session);
+        const effectiveMessage = sshContext.effectivePrompt || message;
         const effectiveOutputFormat = outputFormat
             || inferOutputFormatFromText(message)
             || inferOutputFormatFromSession(message, session);
@@ -178,8 +183,47 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             res.setHeader('X-Session-Id', sessionId);
 
             const toolManager = await ensureRuntimeToolManager(req.app);
+
+            if (sshContext.directParams) {
+                const sshResult = await toolManager.executeTool('ssh-execute', sshContext.directParams, {
+                    sessionId,
+                    route: '/api/chat',
+                    transport: 'http',
+                    toolManager,
+                });
+                const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
+                await sessionStore.update(sessionId, {
+                    metadata: {
+                        lastToolIntent: 'ssh-execute',
+                        ...(sshContext.target?.host ? {
+                            lastSshTarget: {
+                                host: sshContext.target.host,
+                                username: sshContext.target.username || '',
+                                port: sshContext.target.port || 22,
+                            },
+                        } : {}),
+                    },
+                });
+                memoryService.rememberResponse(sessionId, assistantMessage);
+                await sessionStore.appendMessages(sessionId, [
+                    { role: 'user', content: message },
+                    { role: 'assistant', content: assistantMessage },
+                ]);
+                completeRuntimeTask(runtimeTask?.id, {
+                    responseId: `tool-ssh-${Date.now()}`,
+                    output: assistantMessage,
+                    model: model || session?.metadata?.model || null,
+                    duration: Date.now() - startedAt,
+                    metadata: { directTool: 'ssh-execute' },
+                });
+                res.write(`data: ${JSON.stringify({ type: 'delta', content: assistantMessage })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: null, artifacts: [] })}\n\n`);
+                res.end();
+                return;
+            }
+
             const execution = await executeChatResponse(req.app, {
-                input: message,
+                input: effectiveMessage,
                 sessionId,
                 memoryInput: message,
                 previousResponseId: session.previousResponseId,
@@ -213,6 +257,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                             { role: 'assistant', content: fullText },
                         ]);
                     }
+                    const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
+                    if (sshMetadata) {
+                        await sessionStore.update(sessionId, { metadata: sshMetadata });
+                    }
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
@@ -239,15 +287,57 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return;
         }
 
+        const runtimeToolManager = await ensureRuntimeToolManager(req.app);
+        if (sshContext.directParams) {
+            const sshResult = await runtimeToolManager.executeTool('ssh-execute', sshContext.directParams, {
+                sessionId,
+                route: '/api/chat',
+                transport: 'http',
+                toolManager: runtimeToolManager,
+            });
+            const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
+            await sessionStore.update(sessionId, {
+                metadata: {
+                    lastToolIntent: 'ssh-execute',
+                    ...(sshContext.target?.host ? {
+                        lastSshTarget: {
+                            host: sshContext.target.host,
+                            username: sshContext.target.username || '',
+                            port: sshContext.target.port || 22,
+                        },
+                    } : {}),
+                },
+            });
+            memoryService.rememberResponse(sessionId, assistantMessage);
+            await sessionStore.appendMessages(sessionId, [
+                { role: 'user', content: message },
+                { role: 'assistant', content: assistantMessage },
+            ]);
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId: `tool-ssh-${Date.now()}`,
+                output: assistantMessage,
+                model: model || session?.metadata?.model || null,
+                duration: Date.now() - startedAt,
+                metadata: { directTool: 'ssh-execute' },
+            });
+            res.json({
+                sessionId,
+                responseId: null,
+                message: assistantMessage,
+                artifacts: [],
+            });
+            return;
+        }
+
         const execution = await executeChatResponse(req.app, {
-            input: message,
+            input: effectiveMessage,
             sessionId,
             memoryInput: message,
             previousResponseId: session.previousResponseId,
             instructions,
             stream: false,
             model,
-            toolManager: await ensureRuntimeToolManager(req.app),
+            toolManager: runtimeToolManager,
             toolContext: {
                 sessionId,
                 route: '/api/chat',
@@ -270,6 +360,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },
             ]);
+        }
+        const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
+        if (sshMetadata) {
+            await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,

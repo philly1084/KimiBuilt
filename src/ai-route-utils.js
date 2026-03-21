@@ -106,6 +106,184 @@ function isArtifactContinuationPrompt(text = '') {
     return continuationPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function promptHasExplicitSshIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\bssh\b/.test(normalized)
+        || /\b(remote host|remote server|remote machine)\b/.test(normalized)
+        || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(normalized);
+}
+
+function extractExplicitSshTarget(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const match = normalized.match(/\b(?:(?<username>[a-zA-Z0-9._-]+)@)?(?<host>(?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?::(?<port>\d{2,5}))?\b/);
+    if (!match?.groups?.host) {
+        return null;
+    }
+
+    return {
+        host: match.groups.host,
+        username: match.groups.username || null,
+        port: match.groups.port ? Number(match.groups.port) : null,
+    };
+}
+
+function extractRequestedSshCommand(text = '') {
+    const prompt = String(text || '').trim();
+    if (!prompt) {
+        return null;
+    }
+
+    const quotedPatterns = [
+        /\b(?:run|execute)\s+`([^`]+)`/i,
+        /\b(?:run|execute)\s+"([^"]+)"/i,
+        /\b(?:run|execute)\s+'([^']+)'/i,
+    ];
+
+    for (const pattern of quotedPatterns) {
+        const match = prompt.match(pattern);
+        if (match?.[1]) {
+            return match[1].trim();
+        }
+    }
+
+    if (/\b(?:check|inspect|verify|look at)\b[\s\S]{0,40}\b(?:health|status)\b/i.test(prompt)
+        || /\bhealth check\b/i.test(prompt)) {
+        return 'hostname && uptime && (df -h / || true) && (free -m || true)';
+    }
+
+    if (/\b(?:namespace|namespaces)\b/i.test(prompt) && /\b(kubernetes|k8s|cluster|kubectl)\b/i.test(prompt)) {
+        return 'kubectl get namespaces';
+    }
+
+    if (/\b(?:pod|pods)\b/i.test(prompt) && /\b(kubernetes|k8s|cluster|kubectl)\b/i.test(prompt)) {
+        return 'kubectl get pods -A';
+    }
+
+    return null;
+}
+
+function isSshContinuationPrompt(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /^(continue|finish|refine|update|configure|set up|setup|install|apply|use|lets|let's|now|then|next|okay|ok|go ahead)\b/.test(normalized)
+        || /\b(traefik|tls|ssl|acme|let'?s encrypt|certificate|cert|ingress|kubectl|namespace|pod|deployment|service|container|docker|restart|logs?|tunnel)\b/.test(normalized);
+}
+
+function formatSshTarget(target = {}) {
+    if (!target?.host) {
+        return '';
+    }
+
+    const username = target.username ? `${target.username}@` : '';
+    const port = target.port && Number(target.port) !== 22 ? `:${target.port}` : '';
+    return `${username}${target.host}${port}`;
+}
+
+function resolveSshRequestContext(text = '', session = null) {
+    const prompt = String(text || '').trim();
+    const explicitIntent = promptHasExplicitSshIntent(prompt);
+    const explicitTarget = extractExplicitSshTarget(prompt);
+    const sessionTarget = session?.metadata?.lastSshTarget || null;
+    const target = explicitTarget || sessionTarget;
+    const stickySsh = session?.metadata?.lastToolIntent === 'ssh-execute'
+        || session?.metadata?.lastToolIntent === 'remote-command';
+    const continuation = !explicitIntent && stickySsh && target?.host && isSshContinuationPrompt(prompt);
+    const effectivePrompt = continuation
+        ? `SSH into ${formatSshTarget(target)} and ${prompt}`
+        : prompt;
+    const command = extractRequestedSshCommand(effectivePrompt);
+
+    return {
+        explicitIntent,
+        continuation,
+        shouldTreatAsSsh: explicitIntent || continuation,
+        effectivePrompt,
+        target,
+        command,
+        directParams: target?.host && command
+            ? {
+                host: target.host,
+                ...(target.username ? { username: target.username } : {}),
+                ...(target.port ? { port: target.port } : {}),
+                command,
+            }
+            : null,
+    };
+}
+
+function formatSshToolResult(result = {}, fallbackTarget = null) {
+    if (!result?.success) {
+        return `SSH request failed: ${result?.error || 'Unknown SSH error'}`;
+    }
+
+    const host = result?.data?.host || formatSshTarget(fallbackTarget) || 'remote host';
+    const stdout = String(result?.data?.stdout || '').trim();
+    const stderr = String(result?.data?.stderr || '').trim();
+    const sections = [`SSH command completed on ${host}.`];
+
+    if (stdout) {
+        sections.push(`STDOUT:\n${stdout}`);
+    }
+
+    if (stderr) {
+        sections.push(`STDERR:\n${stderr}`);
+    }
+
+    return sections.join('\n\n');
+}
+
+function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+
+    for (const event of events) {
+        const toolName = event?.toolCall?.function?.name;
+        if (toolName !== 'ssh-execute' && toolName !== 'remote-command') {
+            continue;
+        }
+
+        let args = {};
+        try {
+            args = JSON.parse(event?.toolCall?.function?.arguments || '{}');
+        } catch (_error) {
+            args = {};
+        }
+
+        const hostField = String(event?.result?.data?.host || '').trim();
+        const hostMatch = hostField.match(/^(?<host>[^:]+)(?::(?<port>\d+))?$/);
+        const host = args.host || hostMatch?.groups?.host || null;
+        const port = args.port || (hostMatch?.groups?.port ? Number(hostMatch.groups.port) : null);
+        const username = args.username || null;
+
+        if (!host) {
+            return {
+                lastToolIntent: 'ssh-execute',
+            };
+        }
+
+        return {
+            lastToolIntent: 'ssh-execute',
+            lastSshTarget: {
+                host,
+                username,
+                port: port || 22,
+            },
+        };
+    }
+
+    return null;
+}
+
 function inferOutputFormatFromSession(text = '', session = null) {
     const lastOutputFormat = normalizeFormat(session?.metadata?.lastOutputFormat || '');
     const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId || '';
@@ -173,6 +351,9 @@ module.exports = {
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
     isArtifactContinuationPrompt,
+    resolveSshRequestContext,
+    formatSshToolResult,
+    extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
 };

@@ -6,6 +6,9 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    resolveSshRequestContext,
+    formatSshToolResult,
+    extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
 } = require('../ai-route-utils');
@@ -142,6 +145,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         return;
     }
 
+    const sshContext = resolveSshRequestContext(message, session);
+    const effectiveMessage = sshContext.effectivePrompt || message;
     const effectiveOutputFormat = outputFormat
         || inferOutputFormatFromText(message)
         || inferOutputFormatFromSession(message, session);
@@ -157,6 +162,48 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
 
     try {
         const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
+
+        if (sshContext.directParams) {
+            const sshResult = await runtimeToolManager.executeTool('ssh-execute', sshContext.directParams, {
+                sessionId: session.id,
+                route: '/ws',
+                transport: 'ws',
+                toolManager: runtimeToolManager,
+            });
+            const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
+            await sessionStore.update(session.id, {
+                metadata: {
+                    lastToolIntent: 'ssh-execute',
+                    ...(sshContext.target?.host ? {
+                        lastSshTarget: {
+                            host: sshContext.target.host,
+                            username: sshContext.target.username || '',
+                            port: sshContext.target.port || 22,
+                        },
+                    } : {}),
+                },
+            });
+            memoryService.rememberResponse(session.id, assistantMessage);
+            await sessionStore.appendMessages(session.id, [
+                { role: 'user', content: message },
+                { role: 'assistant', content: assistantMessage },
+            ]);
+            completeRuntimeTask(runtimeTask?.id, {
+                responseId: `tool-ssh-${Date.now()}`,
+                output: assistantMessage,
+                model: model || null,
+                duration: Date.now() - startedAt,
+                metadata: { directTool: 'ssh-execute' },
+            });
+            ws.send(JSON.stringify({ type: 'delta', content: assistantMessage }));
+            ws.send(JSON.stringify({
+                type: 'done',
+                sessionId: session.id,
+                responseId: null,
+                artifacts: [],
+            }));
+            return;
+        }
 
         if (effectiveOutputFormat) {
             const generation = await generateOutputArtifactFromPrompt({
@@ -206,7 +253,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             effectiveArtifactIds,
         );
         const execution = await executeRuntimeResponse(ws.app, {
-            input: message,
+            input: effectiveMessage,
             sessionId: session.id,
             memoryInput: message,
             previousResponseId: session.previousResponseId,
@@ -239,6 +286,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                         { role: 'user', content: message },
                         { role: 'assistant', content: fullText },
                     ]);
+                }
+                const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
+                if (sshMetadata) {
+                    await sessionStore.update(session.id, { metadata: sshMetadata });
                 }
                 const artifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,

@@ -84,6 +84,11 @@ class ToolManager {
     try {
       const tools = [
         new SSHExecuteTool(),
+        new SSHExecuteTool({
+          id: 'remote-command',
+          name: 'Remote Command',
+          description: 'Execute remote server commands over SSH',
+        }),
         new DockerExecTool()
       ];
 
@@ -396,6 +401,7 @@ class ToolManager {
   getSSHTriggerPatterns(toolId) {
     const patterns = {
       'ssh-execute': ['ssh', 'remote command', 'execute on server', 'run on host'],
+      'remote-command': ['remote command', 'run remotely', 'execute remotely', 'ssh'],
       'docker-exec': ['docker', 'container', 'run in container', 'docker exec']
     };
     return patterns[toolId] || [toolId];

@@ -10,11 +10,11 @@ const { spawn } = require('child_process');
 const settingsController = require('../../../../routes/admin/settings.controller');
 
 class SSHExecuteTool extends ToolBase {
-  constructor() {
+  constructor(overrides = {}) {
     super({
-      id: 'ssh-execute',
-      name: 'SSH Command',
-      description: 'Execute commands on remote servers via SSH',
+      id: overrides.id || 'ssh-execute',
+      name: overrides.name || 'SSH Command',
+      description: overrides.description || 'Execute commands on remote servers via SSH',
       category: 'ssh',
       version: '1.0.0',
       backend: {

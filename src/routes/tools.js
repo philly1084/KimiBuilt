@@ -62,7 +62,7 @@ function buildRuntimeSummary(toolManager) {
 }
 
 function buildToolRuntime(toolId) {
-  if (toolId === 'ssh-execute') {
+  if (toolId === 'ssh-execute' || toolId === 'remote-command') {
     const ssh = settingsController.getEffectiveSshConfig();
     return {
       configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
@@ -111,6 +111,25 @@ async function resolveToolSessionId(requestedSessionId = null) {
 
   const session = await sessionStore.create({ mode: 'chat' });
   return session.id;
+}
+
+async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
+  if (!sessionId || (toolId !== 'ssh-execute' && toolId !== 'remote-command')) {
+    return;
+  }
+
+  await sessionStore.update(sessionId, {
+    metadata: {
+      lastToolIntent: 'ssh-execute',
+      ...(params.host ? {
+        lastSshTarget: {
+          host: params.host,
+          username: params.username || '',
+          port: params.port || 22,
+        },
+      } : {}),
+    },
+  });
 }
 
 /**
@@ -293,6 +312,7 @@ router.post('/invoke', async (req, res) => {
       params,
       buildToolExecutionContext(toolManager, req, resolvedSessionId),
     );
+    await updateSessionToolMetadata(resolvedSessionId, toolId, params);
     
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
@@ -318,6 +338,7 @@ router.post('/invoke/:id', async (req, res) => {
       params,
       buildToolExecutionContext(toolManager, req, resolvedSessionId),
     );
+    await updateSessionToolMetadata(resolvedSessionId, id, params);
     
     res.json({ success: true, data: result, sessionId: resolvedSessionId });
   } catch (error) {
