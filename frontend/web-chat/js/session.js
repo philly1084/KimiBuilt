@@ -303,6 +303,92 @@ class SessionManager extends EventTarget {
         return true;
     }
 
+    promoteSessionId(oldSessionId, newSessionId) {
+        const previousSessionId = oldSessionId || this.currentSessionId;
+
+        if (!newSessionId) {
+            return previousSessionId;
+        }
+
+        if (previousSessionId === newSessionId) {
+            const session = this.sessions.find((entry) => entry.id === newSessionId);
+            if (session) {
+                session.isLocal = false;
+            }
+            this.currentSessionId = newSessionId;
+            this.saveToStorage();
+            return newSessionId;
+        }
+
+        const previousMessages = this.sessionMessages.get(previousSessionId) || [];
+        const existingMessages = this.sessionMessages.get(newSessionId) || [];
+        const mergedMessages = [...existingMessages];
+
+        previousMessages.forEach((message) => {
+            const duplicate = mergedMessages.some((candidate) =>
+                candidate.id === message.id
+                || (
+                    candidate.role === message.role
+                    && candidate.content === message.content
+                    && candidate.timestamp === message.timestamp
+                ));
+
+            if (!duplicate) {
+                mergedMessages.push(message);
+            }
+        });
+
+        const previousSession = this.sessions.find((entry) => entry.id === previousSessionId);
+        const existingSession = this.sessions.find((entry) => entry.id === newSessionId);
+
+        if (previousSession) {
+            if (existingSession && existingSession !== previousSession) {
+                existingSession.title = existingSession.title === 'New Chat' ? previousSession.title : existingSession.title;
+                existingSession.model = existingSession.model || previousSession.model;
+                existingSession.mode = existingSession.mode || previousSession.mode;
+                existingSession.isLocal = false;
+                this.sessions = this.sessions.filter((entry) => entry.id !== previousSessionId);
+            } else {
+                previousSession.id = newSessionId;
+                previousSession.isLocal = false;
+            }
+        } else if (!existingSession) {
+            this.sessions.unshift({
+                id: newSessionId,
+                mode: 'chat',
+                model: 'gpt-4o',
+                title: 'New Chat',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                isLocal: false,
+                version: this.version,
+            });
+        }
+
+        if (previousSessionId && previousSessionId !== newSessionId) {
+            this.sessionMessages.delete(previousSessionId);
+        }
+        this.sessionMessages.set(newSessionId, mergedMessages);
+
+        if (this.currentSessionId === previousSessionId || !this.currentSessionId) {
+            this.currentSessionId = newSessionId;
+        }
+
+        this.saveToStorage();
+        this.dispatchEvent(new CustomEvent('sessionPromoted', {
+            detail: {
+                previousSessionId,
+                sessionId: newSessionId,
+                messages: mergedMessages,
+            },
+        }));
+        this.dispatchEvent(new CustomEvent('sessionsChanged', {
+            detail: { sessions: this.sessions },
+        }));
+
+        return newSessionId;
+    }
+
     setSessionModel(sessionId, model) {
         const session = this.sessions.find(s => s.id === sessionId);
         if (session) {

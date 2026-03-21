@@ -7,6 +7,7 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    isArtifactContinuationPrompt,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
 } = require('../ai-route-utils');
@@ -59,6 +60,78 @@ function inferOutputFormatFromText(text = '') {
     ];
 
     return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
+}
+
+function normalizeMessageText(content = '') {
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map((item) => {
+                if (typeof item === 'string') {
+                    return item;
+                }
+
+                if (item?.type === 'text' || item?.type === 'input_text' || item?.type === 'output_text') {
+                    return item.text || '';
+                }
+
+                return '';
+            })
+            .filter(Boolean)
+            .join('\n');
+    }
+
+    return '';
+}
+
+function inferOutputFormatFromTranscript(messages = [], session = null) {
+    const normalizedMessages = Array.isArray(messages) ? messages : [];
+    const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
+    const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
+
+    if (!isArtifactContinuationPrompt(lastUserText)) {
+        return inferOutputFormatFromSession(lastUserText, session);
+    }
+
+    for (let index = normalizedMessages.length - 1; index >= 0; index -= 1) {
+        const message = normalizedMessages[index];
+        const format = inferOutputFormatFromText(normalizeMessageText(message?.content || ''));
+        if (format) {
+            return format;
+        }
+    }
+
+    return inferOutputFormatFromSession(lastUserText, session);
+}
+
+function buildArtifactPromptFromTranscript(messages = [], fallbackPrompt = '') {
+    const normalizedMessages = Array.isArray(messages) ? messages : [];
+    const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
+    const lastUserText = normalizeMessageText(lastUserMessage?.content || fallbackPrompt);
+
+    if (!isArtifactContinuationPrompt(lastUserText)) {
+        return lastUserText || fallbackPrompt;
+    }
+
+    const transcript = normalizedMessages
+        .filter((message) => ['user', 'assistant', 'tool'].includes(message?.role))
+        .slice(-8)
+        .map((message) => `${message.role}: ${normalizeMessageText(message?.content || '')}`.trim())
+        .filter((line) => line && !line.endsWith(':'))
+        .join('\n');
+
+    if (!transcript) {
+        return lastUserText || fallbackPrompt;
+    }
+
+    return [
+        'Continue or refine the same artifact request using this recent conversation context.',
+        transcript,
+        `Current request: ${lastUserText || fallbackPrompt}`,
+    ].filter(Boolean).join('\n\n');
 }
 
 function buildContinuityInstructions(extra = '') {
@@ -195,13 +268,15 @@ router.post('/chat/completions', async (req, res, next) => {
         }
 
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
+        const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
         const effectiveOutputFormat = output_format
-            || inferOutputFormatFromText(lastUserMessage?.content || '')
-            || inferOutputFormatFromSession(lastUserMessage?.content || '', session);
+            || inferOutputFormatFromText(lastUserText)
+            || inferOutputFormatFromTranscript(messages, session);
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
+        const artifactPrompt = buildArtifactPromptFromTranscript(messages, lastUserText);
         runtimeTask = startRuntimeTask({
             sessionId,
-            input: lastUserMessage?.content || JSON.stringify(messages),
+            input: lastUserText || JSON.stringify(messages),
             model: model || null,
             mode: 'openai-chat',
             transport: 'http',
@@ -221,7 +296,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 session,
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
-                prompt: lastUserMessage?.content || '',
+                prompt: artifactPrompt,
                 artifactIds: effectiveArtifactIds,
                 model,
             });
@@ -235,7 +310,7 @@ router.post('/chat/completions', async (req, res, next) => {
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage);
             await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: lastUserMessage?.content || '' },
+                { role: 'user', content: lastUserText },
                 { role: 'assistant', content: generation.assistantMessage },
             ]);
 
@@ -314,8 +389,8 @@ router.post('/chat/completions', async (req, res, next) => {
             const execution = await executeRuntimeResponse(req.app, {
                 input,
                 sessionId,
-                memoryInput: lastUserMessage?.content || '',
-                loadContextMessages: Boolean(lastUserMessage?.content),
+                memoryInput: lastUserText,
+                loadContextMessages: Boolean(lastUserText),
                 loadRecentMessages: shouldInjectRecentMessages(messages),
                 previousResponseId: session.previousResponseId,
                 instructions,
@@ -352,7 +427,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         await sessionStore.recordResponse(sessionId, event.response.id);
                         memoryService.rememberResponse(sessionId, fullText);
                         await sessionStore.appendMessages(sessionId, [
-                            { role: 'user', content: lastUserMessage?.content || '' },
+                            { role: 'user', content: lastUserText },
                             { role: 'assistant', content: fullText },
                         ]);
                     }
@@ -362,7 +437,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         mode: 'chat',
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
-                        prompt: lastUserMessage?.content || '',
+                        prompt: artifactPrompt,
                         title: 'chat-output',
                         responseId: event.response.id,
                         artifactIds: artifact_ids,
@@ -396,8 +471,8 @@ router.post('/chat/completions', async (req, res, next) => {
         const execution = await executeRuntimeResponse(req.app, {
             input,
             sessionId,
-            memoryInput: lastUserMessage?.content || '',
-            loadContextMessages: Boolean(lastUserMessage?.content),
+            memoryInput: lastUserText,
+            loadContextMessages: Boolean(lastUserText),
             loadRecentMessages: shouldInjectRecentMessages(messages),
             previousResponseId: session.previousResponseId,
             instructions,
@@ -419,7 +494,7 @@ router.post('/chat/completions', async (req, res, next) => {
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText);
             await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: lastUserMessage?.content || '' },
+                { role: 'user', content: lastUserText },
                 { role: 'assistant', content: outputText },
             ]);
         }
@@ -429,7 +504,7 @@ router.post('/chat/completions', async (req, res, next) => {
             mode: 'chat',
             outputFormat: effectiveOutputFormat,
             content: outputText,
-            prompt: lastUserMessage?.content || '',
+            prompt: artifactPrompt,
             title: 'chat-output',
             responseId: response.id,
             artifactIds: artifact_ids,
@@ -508,13 +583,19 @@ router.post('/responses', async (req, res, next) => {
             });
         }
 
+        const normalizedInputMessages = typeof input === 'string'
+            ? [{ role: 'user', content: input }]
+            : (Array.isArray(input)
+                ? input.filter((item) => item?.role).map((item) => ({ role: item.role, content: item.content }))
+                : []);
         const userInput = typeof input === 'string'
             ? input
-            : input.filter((item) => item.role === 'user').pop()?.content || '';
+            : normalizeMessageText(input.filter((item) => item.role === 'user').pop()?.content || '');
         const effectiveOutputFormat = output_format
             || inferOutputFormatFromText(userInput)
-            || inferOutputFormatFromSession(userInput, session);
+            || inferOutputFormatFromTranscript(normalizedInputMessages, session);
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
+        const artifactPrompt = buildArtifactPromptFromTranscript(normalizedInputMessages, userInput);
         runtimeTask = startRuntimeTask({
             sessionId,
             input: userInput || JSON.stringify(input),
@@ -537,7 +618,7 @@ router.post('/responses', async (req, res, next) => {
                 session,
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
-                prompt: userInput,
+                prompt: artifactPrompt,
                 artifactIds: effectiveArtifactIds,
                 model,
             });
@@ -653,7 +734,7 @@ router.post('/responses', async (req, res, next) => {
                         mode: 'chat',
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
-                        prompt: userInput,
+                        prompt: artifactPrompt,
                         title: 'response-output',
                         responseId: event.response.id,
                         artifactIds: artifact_ids,
@@ -711,7 +792,7 @@ router.post('/responses', async (req, res, next) => {
             mode: 'chat',
             outputFormat: effectiveOutputFormat,
             content: outputText,
-            prompt: userInput,
+            prompt: artifactPrompt,
             title: 'response-output',
             responseId: response.id,
             artifactIds: artifact_ids,

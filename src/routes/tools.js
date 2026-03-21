@@ -8,6 +8,8 @@ const router = express.Router();
 const { getUnifiedRegistry } = require('../agent-sdk/registry/UnifiedRegistry');
 const { getToolManager } = require('../agent-sdk/tools');
 const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
+const settingsController = require('./admin/settings.controller');
+const { config } = require('../config');
 
 const registry = getUnifiedRegistry();
 
@@ -15,6 +17,75 @@ async function ensureToolManagerInitialized() {
   const toolManager = getToolManager();
   await toolManager.initialize();
   return toolManager;
+}
+
+function isInternalClusterBaseURL(baseURL = '') {
+  const normalized = String(baseURL || '').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return parsed.hostname.includes('.svc.cluster.local')
+      || parsed.hostname === 'ollama'
+      || parsed.hostname === 'qdrant'
+      || parsed.hostname === 'postgres';
+  } catch (_error) {
+    return normalized.includes('.svc.cluster.local');
+  }
+}
+
+function buildRuntimeSummary(toolManager) {
+  const ssh = settingsController.getEffectiveSshConfig();
+
+  return {
+    source: 'backend',
+    toolManagerInitialized: Boolean(toolManager?.initialized),
+    totalRegisteredTools: toolManager?.registry?.getAllTools?.().length || 0,
+    modelGateway: {
+      baseURL: config.openai.baseURL,
+      internalCluster: isInternalClusterBaseURL(config.openai.baseURL),
+    },
+    sshDefaults: {
+      enabled: Boolean(ssh.enabled),
+      configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
+      source: ssh.source || 'dashboard',
+      host: ssh.host || '',
+      port: ssh.port || 22,
+      username: ssh.username || '',
+      hasPassword: Boolean(ssh.password),
+      hasPrivateKey: Boolean(ssh.privateKeyPath),
+    },
+  };
+}
+
+function buildToolRuntime(toolId) {
+  if (toolId === 'ssh-execute') {
+    const ssh = settingsController.getEffectiveSshConfig();
+    return {
+      configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
+      source: ssh.source || 'dashboard',
+      defaultTarget: ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null,
+      auth: ssh.privateKeyPath ? 'private-key' : (ssh.password ? 'password' : 'unset'),
+    };
+  }
+
+  if (toolId === 'docker-exec') {
+    return {
+      configured: Boolean(process.env.DOCKER_HOST),
+      dockerHost: process.env.DOCKER_HOST || '',
+    };
+  }
+
+  if (toolId === 'web-search') {
+    return {
+      configured: Boolean(process.env.PERPLEXITY_API_KEY),
+      provider: process.env.PERPLEXITY_API_KEY ? 'perplexity' : 'unconfigured',
+    };
+  }
+
+  return null;
 }
 
 function buildToolExecutionContext(toolManager, req, sessionId = null) {
@@ -35,7 +106,7 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
  */
 router.get('/available', async (req, res) => {
   try {
-    await ensureToolManagerInitialized();
+    const toolManager = await ensureToolManagerInitialized();
     const { category } = req.query;
     
     let tools = registry.getFrontendTools();
@@ -46,6 +117,7 @@ router.get('/available', async (req, res) => {
     
     const enrichedTools = await Promise.all(tools.map(async (tool) => ({
       ...tool,
+      runtime: buildToolRuntime(tool.id),
       ...(await getToolDocMetadata(tool.id)),
     })));
 
@@ -54,7 +126,8 @@ router.get('/available', async (req, res) => {
       data: enrichedTools,
       meta: {
         total: enrichedTools.length,
-        categories: [...new Set(enrichedTools.map(t => t.category))]
+        categories: [...new Set(enrichedTools.map(t => t.category))],
+        runtime: buildRuntimeSummary(toolManager),
       }
     });
   } catch (error) {
@@ -146,7 +219,7 @@ router.get('/docs/:id', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
-    await ensureToolManagerInitialized();
+    const toolManager = await ensureToolManagerInitialized();
     const { id } = req.params;
     
     const tool = registry.getTool(id);
@@ -168,6 +241,7 @@ router.get('/:id', async (req, res) => {
         category: tool.category,
         version: tool.version,
         manifest,
+        runtime: buildToolRuntime(id),
         skill: skill ? {
           enabled: skill.enabled,
           triggerPatterns: skill.triggerPatterns,
@@ -175,7 +249,10 @@ router.get('/:id', async (req, res) => {
         } : null,
         parameters: manifest?.parameters || [],
         ...docMetadata,
-      }
+      },
+      meta: {
+        runtime: buildRuntimeSummary(toolManager),
+      },
     });
   } catch (error) {
     console.error('Error getting tool:', error);

@@ -172,6 +172,7 @@ module.exports = {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
+    isArtifactContinuationPrompt,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
 };

@@ -799,7 +799,10 @@ class OpenAIAPIClient extends EventTarget {
         }
 
         const data = await response.json();
-        return data.data || [];
+        return {
+            tools: data.data || [],
+            meta: data.meta || {},
+        };
     }
 
     async getToolDoc(toolId) {

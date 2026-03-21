@@ -518,6 +518,10 @@ class ChatApp {
             
             // Stream the chat
             for await (const chunk of apiClient.streamChat(messages, model, this.currentAbortController.signal)) {
+                if (chunk.sessionId) {
+                    this.syncBackendSession(chunk.sessionId);
+                }
+
                 switch (chunk.type) {
                     case 'delta':
                         hasReceivedContent = true;
@@ -584,8 +588,8 @@ class ChatApp {
 
             if (isListCommand) {
                 const category = trimmed.startsWith('/tools ') ? trimmed.slice('/tools '.length).trim() : null;
-                const tools = await apiClient.getAvailableTools(category || null);
-                assistantContent = this.formatToolsList(tools, category);
+                const toolResponse = await apiClient.getAvailableTools(category || null);
+                assistantContent = this.formatToolsList(toolResponse, category);
             } else if (isHelpCommand) {
                 const toolId = trimmed.slice('/tool-help '.length).trim();
                 if (!toolId) {
@@ -636,7 +640,10 @@ class ChatApp {
         }
     }
 
-    formatToolsList(tools, category = null) {
+    formatToolsList(toolResponse, category = null) {
+        const tools = Array.isArray(toolResponse) ? toolResponse : (toolResponse?.tools || []);
+        const runtime = toolResponse?.meta?.runtime || null;
+
         if (!Array.isArray(tools) || tools.length === 0) {
             return category
                 ? `No frontend tools are available in category \`${category}\`.`
@@ -644,6 +651,21 @@ class ChatApp {
         }
 
         const lines = ['## Available Tools', ''];
+        if (runtime) {
+            const gatewayScope = runtime.modelGateway?.internalCluster ? 'internal cluster' : 'external endpoint';
+            lines.push(`Runtime source: \`${runtime.source || 'backend'}\``);
+            lines.push(`Model gateway: \`${runtime.modelGateway?.baseURL || 'unknown'}\` (${gatewayScope})`);
+            if (runtime.sshDefaults?.enabled) {
+                const target = runtime.sshDefaults.host
+                    ? `${runtime.sshDefaults.username || 'unknown'}@${runtime.sshDefaults.host}:${runtime.sshDefaults.port || 22}`
+                    : 'not set';
+                lines.push(`SSH defaults: source=${runtime.sshDefaults.source || 'unknown'}, target=${target}, configured=${runtime.sshDefaults.configured ? 'yes' : 'no'}`);
+            } else {
+                lines.push('SSH defaults: disabled');
+            }
+            lines.push('');
+        }
+
         tools.forEach((tool) => {
             const params = Array.isArray(tool.parameters)
                 ? tool.parameters.map((param) => typeof param === 'string' ? param : param.name).filter(Boolean)
@@ -652,6 +674,11 @@ class ChatApp {
             lines.push(`  ${tool.description || 'No description provided.'}`);
             if (tool.support?.status) {
                 lines.push(`  Support: ${tool.support.status}`);
+            }
+            if (tool.runtime?.defaultTarget) {
+                lines.push(`  Runtime: ${tool.runtime.defaultTarget} via ${tool.runtime.source || 'unknown'}`);
+            } else if (tool.runtime && Object.prototype.hasOwnProperty.call(tool.runtime, 'configured')) {
+                lines.push(`  Runtime: configured=${tool.runtime.configured ? 'yes' : 'no'}`);
             }
             if (params.length) {
                 lines.push(`  Params: ${params.join(', ')}`);
@@ -913,6 +940,19 @@ class ChatApp {
         this.messageInput.focus();
     }
 
+    syncBackendSession(sessionId) {
+        if (!sessionId) {
+            return;
+        }
+
+        const currentSessionId = sessionManager.currentSessionId;
+        if (currentSessionId !== sessionId) {
+            sessionManager.promoteSessionId(currentSessionId, sessionId);
+        }
+
+        apiClient.setSessionId(sessionId);
+    }
+
     handleDelta(content) {
         if (!this.currentStreamingMessageId) return;
         
@@ -1171,6 +1211,10 @@ class ChatApp {
             const history = this.buildMessageHistory(sessionId);
             
             for await (const chunk of apiClient.streamChat(history, model, this.currentAbortController.signal)) {
+                if (chunk.sessionId) {
+                    this.syncBackendSession(chunk.sessionId);
+                }
+
                 switch (chunk.type) {
                     case 'delta':
                         this.handleDelta(chunk.content);

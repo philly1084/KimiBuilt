@@ -566,13 +566,30 @@ Type any message to chat with the AI.
 
     async listTools(category = null) {
         try {
-            const tools = await api.getAvailableTools(category);
+            const toolResponse = await api.getAvailableTools(category);
+            const tools = Array.isArray(toolResponse) ? toolResponse : (toolResponse.tools || []);
+            const runtime = toolResponse?.meta?.runtime || null;
             if (!tools.length) {
                 this.printSystem(category ? `No tools available in category "${category}".` : 'No tools are currently available.');
                 return;
             }
 
             const lines = ['## Available Tools', ''];
+            if (runtime) {
+                const gatewayScope = runtime.modelGateway?.internalCluster ? 'internal cluster' : 'external endpoint';
+                lines.push(`Runtime source: \`${runtime.source || 'backend'}\``);
+                lines.push(`Model gateway: \`${runtime.modelGateway?.baseURL || 'unknown'}\` (${gatewayScope})`);
+                if (runtime.sshDefaults?.enabled) {
+                    const target = runtime.sshDefaults.host
+                        ? `${runtime.sshDefaults.username || 'unknown'}@${runtime.sshDefaults.host}:${runtime.sshDefaults.port || 22}`
+                        : 'not set';
+                    lines.push(`SSH defaults: source=${runtime.sshDefaults.source || 'unknown'}, target=${target}, configured=${runtime.sshDefaults.configured ? 'yes' : 'no'}`);
+                } else {
+                    lines.push('SSH defaults: disabled');
+                }
+                lines.push('');
+            }
+
             tools.forEach((tool) => {
                 const params = Array.isArray(tool.parameters)
                     ? tool.parameters
@@ -581,6 +598,11 @@ Type any message to chat with the AI.
                 lines.push(`  ${tool.description || 'No description provided.'}`);
                 if (tool.support?.status) {
                     lines.push(`  Support: ${tool.support.status}`);
+                }
+                if (tool.runtime?.defaultTarget) {
+                    lines.push(`  Runtime: ${tool.runtime.defaultTarget} via ${tool.runtime.source || 'unknown'}`);
+                } else if (tool.runtime && Object.prototype.hasOwnProperty.call(tool.runtime, 'configured')) {
+                    lines.push(`  Runtime: configured=${tool.runtime.configured ? 'yes' : 'no'}`);
                 }
                 if (params.length) {
                     const paramNames = Array.isArray(params)

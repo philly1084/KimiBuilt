@@ -653,7 +653,10 @@ class NotesAPIClient {
         }
 
         const data = await response.json();
-        return data.data || [];
+        return {
+            tools: data.data || [],
+            meta: data.meta || {},
+        };
     }
 
     async getToolDoc(toolId) {
