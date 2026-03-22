@@ -75,13 +75,44 @@ function isTerminalFinishReason(finishReason) {
     return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
 }
 
+function extractErrorDetailsMessage(details) {
+    if (!details) {
+        return '';
+    }
+
+    if (typeof details === 'string') {
+        return details;
+    }
+
+    if (typeof details?.error === 'string') {
+        return details.error;
+    }
+
+    if (typeof details?.message === 'string') {
+        return details.message;
+    }
+
+    if (typeof details?.error?.message === 'string') {
+        return details.error.message;
+    }
+
+    return '';
+}
+
+function isSessionNotFoundError(error) {
+    const message = extractErrorDetailsMessage(error?.details) || String(error?.message || '');
+    return error?.status === 404 && /session not found/i.test(message);
+}
+
 /**
  * Parse error response to get user-friendly message
  */
 function parseErrorMessage(error, response) {
+    const detailedMessage = extractErrorDetailsMessage(error?.details);
+
     // Handle specific HTTP status codes
     if (response?.status === 400) {
-        return 'Invalid request. Please check your message format and try again.';
+        return detailedMessage || 'Invalid request. Please check your message format and try again.';
     }
     if (response?.status === 401) {
         return 'Your login session is missing or expired. Sign in again.';
@@ -90,13 +121,13 @@ function parseErrorMessage(error, response) {
         return 'Access denied. You may not have permission to use this feature.';
     }
     if (response?.status === 404) {
-        return 'The requested resource was not found.';
+        return detailedMessage || 'The requested resource was not found.';
     }
     if (response?.status === 429) {
         return 'Rate limit exceeded. Please wait a moment and try again.';
     }
     if (response?.status >= 500) {
-        return 'Server error. Please try again later.';
+        return detailedMessage || 'Server error. Please try again later.';
     }
     
     // Network errors
@@ -107,7 +138,7 @@ function parseErrorMessage(error, response) {
         return 'Network error. Please check your connection and try again.';
     }
     
-    return error.message || 'An unexpected error occurred';
+    return detailedMessage || error.message || 'An unexpected error occurred';
 }
 
 // ============================================
@@ -216,6 +247,12 @@ class NotesAPIClient {
                         error.details = errorData;
                     } catch (e) {
                         // Ignore parsing errors
+                    }
+
+                    if (isSessionNotFoundError(error) && params.session_id) {
+                        this.currentSessionId = null;
+                        delete params.session_id;
+                        continue;
                     }
                     
                     throw error;
@@ -379,6 +416,19 @@ class NotesAPIClient {
                     const error = new Error(`HTTP ${response.status}`);
                     error.status = response.status;
                     error.response = response;
+
+                    try {
+                        error.details = await response.json();
+                    } catch (e) {
+                        // Ignore parsing errors
+                    }
+
+                    if (isSessionNotFoundError(error) && params.session_id) {
+                        this.currentSessionId = null;
+                        delete params.session_id;
+                        continue;
+                    }
+
                     throw error;
                 }
                 
@@ -680,28 +730,48 @@ class NotesAPIClient {
     }
 
     async invokeTool(toolId, params = {}) {
-        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/invoke`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tool: toolId,
-                params,
-                sessionId: this.currentSessionId,
-            }),
-        });
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/invoke`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool: toolId,
+                    params,
+                    sessionId: this.currentSessionId,
+                }),
+            });
 
-        if (!response.ok) {
-            throw new Error(`Tool invocation failed: HTTP ${response.status}`);
+            if (!response.ok) {
+                let details = null;
+                try {
+                    details = await response.json();
+                } catch (e) {
+                    details = null;
+                }
+
+                const error = new Error(`Tool invocation failed: HTTP ${response.status}`);
+                error.status = response.status;
+                error.details = details;
+
+                if (isSessionNotFoundError(error) && this.currentSessionId) {
+                    this.currentSessionId = null;
+                    continue;
+                }
+
+                throw error;
+            }
+
+            const data = await response.json();
+            if (data.sessionId) {
+                this.currentSessionId = data.sessionId;
+            }
+            return {
+                result: data.data,
+                sessionId: data.sessionId || this.currentSessionId || null,
+            };
         }
 
-        const data = await response.json();
-        if (data.sessionId) {
-            this.currentSessionId = data.sessionId;
-        }
-        return {
-            result: data.data,
-            sessionId: data.sessionId || this.currentSessionId || null,
-        };
+        throw new Error('Tool invocation failed after resetting the session.');
     }
 }
 

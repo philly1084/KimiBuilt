@@ -1439,19 +1439,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return false;
         }
 
-        if ([
-            'codex',
-            'computer-use',
-            'computer_use',
-            'cua',
-        ].some((token) => id.includes(token))) {
-            return false;
-        }
-
-        return id.includes('gpt') ||
-            id.startsWith('o1') ||
-            id.startsWith('o3') ||
-            id.startsWith('o4');
+        return isSupportedNotesModelId(id);
     }
 
     function buildCandidateModelsForRequest(question = '', preferredModel = 'gpt-4o', requestOptions = {}) {
@@ -1469,19 +1457,23 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         };
 
         if (toolSensitiveRequest) {
-            const compatibleAvailableModels = (getModels() || [])
+            const availableModelIds = (getModels() || [])
                 .map((model) => model?.id || model)
                 .filter((modelId) => isToolCompatibleNotesModelId(modelId));
+            const availableModelSet = new Set(availableModelIds.map((modelId) => String(modelId || '').trim()));
 
-            fallbackModels.forEach(pushUnique);
-            compatibleAvailableModels.forEach(pushUnique);
             if (isToolCompatibleNotesModelId(preferredModel)) {
                 pushUnique(preferredModel);
             }
+            availableModelIds.forEach(pushUnique);
+            fallbackModels
+                .filter((modelId) => availableModelSet.has(String(modelId || '').trim()))
+                .forEach(pushUnique);
             if (ordered.length === 0) {
                 pushUnique(preferredModel);
+                fallbackModels.forEach(pushUnique);
             }
-            return ordered.length > 0 ? ordered : fallbackModels;
+            return ordered;
         }
 
         pushUnique(preferredModel);
@@ -2945,7 +2937,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         .slice(modelIndex + 1)
                         .some((candidate) => isSupportedNotesModelId(candidate) && !attemptedModels.includes(candidate));
                     const shouldRetryWithFallback = hasMoreCandidates &&
-                        (error.status >= 500
+                        ((error.status >= 500)
+                            || (error.status === 404 && /model|resource was not found|not found/i.test(String(error.message || '')))
                             || error.status === 502
                             || /server error|api request failed|streaming error|invalid response returned by the ai gateway/i.test(String(error.message || '')));
 
