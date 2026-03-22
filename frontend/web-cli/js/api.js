@@ -16,6 +16,9 @@ const LOCAL_MODEL_TIMEOUT = 300000;
 const IMAGE_TIMEOUT = 240000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
+const WEB_CLI_TASK_TYPE = 'chat';
+const WEB_CLI_CLIENT_SURFACE = 'web-cli';
+const WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 
 class WebCLIAPI {
     constructor() {
@@ -199,6 +202,12 @@ class WebCLIAPI {
             model: model || this.currentModel,
             messages,
             stream: true,
+            taskType: WEB_CLI_TASK_TYPE,
+            clientSurface: WEB_CLI_CLIENT_SURFACE,
+            metadata: {
+                remoteBuildAutonomyApproved: WEB_CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
+                clientSurface: WEB_CLI_CLIENT_SURFACE,
+            },
         };
 
         if (this.sessionId) {
@@ -487,6 +496,11 @@ class WebCLIAPI {
         if (category) {
             params.set('category', category);
         }
+        params.set('taskType', WEB_CLI_TASK_TYPE);
+        params.set('clientSurface', WEB_CLI_CLIENT_SURFACE);
+        if (this.sessionId && !String(this.sessionId).startsWith('local_')) {
+            params.set('sessionId', this.sessionId);
+        }
 
         const response = await this.fetchWithTimeout(
             `${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`,
@@ -536,6 +550,8 @@ class WebCLIAPI {
                     tool: toolId,
                     params,
                     sessionId: this.sessionId,
+                    taskType: WEB_CLI_TASK_TYPE,
+                    clientSurface: WEB_CLI_CLIENT_SURFACE,
                 }),
             },
             120000

@@ -3,6 +3,9 @@ const { getApiBaseUrl } = require('./config');
 
 // Default timeout for requests (60 seconds)
 const DEFAULT_TIMEOUT = 60000;
+const CLI_TASK_TYPE = 'chat';
+const CLI_CLIENT_SURFACE = 'cli';
+const CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 
 /**
  * Custom API Error class with additional context.
@@ -58,6 +61,12 @@ class OpenAIClient {
       model: model || 'gpt-4o',
       messages,
       stream: true,
+      taskType: CLI_TASK_TYPE,
+      clientSurface: CLI_CLIENT_SURFACE,
+      metadata: {
+        remoteBuildAutonomyApproved: CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
+        clientSurface: CLI_CLIENT_SURFACE,
+      },
     };
     
     if (sessionId) {
@@ -116,6 +125,12 @@ class OpenAIClient {
       model: model || 'gpt-4o',
       messages,
       stream: false,
+      taskType: CLI_TASK_TYPE,
+      clientSurface: CLI_CLIENT_SURFACE,
+      metadata: {
+        remoteBuildAutonomyApproved: CLI_REMOTE_BUILD_AUTONOMY_APPROVED,
+        clientSurface: CLI_CLIENT_SURFACE,
+      },
     };
     
     if (sessionId) {

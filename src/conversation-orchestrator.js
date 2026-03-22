@@ -1,5 +1,6 @@
 const EventEmitter = require('events');
 const { createResponse } = require('./openai-client');
+const { config } = require('./config');
 const { extractResponseText } = require('./artifacts/artifact-service');
 const settingsController = require('./routes/admin/settings.controller');
 const {
@@ -16,7 +17,6 @@ const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
-const MAX_REMOTE_BUILD_AUTONOMOUS_ROUNDS = 3;
 const MAX_TOOL_RESULT_CHARS = 12000;
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
@@ -406,6 +406,14 @@ function createExecutionTraceEntry({
     };
 }
 
+function getRemoteBuildAutonomyBudget() {
+    return {
+        maxRounds: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousRounds) || 8),
+        maxToolCalls: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousToolCalls) || 24),
+        maxDurationMs: Math.max(1000, Number(config.runtime?.remoteBuildMaxAutonomousMs) || 120000),
+    };
+}
+
 function sanitizeValue(value, depth = 0) {
     if (value == null) {
         return value;
@@ -633,6 +641,10 @@ class ConversationOrchestrator extends EventEmitter {
                 || hasAutonomousRemoteApproval(objective)
                 || Boolean(session?.metadata?.remoteBuildAutonomyApproved)
             );
+        const autonomyBudget = getRemoteBuildAutonomyBudget();
+        const maxAutonomousRounds = autonomyApproved ? autonomyBudget.maxRounds : 1;
+        const maxAutonomousToolCalls = autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS;
+        const autonomyDeadline = autonomyApproved ? startedAt + autonomyBudget.maxDurationMs : startedAt;
 
         try {
             if (resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
@@ -644,7 +656,9 @@ class ConversationOrchestrator extends EventEmitter {
                     details: {
                         approved: autonomyApproved,
                         source: autonomyApprovalSource || 'none',
-                        maxAutonomousRounds: autonomyApproved ? MAX_REMOTE_BUILD_AUTONOMOUS_ROUNDS : 1,
+                        maxAutonomousRounds,
+                        maxAutonomousToolCalls,
+                        maxAutonomousDurationMs: autonomyApproved ? autonomyBudget.maxDurationMs : 0,
                     },
                 }));
             }
@@ -652,7 +666,39 @@ class ConversationOrchestrator extends EventEmitter {
             const executedStepSignatures = new Set();
             let round = 0;
 
-            while (round < (autonomyApproved ? MAX_REMOTE_BUILD_AUTONOMOUS_ROUNDS : 1)) {
+            while (round < maxAutonomousRounds) {
+                if (autonomyApproved && Date.now() >= autonomyDeadline) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'budget',
+                        name: 'Autonomous execution time budget reached',
+                        details: {
+                            round,
+                            maxRounds: maxAutonomousRounds,
+                            toolCalls: toolEvents.length,
+                            maxToolCalls: maxAutonomousToolCalls,
+                            elapsedMs: Date.now() - startedAt,
+                            maxDurationMs: autonomyBudget.maxDurationMs,
+                        },
+                    }));
+                    break;
+                }
+
+                if (toolEvents.length >= maxAutonomousToolCalls) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'budget',
+                        name: 'Autonomous execution tool budget reached',
+                        details: {
+                            round,
+                            maxRounds: maxAutonomousRounds,
+                            toolCalls: toolEvents.length,
+                            maxToolCalls: maxAutonomousToolCalls,
+                            elapsedMs: Date.now() - startedAt,
+                            maxDurationMs: autonomyApproved ? autonomyBudget.maxDurationMs : 0,
+                        },
+                    }));
+                    break;
+                }
+
                 round += 1;
                 let nextPlan = [];
                 const planningStartedAt = new Date().toISOString();
@@ -697,6 +743,11 @@ class ConversationOrchestrator extends EventEmitter {
                     executedStepSignatures.add(signature);
                     return true;
                 });
+
+                if (autonomyApproved && nextPlan.length > 0) {
+                    const remainingToolBudget = Math.max(0, maxAutonomousToolCalls - toolEvents.length);
+                    nextPlan = nextPlan.slice(0, remainingToolBudget);
+                }
 
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'planning',
@@ -1258,7 +1309,8 @@ class ConversationOrchestrator extends EventEmitter {
                     'The user has already approved continuing through obvious next remote-build steps.',
                     'Do not stop after a single inspection if the next server action is routine and clearly implied by the verified results.',
                     'Keep moving through setup, inspection, verification, and routine fixes without asking for confirmation between each step.',
-                    'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, or repeated tool failures.',
+                    'Keep going until the goal is reached, a real blocker appears, or the autonomous runtime budget is exhausted.',
+                    'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, repeated tool failures, or an exhausted autonomy budget.',
                 ]
                 : []),
             ...(toolPolicy.candidateToolIds.includes('ssh-execute') && toolPolicy.hasReachableSshTarget

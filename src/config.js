@@ -63,6 +63,21 @@ const config = {
         perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
         perplexityBaseURL: process.env.PERPLEXITY_BASE_URL || 'https://api.perplexity.ai',
     },
+
+    runtime: {
+        remoteBuildMaxAutonomousRounds: Math.max(
+            1,
+            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_ROUNDS, 10) || 8,
+        ),
+        remoteBuildMaxAutonomousToolCalls: Math.max(
+            1,
+            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_TOOL_CALLS, 10) || 24,
+        ),
+        remoteBuildMaxAutonomousMs: Math.max(
+            1000,
+            parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_MS, 10) || 120000,
+        ),
+    },
 };
 
 function validate() {

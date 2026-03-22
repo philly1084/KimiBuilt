@@ -385,6 +385,99 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('continues beyond the old three-round cap while remote-build work is still making progress', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Remote work completed after multiple autonomous rounds.', 'resp_long_auto')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{ tool: 'ssh-execute', reason: 'Round 1', params: { command: 'echo round-1' } }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{ tool: 'ssh-execute', reason: 'Round 2', params: { command: 'echo round-2' } }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{ tool: 'ssh-execute', reason: 'Round 3', params: { command: 'echo round-3' } }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{ tool: 'ssh-execute', reason: 'Round 4', params: { command: 'echo round-4' } }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: { stdout: 'round-1', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: { stdout: 'round-2', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: { stdout: 'round-3', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: { stdout: 'round-4', stderr: '', host: '10.0.0.5:22' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-long-remote', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-long-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to keep going until the server work is done.',
+            sessionId: 'session-long-remote',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(4);
+        expect(llmClient.complete).toHaveBeenCalledTimes(5);
+        expect(result.response.metadata.toolEvents).toHaveLength(4);
+        expect(result.response.metadata.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+            'Plan round 4',
+            'Execution round 4',
+        ]));
+    });
+
     test('treats explicit web research and scrape requests as first-class tool intents', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
