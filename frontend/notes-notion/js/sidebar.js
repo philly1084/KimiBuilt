@@ -5,6 +5,8 @@
 const Sidebar = (function() {
     let sidebarEl = null;
     let pageTreeEl = null;
+    let outlineSectionEl = null;
+    let outlineToggleEl = null;
     let expandedPages = new Set();
     
     /**
@@ -13,6 +15,8 @@ const Sidebar = (function() {
     async function init() {
         sidebarEl = document.getElementById('sidebar');
         pageTreeEl = document.getElementById('page-tree');
+        outlineSectionEl = document.getElementById('sidebar-outline-section');
+        outlineToggleEl = document.getElementById('sidebar-outline-toggle');
         
         setupEventListeners();
         refreshPageTree();
@@ -22,6 +26,9 @@ const Sidebar = (function() {
         if (isCollapsed) {
             sidebarEl.classList.add('collapsed');
         }
+
+        const isOutlineCollapsed = localStorage.getItem('notes_notion_sidebar_outline_collapsed') === 'true';
+        setOutlineCollapsed(isOutlineCollapsed);
         
         // Setup mobile toggle
         setupMobileToggle();
@@ -76,6 +83,10 @@ const Sidebar = (function() {
         const toggleBtn = document.getElementById('sidebar-toggle');
         if (toggleBtn) {
             toggleBtn.addEventListener('click', toggleSidebar);
+        }
+
+        if (outlineToggleEl) {
+            outlineToggleEl.addEventListener('click', toggleOutlineSection);
         }
         
         // Theme toggle
@@ -665,6 +676,21 @@ const Sidebar = (function() {
     function toggleSidebar() {
         sidebarEl.classList.toggle('collapsed');
         localStorage.setItem('notes_notion_sidebar_collapsed', sidebarEl.classList.contains('collapsed'));
+    }
+
+    function setOutlineCollapsed(collapsed) {
+        if (!outlineSectionEl || !outlineToggleEl) return;
+
+        outlineSectionEl.classList.toggle('collapsed', Boolean(collapsed));
+        outlineToggleEl.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+
+    function toggleOutlineSection() {
+        if (!outlineSectionEl) return;
+
+        const collapsed = !outlineSectionEl.classList.contains('collapsed');
+        setOutlineCollapsed(collapsed);
+        localStorage.setItem('notes_notion_sidebar_outline_collapsed', collapsed ? 'true' : 'false');
     }
     
     /**

@@ -9,6 +9,7 @@ const { vectorStore } = require('../memory/vector-store');
 const { createResponse } = require('../openai-client');
 const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
+const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
 
 function sha256(buffer) {
     return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -49,6 +50,59 @@ function tryParseJson(text, fallbackTitle = 'Workbook') {
             ],
         };
     }
+}
+
+function safeJsonParse(text = '') {
+    try {
+        return JSON.parse(unwrapCodeFence(text));
+    } catch (_error) {
+        return null;
+    }
+}
+
+function inferDocumentTitle(prompt = '', fallback = 'Document') {
+    const normalized = String(prompt || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized) {
+        return fallback;
+    }
+
+    const title = normalized
+        .replace(/^(create|make|generate|write|draft|build)\s+/i, '')
+        .replace(/[.?!]+$/g, '')
+        .slice(0, 80)
+        .trim();
+
+    return title || fallback;
+}
+
+function normalizePlanSections(sections = []) {
+    return (Array.isArray(sections) ? sections : [])
+        .slice(0, 12)
+        .map((section, index) => ({
+            heading: String(section?.heading || section?.title || `Section ${index + 1}`).trim(),
+            purpose: String(section?.purpose || section?.goal || '').trim(),
+            keyPoints: (Array.isArray(section?.keyPoints) ? section.keyPoints : [])
+                .map((point) => String(point || '').trim())
+                .filter(Boolean)
+                .slice(0, 6),
+            targetLength: String(section?.targetLength || 'medium').trim() || 'medium',
+        }))
+        .filter((section) => section.heading);
+}
+
+function normalizeDocumentSections(sections = [], fallbackSections = []) {
+    const fallbackByIndex = Array.isArray(fallbackSections) ? fallbackSections : [];
+
+    return (Array.isArray(sections) ? sections : [])
+        .slice(0, 18)
+        .map((section, index) => ({
+            heading: String(section?.heading || section?.title || fallbackByIndex[index]?.heading || `Section ${index + 1}`).trim(),
+            content: String(section?.content || section?.body || '').trim(),
+            level: Number(section?.level) > 0 ? Number(section.level) : 1,
+        }))
+        .filter((section) => section.heading && section.content);
 }
 
 class ArtifactService {
@@ -323,6 +377,201 @@ class ArtifactService {
         return base;
     }
 
+    async runGenerationPass({
+        session = null,
+        input,
+        instructions,
+        model = null,
+        previousResponseId = null,
+    }) {
+        const response = await createResponse({
+            input,
+            previousResponseId,
+            contextMessages: [],
+            recentMessages: [],
+            instructions,
+            stream: false,
+            model,
+        });
+
+        return {
+            responseId: response.id,
+            outputText: extractResponseText(response),
+        };
+    }
+
+    getArtifactPlanInstructions(format, promptContext = '', existingContent = '') {
+        return [
+            'You are planning a high-quality business document generation workflow.',
+            'Return JSON only. No markdown fences.',
+            'First decide the document title and the major sections required to satisfy the request.',
+            'Prefer 4-8 sections for substantial documents unless the request clearly needs fewer.',
+            'Each section should have a concrete purpose and 2-5 key points that must be covered.',
+            existingContent ? `Existing content to revise:\n${existingContent}` : '',
+            promptContext,
+            '',
+            'Return exactly this shape:',
+            '{',
+            '  "title": "Document title",',
+            '  "sections": [',
+            '    {',
+            '      "heading": "Section heading",',
+            '      "purpose": "Why this section exists",',
+            '      "keyPoints": ["Point 1", "Point 2"],',
+            '      "targetLength": "short|medium|long"',
+            '    }',
+            '  ]',
+            '}',
+            `Target output format: ${format}.`,
+        ].filter(Boolean).join('\n');
+    }
+
+    getArtifactExpansionInstructions(format, promptContext = '', existingContent = '') {
+        return [
+            'You are expanding an approved document outline into full section content.',
+            'Return JSON only. No markdown fences.',
+            'Write polished, business-ready prose for each section.',
+            'Keep sections distinct, avoid repetition, and fully cover the requested key points.',
+            'Use paragraphs and inline bullets within section content when appropriate.',
+            existingContent ? `Existing content to revise:\n${existingContent}` : '',
+            promptContext,
+            '',
+            'Return exactly this shape:',
+            '{',
+            '  "title": "Document title",',
+            '  "sections": [',
+            '    {',
+            '      "heading": "Section heading",',
+            '      "content": "Full section content",',
+            '      "level": 1',
+            '    }',
+            '  ]',
+            '}',
+            `Target output format: ${format}.`,
+        ].filter(Boolean).join('\n');
+    }
+
+    getArtifactCompositionInstructions(format, promptContext = '') {
+        return [
+            'You are composing the final document artifact from an expanded section draft.',
+            'Return valid standalone HTML only. No markdown fences.',
+            'Use semantic HTML with a strong document structure.',
+            'Include one H1 title and then H2/H3 sections as appropriate.',
+            'Preserve the section order and cover all requested content.',
+            'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
+            'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
+            promptContext,
+            `Target output format: ${format}.`,
+        ].filter(Boolean).join('\n');
+    }
+
+    async generateMultiPassDocumentSource({
+        session,
+        prompt,
+        format,
+        promptContext = '',
+        existingContent = '',
+        model = null,
+    }) {
+        const planPass = await this.runGenerationPass({
+            session,
+            input: prompt,
+            instructions: buildSessionInstructions(
+                session,
+                this.getArtifactPlanInstructions(format, promptContext, existingContent),
+            ),
+            model,
+            previousResponseId: session?.previousResponseId || null,
+        });
+
+        const parsedPlan = safeJsonParse(planPass.outputText) || {};
+        const normalizedPlan = {
+            title: String(parsedPlan.title || inferDocumentTitle(prompt, `${String(format || 'document').toUpperCase()} Document`)).trim(),
+            sections: normalizePlanSections(parsedPlan.sections),
+        };
+
+        if (normalizedPlan.sections.length === 0) {
+            normalizedPlan.sections = [
+                {
+                    heading: 'Overview',
+                    purpose: 'Summarize the document objective and context.',
+                    keyPoints: [],
+                    targetLength: 'medium',
+                },
+                {
+                    heading: 'Details',
+                    purpose: 'Cover the main requested content in detail.',
+                    keyPoints: [],
+                    targetLength: 'medium',
+                },
+            ];
+        }
+
+        const expansionPass = await this.runGenerationPass({
+            session,
+            input: [
+                'Original request:',
+                prompt,
+                '',
+                'Approved outline:',
+                JSON.stringify(normalizedPlan, null, 2),
+            ].join('\n'),
+            instructions: buildSessionInstructions(
+                session,
+                this.getArtifactExpansionInstructions(format, promptContext, existingContent),
+            ),
+            model,
+        });
+
+        const parsedExpanded = safeJsonParse(expansionPass.outputText) || {};
+        const expandedDocument = {
+            title: String(parsedExpanded.title || normalizedPlan.title).trim() || normalizedPlan.title,
+            sections: normalizeDocumentSections(parsedExpanded.sections, normalizedPlan.sections),
+        };
+
+        if (expandedDocument.sections.length === 0) {
+            expandedDocument.sections = normalizedPlan.sections.map((section) => ({
+                heading: section.heading,
+                content: section.keyPoints.length > 0
+                    ? section.keyPoints.map((point) => `- ${point}`).join('\n')
+                    : section.purpose || '',
+                level: 1,
+            }));
+        }
+
+        const compositionPass = await this.runGenerationPass({
+            session,
+            input: [
+                'Original request:',
+                prompt,
+                '',
+                'Structured document draft:',
+                JSON.stringify(expandedDocument, null, 2),
+            ].join('\n'),
+            instructions: buildSessionInstructions(
+                session,
+                this.getArtifactCompositionInstructions(format, promptContext),
+            ),
+            model,
+        });
+
+        return {
+            responseId: compositionPass.responseId,
+            title: expandedDocument.title || normalizedPlan.title,
+            outputText: compositionPass.outputText,
+            metadata: {
+                generationStrategy: 'multi-pass',
+                generationPasses: ['plan', 'expand', 'compose'],
+                sectionCount: expandedDocument.sections.length,
+                outline: normalizedPlan.sections.map((section) => ({
+                    heading: section.heading,
+                    purpose: section.purpose,
+                    targetLength: section.targetLength,
+                })),
+            },
+        };
+    }
+
     async generateArtifact({
         session,
         sessionId,
@@ -341,23 +590,30 @@ class ArtifactService {
         }
 
         const promptContext = await this.buildPromptContext(sessionId, artifactIds);
-        const instructions = buildSessionInstructions(
-            session,
-            this.getGenerationInstructions(normalizedFormat, [template, existingContent].filter(Boolean).join('\n\n'), promptContext),
-        );
+        const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
+        const generated = MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
+            ? await this.generateMultiPassDocumentSource({
+                session,
+                prompt,
+                format: normalizedFormat,
+                promptContext,
+                existingContent: combinedExistingContent,
+                model,
+            })
+            : await this.runGenerationPass({
+                session,
+                input: prompt,
+                instructions: buildSessionInstructions(
+                    session,
+                    this.getGenerationInstructions(normalizedFormat, combinedExistingContent, promptContext),
+                ),
+                model,
+                previousResponseId: session?.previousResponseId || null,
+            });
 
-        const response = await createResponse({
-            input: prompt,
-            previousResponseId: session?.previousResponseId || null,
-            contextMessages: [],
-            instructions,
-            stream: false,
-            model,
-        });
-
-        const outputText = extractResponseText(response);
+        const outputText = generated.outputText;
         const unwrapped = unwrapCodeFence(outputText);
-        const title = `${normalizedFormat}-${new Date().toISOString().slice(0, 10)}`;
+        const title = generated.title || `${normalizedFormat}-${new Date().toISOString().slice(0, 10)}`;
 
         const rendered = normalizedFormat === 'xlsx'
             ? await renderArtifact({
@@ -389,12 +645,13 @@ class ArtifactService {
                 format: normalizedFormat,
                 sourcePrompt: prompt,
                 artifactIds,
+                ...(generated.metadata || {}),
             },
             vectorize: Boolean(rendered.extractedText),
         });
 
         return {
-            responseId: response.id,
+            responseId: generated.responseId,
             artifact: this.serializeArtifact(artifact),
             outputText,
         };

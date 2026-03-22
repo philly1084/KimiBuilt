@@ -350,6 +350,8 @@ GUIDELINES:
 - If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.
 - For multi-step non-page work, continue the task with the best next concrete step and use verified prior tool results and session state before asking the user to repeat details.
 - If SSH access or a prior SSH target is already established in the session, do not ask for host/user details again unless a tool failure shows the target is missing or incorrect.
+- For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
+- When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
 - Do not invent block IDs - only use IDs that exist in the page

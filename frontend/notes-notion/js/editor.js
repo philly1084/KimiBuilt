@@ -325,9 +325,13 @@ const Editor = (function() {
 
     function updateWorkspacePanel() {
         const outlineEl = document.getElementById('page-outline-list');
+        const outlineCountEl = document.getElementById('page-outline-count');
         if (!outlineEl) return;
 
         const headings = getOutlineHeadings();
+        if (outlineCountEl) {
+            outlineCountEl.textContent = String(headings.length);
+        }
 
         if (headings.length === 0) {
             outlineEl.innerHTML = '<div class="outline-empty">Add headings to see an outline.</div>';

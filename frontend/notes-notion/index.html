@@ -45,11 +45,32 @@
                 </button>
             </div>
 
-            <div class="sidebar-section">
-                <div class="section-title">Private</div>
-                <div id="page-tree" class="page-tree">
-                    <!-- Pages will be rendered here -->
+            <div class="sidebar-body">
+                <div class="sidebar-section sidebar-pages-section">
+                    <div class="section-title">Private</div>
+                    <div id="page-tree" class="page-tree">
+                        <!-- Pages will be rendered here -->
+                    </div>
                 </div>
+
+                <section id="sidebar-outline-section" class="sidebar-outline-section">
+                    <button
+                        id="sidebar-outline-toggle"
+                        class="sidebar-outline-toggle"
+                        type="button"
+                        aria-expanded="true"
+                        aria-controls="sidebar-outline-content"
+                    >
+                        <span class="sidebar-outline-toggle-copy">
+                            <span class="sidebar-outline-title">Outline</span>
+                            <span id="page-outline-count" class="sidebar-outline-count">0</span>
+                        </span>
+                        <span class="sidebar-outline-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    <div id="sidebar-outline-content" class="sidebar-outline-content">
+                        <div id="page-outline-list" class="page-outline-list page-outline-list-sidebar"></div>
+                    </div>
+                </section>
             </div>
 
             <div class="sidebar-footer">
@@ -242,14 +263,6 @@
                     </div>
                 </div>
 
-                <aside id="page-outline-panel" class="page-outline-panel">
-                    <div class="outline-card">
-                        <div class="outline-card-header">
-                            <span class="outline-card-title">Outline</span>
-                        </div>
-                        <div id="page-outline-list" class="page-outline-list"></div>
-                    </div>
-                </aside>
             </div>
         </main>
     </div>

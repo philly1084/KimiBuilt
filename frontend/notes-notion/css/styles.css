@@ -134,6 +134,7 @@ body {
     flex-shrink: 0;
     transition: width 0.2s ease, transform 0.2s ease;
     overflow: hidden;
+    min-height: 0;
 }
 
 .sidebar.collapsed {
@@ -253,6 +254,14 @@ body {
     padding: 8px 14px;
 }
 
+.sidebar-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 /* New page button - Lilly-style */
 .new-page-btn {
     width: 100%;
@@ -279,9 +288,13 @@ body {
 
 /* Sidebar section - Lilly-style cleaner */
 .sidebar-section {
-    flex: 1;
-    overflow-y: auto;
     padding: 8px 0;
+}
+
+.sidebar-pages-section {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .section-title {
@@ -296,6 +309,84 @@ body {
 /* Page Tree - Lilly-style cleaner design */
 .page-tree {
     padding: 6px 0;
+}
+
+.sidebar-outline-section {
+    flex: 0 0 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin: 6px 12px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.sidebar-outline-toggle {
+    width: 100%;
+    padding: 12px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.sidebar-outline-toggle:hover {
+    background: var(--bg-hover);
+}
+
+.sidebar-outline-toggle-copy {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sidebar-outline-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sidebar-outline-count {
+    flex-shrink: 0;
+    min-width: 24px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.sidebar-outline-chevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.18s ease;
+}
+
+.sidebar-outline-content {
+    max-height: min(34vh, 360px);
+    overflow-y: auto;
+    padding: 0 10px 10px;
+}
+
+.sidebar-outline-section.collapsed .sidebar-outline-content {
+    display: none;
+}
+
+.sidebar-outline-section.collapsed .sidebar-outline-chevron {
+    transform: rotate(-90deg);
 }
 
 .page-tree-item {
@@ -655,12 +746,10 @@ body {
 }
 
 .page-workspace {
-    max-width: 1320px;
+    max-width: 1120px;
     margin: 0 auto;
     padding: 0 32px 80px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 24px;
+    display: block;
     align-items: start;
 }
 
@@ -668,55 +757,14 @@ body {
     min-width: 0;
 }
 
-.page-outline-panel {
-    position: sticky;
-    top: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding-top: 16px;
-}
-
-.outline-card {
-    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    box-shadow: var(--shadow-sm);
-    padding: 14px;
-}
-
-.outline-card-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-    margin-bottom: 10px;
-}
-
-.outline-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 10px;
-}
-
-.outline-card-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.outline-card-meta {
-    font-size: 12px;
-    color: var(--text-muted);
-}
-
 .page-outline-list {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+.page-outline-list-sidebar {
+    min-height: 0;
 }
 
 .outline-item {
@@ -3650,14 +3698,11 @@ body {
 /* Responsive Adjustments */
 @media (max-width: 768px) {
     .page-workspace {
-        grid-template-columns: 1fr;
         padding: 0 0 48px;
     }
 
-    .page-outline-panel {
-        position: static;
-        padding: 0 24px;
-        order: -1;
+    .sidebar-outline-content {
+        max-height: 24vh;
     }
 
     .page-actions {

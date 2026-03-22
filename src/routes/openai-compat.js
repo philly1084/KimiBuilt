@@ -114,6 +114,7 @@ function buildContinuityInstructions(extra = '') {
         'Use recalled memory only as supplemental context.',
         'Do not claim you lack access to prior conversation if session transcript or recalled context is available in the prompt.',
         'Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that.',
+        'For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying.',
         'Be concise and informative.',
         extra || '',
     ].filter(Boolean).join('\n');
