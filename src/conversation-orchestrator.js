@@ -193,6 +193,25 @@ function normalizeToolResult(result, fallbackToolId) {
     };
 }
 
+function extractVerifiedImageEmbeds(toolEvents = []) {
+    return toolEvents.flatMap((event) => {
+        const data = event?.result?.data || {};
+        const embeds = [];
+
+        if (typeof data.markdownImage === 'string' && data.markdownImage.trim()) {
+            embeds.push(data.markdownImage.trim());
+        }
+
+        if (Array.isArray(data.markdownImages)) {
+            embeds.push(...data.markdownImages
+                .filter((entry) => typeof entry === 'string' && entry.trim())
+                .map((entry) => entry.trim()));
+        }
+
+        return embeds;
+    });
+}
+
 function buildSyntheticResponse({ output, responseId, model, metadata = {} }) {
     return {
         id: responseId || `resp_orch_${Date.now()}`,
@@ -742,11 +761,21 @@ class ConversationOrchestrator extends EventEmitter {
         const synthesisPrompt = [
             'Use the verified tool results below to answer the user.',
             'If a tool failed, state the exact failure plainly.',
+            'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
             `Task type: ${taskType}`,
             '',
             'User request:',
             objective || '(empty)',
             '',
+            ...(extractVerifiedImageEmbeds(toolEvents).length > 0
+                ? [
+                    'Verified embeddable images:',
+                    ...extractVerifiedImageEmbeds(toolEvents),
+                    '',
+                    'Reuse those image embeds directly when they satisfy the request.',
+                    '',
+                ]
+                : []),
             'Verified tool results:',
             JSON.stringify(toolEvents.map((event) => ({
                 tool: event.toolCall?.function?.name,
@@ -787,6 +816,7 @@ class ConversationOrchestrator extends EventEmitter {
         if (toolEvents.length > 0) {
             parts.push('Use the verified tool results as the source of truth over guesses.');
             parts.push('When a verified tool result includes image URLs or markdown image snippets, you may embed them with standard markdown image syntax.');
+            parts.push('Do not fabricate SVG overlays, inline HTML image placeholders, or other visual stand-ins when verified image URLs are available.');
         }
 
         return parts.filter(Boolean).join('\n\n');

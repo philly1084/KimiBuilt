@@ -974,6 +974,10 @@ function buildAutomaticToolGuidance(automaticTools = []) {
         guidance.push('- Use `image-from-url` when the user provides or requests a direct image URL to embed in the answer.');
     }
 
+    if (automaticTools.some((entry) => ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(entry.id))) {
+        guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
+    }
+
     if (automaticTools.some((entry) => entry.id === 'file-read')) {
         guidance.push('- Use `file-read` to inspect files from the local workspace when the user asks to read or review them.');
     }
