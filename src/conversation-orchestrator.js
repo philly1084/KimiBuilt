@@ -326,6 +326,45 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
     return null;
 }
 
+function isInvalidRuntimeResponseText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase().replace(/[â€™]/g, '\'');
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        'cli_help sub-agent',
+        'generalist agent',
+        'provided file-system tools',
+        'current environment\'s available toolset',
+        'current workspace in /app',
+        'i do not have access to an ssh-execute tool',
+        'i do not have a usable remote-build or ssh execution tool',
+        'i can\'t access the remote server from this environment',
+        'i cannot access the remote server from this environment',
+        'this session is restricted from network/ssh access',
+        'this session is restricted from network access',
+        'no ssh/network path to the remote server',
+        'no ssh path to the remote server',
+        'i can\'t run remote-build',
+        'i cannot run remote-build',
+        'i can\'t connect via ssh',
+        'i cannot connect via ssh',
+        'i can\'t execute ssh from this session',
+        'i cannot execute ssh from this session',
+        'bwrap: no permissions to create a new namespace',
+        'bwrap: no permissions to create a new na',
+        'bwrap: no permissions',
+        'basic local commands fail before any ssh attempt',
+        'testing command execution first',
+        'fails before any remote connection starts',
+        'fails before any network connection starts',
+        'workspace can execute anything locally',
+        'launch a remote check from /app',
+        'can\'t inspect config or launch a remote check from /app',
+    ].some((pattern) => normalized.includes(pattern));
+}
+
 function normalizeStepSignature(step = {}) {
     return JSON.stringify({
         tool: String(step?.tool || '').trim(),
@@ -733,6 +772,77 @@ class ConversationOrchestrator extends EventEmitter {
             });
 
             output = extractResponseText(finalResponse);
+            if (isInvalidRuntimeResponseText(output) && toolEvents.length === 0 && toolPolicy.candidateToolIds.length > 0) {
+                const recoveryPlan = this.buildFallbackPlan({
+                    objective,
+                    session,
+                    executionProfile: resolvedProfile,
+                    toolPolicy,
+                    model,
+                }).filter((step) => !executedStepSignatures.has(normalizeStepSignature(step)));
+
+                if (recoveryPlan.length > 0) {
+                    runtimeMode = 'recovered-tools';
+                    const recoveryPlanningStartedAt = new Date().toISOString();
+                    recoveryPlan.forEach((step) => executedStepSignatures.add(normalizeStepSignature(step)));
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'planning',
+                        name: 'Recovery plan',
+                        startedAt: recoveryPlanningStartedAt,
+                        endedAt: new Date().toISOString(),
+                        details: {
+                            invalidModelResponse: true,
+                            stepCount: recoveryPlan.length,
+                            steps: recoveryPlan.map((step) => ({
+                                tool: step.tool,
+                                reason: step.reason,
+                            })),
+                        },
+                    }));
+
+                    const recoveryExecutionStartedAt = new Date().toISOString();
+                    const recoveryToolEvents = await this.executePlan({
+                        plan: recoveryPlan,
+                        toolManager: runtimeToolManager,
+                        sessionId,
+                        executionProfile: resolvedProfile,
+                        toolContext,
+                    });
+                    toolEvents.push(...recoveryToolEvents);
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'execution',
+                        name: 'Recovery execution',
+                        startedAt: recoveryExecutionStartedAt,
+                        endedAt: new Date().toISOString(),
+                        status: recoveryToolEvents.some((event) => event?.result?.success === false) ? 'error' : 'completed',
+                        details: {
+                            toolCalls: recoveryToolEvents.length,
+                            tools: recoveryToolEvents.map((event) => ({
+                                tool: event?.toolCall?.function?.name || '',
+                                success: event?.result?.success !== false,
+                                error: event?.result?.error || null,
+                            })),
+                        },
+                    }));
+
+                    finalResponse = await this.buildFinalResponse({
+                        input,
+                        objective,
+                        instructions,
+                        contextMessages: resolvedContextMessages,
+                        recentMessages: resolvedRecentMessages,
+                        model,
+                        taskType,
+                        executionProfile: resolvedProfile,
+                        toolPolicy,
+                        toolEvents,
+                        runtimeMode,
+                        autonomyApproved,
+                        executionTrace,
+                    });
+                    output = extractResponseText(finalResponse);
+                }
+            }
             await this.persistConversationState({
                 sessionId,
                 userText: objective,
@@ -855,6 +965,12 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('file-mkdir');
             }
         } else {
+            if (allowedToolIds.includes('ssh-execute') && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
+                candidates.add('ssh-execute');
+            }
+            if (allowedToolIds.includes('remote-command') && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
+                candidates.add('remote-command');
+            }
             if ((hasExplicitWebResearchIntent || /\b(latest|current|today|news|research|look up|search|browse)\b/.test(prompt)) && allowedToolIds.includes('web-search')) {
                 candidates.add('web-search');
             }
