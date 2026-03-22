@@ -346,6 +346,8 @@ GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
 - assistant_reply should be brief and user-friendly (not mention the JSON actions)
 - The editor will automatically apply your actions and show the assistant_reply to the user
+- In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
+- If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions, not a request to inspect a remote server or codebase.
 - Use \`\`\`notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.
 - If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.
 - For multi-step non-page work, continue the task with the best next concrete step and use verified prior tool results and session state before asking the user to repeat details.
@@ -408,6 +410,19 @@ GUIDELINES:
         const pageHasEnoughSurface = (context?.blockCount || 0) > 3 || (context?.outline?.length || 0) > 1;
 
         return writingVerb && (substantialTarget || pageHasEnoughSurface);
+    }
+
+    function isExplicitPageEditIntent(question = '') {
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return [
+            /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
+            /\b(edit|update|rewrite|reformat|reorganize|restyle|clean up|fix)\b[\s\S]{0,40}\b(page|note|document|doc)\b/,
+            /\b(current page|this page|the page|this note|the note)\b/,
+        ].some((pattern) => pattern.test(normalized));
     }
 
     function normalizeHiddenDraftResult(text = '', fallback = null) {
@@ -2669,9 +2684,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                 attemptedModels.push(model);
                 const useMultiPassDraft = shouldUseMultiPassNotesDraft(question, context, requestOptions);
+                const explicitPageEditIntent = isExplicitPageEditIntent(question);
+                const effectiveQuestion = explicitPageEditIntent
+                    ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. Apply the requested content to this notes page with notes-actions unless the user explicitly says web page, site page, repo file, or server component.`
+                    : question;
                 let messages = [
                     { role: 'system', content: systemPrompt },
-                    { role: 'user', content: question }
+                    { role: 'user', content: effectiveQuestion }
                 ];
                 let responseText = '';
                 let lastVisibleText = '';
@@ -2685,7 +2704,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                             apiClient,
                             model,
                             systemPrompt,
-                            question,
+                            question: effectiveQuestion,
                             requestOptions,
                         });
                         if (Array.isArray(multiPassMessages) && multiPassMessages.length > 0) {

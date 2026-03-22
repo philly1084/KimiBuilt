@@ -4,6 +4,7 @@ const { createResponse } = require('./openai-client');
 
 const RECENT_TRANSCRIPT_LIMIT = 12;
 const DEFAULT_EXECUTION_PROFILE = 'default';
+const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 
 function resolveConversationExecutorFlag(payload = {}) {
@@ -35,6 +36,16 @@ function normalizeExecutionProfile(value = '') {
         'software-builder',
     ].includes(normalized)) {
         return REMOTE_BUILD_EXECUTION_PROFILE;
+    }
+
+    if ([
+        'notes',
+        'notes-app',
+        'notes_app',
+        'notes-editor',
+        'notes_editor',
+    ].includes(normalized)) {
+        return NOTES_EXECUTION_PROFILE;
     }
 
     return DEFAULT_EXECUTION_PROFILE;
@@ -69,6 +80,17 @@ function extractRuntimeText(input = '') {
 }
 
 function inferExecutionProfile(payload = {}) {
+    const taskType = String(
+        payload?.taskType
+        || payload?.task_type
+        || payload?.clientSurface
+        || payload?.client_surface
+        || payload?.metadata?.taskType
+        || payload?.metadata?.task_type
+        || payload?.metadata?.clientSurface
+        || payload?.metadata?.client_surface
+        || '',
+    ).trim().toLowerCase();
     const configuredProfile = normalizeExecutionProfile(
         payload?.executionProfile
         || payload?.execution_profile
@@ -79,15 +101,25 @@ function inferExecutionProfile(payload = {}) {
         || payload?.metadata?.agentProfile
         || payload?.metadata?.agent_profile,
     );
+    const requestedNotesProfile = configuredProfile === NOTES_EXECUTION_PROFILE
+        || ['notes', 'notes-app', 'notes_app', 'notes-editor', 'notes_editor'].includes(taskType);
 
-    if (configuredProfile !== DEFAULT_EXECUTION_PROFILE) {
-        return configuredProfile;
+    if (configuredProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+        return REMOTE_BUILD_EXECUTION_PROFILE;
     }
 
     const text = extractRuntimeText(payload?.input || payload?.memoryInput || '');
     const normalized = String(text || '').toLowerCase();
+    const pageEditIntent = normalized
+        ? [
+            /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
+            /\b(edit|update|rewrite|reformat|reorganize|restyle|clean up|fix)\b[\s\S]{0,40}\b(page|note|document|doc)\b/,
+            /\b(current page|this page|the page|this note|the note)\b/,
+        ].some((pattern) => pattern.test(normalized))
+        : false;
+
     if (!normalized) {
-        return DEFAULT_EXECUTION_PROFILE;
+        return requestedNotesProfile ? NOTES_EXECUTION_PROFILE : DEFAULT_EXECUTION_PROFILE;
     }
 
     const remoteBuildIntent = [
@@ -98,6 +130,14 @@ function inferExecutionProfile(payload = {}) {
         /\b(kubectl|kubernetes|k8s|docker compose|docker-compose|systemctl|journalctl|nginx|pm2)\b/,
         /\b(build|compile|install|run)\b[\s\S]{0,40}\b(on|via)\b[\s\S]{0,20}\b(server|ssh|remote)\b/,
     ].some((pattern) => pattern.test(normalized));
+
+    if (requestedNotesProfile) {
+        if (pageEditIntent) {
+            return NOTES_EXECUTION_PROFILE;
+        }
+
+        return remoteBuildIntent ? REMOTE_BUILD_EXECUTION_PROFILE : NOTES_EXECUTION_PROFILE;
+    }
 
     return remoteBuildIntent ? REMOTE_BUILD_EXECUTION_PROFILE : DEFAULT_EXECUTION_PROFILE;
 }

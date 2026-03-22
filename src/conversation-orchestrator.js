@@ -8,6 +8,7 @@ const {
 } = require('./ai-route-utils');
 
 const DEFAULT_EXECUTION_PROFILE = 'default';
+const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
@@ -16,6 +17,19 @@ const RECENT_TRANSCRIPT_LIMIT = 12;
 
 const PROFILE_TOOL_ALLOWLISTS = {
     [DEFAULT_EXECUTION_PROFILE]: [
+        'web-search',
+        'web-fetch',
+        'web-scrape',
+        'image-generate',
+        'image-search-unsplash',
+        'image-from-url',
+        'file-read',
+        'file-write',
+        'file-search',
+        'file-mkdir',
+        'tool-doc-read',
+    ],
+    [NOTES_EXECUTION_PROFILE]: [
         'web-search',
         'web-fetch',
         'web-scrape',
@@ -49,6 +63,16 @@ const PROFILE_TOOL_ALLOWLISTS = {
 
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
+
+    if ([
+        'notes',
+        'notes-app',
+        'notes_app',
+        'notes-editor',
+        'notes_editor',
+    ].includes(normalized)) {
+        return NOTES_EXECUTION_PROFILE;
+    }
 
     if ([
         'remote-build',

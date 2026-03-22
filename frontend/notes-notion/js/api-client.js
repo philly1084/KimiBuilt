@@ -82,6 +82,8 @@ function buildNotesRuntimeContext(extra = {}) {
     return {
         task_type: NOTES_TASK_TYPE,
         taskType: NOTES_TASK_TYPE,
+        execution_profile: NOTES_TASK_TYPE,
+        executionProfile: NOTES_TASK_TYPE,
         client_surface: NOTES_CLIENT_SURFACE,
         clientSurface: NOTES_CLIENT_SURFACE,
         ...extra,
