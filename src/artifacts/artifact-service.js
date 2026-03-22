@@ -11,6 +11,7 @@ const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
+const DEFAULT_DOCUMENT_IMAGE_TARGET = 8;
 const COMPOSITION_PLANNING_PATTERNS = [
     /\bpage layout plan\b/i,
     /\bcredits? and source register\b/i,
@@ -154,6 +155,19 @@ function isLikelyImageUrl(url = '') {
         || normalized.includes('/photo-');
 }
 
+function isExternalImageReferenceUrl(url = '') {
+    const normalized = String(url || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (normalized.startsWith('/')) {
+        return false;
+    }
+
+    return /^https?:\/\//.test(normalized) && !/\/api\/artifacts\/.+\/download\b/.test(normalized);
+}
+
 function extractImageReferencesFromSession(session = null) {
     const entries = Array.isArray(session?.metadata?.projectMemory?.urls)
         ? session.metadata.projectMemory.urls
@@ -162,7 +176,7 @@ function extractImageReferencesFromSession(session = null) {
 
     entries.forEach((entry) => {
         const url = normalizeImageReferenceUrl(entry?.url || '');
-        if (!url || (!isLikelyImageUrl(url) && String(entry?.kind || '').toLowerCase() !== 'image')) {
+        if (!url || !isExternalImageReferenceUrl(url) || (!isLikelyImageUrl(url) && String(entry?.kind || '').toLowerCase() !== 'image')) {
             return;
         }
 
@@ -182,6 +196,9 @@ function buildDocumentImageInstructions() {
         'When verified image URLs are available in session memory or prompt context, use those real images with standard HTML <img> tags.',
         'Prefer remembered direct image URLs and Unsplash image URLs over generated decorative placeholders.',
         'Prefer standard HTML <img src="..."> elements over background-image-only treatments when the image is meaningful content.',
+        'For HTML, PDF, and DOCX designs, distribute real images throughout the document instead of clustering them in a single appendix or final page.',
+        'Use a strong visual rhythm: opening hero image, repeated section visuals, image cards, and galleries when enough verified image URLs exist.',
+        'If there are enough verified images, include visuals in most major sections rather than only one or two isolated slots.',
         'Never create inline SVG artwork, multilayered SVG mockups, CSS-only fake photos, canvas placeholders, blob URLs, or data:image embeds unless the user explicitly asks for vector artwork.',
         'If no verified image URL is available for a visual slot, omit the image block and keep the section text-only.',
         'Use descriptive alt text and keep images tied to the content instead of decorative filler.',
@@ -230,7 +247,7 @@ function renderSectionContentHtml(content = '') {
 
 function buildImageFigureHtml(imageReference, fallbackAlt = 'Document image') {
     const url = normalizeImageReferenceUrl(imageReference?.url || '');
-    if (!url) {
+    if (!url || !isExternalImageReferenceUrl(url)) {
         return '';
     }
 
@@ -246,31 +263,72 @@ function buildImageFigureHtml(imageReference, fallbackAlt = 'Document image') {
     ].join('\n');
 }
 
+function pickImageReference(imageReferences = [], index = 0) {
+    const normalized = Array.isArray(imageReferences)
+        ? imageReferences.filter((entry) => {
+            const url = normalizeImageReferenceUrl(entry?.url || '');
+            return url && isExternalImageReferenceUrl(url);
+        })
+        : [];
+
+    if (normalized.length === 0) {
+        return null;
+    }
+
+    return normalized[index % normalized.length];
+}
+
 function buildExpandedDocumentHtml(title = 'Document', sections = [], imageReferences = []) {
     const safeTitle = escapeHtml(title);
     const normalizedSections = Array.isArray(sections) ? sections : [];
     const normalizedImages = Array.isArray(imageReferences) ? imageReferences : [];
+    const heroImage = pickImageReference(normalizedImages, 0);
+
+    const heroMarkup = heroImage
+        ? [
+            '<section class="document-hero">',
+            `  ${buildImageFigureHtml(heroImage, `${title} hero image`).replace(/\n/g, '\n  ')}`,
+            '</section>',
+        ].join('\n')
+        : '';
 
     const sectionMarkup = normalizedSections.map((section, index) => {
         const safeHeading = escapeHtml(String(section?.heading || `Section ${index + 1}`).trim());
         const bodyMarkup = renderSectionContentHtml(section?.content || '');
-        const figureMarkup = buildImageFigureHtml(normalizedImages[index], section?.heading || title);
+        const primaryImage = pickImageReference(normalizedImages, index + 1);
+        const supportingImage = normalizedImages.length >= 4 && index % 2 === 0
+            ? pickImageReference(normalizedImages, index + 2)
+            : null;
+        const figureMarkup = buildImageFigureHtml(primaryImage, section?.heading || title);
+        const supportingFigureMarkup = supportingImage && supportingImage?.url !== primaryImage?.url
+            ? buildImageFigureHtml(supportingImage, `${section?.heading || title} supporting image`)
+            : '';
+        const imageRailMarkup = figureMarkup || supportingFigureMarkup
+            ? [
+                '<div class="document-image-rail">',
+                figureMarkup ? `  ${figureMarkup.replace(/\n/g, '\n  ')}` : '',
+                supportingFigureMarkup ? `  ${supportingFigureMarkup.replace(/\n/g, '\n  ')}` : '',
+                '</div>',
+            ].filter(Boolean).join('\n')
+            : '';
 
         return [
             `<section class="document-section" data-section-index="${index + 1}">`,
             `  <h2>${safeHeading}</h2>`,
-            figureMarkup ? `  ${figureMarkup.replace(/\n/g, '\n  ')}` : '',
+            imageRailMarkup ? `  ${imageRailMarkup.replace(/\n/g, '\n  ')}` : '',
             `  <div class="document-copy">${bodyMarkup}</div>`,
             '</section>',
         ].filter(Boolean).join('\n');
     }).join('\n');
 
-    const remainingImages = normalizedImages.slice(normalizedSections.length);
+    const remainingImages = normalizedImages.slice(Math.min(normalizedImages.length, normalizedSections.length + 1));
     const galleryMarkup = remainingImages.length > 0
         ? [
             '<section class="document-section document-gallery">',
-            '  <h2>Source Images</h2>',
+            '  <h2>Image Gallery</h2>',
+            '  <div class="document-gallery-grid">',
             ...remainingImages.map((imageReference, index) => `  ${buildImageFigureHtml(imageReference, `${title} image ${index + 1}`).replace(/\n/g, '\n  ')}`),
+            '  </div>',
             '</section>',
         ].join('\n')
         : '';
@@ -288,10 +346,13 @@ function buildExpandedDocumentHtml(title = 'Document', sections = [], imageRefer
         '    h1, h2, h3 { color: #111827; }',
         '    .document-section { margin: 0 0 32px; }',
         '    .document-copy p, .document-copy ul, .document-copy ol { margin: 0 0 16px; }',
+        '    .document-hero { margin: 0 0 32px; }',
+        '    .document-image-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin: 20px 0 24px; }',
         '    .document-image { margin: 20px 0 24px; }',
-        '    .document-image img { width: 100%; height: auto; border-radius: 16px; display: block; }',
+        '    .document-image img { width: 100%; height: auto; min-height: 220px; object-fit: cover; border-radius: 16px; display: block; }',
         '    .document-image figcaption { font-size: 12px; color: #4b5563; margin-top: 8px; }',
         '    .document-credit { display: inline-block; margin-left: 8px; }',
+        '    .document-gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }',
         '    a { color: #1d4ed8; }',
         '  </style>',
         '</head>',
@@ -300,6 +361,7 @@ function buildExpandedDocumentHtml(title = 'Document', sections = [], imageRefer
         '    <header>',
         `      <h1>${safeTitle}</h1>`,
         '    </header>',
+        heroMarkup ? `    ${heroMarkup.replace(/\n/g, '\n    ')}` : '',
         sectionMarkup || '    <section class="document-section"><p>No content provided.</p></section>',
         galleryMarkup ? `    ${galleryMarkup.replace(/\n/g, '\n    ')}` : '',
         '  </main>',
@@ -346,6 +408,10 @@ function shouldRecoverCompositionOutput(outputText = '', expandedDocument = null
 function shouldFetchUnsplashReferences(prompt = '') {
     const normalized = String(prompt || '').trim().toLowerCase();
     if (!normalized) {
+        return false;
+    }
+
+    if (/\b(no images|without images|text only|text-only|no photos|without photos)\b/.test(normalized)) {
         return false;
     }
 
@@ -725,6 +791,7 @@ class ArtifactService {
             'Preserve the section order and cover all requested content.',
             'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
             'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
+            'When verified external image URLs are available, make the design image-rich with a hero image, repeated section visuals, image cards, and gallery treatments across the document.',
             'Do not output a layout plan, source register instructions, build checklist, editorial note, or any meta-document that describes how a future document should be assembled.',
             'The output must be the finished document itself, not instructions for building it.',
             buildDocumentImageInstructions(),
@@ -750,23 +817,23 @@ class ArtifactService {
         ].join('\n');
     }
 
-    async resolveImageReferences(session = null, prompt = '') {
+    async resolveImageReferences(session = null, prompt = '', options = {}) {
+        const desiredCount = Math.max(1, Number(options.desiredCount || DEFAULT_DOCUMENT_IMAGE_TARGET) || DEFAULT_DOCUMENT_IMAGE_TARGET);
         const sessionRefs = extractImageReferencesFromSession(session);
-        if (sessionRefs.length > 0) {
-            return sessionRefs;
-        }
+        let combinedRefs = sessionRefs.slice(0, desiredCount);
+        const preferVisualDefaults = options.preferVisualDefaults === true;
 
-        if (!isUnsplashConfigured() || !shouldFetchUnsplashReferences(prompt)) {
-            return [];
+        if (!isUnsplashConfigured() || (!preferVisualDefaults && !shouldFetchUnsplashReferences(prompt))) {
+            return combinedRefs;
         }
 
         const query = inferUnsplashQuery(prompt);
         if (!query) {
-            return [];
+            return combinedRefs;
         }
 
         try {
-            const results = await searchImages(query, { perPage: 3, orientation: 'landscape' });
+            const results = await searchImages(query, { perPage: desiredCount, orientation: 'landscape' });
             const unsplashRefs = (Array.isArray(results?.results) ? results.results : [])
                 .map((image) => ({
                     url: normalizeImageReferenceUrl(image?.urls?.regular || image?.urls?.full || image?.urls?.small || ''),
@@ -774,18 +841,30 @@ class ArtifactService {
                     source: 'unsplash',
                     toolId: 'image-search-unsplash',
                 }))
-                .filter((entry) => entry.url);
+                .filter((entry) => entry.url && isExternalImageReferenceUrl(entry.url));
 
-            return unsplashRefs;
+            const unique = new Map();
+            [...combinedRefs, ...unsplashRefs].forEach((entry) => {
+                if (!entry?.url || !isExternalImageReferenceUrl(entry.url) || unique.has(entry.url)) {
+                    return;
+                }
+                unique.set(entry.url, entry);
+            });
+
+            combinedRefs = Array.from(unique.values()).slice(0, desiredCount);
+            return combinedRefs;
         } catch (error) {
             console.warn('[Artifacts] Failed to fetch Unsplash references:', error.message);
-            return [];
+            return combinedRefs;
         }
     }
 
     async buildImageReferenceContext(session = null, prompt = '') {
         return this.formatImageReferenceContext(
-            await this.resolveImageReferences(session, prompt),
+            await this.resolveImageReferences(session, prompt, {
+                desiredCount: DEFAULT_DOCUMENT_IMAGE_TARGET,
+                preferVisualDefaults: true,
+            }),
         );
     }
 
@@ -925,7 +1004,10 @@ class ArtifactService {
         }
 
         const promptContext = await this.buildPromptContext(sessionId, artifactIds);
-        const imageReferences = await this.resolveImageReferences(session, prompt);
+        const imageReferences = await this.resolveImageReferences(session, prompt, {
+            desiredCount: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat) ? DEFAULT_DOCUMENT_IMAGE_TARGET : 3,
+            preferVisualDefaults: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat),
+        });
         const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
         const generated = MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)

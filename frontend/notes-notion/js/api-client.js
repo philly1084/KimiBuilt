@@ -19,6 +19,9 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
 const BASE_URL_WITHOUT_API = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     ? 'http://localhost:3000'
     : CURRENT_ORIGIN;
+const NOTES_TASK_TYPE = 'notes';
+const NOTES_CLIENT_SURFACE = 'notes';
+const NOTES_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 // Retry configuration
 const RETRY_CONFIG = {
     maxRetries: 3,
@@ -177,6 +180,15 @@ class NotesAPIClient {
             model,
             messages,
             stream: true,
+            taskType: NOTES_TASK_TYPE,
+            clientSurface: NOTES_CLIENT_SURFACE,
+            metadata: {
+                remoteBuildAutonomyApproved: NOTES_REMOTE_BUILD_AUTONOMY_APPROVED,
+                clientSurface: NOTES_CLIENT_SURFACE,
+                ...(requestOptions.metadata && typeof requestOptions.metadata === 'object'
+                    ? requestOptions.metadata
+                    : {}),
+            },
         };
 
         if (requestOptions.outputFormat) {
@@ -381,6 +393,15 @@ class NotesAPIClient {
             model,
             messages,
             stream: false,
+            taskType: NOTES_TASK_TYPE,
+            clientSurface: NOTES_CLIENT_SURFACE,
+            metadata: {
+                remoteBuildAutonomyApproved: NOTES_REMOTE_BUILD_AUTONOMY_APPROVED,
+                clientSurface: NOTES_CLIENT_SURFACE,
+                ...(requestOptions.metadata && typeof requestOptions.metadata === 'object'
+                    ? requestOptions.metadata
+                    : {}),
+            },
         };
 
         if (requestOptions.outputFormat) {
@@ -698,6 +719,11 @@ class NotesAPIClient {
         if (category) {
             params.set('category', category);
         }
+        params.set('taskType', NOTES_TASK_TYPE);
+        params.set('clientSurface', NOTES_CLIENT_SURFACE);
+        if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
+            params.set('sessionId', this.currentSessionId);
+        }
 
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`, {
             method: 'GET',
@@ -738,6 +764,8 @@ class NotesAPIClient {
                     tool: toolId,
                     params,
                     sessionId: this.currentSessionId,
+                    taskType: NOTES_TASK_TYPE,
+                    clientSurface: NOTES_CLIENT_SURFACE,
                 }),
             });
 

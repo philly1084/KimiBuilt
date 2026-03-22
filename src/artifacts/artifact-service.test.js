@@ -298,12 +298,95 @@ describe('ArtifactService', () => {
         });
 
         expect(searchImages).toHaveBeenCalledWith(expect.stringContaining('atlantic canada axe throwing venues'), expect.objectContaining({
-            perPage: 3,
+            perPage: 8,
             orientation: 'landscape',
         }));
         const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
         expect(instructions).toContain('https://images.unsplash.com/photo-999');
         expect(instructions).toContain('[Verified image references]');
+    });
+
+    test('ignores internal artifact image links and prefers external urls for document visuals', async () => {
+        isConfigured.mockReturnValue(true);
+        searchImages.mockResolvedValue({
+            results: [
+                {
+                    description: 'External photo',
+                    altDescription: 'External fallback photo',
+                    urls: {
+                        regular: 'https://images.unsplash.com/photo-456',
+                    },
+                },
+            ],
+        });
+
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Travel Brief',
+                        sections: [
+                            { heading: 'Overview', purpose: 'Summarize the brief', keyPoints: ['Goal'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Travel Brief',
+                        sections: [
+                            { heading: 'Overview', content: 'Overview content', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Page Layout Plan\n\nUse verified photos throughout the PDF.' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: {
+                previousResponseId: 'prev-1',
+                metadata: {
+                    projectMemory: {
+                        urls: [
+                            {
+                                url: '/api/artifacts/internal-image/download',
+                                kind: 'image',
+                                title: 'Internal artifact image',
+                                source: 'session',
+                            },
+                        ],
+                    },
+                },
+            },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a polished PDF travel brief.',
+            format: 'pdf',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
+        expect(instructions).not.toContain('/api/artifacts/internal-image/download');
+        expect(instructions).toContain('https://images.unsplash.com/photo-456');
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('https://images.unsplash.com/photo-456'),
+        }));
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.not.stringContaining('/api/artifacts/internal-image/download'),
+        }));
     });
 
     test('recovers when composition returns a layout plan instead of final html', async () => {

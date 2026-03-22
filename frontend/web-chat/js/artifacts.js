@@ -10,6 +10,7 @@
         : `${window.location.protocol}//${window.location.host}`;
     const V1_BASE = `${API_BASE}/v1`;
     const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+    const WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 
     const state = {
         artifacts: [],
@@ -596,6 +597,12 @@
                 model,
                 messages,
                 stream: true,
+                taskType: 'chat',
+                clientSurface: 'web-chat',
+                metadata: {
+                    remoteBuildAutonomyApproved: WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED,
+                    clientSurface: 'web-chat',
+                },
             };
             if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
                 params.session_id = this.currentSessionId;

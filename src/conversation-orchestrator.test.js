@@ -168,6 +168,223 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('Deployment is healthy.');
     });
 
+    test('continues through multiple remote-build rounds after broad user approval', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Cluster inspection completed and the obvious next checks were run.', 'resp_auto')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            tool: 'ssh-execute',
+                            reason: 'Check node status first',
+                            params: {
+                                command: 'kubectl get nodes -o wide',
+                            },
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            tool: 'ssh-execute',
+                            reason: 'Check pods after confirming nodes',
+                            params: {
+                                command: 'kubectl get pods -A -o wide',
+                            },
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: {
+                        stdout: 'node-1 Ready',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: {
+                        stdout: 'kube-system traefik Running',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to inspect the cluster and keep going with the obvious next steps.',
+            sessionId: 'session-remote',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(llmClient.complete).toHaveBeenCalledTimes(3);
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            1,
+            'ssh-execute',
+            expect.objectContaining({ command: 'kubectl get nodes -o wide' }),
+            expect.objectContaining({ executionProfile: 'remote-build' }),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            2,
+            'ssh-execute',
+            expect.objectContaining({ command: 'kubectl get pods -A -o wide' }),
+            expect.objectContaining({ executionProfile: 'remote-build' }),
+        );
+        expect(sessionStore.update).toHaveBeenCalledWith('session-remote', expect.objectContaining({
+            metadata: expect.objectContaining({
+                remoteBuildAutonomyApproved: true,
+            }),
+        }));
+        expect(result.response.metadata.toolEvents).toHaveLength(2);
+        expect(result.response.metadata.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+            'Remote-build autonomy approved',
+            'Plan round 1',
+            'Execution round 1',
+            'Plan round 2',
+            'Execution round 2',
+        ]));
+    });
+
+    test('accepts frontend-provided remote-build autonomy approval', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Remote inspection completed.', 'resp_frontend_auto')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            tool: 'ssh-execute',
+                            reason: 'Inspect the node first',
+                            params: {
+                                command: 'hostname && uname -m',
+                            },
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            tool: 'ssh-execute',
+                            reason: 'Inspect pods after node verification',
+                            params: {
+                                command: 'kubectl get pods -A',
+                            },
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: { stdout: 'host-a\naarch64', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'ssh-execute',
+                    data: { stdout: 'kube-system traefik Running', stderr: '', host: '10.0.0.5:22' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-frontend-remote', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-frontend-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'Inspect the cluster state on the server.',
+            sessionId: 'session-frontend-remote',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+                clientSurface: 'web-chat',
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(sessionStore.update).toHaveBeenCalledWith('session-frontend-remote', expect.objectContaining({
+            metadata: expect.objectContaining({
+                remoteBuildAutonomyApproved: true,
+            }),
+        }));
+    });
+
     test('treats explicit web research and scrape requests as first-class tool intents', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

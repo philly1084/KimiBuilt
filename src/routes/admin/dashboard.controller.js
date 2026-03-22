@@ -89,6 +89,92 @@ class DashboardController {
     };
   }
 
+  normalizeExecutionTraceStep(step = {}, fallbackStartTime = null, fallbackEndTime = null) {
+    const startTime = step?.startTime || fallbackStartTime || new Date().toISOString();
+    const endTime = step?.endTime || fallbackEndTime || startTime;
+
+    return {
+      type: step?.type || 'runtime',
+      name: step?.name || 'Runtime step',
+      startTime,
+      endTime,
+      duration: Number(step?.duration || Math.max(0, new Date(endTime).getTime() - new Date(startTime).getTime()) || 0),
+      status: step?.status || 'completed',
+      details: step?.details && typeof step.details === 'object' ? step.details : {},
+    };
+  }
+
+  extractExecutionTrace(metadata = {}, fallbackStartTime = null, fallbackEndTime = null) {
+    const steps = Array.isArray(metadata?.executionTrace)
+      ? metadata.executionTrace
+      : [];
+
+    return steps.map((step) => this.normalizeExecutionTraceStep(step, fallbackStartTime, fallbackEndTime));
+  }
+
+  buildTimeline(task, toolUsage, metadata = {}, { completed = true, responseId = null, output = '', duration = 0, error = '' } = {}) {
+    const endTime = completed ? task.completedAt : task.failedAt;
+    const executionTrace = this.extractExecutionTrace(metadata, task.createdAt, endTime);
+    const timeline = [
+      {
+        step: 1,
+        type: 'request',
+        name: `${task.mode} request received`,
+        startTime: task.createdAt,
+        endTime: task.createdAt,
+        duration: 0,
+        status: 'completed',
+        details: {
+          transport: task.transport,
+          sessionId: task.sessionId,
+        },
+      },
+      ...executionTrace,
+      ...toolUsage.toolEvents.map((event) => ({
+        type: 'tool_call',
+        name: `Tool call (${event.toolId})`,
+        startTime: task.createdAt,
+        endTime,
+        duration: Number(event.duration || 0),
+        status: event.success ? 'completed' : 'error',
+        details: {
+          reason: event.reason,
+          paramKeys: event.paramKeys,
+          error: event.error,
+        },
+      })),
+      completed
+        ? {
+          type: 'model_call',
+          name: `Model response (${task.model})`,
+          startTime: task.createdAt,
+          endTime,
+          duration: Number(duration || 0),
+          status: 'completed',
+          details: {
+            responseId,
+            outputPreview: String(output || '').slice(0, 200),
+          },
+        }
+        : {
+          type: 'model_call',
+          name: `Model request failed (${task.model})`,
+          startTime: task.createdAt,
+          endTime,
+          duration: Number(duration || 0),
+          status: 'error',
+          details: {
+            error,
+          },
+        },
+    ].filter(Boolean);
+
+    return timeline.map((entry, index) => ({
+      step: index + 1,
+      ...entry,
+    }));
+  }
+
   buildToolUsageSummary() {
     const toolCounts = new Map();
     let totalCalls = 0;
@@ -570,48 +656,12 @@ class DashboardController {
       model: task.model,
       input: task.input,
       output: String(output || '').slice(0, 4000),
-      timeline: [
-        {
-          step: 1,
-          type: 'request',
-          name: `${task.mode} request received`,
-          startTime: task.createdAt,
-          endTime: task.createdAt,
-          duration: 0,
-          status: 'completed',
-          details: {
-            transport: task.transport,
-            sessionId: task.sessionId,
-          },
-        },
-        ...toolUsage.toolEvents.map((event, index) => ({
-          step: index + 2,
-          type: 'tool_call',
-          name: `Tool call (${event.toolId})`,
-          startTime: task.createdAt,
-          endTime: task.completedAt,
-          duration: Number(event.duration || 0),
-          status: event.success ? 'completed' : 'error',
-          details: {
-            reason: event.reason,
-            paramKeys: event.paramKeys,
-            error: event.error,
-          },
-        })),
-        {
-          step: toolUsage.toolEvents.length + 2,
-          type: 'model_call',
-          name: `Model response (${task.model})`,
-          startTime: task.createdAt,
-          endTime: task.completedAt,
-          duration: Number(duration || 0),
-          status: 'completed',
-          details: {
-            responseId,
-            outputPreview: String(output || '').slice(0, 200),
-          },
-        },
-      ],
+      timeline: this.buildTimeline(task, toolUsage, metadata, {
+        completed: true,
+        responseId,
+        output,
+        duration,
+      }),
       metrics: {
         totalTokens: tokenUsage.totalTokens,
         promptTokens: tokenUsage.promptTokens,
@@ -693,47 +743,11 @@ class DashboardController {
       model: task.model,
       input: task.input,
       output: '',
-      timeline: [
-        {
-          step: 1,
-          type: 'request',
-          name: `${task.mode} request received`,
-          startTime: task.createdAt,
-          endTime: task.createdAt,
-          duration: 0,
-          status: 'completed',
-          details: {
-            transport: task.transport,
-            sessionId: task.sessionId,
-          },
-        },
-        ...toolUsage.toolEvents.map((event, index) => ({
-          step: index + 2,
-          type: 'tool_call',
-          name: `Tool call (${event.toolId})`,
-          startTime: task.createdAt,
-          endTime: task.failedAt,
-          duration: Number(event.duration || 0),
-          status: event.success ? 'completed' : 'error',
-          details: {
-            reason: event.reason,
-            paramKeys: event.paramKeys,
-            error: event.error,
-          },
-        })),
-        {
-          step: toolUsage.toolEvents.length + 2,
-          type: 'model_call',
-          name: `Model request failed (${task.model})`,
-          startTime: task.createdAt,
-          endTime: task.failedAt,
-          duration: Number(duration || 0),
-          status: 'error',
-          details: {
-            error: task.error,
-          },
-        },
-      ],
+      timeline: this.buildTimeline(task, toolUsage, metadata, {
+        completed: false,
+        duration,
+        error: task.error,
+      }),
       metrics: {
         totalTokens: tokenUsage.totalTokens,
         promptTokens: tokenUsage.promptTokens,

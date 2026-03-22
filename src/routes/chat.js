@@ -50,13 +50,22 @@ const chatSchema = {
     enableConversationExecutor: { required: false, type: 'boolean' },
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
+    metadata: { required: false, type: 'object' },
 };
 
 router.post('/', validate(chatSchema), async (req, res, next) => {
     let runtimeTask = null;
     const startedAt = Date.now();
     try {
-        const { message, stream = true, model = null, artifactIds = [], outputFormat = null, executionProfile = null } = req.body;
+        const {
+            message,
+            stream = true,
+            model = null,
+            artifactIds = [],
+            outputFormat = null,
+            executionProfile = null,
+            metadata: requestMetadata = {},
+        } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
 
@@ -253,6 +262,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType: 'chat',
+                metadata: requestMetadata,
             });
             const response = execution.response;
 
@@ -398,6 +408,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType: 'chat',
+            metadata: requestMetadata,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {

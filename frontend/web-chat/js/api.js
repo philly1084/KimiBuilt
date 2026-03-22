@@ -15,6 +15,7 @@ const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 const WEB_CHAT_TASK_TYPE = 'chat';
 const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
+const WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -219,6 +220,12 @@ class OpenAIAPIClient extends EventTarget {
             model,
             messages,
             stream: true,
+            taskType: WEB_CHAT_TASK_TYPE,
+            clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            metadata: {
+                remoteBuildAutonomyApproved: WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED,
+                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            },
         };
         
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
@@ -494,6 +501,12 @@ class OpenAIAPIClient extends EventTarget {
             model,
             messages,
             stream: false,
+            taskType: WEB_CHAT_TASK_TYPE,
+            clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            metadata: {
+                remoteBuildAutonomyApproved: WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED,
+                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            },
         };
         
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {

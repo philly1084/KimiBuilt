@@ -16,6 +16,7 @@ const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
+const MAX_REMOTE_BUILD_AUTONOMOUS_ROUNDS = 3;
 const MAX_TOOL_RESULT_CHARS = 12000;
 const RECENT_TRANSCRIPT_LIMIT = 12;
 
@@ -236,6 +237,69 @@ function formatSshRuntimeTarget(target = null) {
     return `${username}${target.host}${port}`;
 }
 
+function hasAutonomousRemoteApproval(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(do what you need|take it from here|handle it|run with it|finish it|finish setup|finish the setup|complete the setup)\b/,
+        /\b(keep going|continue|proceed|go ahead|next steps|do the next steps|obvious next steps)\b/,
+        /\b(start the build|continue the build|continue on the server|keep working on the server)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasAutonomyRevocation(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(ask me first|wait for me|hold on|stop here|pause here|don'?t continue|do not continue)\b/.test(normalized);
+}
+
+function normalizeStepSignature(step = {}) {
+    return JSON.stringify({
+        tool: String(step?.tool || '').trim(),
+        params: step?.params && typeof step.params === 'object' ? step.params : {},
+    });
+}
+
+function summarizeToolEventsForPlanner(toolEvents = []) {
+    return (Array.isArray(toolEvents) ? toolEvents : [])
+        .slice(-6)
+        .map((event) => ({
+            tool: event?.toolCall?.function?.name || '',
+            reason: event?.reason || '',
+            success: event?.result?.success !== false,
+            error: event?.result?.error || '',
+            data: event?.result?.data || null,
+        }));
+}
+
+function createExecutionTraceEntry({
+    type = 'info',
+    name = 'Runtime step',
+    status = 'completed',
+    details = {},
+    startedAt = null,
+    endedAt = null,
+} = {}) {
+    const startTime = startedAt || new Date().toISOString();
+    const endTime = endedAt || startTime;
+
+    return {
+        type,
+        name,
+        status,
+        startTime,
+        endTime,
+        duration: Math.max(0, new Date(endTime).getTime() - new Date(startTime).getTime()),
+        details,
+    };
+}
+
 function sanitizeValue(value, depth = 0) {
     if (value == null) {
         return value;
@@ -442,41 +506,146 @@ class ConversationOrchestrator extends EventEmitter {
         let toolEvents = [];
         let plan = [];
         let runtimeMode = 'plain';
+        let executionTrace = [];
+        const requestedAutonomyApproval = Boolean(
+            metadata?.remoteBuildAutonomyApproved
+            || metadata?.remote_build_autonomy_approved
+            || metadata?.frontendRemoteBuildAutonomyApproved
+            || metadata?.frontend_remote_build_autonomy_approved,
+        );
+        const autonomyApprovalSource = requestedAutonomyApproval
+            ? 'frontend'
+            : hasAutonomousRemoteApproval(objective)
+                ? 'user'
+                : session?.metadata?.remoteBuildAutonomyApproved
+                    ? 'session'
+                    : null;
+        const autonomyApproved = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            && !hasAutonomyRevocation(objective)
+            && (
+                requestedAutonomyApproval
+                || hasAutonomousRemoteApproval(objective)
+                || Boolean(session?.metadata?.remoteBuildAutonomyApproved)
+            );
 
         try {
-            const directAction = this.buildDirectAction({
-                objective,
-                session,
-                toolPolicy,
-            });
-
-            if (directAction) {
-                runtimeMode = 'direct-tool';
-                plan = [directAction];
-            } else if (toolPolicy.candidateToolIds.length > 0) {
-                plan = await this.planToolUse({
-                    objective,
-                    instructions,
-                    contextMessages: resolvedContextMessages,
-                    recentMessages: resolvedRecentMessages,
-                    executionProfile: resolvedProfile,
-                    toolPolicy,
-                    model,
-                    taskType,
-                });
-                if (plan.length > 0) {
-                    runtimeMode = 'planned-tools';
-                }
+            if (resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'approval',
+                    name: autonomyApproved
+                        ? 'Remote-build autonomy approved'
+                        : 'Remote-build autonomy not approved',
+                    details: {
+                        approved: autonomyApproved,
+                        source: autonomyApprovalSource || 'none',
+                        maxAutonomousRounds: autonomyApproved ? MAX_REMOTE_BUILD_AUTONOMOUS_ROUNDS : 1,
+                    },
+                }));
             }
 
-            if (plan.length > 0) {
-                toolEvents = await this.executePlan({
-                    plan,
+            const executedStepSignatures = new Set();
+            let round = 0;
+
+            while (round < (autonomyApproved ? MAX_REMOTE_BUILD_AUTONOMOUS_ROUNDS : 1)) {
+                round += 1;
+                let nextPlan = [];
+                const planningStartedAt = new Date().toISOString();
+
+                if (round === 1) {
+                    const directAction = this.buildDirectAction({
+                        objective,
+                        session,
+                        toolPolicy,
+                    });
+
+                    if (directAction) {
+                        runtimeMode = 'direct-tool';
+                        nextPlan = [directAction];
+                    }
+                }
+
+                if (nextPlan.length === 0 && toolPolicy.candidateToolIds.length > 0) {
+                    nextPlan = await this.planToolUse({
+                        objective,
+                        instructions,
+                        contextMessages: resolvedContextMessages,
+                        recentMessages: resolvedRecentMessages,
+                        executionProfile: resolvedProfile,
+                        toolPolicy,
+                        model,
+                        taskType,
+                        toolEvents,
+                        autonomyApproved,
+                    });
+                    if (nextPlan.length > 0 && runtimeMode === 'plain') {
+                        runtimeMode = 'planned-tools';
+                    }
+                }
+
+                nextPlan = nextPlan.filter((step) => {
+                    const signature = normalizeStepSignature(step);
+                    if (executedStepSignatures.has(signature)) {
+                        return false;
+                    }
+                    executedStepSignatures.add(signature);
+                    return true;
+                });
+
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'planning',
+                    name: `Plan round ${round}`,
+                    startedAt: planningStartedAt,
+                    endedAt: new Date().toISOString(),
+                    details: {
+                        round,
+                        autonomyApproved,
+                        stepCount: nextPlan.length,
+                        steps: nextPlan.map((step) => ({
+                            tool: step.tool,
+                            reason: step.reason,
+                        })),
+                    },
+                }));
+
+                if (nextPlan.length === 0) {
+                    break;
+                }
+
+                plan.push(...nextPlan);
+                const executionStartedAt = new Date().toISOString();
+
+                const roundToolEvents = await this.executePlan({
+                    plan: nextPlan,
                     toolManager: runtimeToolManager,
                     sessionId,
                     executionProfile: resolvedProfile,
                     toolContext,
                 });
+
+                toolEvents.push(...roundToolEvents);
+
+                const roundFailed = roundToolEvents.some((event) => event?.result?.success === false);
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'execution',
+                    name: `Execution round ${round}`,
+                    startedAt: executionStartedAt,
+                    endedAt: new Date().toISOString(),
+                    status: roundFailed ? 'error' : 'completed',
+                    details: {
+                        round,
+                        toolCalls: roundToolEvents.length,
+                        failed: roundFailed,
+                        tools: roundToolEvents.map((event) => ({
+                            tool: event?.toolCall?.function?.name || '',
+                            success: event?.result?.success !== false,
+                            reason: event?.reason || '',
+                            error: event?.result?.error || null,
+                        })),
+                    },
+                }));
+                if (!autonomyApproved || roundFailed || roundToolEvents.length === 0) {
+                    break;
+                }
             }
 
             finalResponse = await this.buildFinalResponse({
@@ -491,6 +660,8 @@ class ConversationOrchestrator extends EventEmitter {
                 toolPolicy,
                 toolEvents,
                 runtimeMode,
+                autonomyApproved,
+                executionTrace,
             });
 
             output = extractResponseText(finalResponse);
@@ -500,6 +671,8 @@ class ConversationOrchestrator extends EventEmitter {
                 assistantText: output,
                 responseId: finalResponse.id,
                 toolEvents,
+                executionProfile: resolvedProfile,
+                autonomyApproved,
             });
 
             const trace = {
@@ -511,6 +684,8 @@ class ConversationOrchestrator extends EventEmitter {
                 tools: toolPolicy.candidateToolIds,
                 duration: Date.now() - startedAt,
                 timestamp: new Date().toISOString(),
+                autonomyApproved,
+                executionTrace,
             };
 
             this.emit('task:complete', {
@@ -720,6 +895,8 @@ class ConversationOrchestrator extends EventEmitter {
         toolPolicy = {},
         model = null,
         taskType = 'chat',
+        toolEvents = [],
+        autonomyApproved = false,
     }) {
         if (!toolPolicy.candidateToolIds.length) {
             return [];
@@ -751,11 +928,24 @@ class ConversationOrchestrator extends EventEmitter {
                 ? recentMessages.map((message) => `${message.role}: ${normalizeMessageText(message.content || '')}`).join('\n')
                 : '(none)',
             '',
+            'Verified tool results from this run so far:',
+            toolEvents.length > 0
+                ? JSON.stringify(summarizeToolEventsForPlanner(toolEvents), null, 2)
+                : '(none)',
+            '',
             'Return exactly this shape:',
             '{"steps":[{"tool":"tool-id","reason":"why","params":{}}]}',
             `Use at most ${MAX_PLAN_STEPS} steps.`,
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
+            ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                ? [
+                    'The user has already approved continuing through obvious next remote-build steps.',
+                    'Do not stop after a single inspection if the next server action is routine and clearly implied by the verified results.',
+                    'Keep moving through setup, inspection, verification, and routine fixes without asking for confirmation between each step.',
+                    'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, or repeated tool failures.',
+                ]
+                : []),
             ...(toolPolicy.candidateToolIds.includes('ssh-execute') && toolPolicy.hasReachableSshTarget
                 ? [
                     'For ssh-execute, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.',
@@ -854,6 +1044,8 @@ class ConversationOrchestrator extends EventEmitter {
         toolPolicy = {},
         toolEvents = [],
         runtimeMode = 'plain',
+        autonomyApproved = false,
+        executionTrace = [],
     }) {
         const runtimeInstructions = this.buildRuntimeInstructions({
             baseInstructions: instructions,
@@ -879,6 +1071,8 @@ class ConversationOrchestrator extends EventEmitter {
                 runtimeMode,
                 toolEvents: [],
                 toolPolicy,
+                autonomyApproved,
+                executionTrace,
             });
         }
 
@@ -886,6 +1080,12 @@ class ConversationOrchestrator extends EventEmitter {
             'Use the verified tool results below to answer the user.',
             'If a tool failed, state the exact failure plainly.',
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
+            ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                ? [
+                    'The user has already approved continuing through obvious remote-build steps.',
+                    'Summarize the work completed in this run and only ask for input if you hit a real blocker or need an external decision.',
+                ]
+                : []),
             `Task type: ${taskType}`,
             '',
             'User request:',
@@ -923,6 +1123,8 @@ class ConversationOrchestrator extends EventEmitter {
             runtimeMode,
             toolEvents,
             toolPolicy,
+            autonomyApproved,
+            executionTrace,
         });
     }
 
@@ -972,7 +1174,15 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    async persistConversationState({ sessionId, userText, assistantText, responseId, toolEvents = [] }) {
+    async persistConversationState({
+        sessionId,
+        userText,
+        assistantText,
+        responseId,
+        toolEvents = [],
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        autonomyApproved = false,
+    }) {
         if (this.sessionStore?.recordResponse) {
             await this.sessionStore.recordResponse(sessionId, responseId);
         }
@@ -1005,6 +1215,9 @@ class ConversationOrchestrator extends EventEmitter {
             await this.sessionStore.update(sessionId, {
                 metadata: {
                     ...(sshMetadata || {}),
+                    ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                        ? { remoteBuildAutonomyApproved: autonomyApproved }
+                        : {}),
                     projectMemory,
                 },
             });

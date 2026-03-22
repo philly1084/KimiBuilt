@@ -245,6 +245,7 @@ router.post('/chat/completions', async (req, res, next) => {
             artifact_ids = [],
             output_format = null,
             executionProfile = null,
+            metadata: requestMetadata = {},
         } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
@@ -533,6 +534,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
+                metadata: requestMetadata,
             });
             const response = execution.response;
 
@@ -722,6 +724,7 @@ router.post('/chat/completions', async (req, res, next) => {
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            metadata: requestMetadata,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -809,6 +812,7 @@ router.post('/responses', async (req, res, next) => {
             artifact_ids = [],
             output_format = null,
             executionProfile = null,
+            metadata: requestMetadata = {},
         } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
@@ -1081,6 +1085,7 @@ router.post('/responses', async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
+                metadata: requestMetadata,
             });
             const response = execution.response;
 
@@ -1247,6 +1252,7 @@ router.post('/responses', async (req, res, next) => {
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            metadata: requestMetadata,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
