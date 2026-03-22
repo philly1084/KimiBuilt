@@ -32,6 +32,9 @@ const PROFILE_TOOL_ALLOWLISTS = {
     'tool-doc-read',
   ]),
   [NOTES_EXECUTION_PROFILE]: new Set([
+    'ssh-execute',
+    'remote-command',
+    'docker-exec',
     'web-search',
     'web-fetch',
     'web-scrape',
@@ -267,10 +270,11 @@ router.get('/available', async (req, res) => {
   try {
     const toolManager = await ensureToolManagerInitialized();
     const { category, sessionId } = req.query;
+    const includeAllTools = ['1', 'true', 'yes'].includes(String(req.query?.includeAll || '').trim().toLowerCase());
     const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
     const allowlist = PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE];
     
-    let tools = registry.getFrontendTools().filter((tool) => allowlist.has(tool.id));
+    let tools = registry.getFrontendTools().filter((tool) => includeAllTools || allowlist.has(tool.id));
     
     if (category && category !== 'all') {
       tools = tools.filter(t => t.category === category);
@@ -289,6 +293,7 @@ router.get('/available', async (req, res) => {
         total: enrichedTools.length,
         categories: [...new Set(enrichedTools.map(t => t.category))],
         executionProfile,
+        includeAllTools,
         runtime: buildRuntimeSummary(toolManager),
       }
     });

@@ -411,7 +411,10 @@ class ApiClient {
      * Get frontend-visible tools from the live registry
      */
     async getTools(category = null) {
-        return this.get('/api/tools/available', category ? { category } : null);
+        return this.get('/api/tools/available', {
+            ...(category ? { category } : {}),
+            includeAll: true,
+        });
     }
 
     /**

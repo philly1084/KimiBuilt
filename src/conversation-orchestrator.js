@@ -34,6 +34,9 @@ const PROFILE_TOOL_ALLOWLISTS = {
         'tool-doc-read',
     ],
     [NOTES_EXECUTION_PROFILE]: [
+        'ssh-execute',
+        'remote-command',
+        'docker-exec',
         'web-search',
         'web-fetch',
         'web-scrape',
