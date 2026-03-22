@@ -199,6 +199,41 @@ describe('ConversationOrchestrator', () => {
         expect(scrapePolicy.candidateToolIds).toContain('web-scrape');
     });
 
+    test('forces a direct Perplexity-backed web-search action for explicit research requests', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'web-search'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Please do research on managed Postgres providers for startups.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective: 'Please do research on managed Postgres providers for startups.',
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'web-search',
+            reason: 'Explicit research request should start with Perplexity-backed web search.',
+            params: expect.objectContaining({
+                engine: 'perplexity',
+                query: 'managed Postgres providers for startups',
+            }),
+        });
+    });
+
     test('treats image generation, unsplash, and direct image URLs as first-class tool intents', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

@@ -120,6 +120,47 @@ function normalizeMessageText(content = '') {
     return '';
 }
 
+function hasExplicitWebResearchIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(normalized);
+}
+
+function extractExplicitWebResearchQuery(text = '') {
+    const prompt = String(text || '').trim();
+    if (!prompt) {
+        return null;
+    }
+
+    const patterns = [
+        /\b(?:do|perform|run)\s+research\s+(?:on|about|into)?\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bweb research\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bresearch\s+(?:on|about|into)?\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\blook up\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bsearch for\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bsearch the web for\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = prompt.match(pattern);
+        if (match?.[1]) {
+            return match[1].trim();
+        }
+    }
+
+    if (!hasExplicitWebResearchIntentText(prompt)) {
+        return null;
+    }
+
+    return prompt
+        .replace(/^(please|can you|could you|would you|help me|i need you to)\s+/i, '')
+        .replace(/[.?!]+$/g, '')
+        .trim();
+}
+
 function extractObjective(input = null, fallback = '') {
     if (typeof fallback === 'string' && fallback.trim()) {
         return fallback.trim();
@@ -524,7 +565,7 @@ class ConversationOrchestrator extends EventEmitter {
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
         const candidates = new Set();
         const hasUrl = /https?:\/\//i.test(prompt);
-        const hasExplicitWebResearchIntent = /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(prompt);
+        const hasExplicitWebResearchIntent = hasExplicitWebResearchIntentText(prompt);
         const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/.test(prompt);
         const hasImageIntent = /\b(image|images|visual|visuals|illustration|illustrations|photo|photos|hero image|background image|cover image)\b/.test(prompt);
         const hasUnsplashIntent = /\bunsplash\b/.test(prompt);
@@ -635,6 +676,25 @@ class ConversationOrchestrator extends EventEmitter {
     }
 
     buildDirectAction({ objective = '', session = null, toolPolicy = {} }) {
+        const researchQuery = extractExplicitWebResearchQuery(objective);
+        if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
+            && toolPolicy.candidateToolIds.includes('web-search')
+            && researchQuery) {
+            return {
+                tool: 'web-search',
+                reason: 'Explicit research request should start with Perplexity-backed web search.',
+                params: {
+                    query: researchQuery,
+                    engine: 'perplexity',
+                    limit: 5,
+                    region: 'us-en',
+                    timeRange: 'all',
+                    includeSnippets: true,
+                    includeUrls: true,
+                },
+            };
+        }
+
         if (!toolPolicy.candidateToolIds.includes('ssh-execute')) {
             return null;
         }

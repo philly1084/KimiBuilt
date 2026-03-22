@@ -583,6 +583,24 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
     return true;
 }
 
+function hasExplicitWebResearchIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return [
+        /\bweb research\b/i,
+        /\bresearch\b/i,
+        /\blook up\b/i,
+        /\bsearch for\b/i,
+        /\bsearch the web\b/i,
+        /\bbrowse (?:the )?web\b/i,
+        /\bsearch online\b/i,
+        /\bbrowse online\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
 function extractExplicitWebResearchQuery(prompt = '') {
     const text = String(prompt || '').trim();
     if (!text) {
@@ -590,8 +608,9 @@ function extractExplicitWebResearchQuery(prompt = '') {
     }
 
     const patterns = [
+        /\b(?:do|perform|run)\s+research\s+(?:on|about|into)?\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
         /\bweb research\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
-        /\bresearch\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
+        /\bresearch\s+(?:on|about|into)?\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
         /\blook up\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
         /\bsearch for\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
         /\bsearch the web for\s+(.+?)(?:[.?!]\s|[\r\n]|$)/i,
@@ -604,7 +623,14 @@ function extractExplicitWebResearchQuery(prompt = '') {
         }
     }
 
-    return null;
+    if (!hasExplicitWebResearchIntent(text)) {
+        return null;
+    }
+
+    return text
+        .replace(/^(please|can you|could you|would you|help me|i need you to)\s+/i, '')
+        .replace(/[.?!]+$/g, '')
+        .trim();
 }
 
 function extractRequestedDirectoryPath(prompt = '') {
@@ -816,8 +842,8 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const hasUrl = /https?:\/\//i.test(normalizedPrompt);
     const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/i.test(normalizedPrompt);
     const hasWebResearchIntent = Boolean(
-        extractExplicitWebResearchQuery(prompt)
-        || /\b(latest|current|today|news|web research|research|look up|search for|search the web|browse)\b/i.test(normalizedPrompt)
+        hasExplicitWebResearchIntent(prompt)
+        || /\b(latest|current|today|news|look up|search for|search the web|browse)\b/i.test(normalizedPrompt)
     );
     const hasImageIntent = /\b(image|images|visual|visuals|illustration|illustrations|photo|photos|hero image|background image|cover image)\b/i.test(normalizedPrompt);
     const hasUnsplashIntent = /\bunsplash\b/i.test(normalizedPrompt);
@@ -928,7 +954,7 @@ function inferRequiredAutomaticToolId(prompt = '') {
         return 'ssh-execute';
     }
 
-    if (extractExplicitWebResearchQuery(prompt)) {
+    if (hasExplicitWebResearchIntent(prompt)) {
         return 'web-search';
     }
 
@@ -952,6 +978,7 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'web-search')) {
         guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
+        guidance.push('- When the user explicitly asks for research, call `web-search` first. This backend routes it through the configured Perplexity provider.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'web-fetch')) {

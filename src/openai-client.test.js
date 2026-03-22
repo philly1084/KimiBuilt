@@ -271,6 +271,9 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(
             __testUtils.extractExplicitWebResearchQuery('Still not working, can you web research tigers and cats differences.'),
         ).toBe('tigers and cats differences');
+        expect(
+            __testUtils.extractExplicitWebResearchQuery('Please do research on the best static site hosts for docs.'),
+        ).toBe('the best static site hosts for docs');
     });
 
     test('extracts requested folder names for deterministic preflight', () => {
