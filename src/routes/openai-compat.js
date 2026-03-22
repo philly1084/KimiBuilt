@@ -284,6 +284,7 @@ router.post('/chat/completions', async (req, res, next) => {
             taskType,
             input: effectiveMessages,
             memoryInput: lastUserText,
+            session,
         });
         const effectiveOutputFormat = output_format
             || inferOutputFormatFromText(lastUserText)
@@ -850,6 +851,7 @@ router.post('/responses', async (req, res, next) => {
             taskType,
             input: runtimeInput,
             memoryInput: userInput,
+            session,
         });
 
         if (stream) {

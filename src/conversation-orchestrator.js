@@ -536,8 +536,11 @@ class ConversationOrchestrator extends EventEmitter {
                 'tool-doc-read',
             ].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
 
-            if (allowedToolIds.includes('ssh-execute') && hasReachableSshTarget && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
+            if (allowedToolIds.includes('ssh-execute') && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add('ssh-execute');
+            }
+            if (allowedToolIds.includes('remote-command') && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
+                candidates.add('remote-command');
             }
             if (allowedToolIds.includes('docker-exec')) {
                 candidates.add('docker-exec');
@@ -691,7 +694,12 @@ class ConversationOrchestrator extends EventEmitter {
                     'For ssh-execute, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.',
                     'For server work, prefer trying ssh-execute before asking the user for host details again.',
                 ]
-                : []),
+                : toolPolicy.candidateToolIds.includes('ssh-execute')
+                    ? [
+                        'ssh-execute is still available for this request even if the runtime target is not yet verified in this prompt.',
+                        'Do not claim ssh-execute is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.',
+                      ]
+                    : []),
         ].join('\n');
 
         const plannerOutput = await this.completeText(prompt, { model });
@@ -868,6 +876,9 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`SSH runtime target is already available${toolPolicy.sshRuntimeTarget ? ` (${toolPolicy.sshRuntimeTarget})` : ''}.`);
             parts.push('For server work, try ssh-execute against the configured default or sticky session target before asking for host details again.');
             parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
+        } else if (toolPolicy.candidateToolIds?.includes('ssh-execute')) {
+            parts.push('ssh-execute is available for this request even if the target is not currently verified in the prompt context.');
+            parts.push('Do not claim the SSH tool is unavailable. Try ssh-execute for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.');
         }
 
         return parts.filter(Boolean).join('\n\n');

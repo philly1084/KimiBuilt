@@ -110,6 +110,13 @@ function inferExecutionProfile(payload = {}) {
 
     const text = extractRuntimeText(payload?.input || payload?.memoryInput || '');
     const normalized = String(text || '').toLowerCase();
+    const stickyRemoteIntent = ['ssh-execute', 'remote-command'].includes(
+        String(
+            payload?.session?.metadata?.lastToolIntent
+            || payload?.metadata?.lastToolIntent
+            || '',
+        ).trim().toLowerCase(),
+    );
     const pageEditIntent = normalized
         ? [
             /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
@@ -130,13 +137,17 @@ function inferExecutionProfile(payload = {}) {
         /\b(kubectl|kubernetes|k8s|docker compose|docker-compose|systemctl|journalctl|nginx|pm2)\b/,
         /\b(build|compile|install|run)\b[\s\S]{0,40}\b(on|via)\b[\s\S]{0,20}\b(server|ssh|remote)\b/,
     ].some((pattern) => pattern.test(normalized));
+    const remoteContinuationIntent = stickyRemoteIntent && [
+        /^(continue|proceed|next|go ahead|do it|do that|finish|use remote-build|use the remote build)\b/,
+        /\b(next step|next steps|keep going|from this page|from there|on the server|against the server)\b/,
+    ].some((pattern) => pattern.test(normalized));
 
     if (requestedNotesProfile) {
         if (pageEditIntent) {
             return NOTES_EXECUTION_PROFILE;
         }
 
-        return remoteBuildIntent ? REMOTE_BUILD_EXECUTION_PROFILE : NOTES_EXECUTION_PROFILE;
+        return (remoteBuildIntent || remoteContinuationIntent) ? REMOTE_BUILD_EXECUTION_PROFILE : NOTES_EXECUTION_PROFILE;
     }
 
     return remoteBuildIntent ? REMOTE_BUILD_EXECUTION_PROFILE : DEFAULT_EXECUTION_PROFILE;

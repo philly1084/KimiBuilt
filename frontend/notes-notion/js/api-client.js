@@ -275,6 +275,10 @@ class NotesAPIClient {
                                     if (parsed.error) {
                                         throw new Error(parsed.error.message || 'Stream error');
                                     }
+
+                                    if (parsed.session_id || parsed.sessionId) {
+                                        this.currentSessionId = parsed.session_id || parsed.sessionId;
+                                    }
                                     
                                     // Extract content from delta
                                     const content = parsed.choices?.[0]?.delta?.content || '';
