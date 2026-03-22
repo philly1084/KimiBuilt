@@ -112,25 +112,16 @@ class SSHExecuteTool extends ToolBase {
 
     tracker.recordExecution(`ssh ${connection.username}@${connection.host}:${connection.port}`, { command });
 
-    // Build full command
-    let fullCommand = command;
-    
-    if (workingDirectory) {
-      fullCommand = `cd ${workingDirectory} && ${fullCommand}`;
-    }
-    
-    if (Object.keys(environment).length > 0) {
-      const envVars = Object.entries(environment)
-        .map(([k, v]) => `${k}="${v}"`)
-        .join(' ');
-      fullCommand = `export ${envVars} && ${fullCommand}`;
-    }
-    
-    if (sudo) {
-      fullCommand = `sudo ${fullCommand}`;
-    }
+    const executionScript = this.buildExecutionScript({
+      command,
+      workingDirectory,
+      environment,
+    });
 
-    const result = await this.executeSSH(connection, fullCommand, timeout);
+    const result = await this.executeSSH(connection, executionScript, timeout, {
+      sudo,
+      originalCommand: command,
+    });
 
     tracker.recordNetworkCall(`ssh://${connection.host}:${connection.port}`, 'EXEC', {
       command: command.substring(0, 100),
@@ -166,7 +157,7 @@ class SSHExecuteTool extends ToolBase {
     return context.sshCredentials.default || {};
   }
 
-  async executeSSH(connection, command, timeout) {
+  async executeSSH(connection, executionScript, timeout, options = {}) {
     const sshPath = await this.findSshBinary();
     const askPassScript = connection.password ? await this.createAskPassScript() : null;
     const startedAt = Date.now();
@@ -201,7 +192,7 @@ class SSHExecuteTool extends ToolBase {
 
     sshArgs.push(
       `${connection.username}@${connection.host}`,
-      this.wrapRemoteCommand(command),
+      this.buildRemoteLauncher({ sudo: options.sudo }),
     );
 
     const env = {
@@ -220,7 +211,8 @@ class SSHExecuteTool extends ToolBase {
       const result = await this.spawnProcess(sshPath, sshArgs, {
         env,
         timeout,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
+        input: executionScript,
       });
 
       return {
@@ -229,7 +221,13 @@ class SSHExecuteTool extends ToolBase {
         exitCode: result.exitCode,
         duration: Date.now() - startedAt,
         host: `${connection.host}:${connection.port}`,
+        shellMode: options.sudo ? 'sudo-shell-script' : 'shell-script',
       };
+    } catch (error) {
+      throw this.enrichExecutionError(error, {
+        command: options.originalCommand || '',
+        host: `${connection.host}:${connection.port}`,
+      });
     } finally {
       if (askPassScript) {
         await fs.rm(path.dirname(askPassScript), { recursive: true, force: true }).catch(() => {});
@@ -265,12 +263,88 @@ class SSHExecuteTool extends ToolBase {
     return scriptPath;
   }
 
-  wrapRemoteCommand(command) {
-    return `sh -lc ${this.quoteShellArg(command)}`;
+  buildExecutionScript({ command, workingDirectory, environment = {} }) {
+    const lines = [];
+
+    if (workingDirectory) {
+      lines.push(`cd -- ${this.quoteShellArg(workingDirectory)}`);
+    }
+
+    Object.entries(environment || {}).forEach(([key, value]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(key || ''))) {
+        return;
+      }
+      lines.push(`export ${key}=${this.quoteShellArg(String(value ?? ''))}`);
+    });
+
+    lines.push(String(command || '').trim());
+    lines.push('');
+
+    return lines.filter(Boolean).join('\n');
+  }
+
+  buildRemoteLauncher({ sudo = false } = {}) {
+    if (sudo) {
+      return 'if command -v bash >/dev/null 2>&1; then exec sudo -n bash -seuo pipefail; else exec sudo -n sh -seu; fi';
+    }
+
+    return 'if command -v bash >/dev/null 2>&1; then exec bash -seuo pipefail; else exec sh -seu; fi';
   }
 
   quoteShellArg(value) {
     return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
+  }
+
+  enrichExecutionError(error, { command = '', host = '' } = {}) {
+    const enrichedError = error;
+    const stderr = String(error?.stderr || '').trim();
+    const stdout = String(error?.stdout || '').trim();
+    const combined = `${stderr}\n${stdout}\n${error?.message || ''}`.toLowerCase();
+    const hints = [];
+
+    if (/unterminated quoted string|syntax error/i.test(combined)) {
+      hints.push('Remote shell syntax failed. Prefer simple Bash/POSIX commands and avoid nested quote chains or shell fragments copied from another context.');
+    }
+
+    if (/\brg: not found\b|\bripgrep\b/.test(combined) || /\brg\b/.test(command)) {
+      hints.push('`rg` is often not installed on Ubuntu servers. Prefer `find` and `grep -R` unless you install ripgrep first.');
+    }
+
+    if (/\bdocker-compose: not found\b/.test(combined) || /\bdocker-compose\b/.test(command)) {
+      hints.push('Many Ubuntu hosts only have the Docker plugin. Prefer `docker compose` before `docker-compose`.');
+    }
+
+    if (/\bifconfig: not found\b/.test(combined) || /\bifconfig\b/.test(command)) {
+      hints.push('On modern Ubuntu, prefer `ip addr` instead of `ifconfig`.');
+    }
+
+    if (/\bnetstat: not found\b/.test(combined) || /\bnetstat\b/.test(command)) {
+      hints.push('On modern Ubuntu, prefer `ss -tulpn` instead of `netstat`.');
+    }
+
+    if (/\byum: not found\b/.test(combined) || /\byum\b/.test(command)) {
+      hints.push('This looks like Ubuntu. Prefer `apt-get` or `apt` rather than `yum`.');
+    }
+
+    if (/cannot execute binary file|exec format error/.test(combined)) {
+      hints.push('This host may be ARM64/aarch64. Verify `uname -m` and use Linux arm64 binaries instead of x86_64 builds.');
+    }
+
+    if (/sudo: a password is required/.test(combined)) {
+      hints.push('The remote account requires an interactive sudo password. Use a root-capable account or a non-interactive sudo configuration for automation.');
+    }
+
+    if (hints.length > 0) {
+      enrichedError.hints = hints;
+      enrichedError.message = [
+        error?.message || `SSH execution failed${host ? ` on ${host}` : ''}`,
+        '',
+        'Hints:',
+        ...hints.map((hint) => `- ${hint}`),
+      ].join('\n');
+    }
+
+    return enrichedError;
   }
 
   spawnProcess(command, args, options = {}) {
@@ -296,6 +370,11 @@ class SSHExecuteTool extends ToolBase {
       child.stderr?.on('data', (chunk) => {
         stderr += chunk.toString();
       });
+
+      if (child.stdin && options.input !== undefined) {
+        child.stdin.write(String(options.input));
+        child.stdin.end();
+      }
 
       child.on('error', (error) => {
         if (timeoutId) clearTimeout(timeoutId);

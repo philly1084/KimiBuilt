@@ -27,9 +27,73 @@ class UnifiedRegistry extends EventEmitter {
     
     // Usage statistics
     this.stats = new Map();
+
+    this.maxUsageHistory = 25;
     
     // Categories
     this.categories = new Set(['web', 'ssh', 'design', 'sandbox', 'database', 'system']);
+  }
+
+  createEmptyStats() {
+    return {
+      invocations: 0,
+      successes: 0,
+      failures: 0,
+      avgDuration: 0,
+      lastUsed: null,
+      byRoute: {},
+      byModel: {},
+      byExecutionProfile: {},
+      recentUsage: [],
+    };
+  }
+
+  incrementStatBucket(target, key) {
+    const normalized = String(key || '').trim();
+    if (!normalized) {
+      return;
+    }
+
+    target[normalized] = (target[normalized] || 0) + 1;
+  }
+
+  buildUsageEntry(id, result = {}, context = {}) {
+    return {
+      toolId: id,
+      timestamp: result.timestamp || new Date().toISOString(),
+      success: result.success !== false,
+      duration: Number(result.duration || 0),
+      sessionId: context.sessionId || null,
+      route: context.route || null,
+      transport: context.transport || null,
+      executionProfile: context.executionProfile || null,
+      model: context.model || null,
+      userId: context.userId || null,
+      paramKeys: Object.keys(context.params || {}).sort(),
+      error: result.success === false ? (result.error || 'Unknown error') : null,
+    };
+  }
+
+  serializeStats(stats = {}) {
+    const invocations = Number(stats.invocations || 0);
+    const successes = Number(stats.successes || 0);
+    const failures = Number(stats.failures || 0);
+    const avgDuration = Number(stats.avgDuration || 0);
+    const recentUsage = Array.isArray(stats.recentUsage) ? stats.recentUsage : [];
+
+    return {
+      invocations,
+      usageCount: invocations,
+      successes,
+      failures,
+      successRate: invocations > 0 ? Math.round((successes / invocations) * 100) : 100,
+      avgDuration,
+      lastUsed: stats.lastUsed || null,
+      byRoute: { ...(stats.byRoute || {}) },
+      byModel: { ...(stats.byModel || {}) },
+      byExecutionProfile: { ...(stats.byExecutionProfile || {}) },
+      recentUsage,
+    };
   }
 
   /**
@@ -56,13 +120,7 @@ class UnifiedRegistry extends EventEmitter {
     this.manifests.set(id, manifest);
     
     // 4. Initialize stats
-    this.stats.set(id, {
-      invocations: 0,
-      successes: 0,
-      failures: 0,
-      avgDuration: 0,
-      lastUsed: null
-    });
+    this.stats.set(id, this.createEmptyStats());
     
     // 5. Add to category
     this.categories.add(category);
@@ -134,10 +192,17 @@ class UnifiedRegistry extends EventEmitter {
    */
   getAllSkills() {
     return Array.from(this.skills.values())
-      .map(skill => ({
-        ...skill,
-        stats: this.stats.get(skill.id)
-      }));
+      .map(skill => {
+        const stats = this.getStats(skill.id);
+        return {
+          ...skill,
+          usageCount: stats.usageCount,
+          successRate: stats.successRate,
+          avgDuration: stats.avgDuration,
+          lastUsed: stats.lastUsed,
+          stats,
+        };
+      });
   }
 
   /**
@@ -214,7 +279,7 @@ class UnifiedRegistry extends EventEmitter {
   /**
    * Record tool invocation
    */
-  recordInvocation(id, result) {
+  recordInvocation(id, result, context = {}) {
     const stats = this.stats.get(id);
     if (stats) {
       stats.invocations++;
@@ -231,8 +296,20 @@ class UnifiedRegistry extends EventEmitter {
         const total = stats.invocations;
         stats.avgDuration = ((stats.avgDuration * (total - 1)) + result.duration) / total;
       }
-      
-      this.emit('stats:updated', { id, stats });
+
+      this.incrementStatBucket(stats.byRoute, context.route || 'unknown');
+      this.incrementStatBucket(stats.byModel, context.model || 'unknown');
+      this.incrementStatBucket(stats.byExecutionProfile, context.executionProfile || 'default');
+
+      const usageEntry = this.buildUsageEntry(id, result, context);
+      stats.recentUsage = [
+        usageEntry,
+        ...(Array.isArray(stats.recentUsage) ? stats.recentUsage : []),
+      ].slice(0, this.maxUsageHistory);
+
+      const serialized = this.serializeStats(stats);
+      this.emit('stats:updated', { id, stats: serialized, timestamp: usageEntry.timestamp });
+      this.emit('invocation:recorded', { id, entry: usageEntry, stats: serialized });
     }
   }
 
@@ -240,7 +317,7 @@ class UnifiedRegistry extends EventEmitter {
    * Get tool statistics
    */
   getStats(id) {
-    return this.stats.get(id);
+    return this.serializeStats(this.stats.get(id) || this.createEmptyStats());
   }
 
   /**

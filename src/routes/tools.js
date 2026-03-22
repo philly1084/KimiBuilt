@@ -164,10 +164,14 @@ function buildToolRuntime(toolId) {
 }
 
 function buildToolExecutionContext(toolManager, req, sessionId = null) {
+  const body = req.body || {};
   return {
     sessionId,
     userId: req.user?.id || req.user?.username,
     timestamp: new Date().toISOString(),
+    route: req.originalUrl || req.path || '/api/tools/invoke',
+    transport: 'http',
+    executionProfile: body.executionProfile || body.execution_profile || body.clientSurface || body.client_surface || 'tool-invoke',
     toolManager,
     tools: {
       get: (toolId) => toolManager.getTool(toolId),
@@ -337,10 +341,11 @@ router.get('/stats', async (req, res) => {
       id: skill.id,
       name: skill.name,
       category: skill.category,
-      invocations: skill.stats?.invocations || 0,
+      invocations: skill.stats?.invocations || skill.stats?.usageCount || 0,
       successRate: skill.stats?.successRate || 100,
       avgDuration: skill.stats?.avgDuration || 0,
-      lastUsed: skill.stats?.lastUsed
+      lastUsed: skill.stats?.lastUsed,
+      recentUsage: skill.stats?.recentUsage || [],
     }));
     
     res.json({ success: true, data: stats });
@@ -411,7 +416,8 @@ router.get('/:id', async (req, res) => {
         skill: skill ? {
           enabled: skill.enabled,
           triggerPatterns: skill.triggerPatterns,
-          requiresConfirmation: skill.requiresConfirmation
+          requiresConfirmation: skill.requiresConfirmation,
+          stats: skill.stats || null,
         } : null,
         parameters: manifest?.parameters || [],
         ...docMetadata,

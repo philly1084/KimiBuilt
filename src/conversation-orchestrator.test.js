@@ -234,6 +234,57 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('includes Ubuntu and arm64 fallback guidance for remote-build SSH work', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['ssh-execute', 'remote-command'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Use remote-build to inspect the k3s cluster and continue setup.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        await orchestrator.planToolUse({
+            objective: 'Use remote-build to inspect the k3s cluster and continue setup.',
+            executionProfile: 'remote-build',
+            toolPolicy,
+        });
+
+        const plannerPrompt = llmClient.complete.mock.calls[0]?.[0] || '';
+        const runtimeInstructions = orchestrator.buildRuntimeInstructions({
+            executionProfile: 'remote-build',
+            allowedToolIds: toolPolicy.allowedToolIds,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('ssh-execute');
+        expect(runtimeInstructions).toContain('verify architecture with `uname -m`');
+        expect(runtimeInstructions).toContain('`find`/`grep -R` for `rg`');
+        expect(runtimeInstructions).toContain('`docker compose` for `docker-compose`');
+        expect(plannerPrompt).toContain('find/grep instead of rg');
+    });
+
     test('treats image generation, unsplash, and direct image URLs as first-class tool intents', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

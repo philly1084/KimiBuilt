@@ -91,6 +91,74 @@ function buildArtifactCompletionMessage(outputFormat, artifact) {
     return `Created the ${formatLabel} artifact${filename}.`;
 }
 
+function hasExplicitArtifactGenerationIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(export|download|save|convert|turn\b[\s\S]{0,20}\binto|turn\b[\s\S]{0,20}\bas|format\b[\s\S]{0,20}\bas)\b/i.test(normalized)
+        || /\b(create|make|generate|build|produce|render|prepare|draft)\b[\s\S]{0,60}\b(file|artifact|document|page|report|brief|pdf|html|docx|xml|spreadsheet|excel|workbook|mermaid|diagram|flowchart|sequence diagram|erd|class diagram|state diagram)\b/i.test(normalized)
+        || /\b(as|into|in)\s+(?:an?\s+)?(?:pdf|html|docx|xml|spreadsheet|excel workbook|workbook|mermaid|mmd)\b/i.test(normalized)
+        || /\b(pdf|html|docx|xml|spreadsheet|excel|workbook)\s+(?:file|document|artifact|export)\b/i.test(normalized);
+}
+
+function hasExplicitMermaidArtifactIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (/\b(mermaid|\.mmd\b)\b/i.test(normalized)) {
+        return hasExplicitArtifactGenerationIntent(normalized)
+            || /\b(mermaid|mmd)\s+(?:file|artifact|diagram|chart|export)\b/i.test(normalized);
+    }
+
+    return /\b(create|make|generate|build|produce|render|export|draw)\b[\s\S]{0,60}\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\b/i.test(normalized)
+        || /\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\s+(?:file|artifact|export)\b/i.test(normalized);
+}
+
+function inferRequestedOutputFormat(text = '') {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    const hasArtifactIntent = hasExplicitArtifactGenerationIntent(normalized);
+
+    if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
+        || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
+        return 'power-query';
+    }
+
+    if ((/\b(xlsx|spreadsheet|excel|workbook)\b/.test(normalized) && hasArtifactIntent)
+        || /\b(excel|spreadsheet|workbook)\s+(?:file|artifact|export)\b/.test(normalized)) {
+        return 'xlsx';
+    }
+
+    if (/\bpdf\b/.test(normalized) && hasArtifactIntent) {
+        return 'pdf';
+    }
+
+    if (/\b(docx|word document)\b/.test(normalized) && hasArtifactIntent) {
+        return 'docx';
+    }
+
+    if (/\bxml\b/.test(normalized) && hasArtifactIntent) {
+        return 'xml';
+    }
+
+    if (hasExplicitMermaidArtifactIntent(normalized)) {
+        return 'mermaid';
+    }
+
+    if (/\bhtml\b/.test(normalized) && hasArtifactIntent) {
+        return 'html';
+    }
+
+    return null;
+}
+
 function isArtifactContinuationPrompt(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -291,6 +359,16 @@ function inferOutputFormatFromSession(text = '', session = null) {
         return null;
     }
 
+    if (lastOutputFormat === 'mermaid') {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) {
+            return null;
+        }
+
+        const mermaidContinuation = /\b(mermaid|diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram|artifact|file|export)\b/i.test(normalized);
+        return (isArtifactContinuationPrompt(normalized) && mermaidContinuation) ? lastOutputFormat : null;
+    }
+
     return isArtifactContinuationPrompt(text) ? lastOutputFormat : null;
 }
 
@@ -350,6 +428,7 @@ module.exports = {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
+    inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     resolveSshRequestContext,
     formatSshToolResult,

@@ -7,14 +7,18 @@ const { v4: uuidv4 } = require('uuid');
 const logsController = require('./logs.controller');
 const tracesController = require('./traces.controller');
 const { vectorStore } = require('../../memory/vector-store');
+const { getUnifiedRegistry } = require('../../agent-sdk/registry/UnifiedRegistry');
 
 class DashboardController {
   constructor(agentOrchestrator) {
     this.orchestrator = agentOrchestrator;
+    this.registry = getUnifiedRegistry();
     this.taskStore = new Map();
     this.sessionStore = new Map();
     this.activityLog = [];
     this.maxActivityItems = 100;
+    this.handleRegistryInvocation = this.handleRegistryInvocation.bind(this);
+    this.registry.on('invocation:recorded', this.handleRegistryInvocation);
   }
 
   estimateTokens(text = '') {
@@ -40,6 +44,88 @@ class DashboardController {
       totalTokens,
       inferred: !Number(usageMetadata.totalTokens || usageMetadata.tokensUsed || explicitUsage || 0),
     };
+  }
+
+  normalizeToolEvent(event = {}) {
+    let rawArgs = {};
+    try {
+      rawArgs = JSON.parse(event?.toolCall?.function?.arguments || '{}');
+    } catch (_error) {
+      rawArgs = {};
+    }
+
+    const toolId = event?.toolCall?.function?.name
+      || event?.result?.toolId
+      || event?.toolId
+      || 'unknown-tool';
+    const duration = Number(event?.result?.duration || event?.duration || 0);
+    const success = event?.result?.success !== false && event?.success !== false;
+    const timestamp = event?.result?.timestamp || event?.timestamp || new Date().toISOString();
+
+    return {
+      toolId,
+      success,
+      duration,
+      reason: event?.reason || '',
+      timestamp,
+      error: event?.result?.error || event?.error || null,
+      paramKeys: Object.keys(rawArgs).sort(),
+      dataPreview: typeof event?.result?.data === 'string'
+        ? String(event.result.data).slice(0, 160)
+        : '',
+    };
+  }
+
+  extractToolUsage(metadata = {}) {
+    const toolEvents = Array.isArray(metadata?.toolEvents)
+      ? metadata.toolEvents.map((event) => this.normalizeToolEvent(event))
+      : [];
+    const skillsUsed = Array.from(new Set(toolEvents.map((event) => event.toolId).filter(Boolean)));
+
+    return {
+      toolEvents,
+      skillsUsed,
+      toolCallCount: toolEvents.length,
+    };
+  }
+
+  buildToolUsageSummary() {
+    const toolCounts = new Map();
+    let totalCalls = 0;
+
+    Array.from(this.taskStore.values()).forEach((task) => {
+      const toolEvents = Array.isArray(task?.result?.toolEvents) ? task.result.toolEvents : [];
+      toolEvents.forEach((event) => {
+        const toolId = event?.toolId || 'unknown-tool';
+        totalCalls += 1;
+        toolCounts.set(toolId, (toolCounts.get(toolId) || 0) + 1);
+      });
+    });
+
+    const topTools = Array.from(toolCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([toolId, count]) => ({ toolId, count }));
+
+    return {
+      totalCalls,
+      distinctTools: toolCounts.size,
+      topTools,
+    };
+  }
+
+  handleRegistryInvocation({ id, entry = {}, stats = {} } = {}) {
+    this.logActivity('tool_invoked', `Tool used: ${id}`, {
+      toolId: id,
+      sessionId: entry.sessionId || null,
+      route: entry.route || null,
+      executionProfile: entry.executionProfile || null,
+      model: entry.model || null,
+      success: entry.success !== false,
+      duration: Number(entry.duration || 0),
+      error: entry.error || null,
+      invocations: Number(stats.invocations || 0),
+    });
   }
 
   /**
@@ -69,6 +155,7 @@ class DashboardController {
           chart: requestChart,
         },
         tokens: tokenSummary,
+        tools: this.buildToolUsageSummary(),
         models: await this.getModelUsageStats(),
         timestamp: new Date().toISOString()
       };
@@ -434,6 +521,7 @@ class DashboardController {
     }
 
     const tokenUsage = this.inferTokenUsage(task.input, output, tokensUsed, metadata?.usage || metadata?.tokenUsage || {});
+    const toolUsage = this.extractToolUsage(metadata);
 
     task.status = 'completed';
     task.model = model || task.model;
@@ -445,6 +533,9 @@ class DashboardController {
       tokensUsed: tokenUsage.totalTokens,
       tokenUsage,
       responseId,
+      toolEvents: toolUsage.toolEvents,
+      skillsUsed: toolUsage.skillsUsed,
+      toolCallCount: toolUsage.toolCallCount,
       metadata,
     };
 
@@ -464,6 +555,8 @@ class DashboardController {
       transport: task.transport,
       sessionId: task.sessionId,
       responseId,
+      toolCalls: toolUsage.toolCallCount,
+      toolsUsed: toolUsage.skillsUsed,
     });
 
     tracesController.addTrace({
@@ -491,8 +584,22 @@ class DashboardController {
             sessionId: task.sessionId,
           },
         },
+        ...toolUsage.toolEvents.map((event, index) => ({
+          step: index + 2,
+          type: 'tool_call',
+          name: `Tool call (${event.toolId})`,
+          startTime: task.createdAt,
+          endTime: task.completedAt,
+          duration: Number(event.duration || 0),
+          status: event.success ? 'completed' : 'error',
+          details: {
+            reason: event.reason,
+            paramKeys: event.paramKeys,
+            error: event.error,
+          },
+        })),
         {
-          step: 2,
+          step: toolUsage.toolEvents.length + 2,
           type: 'model_call',
           name: `Model response (${task.model})`,
           startTime: task.createdAt,
@@ -509,7 +616,7 @@ class DashboardController {
         totalTokens: tokenUsage.totalTokens,
         promptTokens: tokenUsage.promptTokens,
         completionTokens: tokenUsage.completionTokens,
-        toolCalls: 0,
+        toolCalls: toolUsage.toolCallCount,
         retries: 0,
       },
       createdAt: task.createdAt,
@@ -523,6 +630,8 @@ class DashboardController {
       duration: Number(duration || 0),
       tokens: tokenUsage.totalTokens,
       responseId,
+      toolsUsed: toolUsage.skillsUsed,
+      toolCalls: toolUsage.toolCallCount,
     });
 
     return task;
@@ -535,6 +644,7 @@ class DashboardController {
     }
 
     const tokenUsage = this.inferTokenUsage(task.input, '', 0, metadata?.usage || metadata?.tokenUsage || {});
+    const toolUsage = this.extractToolUsage(metadata);
 
     task.status = 'failed';
     task.model = model || task.model;
@@ -544,6 +654,12 @@ class DashboardController {
     task.metadata = {
       ...(task.metadata || {}),
       ...metadata,
+    };
+    task.result = {
+      ...(task.result || {}),
+      toolEvents: toolUsage.toolEvents,
+      skillsUsed: toolUsage.skillsUsed,
+      toolCallCount: toolUsage.toolCallCount,
     };
 
     logsController.addLog({
@@ -562,6 +678,8 @@ class DashboardController {
       transport: task.transport,
       sessionId: task.sessionId,
       error: task.error,
+      toolCalls: toolUsage.toolCallCount,
+      toolsUsed: toolUsage.skillsUsed,
     });
 
     tracesController.addTrace({
@@ -589,8 +707,22 @@ class DashboardController {
             sessionId: task.sessionId,
           },
         },
+        ...toolUsage.toolEvents.map((event, index) => ({
+          step: index + 2,
+          type: 'tool_call',
+          name: `Tool call (${event.toolId})`,
+          startTime: task.createdAt,
+          endTime: task.failedAt,
+          duration: Number(event.duration || 0),
+          status: event.success ? 'completed' : 'error',
+          details: {
+            reason: event.reason,
+            paramKeys: event.paramKeys,
+            error: event.error,
+          },
+        })),
         {
-          step: 2,
+          step: toolUsage.toolEvents.length + 2,
           type: 'model_call',
           name: `Model request failed (${task.model})`,
           startTime: task.createdAt,
@@ -606,7 +738,7 @@ class DashboardController {
         totalTokens: tokenUsage.totalTokens,
         promptTokens: tokenUsage.promptTokens,
         completionTokens: tokenUsage.completionTokens,
-        toolCalls: 0,
+        toolCalls: toolUsage.toolCallCount,
         retries: 0,
       },
       createdAt: task.createdAt,
@@ -619,6 +751,8 @@ class DashboardController {
       model: task.model,
       duration: Number(duration || 0),
       error: task.error,
+      toolsUsed: toolUsage.skillsUsed,
+      toolCalls: toolUsage.toolCallCount,
     });
 
     return task;

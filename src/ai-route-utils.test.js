@@ -9,6 +9,7 @@ const { artifactService } = require('./artifacts/artifact-service');
 const {
     buildArtifactCompletionMessage,
     generateOutputArtifactFromPrompt,
+    inferRequestedOutputFormat,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
 } = require('./ai-route-utils');
@@ -83,6 +84,32 @@ describe('ai-route-utils', () => {
                 lastGeneratedArtifactId: 'artifact-1',
             },
         })).toBe('pdf');
+    });
+
+    test('inferRequestedOutputFormat does not treat casual diagram mentions as mermaid exports', () => {
+        expect(inferRequestedOutputFormat('Can you explain the architecture diagram from earlier?')).toBeNull();
+        expect(inferRequestedOutputFormat('I want the content, not a diagram.')).toBeNull();
+    });
+
+    test('inferRequestedOutputFormat requires an explicit mermaid export request', () => {
+        expect(inferRequestedOutputFormat('Create a Mermaid diagram for the auth flow')).toBe('mermaid');
+        expect(inferRequestedOutputFormat('Export this as a Mermaid file')).toBe('mermaid');
+    });
+
+    test('inferOutputFormatFromSession does not keep mermaid sticky on generic continuation turns', () => {
+        expect(inferOutputFormatFromSession('another pass, keep the pacing quieter', {
+            metadata: {
+                lastOutputFormat: 'mermaid',
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        })).toBeNull();
+
+        expect(inferOutputFormatFromSession('continue the diagram and add retries', {
+            metadata: {
+                lastOutputFormat: 'mermaid',
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        })).toBe('mermaid');
     });
 
     test('resolveArtifactContextIds falls back to the last generated artifact', () => {

@@ -198,7 +198,21 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 output: assistantMessage,
                 model: model || null,
                 duration: Date.now() - startedAt,
-                metadata: { directTool: 'ssh-execute' },
+                metadata: {
+                    directTool: 'ssh-execute',
+                    toolEvents: [{
+                        toolCall: { function: { name: 'ssh-execute', arguments: JSON.stringify(sshContext.directParams || {}) } },
+                        result: {
+                            success: sshResult?.success !== false,
+                            toolId: 'ssh-execute',
+                            duration: sshResult?.duration || 0,
+                            data: sshResult?.data,
+                            error: sshResult?.error || null,
+                            timestamp: sshResult?.timestamp || new Date().toISOString(),
+                        },
+                        reason: 'Direct SSH execution',
+                    }],
+                },
             });
             ws.send(JSON.stringify({ type: 'delta', content: assistantMessage }));
             ws.send(JSON.stringify({
@@ -327,6 +341,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                     output: fullText,
                     model: event.response.model || model || null,
                     duration: Date.now() - startedAt,
+                    metadata: event.response?.metadata || {},
                 });
                 ws.send(JSON.stringify({
                     type: 'done',
@@ -426,7 +441,10 @@ async function handleCanvas(ws, session, payload = {}) {
             output: outputText,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
-            metadata: { canvasType },
+            metadata: {
+                canvasType,
+                ...(response?.metadata || {}),
+            },
         });
 
         ws.send(JSON.stringify({
@@ -528,7 +546,10 @@ async function handleNotation(ws, session, payload = {}) {
             output: outputText,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
-            metadata: { helperMode },
+            metadata: {
+                helperMode,
+                ...(response?.metadata || {}),
+            },
         });
 
         ws.send(JSON.stringify({

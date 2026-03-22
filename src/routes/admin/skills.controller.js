@@ -53,7 +53,10 @@ class SkillsController {
       }
 
       // Sort by usage count
-      skills.sort((a, b) => (b.stats?.usageCount || 0) - (a.stats?.usageCount || 0));
+      skills.sort((a, b) => (
+        (b.stats?.usageCount || b.stats?.invocations || 0)
+        - (a.stats?.usageCount || a.stats?.invocations || 0)
+      ));
 
       res.json({
         success: true,
@@ -261,7 +264,7 @@ class SkillsController {
           enabled: skills.filter(s => s.enabled).length,
           disabled: skills.filter(s => !s.enabled).length,
           byCategory: this.getStatsByCategory(skills),
-          totalInvocations: skills.reduce((sum, s) => sum + (s.stats?.usageCount || 0), 0)
+          totalInvocations: skills.reduce((sum, s) => sum + (s.stats?.usageCount || s.stats?.invocations || 0), 0)
         }
       });
     } catch (error) {

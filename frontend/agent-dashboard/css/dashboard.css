@@ -2067,6 +2067,37 @@ select.form-control,
     margin-top: var(--space-xs);
 }
 
+.tool-usage-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.tool-usage-item {
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+}
+
+.tool-usage-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+}
+
+.tool-usage-meta + .tool-usage-meta {
+    margin-top: var(--space-xs);
+}
+
+.tool-usage-error {
+    margin-top: var(--space-xs);
+    color: var(--danger-light);
+    font-size: var(--text-xs);
+}
+
 .tool-doc-content {
     background-color: var(--bg-primary);
     border: 1px solid var(--border-primary);

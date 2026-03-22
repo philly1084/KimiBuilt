@@ -114,7 +114,10 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             output: structured.result,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
-            metadata: { helperMode },
+            metadata: {
+                helperMode,
+                ...(response?.metadata || {}),
+            },
         });
 
         res.json({

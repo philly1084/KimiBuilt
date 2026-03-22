@@ -760,11 +760,15 @@ class ConversationOrchestrator extends EventEmitter {
                 ? [
                     'For ssh-execute, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.',
                     'For server work, prefer trying ssh-execute before asking the user for host details again.',
+                    'Assume a Linux server and prefer Ubuntu-friendly commands unless tool results prove otherwise.',
+                    'For remote-build work, verify architecture with uname -m before installing binaries and prefer arm64/aarch64 assets when applicable.',
+                    'Prefer common built-ins and standard utilities. If a nonstandard tool may be missing, use a fallback such as find/grep instead of rg, ss instead of netstat, ip addr instead of ifconfig, and docker compose instead of docker-compose.',
                 ]
                 : toolPolicy.candidateToolIds.includes('ssh-execute')
                     ? [
                         'ssh-execute is still available for this request even if the runtime target is not yet verified in this prompt.',
                         'Do not claim ssh-execute is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.',
+                        'When planning server commands, prefer Ubuntu-friendly standard utilities and avoid assuming rg, ifconfig, netstat, or docker-compose are installed.',
                       ]
                     : []),
         ].join('\n');
@@ -943,9 +947,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`SSH runtime target is already available${toolPolicy.sshRuntimeTarget ? ` (${toolPolicy.sshRuntimeTarget})` : ''}.`);
             parts.push('For server work, try ssh-execute against the configured default or sticky session target before asking for host details again.');
             parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
+            parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
+            parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, `ip addr` for `ifconfig`, and `docker compose` for `docker-compose`.');
         } else if (toolPolicy.candidateToolIds?.includes('ssh-execute')) {
             parts.push('ssh-execute is available for this request even if the target is not currently verified in the prompt context.');
             parts.push('Do not claim the SSH tool is unavailable. Try ssh-execute for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.');
+            parts.push('When constructing remote commands, assume Ubuntu/Linux defaults first and avoid depending on nonstandard utilities unless you have verified they exist.');
         }
 
         return parts.filter(Boolean).join('\n\n');

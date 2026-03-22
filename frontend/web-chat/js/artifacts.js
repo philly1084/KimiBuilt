@@ -252,23 +252,53 @@
         }
     }
 
+    function hasExplicitArtifactIntent(text = '') {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) return false;
+
+        return /\b(export|download|save|convert|turn\b[\s\S]{0,20}\binto|turn\b[\s\S]{0,20}\bas|format\b[\s\S]{0,20}\bas)\b/i.test(normalized)
+            || /\b(create|make|generate|build|produce|render|prepare|draft)\b[\s\S]{0,60}\b(file|artifact|document|page|report|brief|pdf|html|docx|xml|spreadsheet|excel|workbook|mermaid|diagram|flowchart|sequence diagram|erd|class diagram|state diagram)\b/i.test(normalized)
+            || /\b(as|into|in)\s+(?:an?\s+)?(?:pdf|html|docx|xml|spreadsheet|excel workbook|workbook|mermaid|mmd)\b/i.test(normalized)
+            || /\b(pdf|html|docx|xml|spreadsheet|excel|workbook)\s+(?:file|document|artifact|export)\b/i.test(normalized);
+    }
+
+    function hasExplicitMermaidIntent(text = '') {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) return false;
+
+        if (/\b(mermaid|\.mmd\b)\b/i.test(normalized)) {
+            return hasExplicitArtifactIntent(normalized)
+                || /\b(mermaid|mmd)\s+(?:file|artifact|diagram|chart|export)\b/i.test(normalized);
+        }
+
+        return /\b(create|make|generate|build|produce|render|export|draw)\b[\s\S]{0,60}\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\b/i.test(normalized)
+            || /\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\s+(?:file|artifact|export)\b/i.test(normalized);
+    }
+
     function inferRequestedOutputFormat(messages = []) {
         const lastUserMessage = [...messages].reverse().find((message) => message?.role === 'user' && message?.content);
         const text = String(lastUserMessage?.content || '').toLowerCase();
         if (!text) return '';
 
-        const checks = [
-            ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
-            ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
-            ['pdf', /\bpdf\b/],
-            ['docx', /\b(docx|word document)\b/],
-            ['xml', /\bxml\b/],
-            ['mermaid', /\b(mermaid|diagram|flowchart|sequence diagram)\b/],
-            ['mermaid', /\b(erd|entity relationship|class diagram|state diagram)\b/],
-            ['html', /\bhtml\b/],
-        ];
+        const hasArtifactIntent = hasExplicitArtifactIntent(text);
 
-        return checks.find(([, pattern]) => pattern.test(text))?.[0] || '';
+        if ((/\b(power\s*query|\.(pq|m)\b)/.test(text) && hasArtifactIntent)
+            || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(text)) {
+            return 'power-query';
+        }
+
+        if ((/\b(xlsx|spreadsheet|excel|workbook)\b/.test(text) && hasArtifactIntent)
+            || /\b(excel|spreadsheet|workbook)\s+(?:file|artifact|export)\b/.test(text)) {
+            return 'xlsx';
+        }
+
+        if (/\bpdf\b/.test(text) && hasArtifactIntent) return 'pdf';
+        if (/\b(docx|word document)\b/.test(text) && hasArtifactIntent) return 'docx';
+        if (/\bxml\b/.test(text) && hasArtifactIntent) return 'xml';
+        if (hasExplicitMermaidIntent(text)) return 'mermaid';
+        if (/\bhtml\b/.test(text) && hasArtifactIntent) return 'html';
+
+        return '';
     }
 
     async function uploadArtifact(file) {

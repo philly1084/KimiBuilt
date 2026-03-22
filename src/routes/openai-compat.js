@@ -8,6 +8,7 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     resolveSshRequestContext,
     formatSshToolResult,
@@ -20,21 +21,6 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 
 const router = Router();
-
-function inferOutputFormatFromText(text = '') {
-    const normalized = String(text || '').toLowerCase();
-    const checks = [
-        ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
-        ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
-        ['pdf', /\bpdf\b/],
-        ['docx', /\b(docx|word document)\b/],
-        ['xml', /\bxml\b/],
-        ['mermaid', /\bmermaid\b/],
-        ['html', /\bhtml\b/],
-    ];
-
-    return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
-}
 
 function normalizeMessageText(content = '') {
     if (typeof content === 'string') {
@@ -65,6 +51,7 @@ function inferOutputFormatFromTranscript(messages = [], session = null) {
     const normalizedMessages = Array.isArray(messages) ? messages : [];
     const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
     const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
+    const mermaidContinuationIntent = /\b(mermaid|diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram|artifact|file|export)\b/i.test(lastUserText);
 
     if (!isArtifactContinuationPrompt(lastUserText)) {
         return inferOutputFormatFromSession(lastUserText, session);
@@ -72,7 +59,10 @@ function inferOutputFormatFromTranscript(messages = [], session = null) {
 
     for (let index = normalizedMessages.length - 1; index >= 0; index -= 1) {
         const message = normalizedMessages[index];
-        const format = inferOutputFormatFromText(normalizeMessageText(message?.content || ''));
+        const format = inferRequestedOutputFormat(normalizeMessageText(message?.content || ''));
+        if (format === 'mermaid' && !mermaidContinuationIntent) {
+            continue;
+        }
         if (format) {
             return format;
         }
@@ -307,7 +297,7 @@ router.post('/chat/completions', async (req, res, next) => {
             session,
         });
         const effectiveOutputFormat = output_format
-            || inferOutputFormatFromText(lastUserText)
+            || inferRequestedOutputFormat(lastUserText)
             || inferOutputFormatFromTranscript(messages, session);
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
         const artifactPrompt = buildArtifactPromptFromTranscript(messages, lastUserText);
@@ -478,7 +468,26 @@ router.post('/chat/completions', async (req, res, next) => {
                     output: assistantMessage,
                     model: model || null,
                     duration: Date.now() - startedAt,
-                    metadata: { directTool: 'ssh-execute' },
+                    metadata: {
+                        directTool: 'ssh-execute',
+                        toolEvents: [{
+                            toolCall: {
+                                function: {
+                                    name: 'ssh-execute',
+                                    arguments: JSON.stringify(sshContext.directParams || {}),
+                                },
+                            },
+                            result: {
+                                success: sshResult?.success !== false,
+                                toolId: 'ssh-execute',
+                                duration: sshResult?.duration || 0,
+                                data: sshResult?.data,
+                                error: sshResult?.error || null,
+                                timestamp: sshResult?.timestamp || new Date().toISOString(),
+                            },
+                            reason: 'Direct SSH execution',
+                        }],
+                    },
                 });
                 res.write(`data: ${JSON.stringify({
                     id: `chatcmpl-${sessionId}-0`,
@@ -579,6 +588,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         output: fullText,
                         model: event.response.model || model || null,
                         duration: Date.now() - startedAt,
+                        metadata: event.response?.metadata || {},
                     });
                     res.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
@@ -647,7 +657,26 @@ router.post('/chat/completions', async (req, res, next) => {
                 output: assistantMessage,
                 model: model || null,
                 duration: Date.now() - startedAt,
-                metadata: { directTool: 'ssh-execute' },
+                metadata: {
+                    directTool: 'ssh-execute',
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'ssh-execute',
+                                arguments: JSON.stringify(sshContext.directParams || {}),
+                            },
+                        },
+                        result: {
+                            success: sshResult?.success !== false,
+                            toolId: 'ssh-execute',
+                            duration: sshResult?.duration || 0,
+                            data: sshResult?.data,
+                            error: sshResult?.error || null,
+                            timestamp: sshResult?.timestamp || new Date().toISOString(),
+                        },
+                        reason: 'Direct SSH execution',
+                    }],
+                },
             });
             res.json({
                 id: `chatcmpl-tool-${Date.now()}`,
@@ -733,6 +762,7 @@ router.post('/chat/completions', async (req, res, next) => {
             output: outputText,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
+            metadata: response?.metadata || {},
         });
 
         res.json({
@@ -816,7 +846,7 @@ router.post('/responses', async (req, res, next) => {
         const effectiveUserInput = sshContext.effectivePrompt || userInput;
         const taskType = resolveConversationTaskType(req.body, session);
         const effectiveOutputFormat = output_format
-            || inferOutputFormatFromText(userInput)
+            || inferRequestedOutputFormat(userInput)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
         const artifactPrompt = buildArtifactPromptFromTranscript(normalizedInputMessages, userInput);
@@ -1000,7 +1030,26 @@ router.post('/responses', async (req, res, next) => {
                     output: assistantMessage,
                     model: model || null,
                     duration: Date.now() - startedAt,
-                    metadata: { directTool: 'ssh-execute' },
+                    metadata: {
+                        directTool: 'ssh-execute',
+                        toolEvents: [{
+                            toolCall: {
+                                function: {
+                                    name: 'ssh-execute',
+                                    arguments: JSON.stringify(sshContext.directParams || {}),
+                                },
+                            },
+                            result: {
+                                success: sshResult?.success !== false,
+                                toolId: 'ssh-execute',
+                                duration: sshResult?.duration || 0,
+                                data: sshResult?.data,
+                                error: sshResult?.error || null,
+                                timestamp: sshResult?.timestamp || new Date().toISOString(),
+                            },
+                            reason: 'Direct SSH execution',
+                        }],
+                    },
                 });
                 res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: assistantMessage })}\n\n`);
                 res.write(`data: ${JSON.stringify({
@@ -1078,6 +1127,7 @@ router.post('/responses', async (req, res, next) => {
                         output: fullText,
                         model: event.response.model || model || null,
                         duration: Date.now() - startedAt,
+                        metadata: event.response?.metadata || {},
                     });
                     res.write(`data: ${JSON.stringify({ type: 'response.completed', response: event.response, session_id: sessionId, artifacts })}\n\n`);
                 }
@@ -1148,7 +1198,26 @@ router.post('/responses', async (req, res, next) => {
                 output: assistantMessage,
                 model: model || null,
                 duration: Date.now() - startedAt,
-                metadata: { directTool: 'ssh-execute' },
+                metadata: {
+                    directTool: 'ssh-execute',
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'ssh-execute',
+                                arguments: JSON.stringify(sshContext.directParams || {}),
+                            },
+                        },
+                        result: {
+                            success: sshResult?.success !== false,
+                            toolId: 'ssh-execute',
+                            duration: sshResult?.duration || 0,
+                            data: sshResult?.data,
+                            error: sshResult?.error || null,
+                            timestamp: sshResult?.timestamp || new Date().toISOString(),
+                        },
+                        reason: 'Direct SSH execution',
+                    }],
+                },
             });
             res.json({
                 ...syntheticResponse,
@@ -1218,6 +1287,7 @@ router.post('/responses', async (req, res, next) => {
             output: outputText,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
+            metadata: response?.metadata || {},
         });
 
         res.json({

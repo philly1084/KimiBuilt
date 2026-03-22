@@ -717,6 +717,9 @@ class Dashboard {
             await this.loadSystemHealth();
             await this.loadRecentActivity();
             await this.loadModelUsage();
+            if (this.state.currentView === 'skills') {
+                await this.loadSkills();
+            }
             
             if (this.state.currentView === 'logs' && !this.state.logsPaused) {
                 await this.loadLogs();
@@ -844,6 +847,7 @@ class Dashboard {
                     <div class="skill-stats">
                         <span class="skill-stat"><strong>${tool.usageCount || 0}</strong> uses</span>
                         <span class="skill-stat"><strong>${tool.successRate || 0}%</strong> success</span>
+                        <span class="skill-stat"><strong>${tool.avgDuration || 0}ms</strong> avg</span>
                     </div>
                     <div class="skill-actions">
                         <button class="btn btn-sm btn-ghost" onclick="dashboard.selectTool('${tool.id}')">Details</button>
@@ -1686,11 +1690,18 @@ class Dashboard {
     }
 
     normalizeSkill(skill = {}) {
+        const stats = skill.stats || {};
         return {
             ...skill,
             enabled: Boolean(skill.enabled ?? skill.isEnabled),
-            usageCount: Number(skill.usageCount ?? skill.stats?.usageCount ?? 0),
-            successRate: Number(skill.successRate ?? skill.stats?.successRate ?? 0),
+            usageCount: Number(stats.usageCount ?? stats.invocations ?? skill.usageCount ?? 0),
+            successRate: Number(stats.successRate ?? skill.successRate ?? 0),
+            avgDuration: Number(stats.avgDuration || 0),
+            lastUsed: stats.lastUsed || null,
+            recentUsage: Array.isArray(stats.recentUsage) ? stats.recentUsage : [],
+            byRoute: stats.byRoute || {},
+            byModel: stats.byModel || {},
+            byExecutionProfile: stats.byExecutionProfile || {},
         };
     }
 
@@ -1711,6 +1722,12 @@ class Dashboard {
             enabled: skill ? Boolean(skill.enabled) : null,
             usageCount: Number(skill?.usageCount || 0),
             successRate: Number(skill?.successRate || 0),
+            avgDuration: Number(skill?.avgDuration || 0),
+            lastUsed: skill?.lastUsed || null,
+            recentUsage: Array.isArray(skill?.recentUsage) ? skill.recentUsage : [],
+            byRoute: skill?.byRoute || {},
+            byModel: skill?.byModel || {},
+            byExecutionProfile: skill?.byExecutionProfile || {},
             triggerPatterns: skill?.triggerPatterns || [],
             requiresConfirmation: Boolean(skill?.requiresConfirmation),
         };
@@ -1755,12 +1772,23 @@ class Dashboard {
             task_cancelled: 'warning',
             task_created: 'info',
             session_cleared: 'info',
+            tool_invoked: activity.metadata?.success === false ? 'warning' : 'info',
         };
+
+        const metaParts = [this.formatDate(activity.timestamp)];
+        if (activity.type === 'tool_invoked') {
+            if (activity.metadata?.route) {
+                metaParts.push(activity.metadata.route);
+            }
+            if (activity.metadata?.executionProfile) {
+                metaParts.push(activity.metadata.executionProfile);
+            }
+        }
 
         return {
             type: typeMap[activity.type] || 'info',
             title: activity.description || activity.title || activity.type || 'Activity',
-            meta: this.formatDate(activity.timestamp),
+            meta: metaParts.filter(Boolean).join(' | '),
         };
     }
 
@@ -1792,15 +1820,17 @@ class Dashboard {
         const container = document.getElementById('toolSummaryGrid');
         if (!container) return;
 
-        const stable = tools.filter((tool) => tool.support === 'stable').length;
         const setup = tools.filter((tool) => tool.support === 'requires_setup').length;
         const docs = tools.filter((tool) => tool.docAvailable).length;
+        const invokedTools = tools.filter((tool) => Number(tool.usageCount || 0) > 0).length;
+        const totalCalls = tools.reduce((sum, tool) => sum + Number(tool.usageCount || 0), 0);
 
         container.innerHTML = [
             { label: 'Registered Tools', value: tools.length, tone: 'info' },
-            { label: 'Stable', value: stable, tone: 'success' },
+            { label: 'Invoked Tools', value: invokedTools, tone: 'success' },
+            { label: 'Total Calls', value: totalCalls, tone: 'accent' },
             { label: 'Requires Setup', value: setup, tone: 'warning' },
-            { label: 'Docs Ready', value: docs, tone: 'accent' },
+            { label: 'Docs Ready', value: docs, tone: 'info' },
         ].map((item) => `
             <div class="tool-summary-card ${item.tone}">
                 <span class="tool-summary-value">${item.value}</span>
@@ -1908,6 +1938,30 @@ class Dashboard {
         const triggerMarkup = tool.triggerPatterns?.length
             ? `<div class="tool-detail-section"><h4>Trigger Patterns</h4><p>${this.escapeHtml(tool.triggerPatterns.join(', '))}</p></div>`
             : '';
+        const recentUsageMarkup = tool.recentUsage?.length
+            ? `
+                <div class="tool-detail-section">
+                    <h4>Recent Usage</h4>
+                    <div class="tool-usage-list">
+                        ${tool.recentUsage.slice(0, 8).map((entry) => `
+                            <div class="tool-usage-item">
+                                <div class="tool-usage-meta">
+                                    <span>${this.escapeHtml(this.formatDate(entry.timestamp))}</span>
+                                    <span>${this.escapeHtml(entry.route || 'runtime')}</span>
+                                    <span>${this.escapeHtml(entry.executionProfile || 'default')}</span>
+                                    <span>${entry.success === false ? 'error' : 'success'}</span>
+                                </div>
+                                <div class="tool-usage-meta">
+                                    <span>${entry.duration ? `${entry.duration}ms` : '0ms'}</span>
+                                    <span>${this.escapeHtml((entry.paramKeys || []).join(', ') || 'no params')}</span>
+                                </div>
+                                ${entry.error ? `<div class="tool-usage-error">${this.escapeHtml(entry.error)}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `
+            : '<div class="tool-detail-section"><h4>Recent Usage</h4><p class="tool-doc-placeholder">No invocations recorded yet.</p></div>';
         const docMarkup = doc?.content
             ? `<div class="tool-doc-content"><pre>${this.escapeHtml(doc.content)}</pre></div>`
             : `<p class="tool-doc-placeholder">${tool.docAvailable ? 'Docs are available on demand. Load them only when you need setup or usage detail.' : 'No tool doc file is registered for this tool.'}</p>`;
@@ -1938,9 +1992,26 @@ class Dashboard {
                     <span class="tool-detail-label">Requires Confirmation</span>
                     <span class="tool-detail-value">${tool.requiresConfirmation ? 'Yes' : 'No'}</span>
                 </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Invocations</span>
+                    <span class="tool-detail-value">${(tool.usageCount || 0).toLocaleString()}</span>
+                </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Average Duration</span>
+                    <span class="tool-detail-value">${tool.avgDuration || 0}ms</span>
+                </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Success Rate</span>
+                    <span class="tool-detail-value">${tool.successRate || 0}%</span>
+                </div>
+                <div class="tool-detail-item">
+                    <span class="tool-detail-label">Last Used</span>
+                    <span class="tool-detail-value">${tool.lastUsed ? this.escapeHtml(this.formatDate(tool.lastUsed)) : 'Never'}</span>
+                </div>
             </div>
             ${triggerMarkup}
             ${supportNotesMarkup}
+            ${recentUsageMarkup}
             <div class="tool-detail-section">
                 <h4>Documentation</h4>
                 ${docMarkup}

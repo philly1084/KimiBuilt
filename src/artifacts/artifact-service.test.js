@@ -305,4 +305,88 @@ describe('ArtifactService', () => {
         expect(instructions).toContain('https://images.unsplash.com/photo-999');
         expect(instructions).toContain('[Verified image references]');
     });
+
+    test('recovers when composition returns a layout plan instead of final html', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Photo Brief',
+                        sections: [
+                            { heading: 'Overview', purpose: 'Summarize the brief', keyPoints: ['Goal'], targetLength: 'short' },
+                            { heading: 'Gallery Notes', purpose: 'Explain the images', keyPoints: ['Verified photos'], targetLength: 'medium' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Photo Brief',
+                        sections: [
+                            { heading: 'Overview', content: 'This is the real overview content.', level: 1 },
+                            { heading: 'Gallery Notes', content: '- Verified Unsplash photos\n- Coherent sequence', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: [
+                        'Page Layout Plan',
+                        'The layout should keep attention on the verified photographs.',
+                        'Credits And Source Register',
+                        'Final Build Checks',
+                    ].join('\n\n') }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: {
+                previousResponseId: 'prev-1',
+                metadata: {
+                    projectMemory: {
+                        urls: [
+                            {
+                                url: 'https://images.unsplash.com/photo-321',
+                                kind: 'image',
+                                title: 'Verified photo',
+                                source: 'tool',
+                                toolId: 'image-search-unsplash',
+                            },
+                        ],
+                    },
+                },
+            },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a polished PDF photo brief using the verified session images.',
+            format: 'pdf',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            format: 'pdf',
+            content: expect.stringContaining('<!DOCTYPE html>'),
+        }));
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('This is the real overview content.'),
+        }));
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('https://images.unsplash.com/photo-321'),
+        }));
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                compositionRecovered: true,
+            }),
+        }));
+    });
 });

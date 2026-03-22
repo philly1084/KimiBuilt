@@ -8,6 +8,7 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    inferRequestedOutputFormat,
     resolveSshRequestContext,
     formatSshToolResult,
     extractSshSessionMetadataFromToolEvents,
@@ -37,21 +38,6 @@ async function updateSessionProjectMemory(sessionId, updates = {}) {
             ),
         },
     });
-}
-
-function inferOutputFormatFromText(text = '') {
-    const normalized = String(text || '').toLowerCase();
-    const checks = [
-        ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
-        ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
-        ['pdf', /\bpdf\b/],
-        ['docx', /\b(docx|word document)\b/],
-        ['xml', /\bxml\b/],
-        ['mermaid', /\bmermaid\b/],
-        ['html', /\bhtml\b/],
-    ];
-
-    return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
 }
 
 const chatSchema = {
@@ -92,7 +78,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const sshContext = resolveSshRequestContext(message, session);
         const effectiveMessage = sshContext.effectivePrompt || message;
         const effectiveOutputFormat = outputFormat
-            || inferOutputFormatFromText(message)
+            || inferRequestedOutputFormat(message)
             || inferOutputFormatFromSession(message, session);
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
         runtimeTask = startRuntimeTask({
@@ -227,7 +213,21 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     output: assistantMessage,
                     model: model || session?.metadata?.model || null,
                     duration: Date.now() - startedAt,
-                    metadata: { directTool: 'ssh-execute' },
+                    metadata: {
+                        directTool: 'ssh-execute',
+                        toolEvents: [{
+                            toolCall: { function: { name: 'ssh-execute', arguments: JSON.stringify(sshContext.directParams || {}) } },
+                            result: {
+                                success: sshResult?.success !== false,
+                                toolId: 'ssh-execute',
+                                duration: sshResult?.duration || 0,
+                                data: sshResult?.data,
+                                error: sshResult?.error || null,
+                                timestamp: sshResult?.timestamp || new Date().toISOString(),
+                            },
+                            reason: 'Direct SSH execution',
+                        }],
+                    },
                 });
                 res.write(`data: ${JSON.stringify({ type: 'delta', content: assistantMessage })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: null, artifacts: [] })}\n\n`);
@@ -300,6 +300,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         output: fullText,
                         model: event.response.model || model || null,
                         duration: Date.now() - startedAt,
+                        metadata: event.response?.metadata || {},
                     });
                     res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts })}\n\n`);
                 }
@@ -354,7 +355,21 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 output: assistantMessage,
                 model: model || session?.metadata?.model || null,
                 duration: Date.now() - startedAt,
-                metadata: { directTool: 'ssh-execute' },
+                metadata: {
+                    directTool: 'ssh-execute',
+                    toolEvents: [{
+                        toolCall: { function: { name: 'ssh-execute', arguments: JSON.stringify(sshContext.directParams || {}) } },
+                        result: {
+                            success: sshResult?.success !== false,
+                            toolId: 'ssh-execute',
+                            duration: sshResult?.duration || 0,
+                            data: sshResult?.data,
+                            error: sshResult?.error || null,
+                            timestamp: sshResult?.timestamp || new Date().toISOString(),
+                        },
+                        reason: 'Direct SSH execution',
+                    }],
+                },
             });
             res.json({
                 sessionId,
@@ -428,6 +443,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             output: outputText,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
+            metadata: response?.metadata || {},
         });
 
         res.json({

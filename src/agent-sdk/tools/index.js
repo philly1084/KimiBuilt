@@ -689,7 +689,10 @@ class ToolManager {
     }
     
     // Record stats
-    this.registry.recordInvocation(id, result);
+    this.registry.recordInvocation(id, result, {
+      ...context,
+      params,
+    });
     
     return result;
   }

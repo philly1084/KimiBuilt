@@ -114,7 +114,10 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             output: structured.content,
             model: response.model || model || null,
             duration: Date.now() - startedAt,
-            metadata: { canvasType },
+            metadata: {
+                canvasType,
+                ...(response?.metadata || {}),
+            },
         });
 
         res.json({

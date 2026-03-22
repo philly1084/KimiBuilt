@@ -4,13 +4,28 @@ const { artifactStore } = require('./artifact-store');
 const { extractArtifact } = require('./artifact-extractor');
 const { renderArtifact } = require('./artifact-renderer');
 const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMATS, inferFormat, normalizeFormat } = require('./constants');
-const { chunkText, stripHtml } = require('../utils/text');
+const { chunkText, escapeHtml, stripHtml } = require('../utils/text');
 const { vectorStore } = require('../memory/vector-store');
 const { createResponse } = require('../openai-client');
 const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
+const COMPOSITION_PLANNING_PATTERNS = [
+    /\bpage layout plan\b/i,
+    /\bcredits? and source register\b/i,
+    /\bfinal build checks\b/i,
+    /\bapproved outline\b/i,
+    /\bstructured document draft\b/i,
+];
+const COMPOSITION_META_PHRASES = [
+    /\bthe layout should\b/i,
+    /\bif attribution must appear\b/i,
+    /\ba separate source register should\b/i,
+    /\bbefore delivery\b/i,
+    /\bthe final pass should\b/i,
+    /\bverification date used for the build\b/i,
+];
 
 function sha256(buffer) {
     return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -166,10 +181,166 @@ function buildDocumentImageInstructions() {
     return [
         'When verified image URLs are available in session memory or prompt context, use those real images with standard HTML <img> tags.',
         'Prefer remembered direct image URLs and Unsplash image URLs over generated decorative placeholders.',
+        'Prefer standard HTML <img src="..."> elements over background-image-only treatments when the image is meaningful content.',
         'Never create inline SVG artwork, multilayered SVG mockups, CSS-only fake photos, canvas placeholders, blob URLs, or data:image embeds unless the user explicitly asks for vector artwork.',
         'If no verified image URL is available for a visual slot, omit the image block and keep the section text-only.',
         'Use descriptive alt text and keep images tied to the content instead of decorative filler.',
     ].join('\n');
+}
+
+function looksLikeStandaloneHtml(text = '') {
+    return /<!doctype html>|<html\b|<body\b|<main\b|<article\b|<section\b|<header\b|<figure\b|<img\b|<h1\b/i.test(String(text || ''));
+}
+
+function renderSectionContentHtml(content = '') {
+    const normalized = String(content || '').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    if (/<[a-z][\s\S]*>/i.test(normalized)) {
+        return normalized;
+    }
+
+    return normalized
+        .split(/\n{2,}/)
+        .map((block) => {
+            const trimmed = block.trim();
+            if (!trimmed) {
+                return '';
+            }
+
+            const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
+            const bulletLines = lines.filter((line) => /^[-*]\s+/.test(line));
+            const numberedLines = lines.filter((line) => /^\d+\.\s+/.test(line));
+
+            if (lines.length > 0 && bulletLines.length === lines.length) {
+                return `<ul>${bulletLines.map((line) => `<li>${escapeHtml(line.replace(/^[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+            }
+
+            if (lines.length > 0 && numberedLines.length === lines.length) {
+                return `<ol>${numberedLines.map((line) => `<li>${escapeHtml(line.replace(/^\d+\.\s+/, ''))}</li>`).join('')}</ol>`;
+            }
+
+            return `<p>${escapeHtml(trimmed).replace(/\n/g, '<br>')}</p>`;
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
+function buildImageFigureHtml(imageReference, fallbackAlt = 'Document image') {
+    const url = normalizeImageReferenceUrl(imageReference?.url || '');
+    if (!url) {
+        return '';
+    }
+
+    const alt = escapeHtml(String(imageReference?.title || fallbackAlt || 'Document image').trim());
+    const sourceLabel = escapeHtml(String(imageReference?.source || 'source').trim());
+    const safeUrl = escapeHtml(url);
+
+    return [
+        '<figure class="document-image">',
+        `  <img src="${safeUrl}" alt="${alt}" loading="eager">`,
+        `  <figcaption>${alt} <span class="document-credit">Source: <a href="${safeUrl}" target="_blank" rel="noreferrer">${sourceLabel}</a></span></figcaption>`,
+        '</figure>',
+    ].join('\n');
+}
+
+function buildExpandedDocumentHtml(title = 'Document', sections = [], imageReferences = []) {
+    const safeTitle = escapeHtml(title);
+    const normalizedSections = Array.isArray(sections) ? sections : [];
+    const normalizedImages = Array.isArray(imageReferences) ? imageReferences : [];
+
+    const sectionMarkup = normalizedSections.map((section, index) => {
+        const safeHeading = escapeHtml(String(section?.heading || `Section ${index + 1}`).trim());
+        const bodyMarkup = renderSectionContentHtml(section?.content || '');
+        const figureMarkup = buildImageFigureHtml(normalizedImages[index], section?.heading || title);
+
+        return [
+            `<section class="document-section" data-section-index="${index + 1}">`,
+            `  <h2>${safeHeading}</h2>`,
+            figureMarkup ? `  ${figureMarkup.replace(/\n/g, '\n  ')}` : '',
+            `  <div class="document-copy">${bodyMarkup}</div>`,
+            '</section>',
+        ].filter(Boolean).join('\n');
+    }).join('\n');
+
+    const remainingImages = normalizedImages.slice(normalizedSections.length);
+    const galleryMarkup = remainingImages.length > 0
+        ? [
+            '<section class="document-section document-gallery">',
+            '  <h2>Source Images</h2>',
+            ...remainingImages.map((imageReference, index) => `  ${buildImageFigureHtml(imageReference, `${title} image ${index + 1}`).replace(/\n/g, '\n  ')}`),
+            '</section>',
+        ].join('\n')
+        : '';
+
+    return [
+        '<!DOCTYPE html>',
+        '<html>',
+        '<head>',
+        '  <meta charset="utf-8">',
+        `  <title>${safeTitle}</title>`,
+        '  <style>',
+        '    body { font-family: Arial, sans-serif; margin: 40px; color: #1f2937; line-height: 1.6; }',
+        '    main { max-width: 900px; margin: 0 auto; }',
+        '    header { margin-bottom: 32px; }',
+        '    h1, h2, h3 { color: #111827; }',
+        '    .document-section { margin: 0 0 32px; }',
+        '    .document-copy p, .document-copy ul, .document-copy ol { margin: 0 0 16px; }',
+        '    .document-image { margin: 20px 0 24px; }',
+        '    .document-image img { width: 100%; height: auto; border-radius: 16px; display: block; }',
+        '    .document-image figcaption { font-size: 12px; color: #4b5563; margin-top: 8px; }',
+        '    .document-credit { display: inline-block; margin-left: 8px; }',
+        '    a { color: #1d4ed8; }',
+        '  </style>',
+        '</head>',
+        '<body>',
+        '  <main>',
+        '    <header>',
+        `      <h1>${safeTitle}</h1>`,
+        '    </header>',
+        sectionMarkup || '    <section class="document-section"><p>No content provided.</p></section>',
+        galleryMarkup ? `    ${galleryMarkup.replace(/\n/g, '\n    ')}` : '',
+        '  </main>',
+        '</body>',
+        '</html>',
+    ].filter(Boolean).join('\n');
+}
+
+function shouldRecoverCompositionOutput(outputText = '', expandedDocument = null) {
+    const raw = String(outputText || '').trim();
+    if (!raw) {
+        return true;
+    }
+
+    const plain = stripHtml(raw).replace(/\s+/g, ' ').trim();
+    if (!plain) {
+        return true;
+    }
+
+    let score = 0;
+    if (!looksLikeStandaloneHtml(raw)) {
+        score += 2;
+    }
+
+    score += COMPOSITION_PLANNING_PATTERNS.filter((pattern) => pattern.test(plain)).length * 2;
+    score += Math.min(2, COMPOSITION_META_PHRASES.filter((pattern) => pattern.test(plain)).length);
+
+    const expectedHeadings = Array.isArray(expandedDocument?.sections)
+        ? expandedDocument.sections
+            .map((section) => String(section?.heading || '').trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+
+    if (expectedHeadings.length > 0) {
+        const matchedHeadings = expectedHeadings.filter((heading) => plain.toLowerCase().includes(heading)).length;
+        if (matchedHeadings === 0) {
+            score += 1;
+        }
+    }
+
+    return score >= 3;
 }
 
 function shouldFetchUnsplashReferences(prompt = '') {
@@ -554,34 +725,44 @@ class ArtifactService {
             'Preserve the section order and cover all requested content.',
             'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
             'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
+            'Do not output a layout plan, source register instructions, build checklist, editorial note, or any meta-document that describes how a future document should be assembled.',
+            'The output must be the finished document itself, not instructions for building it.',
             buildDocumentImageInstructions(),
             promptContext,
             `Target output format: ${format}.`,
         ].filter(Boolean).join('\n');
     }
 
-    async buildImageReferenceContext(session = null, prompt = '') {
+    formatImageReferenceContext(imageReferences = []) {
+        if (!Array.isArray(imageReferences) || imageReferences.length === 0) {
+            return '';
+        }
+
+        return [
+            '[Verified image references]',
+            'Use these real image URLs when the output benefits from visuals.',
+            'Prefer standard HTML <img src="..."> elements that point to these URLs.',
+            ...imageReferences.map((entry, index) => {
+                const label = entry.title || `Image ${index + 1}`;
+                const source = entry.toolId ? ` via ${entry.toolId}` : '';
+                return `- ${label} -> ${entry.url} [${entry.source}${source}]`;
+            }),
+        ].join('\n');
+    }
+
+    async resolveImageReferences(session = null, prompt = '') {
         const sessionRefs = extractImageReferencesFromSession(session);
         if (sessionRefs.length > 0) {
-            return [
-                '[Verified image references]',
-                'Use these real image URLs when the output benefits from visuals.',
-                'Prefer standard HTML <img src="..."> elements that point to these URLs.',
-                ...sessionRefs.map((entry, index) => {
-                    const label = entry.title || `Image ${index + 1}`;
-                    const source = entry.toolId ? ` via ${entry.toolId}` : '';
-                    return `- ${label} -> ${entry.url} [${entry.source}${source}]`;
-                }),
-            ].join('\n');
+            return sessionRefs;
         }
 
         if (!isUnsplashConfigured() || !shouldFetchUnsplashReferences(prompt)) {
-            return '';
+            return [];
         }
 
         const query = inferUnsplashQuery(prompt);
         if (!query) {
-            return '';
+            return [];
         }
 
         try {
@@ -595,23 +776,17 @@ class ArtifactService {
                 }))
                 .filter((entry) => entry.url);
 
-            if (unsplashRefs.length === 0) {
-                return '';
-            }
-
-            return [
-                '[Verified image references]',
-                'Use these real image URLs when the output benefits from visuals.',
-                'Prefer standard HTML <img src="..."> elements that point to these URLs.',
-                ...unsplashRefs.map((entry, index) => {
-                    const label = entry.title || `Unsplash image ${index + 1}`;
-                    return `- ${label} -> ${entry.url} [${entry.source} via ${entry.toolId}]`;
-                }),
-            ].join('\n');
+            return unsplashRefs;
         } catch (error) {
             console.warn('[Artifacts] Failed to fetch Unsplash references:', error.message);
-            return '';
+            return [];
         }
+    }
+
+    async buildImageReferenceContext(session = null, prompt = '') {
+        return this.formatImageReferenceContext(
+            await this.resolveImageReferences(session, prompt),
+        );
     }
 
     async generateMultiPassDocumentSource({
@@ -621,9 +796,12 @@ class ArtifactService {
         promptContext = '',
         existingContent = '',
         model = null,
+        imageReferences = [],
+        imageReferenceContext = '',
     }) {
-        const imageReferenceContext = await this.buildImageReferenceContext(session, prompt);
-        const enrichedPromptContext = [promptContext, imageReferenceContext].filter(Boolean).join('\n\n');
+        const resolvedImageReferences = Array.isArray(imageReferences) ? imageReferences : [];
+        const resolvedImageReferenceContext = imageReferenceContext || this.formatImageReferenceContext(resolvedImageReferences);
+        const enrichedPromptContext = [promptContext, resolvedImageReferenceContext].filter(Boolean).join('\n\n');
         const planPass = await this.runGenerationPass({
             session,
             input: prompt,
@@ -706,14 +884,20 @@ class ArtifactService {
             model,
         });
 
+        const usedCompositionRecovery = shouldRecoverCompositionOutput(compositionPass.outputText, expandedDocument);
+        const finalOutputText = usedCompositionRecovery
+            ? buildExpandedDocumentHtml(expandedDocument.title || normalizedPlan.title, expandedDocument.sections, resolvedImageReferences)
+            : compositionPass.outputText;
+
         return {
             responseId: compositionPass.responseId,
             title: expandedDocument.title || normalizedPlan.title,
-            outputText: compositionPass.outputText,
+            outputText: finalOutputText,
             metadata: {
                 generationStrategy: 'multi-pass',
                 generationPasses: ['plan', 'expand', 'compose'],
                 sectionCount: expandedDocument.sections.length,
+                compositionRecovered: usedCompositionRecovery,
                 outline: normalizedPlan.sections.map((section) => ({
                     heading: section.heading,
                     purpose: section.purpose,
@@ -741,24 +925,30 @@ class ArtifactService {
         }
 
         const promptContext = await this.buildPromptContext(sessionId, artifactIds);
-        const imageReferenceContext = await this.buildImageReferenceContext(session, prompt);
-        const enrichedPromptContext = [promptContext, imageReferenceContext].filter(Boolean).join('\n\n');
+        const imageReferences = await this.resolveImageReferences(session, prompt);
+        const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
         const generated = MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
             ? await this.generateMultiPassDocumentSource({
                 session,
                 prompt,
                 format: normalizedFormat,
-                promptContext: enrichedPromptContext,
+                promptContext,
                 existingContent: combinedExistingContent,
                 model,
+                imageReferences,
+                imageReferenceContext,
             })
             : await this.runGenerationPass({
                 session,
                 input: prompt,
                 instructions: buildSessionInstructions(
                     session,
-                    this.getGenerationInstructions(normalizedFormat, combinedExistingContent, enrichedPromptContext),
+                    this.getGenerationInstructions(
+                        normalizedFormat,
+                        combinedExistingContent,
+                        [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
+                    ),
                 ),
                 model,
                 previousResponseId: session?.previousResponseId || null,
