@@ -66,6 +66,13 @@
                             </svg>
                             <span>Models</span>
                         </li>
+                        <li class="nav-item" data-view="tokens">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 1v22"/>
+                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            </svg>
+                            <span>Tokens</span>
+                        </li>
                         <li class="nav-item" data-view="logs">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -452,6 +459,112 @@
                                     <button type="button" class="btn btn-ghost" id="resetDefaultsBtn">Reset to Defaults</button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Logs View -->
+                <section class="view" id="tokensView">
+                    <div class="stats-grid token-summary-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon primary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 1v22"/>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="tokenAnalyzerTotal">0</span>
+                                <span class="stat-label">Total Tokens</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M4 6h16"/>
+                                    <path d="M4 12h10"/>
+                                    <path d="M4 18h7"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="tokenAnalyzerPrompt">0</span>
+                                <span class="stat-label">Prompt Tokens</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon success">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M5 12h14"/>
+                                    <path d="M12 5l7 7-7 7"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="tokenAnalyzerCompletion">0</span>
+                                <span class="stat-label">Completion Tokens</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 3h18v18H3z"/>
+                                    <path d="M8 12h8"/>
+                                    <path d="M12 8v8"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="tokenAnalyzerProviders">0</span>
+                                <span class="stat-label">Providers Tracked</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid token-analyzer-layout">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Provider Totals</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="provider-token-list" id="providerTokenTotals">
+                                    <!-- Populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Usage Summary</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="token-insights" id="tokenInsights">
+                                    <!-- Populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Per-Model Token Usage</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-wrapper">
+                                <table class="logs-table token-analyzer-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Model</th>
+                                            <th>Provider</th>
+                                            <th class="col-tokens">Requests</th>
+                                            <th class="col-tokens">Prompt</th>
+                                            <th class="col-tokens">Completion</th>
+                                            <th class="col-tokens">Total</th>
+                                            <th class="col-latency">Avg Latency</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tokenAnalyzerRows">
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </section>

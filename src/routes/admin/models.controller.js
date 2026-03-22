@@ -121,12 +121,15 @@ class ModelsController {
     try {
       const models = await this.getLiveModels();
       const usage = this.buildUsageStats(models);
+      const summary = this.buildUsageSummary(usage);
       res.json({
         success: true,
         data: usage,
         meta: {
           source: 'runtime-logs',
           count: usage.length,
+          summary,
+          providerTotals: summary.providerTotals,
         },
       });
     } catch (error) {
@@ -252,10 +255,12 @@ class ModelsController {
       return {
         modelId: model.id,
         modelName: model.name,
+        provider: model.provider || model.raw?.owned_by || 'unknown',
         requests: usage.requests,
         tokens: {
           input: usage.inputTokens,
           output: usage.outputTokens,
+          total: usage.inputTokens + usage.outputTokens,
         },
         cost: {
           input: 0,
@@ -267,6 +272,55 @@ class ModelsController {
         isDefault: model.isDefault,
       };
     });
+  }
+
+  buildUsageSummary(usage = []) {
+    const summary = {
+      totalRequests: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+      providerTotals: [],
+    };
+    const providerMap = new Map();
+
+    for (const entry of usage) {
+      const input = Number(entry.tokens?.input || 0);
+      const output = Number(entry.tokens?.output || 0);
+      const total = Number(entry.tokens?.total || (input + output));
+      const requests = Number(entry.requests || 0);
+      const provider = String(entry.provider || 'unknown');
+
+      if (requests <= 0 && total <= 0) {
+        continue;
+      }
+
+      summary.totalRequests += requests;
+      summary.totalInputTokens += input;
+      summary.totalOutputTokens += output;
+      summary.totalTokens += total;
+
+      const current = providerMap.get(provider) || {
+        provider,
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        modelCount: 0,
+      };
+
+      current.requests += requests;
+      current.inputTokens += input;
+      current.outputTokens += output;
+      current.totalTokens += total;
+      current.modelCount += 1;
+      providerMap.set(provider, current);
+    }
+
+    summary.providerTotals = Array.from(providerMap.values())
+      .sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests || a.provider.localeCompare(b.provider));
+
+    return summary;
   }
 
   ensureModelSettings() {

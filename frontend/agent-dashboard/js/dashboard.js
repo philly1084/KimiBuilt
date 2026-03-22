@@ -20,6 +20,7 @@ class Dashboard {
             logs: [],
             traces: [],
             settings: {},
+            tokenAnalysis: null,
             stats: {
                 totalTasks: 0,
                 successRate: 0,
@@ -364,6 +365,7 @@ class Dashboard {
             overview: 'Overview',
             prompts: 'Prompts',
             models: 'Models',
+            tokens: 'Token Analyzer',
             logs: 'Logs',
             skills: 'Tools',
             traces: 'Traces',
@@ -418,6 +420,9 @@ class Dashboard {
         switch (view) {
             case 'skills':
                 await this.loadSkills();
+                break;
+            case 'tokens':
+                await this.loadTokenAnalyzer();
                 break;
             case 'logs':
                 await this.loadLogs();
@@ -2274,6 +2279,155 @@ class Dashboard {
             console.error('Error loading model usage:', error);
             container.innerHTML = '<div class="model-usage-item"><span class="model-name">Failed to load usage data</span></div>';
         }
+    }
+
+    async loadTokenAnalyzer() {
+        const rowsContainer = document.getElementById('tokenAnalyzerRows');
+        const providerContainer = document.getElementById('providerTokenTotals');
+        const insightsContainer = document.getElementById('tokenInsights');
+        if (!rowsContainer || !providerContainer || !insightsContainer) return;
+
+        try {
+            const response = await apiClient.get('/api/admin/models/usage/stats');
+            const payload = this.unwrapApiPayload(response, []);
+            const meta = response?.meta || response?.data?.meta || {};
+            const models = payload.map((entry) => ({
+                modelId: entry.modelId || '',
+                modelName: entry.modelName || entry.modelId || 'Unknown',
+                provider: entry.provider || 'unknown',
+                requests: Number(entry.requests || 0),
+                inputTokens: Number(entry.tokens?.input || 0),
+                outputTokens: Number(entry.tokens?.output || 0),
+                totalTokens: Number(entry.tokens?.total || 0) || (Number(entry.tokens?.input || 0) + Number(entry.tokens?.output || 0)),
+                avgResponseTime: Number(entry.avgResponseTime || 0),
+            }))
+                .filter((entry) => entry.requests > 0 || entry.totalTokens > 0)
+                .sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests || a.modelName.localeCompare(b.modelName));
+
+            const summary = meta.summary || this.buildTokenAnalyzerSummary(models);
+            const providerTotals = Array.isArray(meta.providerTotals) && meta.providerTotals.length > 0
+                ? meta.providerTotals
+                : this.buildTokenAnalyzerProviderTotals(models);
+
+            this.state.tokenAnalysis = { models, summary, providerTotals };
+
+            document.getElementById('tokenAnalyzerTotal').textContent = this.formatCompactNumber(summary.totalTokens || 0);
+            document.getElementById('tokenAnalyzerPrompt').textContent = this.formatCompactNumber(summary.totalInputTokens || 0);
+            document.getElementById('tokenAnalyzerCompletion').textContent = this.formatCompactNumber(summary.totalOutputTokens || 0);
+            document.getElementById('tokenAnalyzerProviders').textContent = String((summary.providerTotals || providerTotals).length || 0);
+
+            providerContainer.innerHTML = providerTotals.length > 0
+                ? providerTotals.map((provider) => {
+                    const totalTokens = Number(provider.totalTokens || 0);
+                    const percent = summary.totalTokens > 0 ? Math.round((totalTokens / summary.totalTokens) * 100) : 0;
+                    return `
+                        <div class="provider-token-item">
+                            <div class="provider-token-header">
+                                <span class="provider-token-name">${this.escapeHtml(provider.provider || 'unknown')}</span>
+                                <span class="provider-token-total">${totalTokens.toLocaleString()} tokens</span>
+                            </div>
+                            <div class="provider-token-meta">${Number(provider.requests || 0).toLocaleString()} requests${provider.modelCount ? ` | ${provider.modelCount} models` : ''}</div>
+                            <div class="model-bar">
+                                <div class="model-fill" style="width: ${Math.max(0, Math.min(percent, 100))}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')
+                : '<p class="empty-state">No provider token usage yet.</p>';
+
+            const topModel = models[0] || null;
+            const topProvider = providerTotals[0] || null;
+            insightsContainer.innerHTML = `
+                <div class="token-insight-item">
+                    <span class="token-insight-label">Total Requests</span>
+                    <span class="token-insight-value">${Number(summary.totalRequests || 0).toLocaleString()}</span>
+                </div>
+                <div class="token-insight-item">
+                    <span class="token-insight-label">Top Provider</span>
+                    <span class="token-insight-value">${this.escapeHtml(topProvider?.provider || 'None')}</span>
+                </div>
+                <div class="token-insight-item">
+                    <span class="token-insight-label">Top Model</span>
+                    <span class="token-insight-value">${this.escapeHtml(topModel?.modelName || 'None')}</span>
+                </div>
+                <div class="token-insight-item">
+                    <span class="token-insight-label">Prompt / Completion Split</span>
+                    <span class="token-insight-value">${this.formatTokenSplit(summary.totalInputTokens || 0, summary.totalOutputTokens || 0)}</span>
+                </div>
+            `;
+
+            rowsContainer.innerHTML = models.length > 0
+                ? models.map((model) => `
+                    <tr>
+                        <td>${this.escapeHtml(model.modelName)}</td>
+                        <td>${this.escapeHtml(model.provider)}</td>
+                        <td class="col-tokens">${model.requests.toLocaleString()}</td>
+                        <td class="col-tokens">${model.inputTokens.toLocaleString()}</td>
+                        <td class="col-tokens">${model.outputTokens.toLocaleString()}</td>
+                        <td class="col-tokens"><strong>${model.totalTokens.toLocaleString()}</strong></td>
+                        <td class="col-latency">${model.avgResponseTime ? `${model.avgResponseTime}ms` : '-'}</td>
+                    </tr>
+                `).join('')
+                : '<tr><td colspan="7" class="token-analyzer-empty">No token usage data yet.</td></tr>';
+        } catch (error) {
+            console.error('Error loading token analyzer:', error);
+            providerContainer.innerHTML = '<p class="empty-state">Failed to load provider token totals.</p>';
+            insightsContainer.innerHTML = '<p class="empty-state">Failed to load token summary.</p>';
+            rowsContainer.innerHTML = '<tr><td colspan="7" class="token-analyzer-empty">Failed to load token usage data.</td></tr>';
+        }
+    }
+
+    buildTokenAnalyzerSummary(models = []) {
+        const providerTotals = this.buildTokenAnalyzerProviderTotals(models);
+        return {
+            totalRequests: models.reduce((sum, model) => sum + Number(model.requests || 0), 0),
+            totalInputTokens: models.reduce((sum, model) => sum + Number(model.inputTokens || 0), 0),
+            totalOutputTokens: models.reduce((sum, model) => sum + Number(model.outputTokens || 0), 0),
+            totalTokens: models.reduce((sum, model) => sum + Number(model.totalTokens || 0), 0),
+            providerTotals,
+        };
+    }
+
+    buildTokenAnalyzerProviderTotals(models = []) {
+        const providerMap = new Map();
+        models.forEach((model) => {
+            const provider = String(model.provider || 'unknown');
+            const current = providerMap.get(provider) || {
+                provider,
+                requests: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                totalTokens: 0,
+                modelCount: 0,
+            };
+            current.requests += Number(model.requests || 0);
+            current.inputTokens += Number(model.inputTokens || 0);
+            current.outputTokens += Number(model.outputTokens || 0);
+            current.totalTokens += Number(model.totalTokens || 0);
+            current.modelCount += 1;
+            providerMap.set(provider, current);
+        });
+
+        return Array.from(providerMap.values())
+            .sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests || a.provider.localeCompare(b.provider));
+    }
+
+    formatCompactNumber(value = 0) {
+        return new Intl.NumberFormat('en-US', {
+            notation: 'compact',
+            maximumFractionDigits: 1,
+        }).format(Number(value || 0));
+    }
+
+    formatTokenSplit(promptTokens = 0, completionTokens = 0) {
+        const total = Number(promptTokens || 0) + Number(completionTokens || 0);
+        if (!total) {
+            return '0% / 0%';
+        }
+
+        const promptPercent = Math.round((Number(promptTokens || 0) / total) * 100);
+        const completionPercent = Math.max(0, 100 - promptPercent);
+        return `${promptPercent}% / ${completionPercent}%`;
     }
 
     async savePrompt() {

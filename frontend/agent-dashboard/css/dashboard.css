@@ -1149,6 +1149,65 @@ select.form-control,
     font-family: var(--font-mono);
 }
 
+/* Token Analyzer */
+.token-analyzer-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.provider-token-list,
+.token-insights {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.provider-token-item,
+.token-insight-item {
+    padding: var(--space-md);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-tertiary);
+}
+
+.provider-token-header,
+.token-insight-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.provider-token-name,
+.token-insight-label {
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.provider-token-total,
+.token-insight-value {
+    font-size: var(--text-sm);
+    color: var(--accent-secondary);
+    font-family: var(--font-mono);
+}
+
+.provider-token-meta {
+    margin: var(--space-xs) 0 var(--space-sm);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.token-analyzer-table .col-tokens,
+.token-analyzer-table .col-latency {
+    text-align: right;
+}
+
+.token-analyzer-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: var(--space-lg);
+}
+
 /* Health Metrics */
 .health-metrics {
     display: flex;
