@@ -375,6 +375,158 @@ GUIDELINES:
 - When improving layout or variety, prefer mixing headings, callouts, quotes, lists, databases, images, dividers, and tasteful color/textColor choices instead of only plain paragraphs`;
     }
 
+    function unwrapCodeFence(text = '') {
+        const trimmed = String(text || '').trim();
+        const match = trimmed.match(/^```(?:json|notes-actions)?\s*([\s\S]*?)\s*```$/i);
+        return match ? match[1].trim() : trimmed;
+    }
+
+    function safeJsonParse(text = '') {
+        try {
+            return JSON.parse(unwrapCodeFence(text));
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function shouldUseMultiPassNotesDraft(question = '', context = null, requestOptions = {}) {
+        if (requestOptions?.outputFormat) {
+            return false;
+        }
+
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized || normalized.length < 40) {
+            return false;
+        }
+
+        if (/\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|traefik|let'?s encrypt|acme|cert-manager|research|search the web|browse|scrape|tool)\b/.test(normalized)) {
+            return false;
+        }
+
+        const writingVerb = /\b(create|make|build|draft|write|expand|organize|polish|rewrite|turn|convert|structure|format)\b/.test(normalized);
+        const substantialTarget = /\b(page|document|report|brief|spec|proposal|plan|guide|memo|summary|notes|runbook|dashboard|playbook)\b/.test(normalized);
+        const pageHasEnoughSurface = (context?.blockCount || 0) > 3 || (context?.outline?.length || 0) > 1;
+
+        return writingVerb && (substantialTarget || pageHasEnoughSurface);
+    }
+
+    function normalizeHiddenDraftResult(text = '', fallback = null) {
+        const parsed = safeJsonParse(text);
+        if (parsed) {
+            return JSON.stringify(parsed, null, 2);
+        }
+
+        const normalized = unwrapCodeFence(text);
+        if (normalized) {
+            return normalized.slice(0, 6000);
+        }
+
+        return fallback;
+    }
+
+    async function buildMultiPassNotesMessages({
+        apiClient,
+        model,
+        systemPrompt,
+        question,
+        requestOptions = {},
+    }) {
+        const planningClient = typeof NotesAPIClient !== 'undefined'
+            ? new NotesAPIClient()
+            : apiClient;
+
+        const planningPrompt = `${systemPrompt}
+
+Hidden planning pass for a substantial notes-writing request.
+Do not return notes-actions in this pass.
+Return JSON only in this shape:
+{
+  "title": "Page title",
+  "sections": [
+    {
+      "heading": "Section heading",
+      "goal": "Why this section exists",
+      "blockTypes": ["heading_2", "text", "bulleted_list"],
+      "keyPoints": ["Point 1", "Point 2"]
+    }
+  ]
+}`;
+
+        const planningResponse = await planningClient.chat([
+            { role: 'system', content: planningPrompt },
+            { role: 'user', content: question }
+        ], model, requestOptions);
+
+        if (planningResponse?.error) {
+            throw new Error(planningResponse.content || 'Planning pass failed');
+        }
+
+        const normalizedPlan = normalizeHiddenDraftResult(planningResponse.content, null);
+        if (!normalizedPlan) {
+            return null;
+        }
+
+        const expansionPrompt = `${systemPrompt}
+
+Hidden section-expansion pass for a substantial notes-writing request.
+Do not return notes-actions in this pass.
+You will receive the original request plus the approved page plan.
+Return JSON only in this shape:
+{
+  "title": "Page title",
+  "sections": [
+    {
+      "heading": "Section heading",
+      "summary": "Detailed summary of what this section should say",
+      "suggestedBlocks": [
+        { "type": "heading_2", "content": "Section heading" },
+        { "type": "text", "content": "Opening paragraph guidance" }
+      ]
+    }
+  ]
+}`;
+
+        const expansionResponse = await planningClient.chat([
+            { role: 'system', content: expansionPrompt },
+            {
+                role: 'user',
+                content: `Original request:\n${question}\n\nApproved page plan:\n${normalizedPlan}`
+            }
+        ], model, requestOptions);
+
+        if (expansionResponse?.error) {
+            throw new Error(expansionResponse.content || 'Expansion pass failed');
+        }
+
+        const normalizedExpansion = normalizeHiddenDraftResult(expansionResponse.content, normalizedPlan);
+        if (!normalizedExpansion) {
+            return null;
+        }
+
+        return [
+            {
+                role: 'system',
+                content: `${systemPrompt}
+
+Use the hidden planning work below as internal guidance.
+For this final pass, return the finished answer only.
+If the user is editing the page, return notes-actions as needed.`
+            },
+            {
+                role: 'user',
+                content: `${question}
+
+Use this approved page plan:
+${normalizedPlan}
+
+Use these expanded section briefs:
+${normalizedExpansion}
+
+Build the page in a structured, polished way instead of one-shotting the whole document.`
+            }
+        ];
+    }
+
     function normalizeActionContent(type, content) {
         const value = content == null ? '' : content;
 
@@ -2501,12 +2653,7 @@ GUIDELINES:
             wordCount: 0,
             outline: []
         });
-        
-        const messages = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: question }
-        ];
-        
+
         const fallbackModel = 'gpt-4o';
         const attemptedModels = [];
         const candidateModels = [state.selectedModel];
@@ -2521,6 +2668,11 @@ GUIDELINES:
                 }
 
                 attemptedModels.push(model);
+                const useMultiPassDraft = shouldUseMultiPassNotesDraft(question, context, requestOptions);
+                let messages = [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: question }
+                ];
                 let responseText = '';
                 let lastVisibleText = '';
                 let jsonBuffer = '';
@@ -2528,6 +2680,19 @@ GUIDELINES:
                 let generatedArtifacts = [];
 
                 try {
+                    if (useMultiPassDraft) {
+                        const multiPassMessages = await buildMultiPassNotesMessages({
+                            apiClient,
+                            model,
+                            systemPrompt,
+                            question,
+                            requestOptions,
+                        });
+                        if (Array.isArray(multiPassMessages) && multiPassMessages.length > 0) {
+                            messages = multiPassMessages;
+                        }
+                    }
+
                     if (state.streamingEnabled && apiClient.streamChat) {
                         for await (const chunk of apiClient.streamChat(messages, model, null, requestOptions)) {
                             if (chunk.type === 'delta' && chunk.content) {
