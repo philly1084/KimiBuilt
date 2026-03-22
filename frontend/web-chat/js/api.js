@@ -290,6 +290,10 @@ class OpenAIAPIClient extends EventTarget {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let pendingDone = {
+                    sessionId: this.currentSessionId,
+                    artifacts: [],
+                };
                 
                 try {
                     while (true) {
@@ -304,7 +308,11 @@ class OpenAIAPIClient extends EventTarget {
                             if (line.startsWith('data: ')) {
                                 const data = line.slice(6);
                                 if (data === '[DONE]') {
-                                    yield { type: 'done', sessionId: this.currentSessionId };
+                                    yield {
+                                        type: 'done',
+                                        sessionId: pendingDone.sessionId || this.currentSessionId,
+                                        artifacts: pendingDone.artifacts || [],
+                                    };
                                     return;
                                 }
                                 try {
@@ -315,6 +323,24 @@ class OpenAIAPIClient extends EventTarget {
                                         throw new Error(parsed.error.message || 'Stream error');
                                     }
                                     
+                                    if (parsed.session_id || parsed.sessionId) {
+                                        this.currentSessionId = parsed.session_id || parsed.sessionId;
+                                        pendingDone.sessionId = this.currentSessionId;
+                                    }
+
+                                    if (Array.isArray(parsed.artifacts)) {
+                                        pendingDone.artifacts = parsed.artifacts;
+                                    }
+
+                                    if (parsed.type === 'done') {
+                                        yield {
+                                            type: 'done',
+                                            sessionId: pendingDone.sessionId || this.currentSessionId,
+                                            artifacts: pendingDone.artifacts || [],
+                                        };
+                                        return;
+                                    }
+
                                     const content = parsed.choices?.[0]?.delta?.content || '';
                                     if (content) {
                                         yield { type: 'delta', content };
@@ -322,7 +348,11 @@ class OpenAIAPIClient extends EventTarget {
                                     
                                     // Check finish reason
                                     if (this.isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
-                                        yield { type: 'done', sessionId: this.currentSessionId };
+                                        yield {
+                                            type: 'done',
+                                            sessionId: pendingDone.sessionId || this.currentSessionId,
+                                            artifacts: pendingDone.artifacts || [],
+                                        };
                                         return;
                                     }
                                 } catch (e) {
@@ -342,7 +372,11 @@ class OpenAIAPIClient extends EventTarget {
                 
                 // Success - reset retry count
                 this.retryCount = 0;
-                yield { type: 'done', sessionId: this.currentSessionId };
+                yield {
+                    type: 'done',
+                    sessionId: pendingDone.sessionId || this.currentSessionId,
+                    artifacts: pendingDone.artifacts || [],
+                };
                 return;
                 
             } catch (error) {

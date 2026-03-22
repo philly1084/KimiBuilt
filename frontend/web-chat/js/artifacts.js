@@ -578,9 +578,7 @@
                 params.output_format = inferredOutputFormat;
             }
 
-            // Use a longer timeout for generation requests
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
             
             // Combine with external signal if provided
             if (signal) {
@@ -609,13 +607,26 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
-                let lastActivity = Date.now();
+                let pendingDone = {
+                    sessionId: this.currentSessionId,
+                    artifacts: [],
+                };
 
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    lastActivity = Date.now();
+                    if (done) {
+                        state.lastDone = {
+                            sessionId: pendingDone.sessionId || this.currentSessionId,
+                            artifacts: pendingDone.artifacts || [],
+                        };
+                        yield {
+                            type: 'done',
+                            sessionId: pendingDone.sessionId || this.currentSessionId,
+                            artifacts: pendingDone.artifacts || [],
+                        };
+                        break;
+                    }
+
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
                     buffer = lines.pop() || '';
@@ -623,34 +634,77 @@
                     for (const line of lines) {
                         if (!line.startsWith('data: ')) continue;
                         const payload = line.slice(6);
-                        if (payload === '[DONE]') continue;
+                        if (payload === '[DONE]') {
+                            state.lastDone = {
+                                sessionId: pendingDone.sessionId || this.currentSessionId,
+                                artifacts: pendingDone.artifacts || [],
+                            };
+                            yield {
+                                type: 'done',
+                                sessionId: pendingDone.sessionId || this.currentSessionId,
+                                artifacts: pendingDone.artifacts || [],
+                            };
+                            return;
+                        }
                         
                         try {
                             const parsed = JSON.parse(payload);
-                            const content = parsed.choices?.[0]?.delta?.content || '';
-                            if (parsed.session_id) {
-                                this.currentSessionId = parsed.session_id;
+                            if (parsed.error) {
+                                throw new Error(parsed.error.message || 'Stream error');
                             }
+
+                            if (parsed.session_id || parsed.sessionId) {
+                                this.currentSessionId = parsed.session_id || parsed.sessionId;
+                                pendingDone.sessionId = this.currentSessionId;
+                            }
+
+                            if (Array.isArray(parsed.artifacts)) {
+                                pendingDone.artifacts = parsed.artifacts;
+                            }
+
+                            if (parsed.type === 'done') {
+                                state.lastDone = {
+                                    sessionId: pendingDone.sessionId || this.currentSessionId,
+                                    artifacts: pendingDone.artifacts || [],
+                                };
+                                yield {
+                                    type: 'done',
+                                    sessionId: pendingDone.sessionId || this.currentSessionId,
+                                    artifacts: pendingDone.artifacts || [],
+                                };
+                                return;
+                            }
+
+                            const content = parsed.choices?.[0]?.delta?.content || '';
                             if (content) {
                                 yield { type: 'delta', content };
                             }
                             if (isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
-                                state.lastDone = { sessionId: this.currentSessionId, artifacts: parsed.artifacts || [] };
-                                yield { type: 'done', sessionId: this.currentSessionId, artifacts: parsed.artifacts || [] };
+                                state.lastDone = {
+                                    sessionId: pendingDone.sessionId || this.currentSessionId,
+                                    artifacts: pendingDone.artifacts || [],
+                                };
+                                yield {
+                                    type: 'done',
+                                    sessionId: pendingDone.sessionId || this.currentSessionId,
+                                    artifacts: pendingDone.artifacts || [],
+                                };
+                                return;
                             }
-                        } catch {
+                        } catch (error) {
+                            if (error.message === 'Stream error') {
+                                throw error;
+                            }
                             // ignore malformed chunks
                         }
                     }
                 }
             } catch (error) {
                 if (error.name === 'AbortError') {
-                    yield { type: 'error', error: 'Request timed out. The server may be busy or the connection was interrupted.', status: 408 };
+                    yield { type: 'error', error: 'Request cancelled', cancelled: true };
                 } else {
                     yield { type: 'error', error: error.message, status: 0 };
                 }
-            } finally {
-                clearTimeout(timeoutId);
             }
         };
     }
@@ -687,12 +741,14 @@
         
         // Handle errors better - don't immediately show red error on disconnect
         const originalHandleError = window.chatApp.handleError?.bind(window.chatApp);
-        window.chatApp.handleError = function(error) {
+        window.chatApp.handleError = function(error, status = null) {
+            const normalizedMessage = String(error || '').toLowerCase();
+
             // Check if it's a network/connection error
-            if (error?.message?.includes('fetch') || 
-                error?.message?.includes('network') ||
-                error?.message?.includes('Failed to fetch') ||
-                error?.status === 0) {
+            if (normalizedMessage.includes('fetch') ||
+                normalizedMessage.includes('network') ||
+                normalizedMessage.includes('failed to fetch') ||
+                status === 0) {
                 // Show a more user-friendly message
                 if (window.uiHelpers?.showToast) {
                     uiHelpers.showToast('Connection interrupted. Retrying...', 'warning');
@@ -702,7 +758,7 @@
             }
             
             if (originalHandleError) {
-                originalHandleError(error);
+                originalHandleError(error, status);
             }
         };
     }
