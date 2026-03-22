@@ -9,6 +9,7 @@ const { vectorStore } = require('../memory/vector-store');
 const { createResponse } = require('../openai-client');
 const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
+const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
 
 function sha256(buffer) {
@@ -103,6 +104,97 @@ function normalizeDocumentSections(sections = [], fallbackSections = []) {
             level: Number(section?.level) > 0 ? Number(section.level) : 1,
         }))
         .filter((section) => section.heading && section.content);
+}
+
+function normalizeImageReferenceUrl(url = '') {
+    const trimmed = String(url || '').trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    if (trimmed.startsWith('/')) {
+        return trimmed;
+    }
+
+    try {
+        const parsed = new URL(trimmed);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return null;
+        }
+        return parsed.toString();
+    } catch (_error) {
+        return null;
+    }
+}
+
+function isLikelyImageUrl(url = '') {
+    const normalized = String(url || '').toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\.(png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i.test(normalized)
+        || normalized.includes('images.unsplash.com')
+        || normalized.includes('source.unsplash.com')
+        || normalized.includes('/photo-');
+}
+
+function extractImageReferencesFromSession(session = null) {
+    const entries = Array.isArray(session?.metadata?.projectMemory?.urls)
+        ? session.metadata.projectMemory.urls
+        : [];
+    const unique = new Map();
+
+    entries.forEach((entry) => {
+        const url = normalizeImageReferenceUrl(entry?.url || '');
+        if (!url || (!isLikelyImageUrl(url) && String(entry?.kind || '').toLowerCase() !== 'image')) {
+            return;
+        }
+
+        unique.set(url, {
+            url,
+            title: String(entry?.title || '').trim(),
+            source: String(entry?.source || '').trim() || 'session',
+            toolId: String(entry?.toolId || '').trim(),
+        });
+    });
+
+    return Array.from(unique.values()).slice(-8);
+}
+
+function buildDocumentImageInstructions() {
+    return [
+        'When verified image URLs are available in session memory or prompt context, use those real images with standard HTML <img> tags.',
+        'Prefer remembered direct image URLs and Unsplash image URLs over generated decorative placeholders.',
+        'Never create inline SVG artwork, multilayered SVG mockups, CSS-only fake photos, canvas placeholders, blob URLs, or data:image embeds unless the user explicitly asks for vector artwork.',
+        'If no verified image URL is available for a visual slot, omit the image block and keep the section text-only.',
+        'Use descriptive alt text and keep images tied to the content instead of decorative filler.',
+    ].join('\n');
+}
+
+function shouldFetchUnsplashReferences(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\bunsplash\b/.test(normalized)
+        || /\b(image|images|photo|photos|hero|gallery|visual|visuals|cover image|real images)\b/.test(normalized);
+}
+
+function inferUnsplashQuery(prompt = '') {
+    const title = inferDocumentTitle(prompt, '').toLowerCase();
+    const cleaned = title
+        .replace(/\b(a|an|the|with|for|using|use|real|visual|visuals|image|images|photo|photos|unsplash)\b/g, ' ')
+        .replace(/\b(html|pdf|docx|page|document|website|web|landing|create|make|generate|build|polished|guide|brief|report)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!cleaned) {
+        return null;
+    }
+
+    return cleaned.split(' ').slice(0, 6).join(' ');
 }
 
 class ArtifactService {
@@ -359,7 +451,7 @@ class ArtifactService {
         ].filter(Boolean).join('\n\n');
 
         if (normalizedFormat === 'html' || normalizedFormat === 'pdf' || normalizedFormat === 'docx') {
-            return `${base}\n\nReturn valid standalone HTML with inline-friendly structure and business formatting.`;
+            return `${base}\n\n${buildDocumentImageInstructions()}\n\nReturn valid standalone HTML with inline-friendly structure and business formatting.`;
         }
         if (normalizedFormat === 'xml') {
             return `${base}\n\nReturn valid XML only. No markdown fences.`;
@@ -407,6 +499,7 @@ class ArtifactService {
             'First decide the document title and the major sections required to satisfy the request.',
             'Prefer 4-8 sections for substantial documents unless the request clearly needs fewer.',
             'Each section should have a concrete purpose and 2-5 key points that must be covered.',
+            'If verified images are available, plan where real images support the document, but do not invent illustrations.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
             promptContext,
             '',
@@ -433,6 +526,7 @@ class ArtifactService {
             'Write polished, business-ready prose for each section.',
             'Keep sections distinct, avoid repetition, and fully cover the requested key points.',
             'Use paragraphs and inline bullets within section content when appropriate.',
+            'If verified image references are available, mention the real image use naturally in the section content instead of describing fake illustrations.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
             promptContext,
             '',
@@ -460,9 +554,64 @@ class ArtifactService {
             'Preserve the section order and cover all requested content.',
             'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
             'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
+            buildDocumentImageInstructions(),
             promptContext,
             `Target output format: ${format}.`,
         ].filter(Boolean).join('\n');
+    }
+
+    async buildImageReferenceContext(session = null, prompt = '') {
+        const sessionRefs = extractImageReferencesFromSession(session);
+        if (sessionRefs.length > 0) {
+            return [
+                '[Verified image references]',
+                'Use these real image URLs when the output benefits from visuals.',
+                'Prefer standard HTML <img src="..."> elements that point to these URLs.',
+                ...sessionRefs.map((entry, index) => {
+                    const label = entry.title || `Image ${index + 1}`;
+                    const source = entry.toolId ? ` via ${entry.toolId}` : '';
+                    return `- ${label} -> ${entry.url} [${entry.source}${source}]`;
+                }),
+            ].join('\n');
+        }
+
+        if (!isUnsplashConfigured() || !shouldFetchUnsplashReferences(prompt)) {
+            return '';
+        }
+
+        const query = inferUnsplashQuery(prompt);
+        if (!query) {
+            return '';
+        }
+
+        try {
+            const results = await searchImages(query, { perPage: 3, orientation: 'landscape' });
+            const unsplashRefs = (Array.isArray(results?.results) ? results.results : [])
+                .map((image) => ({
+                    url: normalizeImageReferenceUrl(image?.urls?.regular || image?.urls?.full || image?.urls?.small || ''),
+                    title: String(image?.description || image?.altDescription || query).trim(),
+                    source: 'unsplash',
+                    toolId: 'image-search-unsplash',
+                }))
+                .filter((entry) => entry.url);
+
+            if (unsplashRefs.length === 0) {
+                return '';
+            }
+
+            return [
+                '[Verified image references]',
+                'Use these real image URLs when the output benefits from visuals.',
+                'Prefer standard HTML <img src="..."> elements that point to these URLs.',
+                ...unsplashRefs.map((entry, index) => {
+                    const label = entry.title || `Unsplash image ${index + 1}`;
+                    return `- ${label} -> ${entry.url} [${entry.source} via ${entry.toolId}]`;
+                }),
+            ].join('\n');
+        } catch (error) {
+            console.warn('[Artifacts] Failed to fetch Unsplash references:', error.message);
+            return '';
+        }
     }
 
     async generateMultiPassDocumentSource({
@@ -473,12 +622,14 @@ class ArtifactService {
         existingContent = '',
         model = null,
     }) {
+        const imageReferenceContext = await this.buildImageReferenceContext(session, prompt);
+        const enrichedPromptContext = [promptContext, imageReferenceContext].filter(Boolean).join('\n\n');
         const planPass = await this.runGenerationPass({
             session,
             input: prompt,
             instructions: buildSessionInstructions(
                 session,
-                this.getArtifactPlanInstructions(format, promptContext, existingContent),
+                this.getArtifactPlanInstructions(format, enrichedPromptContext, existingContent),
             ),
             model,
             previousResponseId: session?.previousResponseId || null,
@@ -518,7 +669,7 @@ class ArtifactService {
             ].join('\n'),
             instructions: buildSessionInstructions(
                 session,
-                this.getArtifactExpansionInstructions(format, promptContext, existingContent),
+                this.getArtifactExpansionInstructions(format, enrichedPromptContext, existingContent),
             ),
             model,
         });
@@ -550,7 +701,7 @@ class ArtifactService {
             ].join('\n'),
             instructions: buildSessionInstructions(
                 session,
-                this.getArtifactCompositionInstructions(format, promptContext),
+                this.getArtifactCompositionInstructions(format, enrichedPromptContext),
             ),
             model,
         });
@@ -590,13 +741,15 @@ class ArtifactService {
         }
 
         const promptContext = await this.buildPromptContext(sessionId, artifactIds);
+        const imageReferenceContext = await this.buildImageReferenceContext(session, prompt);
+        const enrichedPromptContext = [promptContext, imageReferenceContext].filter(Boolean).join('\n\n');
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
         const generated = MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
             ? await this.generateMultiPassDocumentSource({
                 session,
                 prompt,
                 format: normalizedFormat,
-                promptContext,
+                promptContext: enrichedPromptContext,
                 existingContent: combinedExistingContent,
                 model,
             })
@@ -605,7 +758,7 @@ class ArtifactService {
                 input: prompt,
                 instructions: buildSessionInstructions(
                     session,
-                    this.getGenerationInstructions(normalizedFormat, combinedExistingContent, promptContext),
+                    this.getGenerationInstructions(normalizedFormat, combinedExistingContent, enrichedPromptContext),
                 ),
                 model,
                 previousResponseId: session?.previousResponseId || null,

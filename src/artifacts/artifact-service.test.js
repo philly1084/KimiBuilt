@@ -17,6 +17,11 @@ jest.mock('../openai-client', () => ({
     createResponse: jest.fn(),
 }));
 
+jest.mock('../unsplash-client', () => ({
+    searchImages: jest.fn(),
+    isConfigured: jest.fn(() => false),
+}));
+
 jest.mock('../memory/vector-store', () => ({
     vectorStore: {
         store: jest.fn(),
@@ -37,10 +42,12 @@ const { artifactStore } = require('./artifact-store');
 const { postgres } = require('../postgres');
 const { renderArtifact } = require('./artifact-renderer');
 const { createResponse } = require('../openai-client');
+const { searchImages, isConfigured } = require('../unsplash-client');
 
 describe('ArtifactService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        isConfigured.mockReturnValue(false);
         artifactStore.create.mockResolvedValue({
             id: 'artifact-1',
             sessionId: 'session-1',
@@ -162,5 +169,140 @@ describe('ArtifactService', () => {
             }),
         }));
         expect(result.responseId).toBe('resp-compose');
+    });
+
+    test('injects verified session image references into multi-pass document instructions', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Axe Throwing Guide',
+                        sections: [
+                            { heading: 'Overview', purpose: 'Introduce the venues', keyPoints: ['Atmosphere'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Axe Throwing Guide',
+                        sections: [
+                            { heading: 'Overview', content: 'Overview content', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>Axe Throwing Guide</h1><img src="https://images.unsplash.com/photo-123" alt="Axe throwing venue"></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: {
+                previousResponseId: 'prev-1',
+                metadata: {
+                    projectMemory: {
+                        urls: [
+                            {
+                                url: 'https://images.unsplash.com/photo-123',
+                                kind: 'image',
+                                title: 'Venue action shot',
+                                source: 'tool',
+                                toolId: 'image-search-unsplash',
+                            },
+                        ],
+                    },
+                },
+            },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a polished HTML guide for Atlantic Canada axe throwing venues.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse).toHaveBeenCalledTimes(3);
+        const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
+        expect(instructions).toContain('[Verified image references]');
+        expect(instructions).toContain('https://images.unsplash.com/photo-123');
+        expect(instructions).toContain('Never create inline SVG artwork');
+        expect(instructions).toContain('Prefer standard HTML <img src="..."> elements');
+    });
+
+    test('fetches Unsplash image references for visual html documents when configured', async () => {
+        isConfigured.mockReturnValue(true);
+        searchImages.mockResolvedValue({
+            results: [
+                {
+                    description: 'Axe throwing lane',
+                    altDescription: 'Axe throwing target',
+                    urls: {
+                        regular: 'https://images.unsplash.com/photo-999',
+                    },
+                },
+            ],
+        });
+
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Axe Throwing Guide',
+                        sections: [
+                            { heading: 'Overview', purpose: 'Introduce the venues', keyPoints: ['Atmosphere'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Axe Throwing Guide',
+                        sections: [
+                            { heading: 'Overview', content: 'Overview content', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>Axe Throwing Guide</h1><img src="https://images.unsplash.com/photo-999" alt="Axe throwing lane"></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-1', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a visual HTML guide with real Unsplash images for Atlantic Canada axe throwing venues.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(searchImages).toHaveBeenCalledWith(expect.stringContaining('atlantic canada axe throwing venues'), expect.objectContaining({
+            perPage: 3,
+            orientation: 'landscape',
+        }));
+        const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
+        expect(instructions).toContain('https://images.unsplash.com/photo-999');
+        expect(instructions).toContain('[Verified image references]');
     });
 });
