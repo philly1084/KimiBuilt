@@ -92,8 +92,12 @@ const Agent = (function() {
         syncAPIClientSession(apiClient);
         
         try {
-            // Try to fetch models as a health check
-            await apiClient.getModels();
+            if (typeof apiClient.checkHealth === 'function') {
+                const health = await apiClient.checkHealth();
+                return Boolean(health?.connected);
+            }
+
+            await apiClient.getModels(true);
             return true;
         } catch (error) {
             console.log('Backend not available:', error.message);
@@ -2710,7 +2714,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         setProcessingState(true, {
             requestType: hiddenUserMessage || hiddenAssistantMessage ? 'internal' : 'chat'
         });
-        
+
         try {
             if (isToolCommand(question)) {
                 return await handleToolCommand(question, {
@@ -2721,6 +2725,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
             const context = getPageContext();
             const apiClient = getAPIClient();
+            const toolSensitiveRequest = isToolRuntimeSensitiveIntent(question);
             
             // Check if we can use the real API
             if (apiClient) {
@@ -2733,8 +2738,14 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     });
                     return responseText;
                 } catch (apiError) {
-                    console.warn('API call failed, falling back to stub mode:', apiError.message);
-                    // Fall through to stub mode
+                    const backendAvailable = await isBackendAvailable();
+                    const shouldUseStubFallback = !toolSensitiveRequest && !backendAvailable;
+
+                    if (!shouldUseStubFallback) {
+                        throw apiError;
+                    }
+
+                    console.warn('API call failed, backend is unavailable, falling back to stub mode:', apiError.message);
                 }
             }
 
