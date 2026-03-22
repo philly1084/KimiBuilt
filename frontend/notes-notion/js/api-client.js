@@ -51,6 +51,30 @@ function getRetryDelay(attempt) {
     return Math.min(delay, RETRY_CONFIG.maxDelay);
 }
 
+function isToolRuntimeError(error) {
+    const message = `${extractErrorDetailsMessage(error?.details)} ${String(error?.message || '')}`.trim().toLowerCase();
+    if (!message) {
+        return false;
+    }
+
+    return [
+        /\bssh\b/,
+        /\bssh-execute\b/,
+        /\bremote-build\b/,
+        /\bremote command\b/,
+        /\btool invocation failed\b/,
+        /\btool execution failed\b/,
+        /\bkubectl\b/,
+        /\bk3s\b/,
+        /\bcluster\b/,
+        /\bpermission denied\b/,
+        /\bconnection refused\b/,
+        /\btimed out\b/,
+        /\bhost\b/,
+        /\bcredential\b/,
+    ].some((pattern) => pattern.test(message));
+}
+
 /**
  * Determine if an error is retryable
  */
@@ -58,6 +82,9 @@ function isRetryableError(error) {
     // Network errors are retryable
     if (error.name === 'TypeError' || error.name === 'NetworkError' || error.message?.includes('fetch')) {
         return true;
+    }
+    if (isToolRuntimeError(error)) {
+        return false;
     }
     // 5xx server errors are retryable
     if (error.status >= 500 || error.status === 429) {

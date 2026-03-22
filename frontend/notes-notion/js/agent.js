@@ -1527,9 +1527,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             if (isToolCompatibleNotesModelId(preferredModel)) {
                 pushUnique(preferredModel);
             }
-            availableModelIds.forEach(pushUnique);
             if (ordered.length === 0) {
-                pushUnique(preferredModel);
+                availableModelIds.forEach(pushUnique);
             }
             return ordered;
         }
