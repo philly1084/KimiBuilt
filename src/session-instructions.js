@@ -1,4 +1,5 @@
 const { isDefaultBusinessAgentProfile } = require('./business-agent');
+const { buildProjectMemoryInstructions } = require('./project-memory');
 
 function buildSessionInstructions(session, baseInstructions = '') {
     const parts = [];
@@ -18,6 +19,11 @@ function buildSessionInstructions(session, baseInstructions = '') {
 
     if (!isDefaultBusinessAgentProfile(agent) && Array.isArray(agent?.tools) && agent.tools.length > 0) {
         parts.push(`Preferred workflow tools: ${agent.tools.join(', ')}. You may also use any runtime-provided tools available in this session when they are relevant.`);
+    }
+
+    const projectMemory = buildProjectMemoryInstructions(session);
+    if (projectMemory) {
+        parts.push(projectMemory);
     }
 
     return parts.filter(Boolean).join('\n\n');

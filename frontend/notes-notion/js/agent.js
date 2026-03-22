@@ -1373,8 +1373,92 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return normalized.includes('support@backend.io') ||
             normalized.includes('docs.backend.io/cli') ||
             (normalized.includes('need help?') && normalized.includes('backend.io')) ||
+            normalized.includes('cli_help sub-agent') ||
+            normalized.includes('generalist agent') ||
+            normalized.includes('grep_search') ||
+            normalized.includes('provided file-system tools') ||
+            normalized.includes('current environment\'s available toolset') ||
+            normalized.includes('current workspace in /app') ||
+            normalized.includes('i do not have access to an ssh-execute tool') ||
+            normalized.includes('i do not have a usable remote-build or ssh execution tool') ||
             normalized.startsWith('<!doctype html') ||
             normalized.startsWith('<html');
+    }
+
+    function isToolRuntimeSensitiveIntent(question = '', requestOptions = {}) {
+        if (requestOptions?.outputFormat) {
+            return false;
+        }
+
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return [
+            /\bssh\b/,
+            /\bssh-execute\b/,
+            /\bremote-build\b/,
+            /\bremote command\b/,
+            /\bremote server\b/,
+            /\bremote host\b/,
+            /\bserver\b[\s\S]{0,40}\b(check|inspect|debug|deploy|build|install|setup|health)\b/,
+            /\b(cluster|k3s|kubernetes|k8s|kubectl|docker|traefik|cert-manager|let'?s encrypt|acme)\b/,
+            /\bweb research\b/,
+            /\bsearch the web\b/,
+            /\bbrowse online\b/,
+            /\bscrape\b/,
+            /\btool\b[\s\S]{0,20}\b(work|call|run|use|available)\b/,
+        ].some((pattern) => pattern.test(normalized));
+    }
+
+    function isToolCompatibleNotesModelId(modelId = '') {
+        const id = String(modelId || '').trim().toLowerCase();
+        if (!id) {
+            return false;
+        }
+
+        if ([
+            'codex',
+            'computer-use',
+            'computer_use',
+            'cua',
+        ].some((token) => id.includes(token))) {
+            return false;
+        }
+
+        return id.includes('gpt') ||
+            id.startsWith('o1') ||
+            id.startsWith('o3') ||
+            id.startsWith('o4');
+    }
+
+    function buildCandidateModelsForRequest(question = '', preferredModel = 'gpt-4o', requestOptions = {}) {
+        const toolSensitiveRequest = isToolRuntimeSensitiveIntent(question, requestOptions);
+        const fallbackModels = toolSensitiveRequest
+            ? ['gpt-4o', 'gpt-4o-mini']
+            : ['gpt-4o'];
+        const ordered = [];
+        const pushUnique = (modelId) => {
+            const normalized = String(modelId || '').trim();
+            if (!normalized || ordered.includes(normalized) || !isSupportedNotesModelId(normalized)) {
+                return;
+            }
+            ordered.push(normalized);
+        };
+
+        if (toolSensitiveRequest) {
+            if (isToolCompatibleNotesModelId(preferredModel)) {
+                pushUnique(preferredModel);
+            }
+            fallbackModels.forEach(pushUnique);
+            pushUnique(preferredModel);
+            return ordered;
+        }
+
+        pushUnique(preferredModel);
+        fallbackModels.forEach(pushUnique);
+        return ordered;
     }
 
     // ============================================
@@ -1507,6 +1591,9 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             'vision-preview',
             'preview-tools',
             '-tools',
+            'codex',
+            'computer-use',
+            'computer_use',
         ].some((token) => id.includes(token));
 
         return looksLikeChatModel && !looksUnsupported;
@@ -2669,15 +2756,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             outline: []
         });
 
-        const fallbackModel = 'gpt-4o';
         const attemptedModels = [];
-        const candidateModels = [state.selectedModel];
-        if (state.selectedModel !== fallbackModel) {
-            candidateModels.push(fallbackModel);
-        }
+        const candidateModels = buildCandidateModelsForRequest(question, state.selectedModel, requestOptions);
+        const toolSensitiveRequest = isToolRuntimeSensitiveIntent(question, requestOptions);
 
         try {
-            for (const model of candidateModels) {
+            for (let modelIndex = 0; modelIndex < candidateModels.length; modelIndex += 1) {
+                const model = candidateModels[modelIndex];
                 if (!isSupportedNotesModelId(model) || attemptedModels.includes(model)) {
                     continue;
                 }
@@ -2806,7 +2891,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                             appliedCount: preparedResponse.appliedCount || 0
                         });
 
-                    if (model !== state.selectedModel) {
+                    if (model !== state.selectedModel && !toolSensitiveRequest) {
                         state.selectedModel = model;
                         persistSelectedModel(model);
                         window.dispatchEvent(new CustomEvent('modelChanged', { detail: { modelId: model } }));
@@ -2821,14 +2906,19 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                     return visibleResponse;
                 } catch (error) {
-                    const shouldRetryWithFallback = model !== fallbackModel &&
-                        (error.status >= 500 || /server error|api request failed|streaming error/i.test(String(error.message || '')));
+                    const hasMoreCandidates = candidateModels
+                        .slice(modelIndex + 1)
+                        .some((candidate) => isSupportedNotesModelId(candidate) && !attemptedModels.includes(candidate));
+                    const shouldRetryWithFallback = hasMoreCandidates &&
+                        (error.status >= 500
+                            || error.status === 502
+                            || /server error|api request failed|streaming error|invalid response returned by the ai gateway/i.test(String(error.message || '')));
 
                     if (!shouldRetryWithFallback) {
                         throw error;
                     }
 
-                    console.warn(`Model ${model} failed for Notes agent, retrying with ${fallbackModel}:`, error.message);
+                    console.warn(`Model ${model} failed for Notes agent, retrying with the next candidate:`, error.message);
                 }
             }
 

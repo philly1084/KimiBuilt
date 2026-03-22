@@ -3,8 +3,29 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { generateImage, listImageModels } = require('../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
+const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 
 const router = Router();
+
+async function updateSessionProjectMemory(sessionId, updates = {}) {
+    if (!sessionId) {
+        return null;
+    }
+
+    const session = await sessionStore.get(sessionId);
+    if (!session) {
+        return null;
+    }
+
+    return sessionStore.update(sessionId, {
+        metadata: {
+            projectMemory: mergeProjectMemory(
+                session?.metadata?.projectMemory || {},
+                buildProjectMemoryUpdate(updates),
+            ),
+        },
+    });
+}
 
 const imageSchema = {
     prompt: { required: true, type: 'string' },
@@ -55,6 +76,20 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         });
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
+        await updateSessionProjectMemory(sessionId, {
+            userText: prompt,
+            assistantText: `Generated ${Array.isArray(response?.data) ? response.data.length : n} image result(s).`,
+            toolEvents: [{
+                toolCall: { function: { name: 'image-generate' } },
+                result: {
+                    success: true,
+                    toolId: 'image-generate',
+                    data: response,
+                    error: null,
+                },
+                reason: 'Image generation request',
+            }],
+        });
 
         res.json({
             sessionId,

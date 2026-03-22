@@ -14,6 +14,7 @@ const {
 } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
+const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 
 // Admin dashboard event emitter
 const EventEmitter = require('events');
@@ -21,6 +22,26 @@ const adminEvents = new EventEmitter();
 
 // Store admin dashboard connections
 const adminConnections = new Set();
+
+async function updateSessionProjectMemory(sessionId, updates = {}) {
+    if (!sessionId) {
+        return null;
+    }
+
+    const session = await sessionStore.get(sessionId);
+    if (!session) {
+        return null;
+    }
+
+    return sessionStore.update(sessionId, {
+        metadata: {
+            projectMemory: mergeProjectMemory(
+                session?.metadata?.projectMemory || {},
+                buildProjectMemoryUpdate(updates),
+            ),
+        },
+    });
+}
 
 function inferOutputFormatFromText(text = '') {
     const normalized = String(text || '').toLowerCase();
@@ -158,6 +179,20 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 { role: 'user', content: message },
                 { role: 'assistant', content: assistantMessage },
             ]);
+            await updateSessionProjectMemory(session.id, {
+                userText: message,
+                assistantText: assistantMessage,
+                toolEvents: [{
+                    toolCall: { function: { name: 'ssh-execute' } },
+                    result: {
+                        success: sshResult?.success !== false,
+                        toolId: 'ssh-execute',
+                        data: sshResult?.data,
+                        error: sshResult?.error || null,
+                    },
+                    reason: 'Direct SSH execution',
+                }],
+            });
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: `tool-ssh-${Date.now()}`,
                 output: assistantMessage,
@@ -198,6 +233,11 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 { role: 'user', content: message },
                 { role: 'assistant', content: generation.assistantMessage },
             ]);
+            await updateSessionProjectMemory(session.id, {
+                userText: message,
+                assistantText: generation.assistantMessage,
+                artifacts: generation.artifacts,
+            });
 
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
@@ -275,6 +315,12 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                     responseId: event.response.id,
                     artifactIds,
                     model,
+                });
+                await updateSessionProjectMemory(session.id, {
+                    userText: message,
+                    assistantText: fullText,
+                    toolEvents: event.response?.metadata?.toolEvents || [],
+                    artifacts,
                 });
                 completeRuntimeTask(runtimeTask?.id, {
                     responseId: event.response.id,

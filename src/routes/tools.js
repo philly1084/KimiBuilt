@@ -11,8 +11,57 @@ const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { sessionStore } = require('../session-store');
+const { inferExecutionProfile } = require('../runtime-execution');
 
 const registry = getUnifiedRegistry();
+const DEFAULT_EXECUTION_PROFILE = 'default';
+const NOTES_EXECUTION_PROFILE = 'notes';
+const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
+const PROFILE_TOOL_ALLOWLISTS = {
+  [DEFAULT_EXECUTION_PROFILE]: new Set([
+    'web-search',
+    'web-fetch',
+    'web-scrape',
+    'image-generate',
+    'image-search-unsplash',
+    'image-from-url',
+    'file-read',
+    'file-write',
+    'file-search',
+    'file-mkdir',
+    'tool-doc-read',
+  ]),
+  [NOTES_EXECUTION_PROFILE]: new Set([
+    'web-search',
+    'web-fetch',
+    'web-scrape',
+    'image-generate',
+    'image-search-unsplash',
+    'image-from-url',
+    'file-read',
+    'file-write',
+    'file-search',
+    'file-mkdir',
+    'tool-doc-read',
+  ]),
+  [REMOTE_BUILD_EXECUTION_PROFILE]: new Set([
+    'ssh-execute',
+    'remote-command',
+    'docker-exec',
+    'web-search',
+    'web-fetch',
+    'web-scrape',
+    'image-generate',
+    'image-search-unsplash',
+    'image-from-url',
+    'file-read',
+    'file-write',
+    'file-search',
+    'file-mkdir',
+    'code-sandbox',
+    'tool-doc-read',
+  ]),
+};
 
 async function ensureToolManagerInitialized() {
   const toolManager = getToolManager();
@@ -123,6 +172,62 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
   };
 }
 
+function looksLikeNotesSurface(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return [
+    'notes',
+    'notes-app',
+    'notes_app',
+    'notes-editor',
+    'notes_editor',
+  ].includes(normalized);
+}
+
+function hasStickyRemoteSession(session = null) {
+  const metadata = session?.metadata || {};
+  return ['ssh-execute', 'remote-command'].includes(String(metadata.lastToolIntent || '').trim().toLowerCase())
+    || Boolean(metadata.lastSshTarget?.host);
+}
+
+async function resolveToolExecutionProfile(req, requestedSessionId = null) {
+  const normalizedSessionId = typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '';
+  const session = normalizedSessionId && !normalizedSessionId.startsWith('local_')
+    ? await sessionStore.get(normalizedSessionId)
+    : null;
+  const taskType = looksLikeNotesSurface(
+    req.query?.taskType
+    || req.query?.task_type
+    || req.query?.clientSurface
+    || req.query?.client_surface
+    || req.body?.taskType
+    || req.body?.task_type
+    || req.body?.clientSurface
+    || req.body?.client_surface
+    || session?.mode
+    || session?.metadata?.taskType
+    || session?.metadata?.clientSurface
+  ) ? NOTES_EXECUTION_PROFILE : DEFAULT_EXECUTION_PROFILE;
+
+  let executionProfile = inferExecutionProfile({
+    executionProfile: req.query?.executionProfile
+      || req.query?.execution_profile
+      || req.body?.executionProfile
+      || req.body?.execution_profile
+      || null,
+    taskType,
+    session,
+  });
+
+  if (executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE && hasStickyRemoteSession(session)) {
+    executionProfile = REMOTE_BUILD_EXECUTION_PROFILE;
+  }
+
+  return {
+    session,
+    executionProfile,
+  };
+}
+
 async function resolveToolSessionId(requestedSessionId = null) {
   const normalized = typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '';
 
@@ -161,9 +266,11 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
 router.get('/available', async (req, res) => {
   try {
     const toolManager = await ensureToolManagerInitialized();
-    const { category } = req.query;
+    const { category, sessionId } = req.query;
+    const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
+    const allowlist = PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE];
     
-    let tools = registry.getFrontendTools();
+    let tools = registry.getFrontendTools().filter((tool) => allowlist.has(tool.id));
     
     if (category && category !== 'all') {
       tools = tools.filter(t => t.category === category);
@@ -181,6 +288,7 @@ router.get('/available', async (req, res) => {
       meta: {
         total: enrichedTools.length,
         categories: [...new Set(enrichedTools.map(t => t.category))],
+        executionProfile,
         runtime: buildRuntimeSummary(toolManager),
       }
     });

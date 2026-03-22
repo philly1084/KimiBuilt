@@ -6,6 +6,10 @@ const {
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
 } = require('./ai-route-utils');
+const {
+    buildProjectMemoryUpdate,
+    mergeProjectMemory,
+} = require('./project-memory');
 
 const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
@@ -915,8 +919,25 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);
-        if (sshMetadata && this.sessionStore?.update) {
-            await this.sessionStore.update(sessionId, { metadata: sshMetadata });
+        if (this.sessionStore?.update) {
+            const currentSession = this.sessionStore?.get
+                ? await this.sessionStore.get(sessionId)
+                : null;
+            const projectMemory = mergeProjectMemory(
+                currentSession?.metadata?.projectMemory || {},
+                buildProjectMemoryUpdate({
+                    userText,
+                    assistantText,
+                    toolEvents,
+                }),
+            );
+
+            await this.sessionStore.update(sessionId, {
+                metadata: {
+                    ...(sshMetadata || {}),
+                    projectMemory,
+                },
+            });
         }
     }
 

@@ -17,6 +17,7 @@ const {
 } = require('../ai-route-utils');
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 
 const router = Router();
 
@@ -205,6 +206,28 @@ function isChatCapableModel(modelId = '') {
     return looksLikeChatModel && !imageOnly && !audioOnly;
 }
 
+async function updateSessionProjectMemory(sessionId, updates = {}) {
+    if (!sessionId) {
+        return null;
+    }
+
+    const session = await sessionStore.get(sessionId);
+    if (!session) {
+        return null;
+    }
+
+    const projectMemory = mergeProjectMemory(
+        session?.metadata?.projectMemory || {},
+        buildProjectMemoryUpdate(updates),
+    );
+
+    return sessionStore.update(sessionId, {
+        metadata: {
+            projectMemory,
+        },
+    });
+}
+
 router.get('/models', async (_req, res, next) => {
     try {
         const models = await listModels();
@@ -332,6 +355,11 @@ router.post('/chat/completions', async (req, res, next) => {
                 { role: 'user', content: lastUserText },
                 { role: 'assistant', content: generation.assistantMessage },
             ]);
+            await updateSessionProjectMemory(sessionId, {
+                userText: lastUserText,
+                assistantText: generation.assistantMessage,
+                artifacts: generation.artifacts,
+            });
 
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
@@ -430,6 +458,24 @@ router.post('/chat/completions', async (req, res, next) => {
                     { role: 'user', content: lastUserText },
                     { role: 'assistant', content: assistantMessage },
                 ]);
+                await updateSessionProjectMemory(sessionId, {
+                    userText: lastUserText,
+                    assistantText: assistantMessage,
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'ssh-execute',
+                            },
+                        },
+                        result: {
+                            success: sshResult?.success !== false,
+                            toolId: 'ssh-execute',
+                            data: sshResult?.data,
+                            error: sshResult?.error || null,
+                        },
+                        reason: 'Direct SSH execution',
+                    }],
+                });
                 completeRuntimeTask(runtimeTask?.id, {
                     responseId: `tool-ssh-${Date.now()}`,
                     output: assistantMessage,
@@ -525,6 +571,12 @@ router.post('/chat/completions', async (req, res, next) => {
                         artifactIds: artifact_ids,
                         model,
                     });
+                    await updateSessionProjectMemory(sessionId, {
+                        userText: lastUserText,
+                        assistantText: fullText,
+                        toolEvents: event.response?.metadata?.toolEvents || [],
+                        artifacts,
+                    });
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,
                         output: fullText,
@@ -575,6 +627,24 @@ router.post('/chat/completions', async (req, res, next) => {
                 { role: 'user', content: lastUserText },
                 { role: 'assistant', content: assistantMessage },
             ]);
+            await updateSessionProjectMemory(sessionId, {
+                userText: lastUserText,
+                assistantText: assistantMessage,
+                toolEvents: [{
+                    toolCall: {
+                        function: {
+                            name: 'ssh-execute',
+                        },
+                    },
+                    result: {
+                        success: sshResult?.success !== false,
+                        toolId: 'ssh-execute',
+                        data: sshResult?.data,
+                        error: sshResult?.error || null,
+                    },
+                    reason: 'Direct SSH execution',
+                }],
+            });
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: `tool-ssh-${Date.now()}`,
                 output: assistantMessage,
@@ -654,6 +724,12 @@ router.post('/chat/completions', async (req, res, next) => {
             responseId: response.id,
             artifactIds: artifact_ids,
             model,
+        });
+        await updateSessionProjectMemory(sessionId, {
+            userText: lastUserText,
+            assistantText: outputText,
+            toolEvents: response?.metadata?.toolEvents || [],
+            artifacts,
         });
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
@@ -788,6 +864,11 @@ router.post('/responses', async (req, res, next) => {
                 { role: 'user', content: userInput },
                 { role: 'assistant', content: generation.assistantMessage },
             ]);
+            await updateSessionProjectMemory(sessionId, {
+                userText: userInput,
+                assistantText: generation.assistantMessage,
+                artifacts: generation.artifacts,
+            });
 
             const syntheticResponse = {
                 id: generation.responseId,
@@ -886,6 +967,24 @@ router.post('/responses', async (req, res, next) => {
                     { role: 'user', content: userInput },
                     { role: 'assistant', content: assistantMessage },
                 ]);
+                await updateSessionProjectMemory(sessionId, {
+                    userText: userInput,
+                    assistantText: assistantMessage,
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'ssh-execute',
+                            },
+                        },
+                        result: {
+                            success: sshResult?.success !== false,
+                            toolId: 'ssh-execute',
+                            data: sshResult?.data,
+                            error: sshResult?.error || null,
+                        },
+                        reason: 'Direct SSH execution',
+                    }],
+                });
 
                 const syntheticResponse = {
                     id: `tool-ssh-${Date.now()}`,
@@ -971,6 +1070,12 @@ router.post('/responses', async (req, res, next) => {
                         artifactIds: artifact_ids,
                         model,
                     });
+                    await updateSessionProjectMemory(sessionId, {
+                        userText: userInput,
+                        assistantText: fullText,
+                        toolEvents: event.response?.metadata?.toolEvents || [],
+                        artifacts,
+                    });
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,
                         output: fullText,
@@ -1012,6 +1117,24 @@ router.post('/responses', async (req, res, next) => {
                 { role: 'user', content: userInput },
                 { role: 'assistant', content: assistantMessage },
             ]);
+            await updateSessionProjectMemory(sessionId, {
+                userText: userInput,
+                assistantText: assistantMessage,
+                toolEvents: [{
+                    toolCall: {
+                        function: {
+                            name: 'ssh-execute',
+                        },
+                    },
+                    result: {
+                        success: sshResult?.success !== false,
+                        toolId: 'ssh-execute',
+                        data: sshResult?.data,
+                        error: sshResult?.error || null,
+                    },
+                    reason: 'Direct SSH execution',
+                }],
+            });
             const syntheticResponse = {
                 id: `tool-ssh-${Date.now()}`,
                 object: 'response',
@@ -1087,6 +1210,12 @@ router.post('/responses', async (req, res, next) => {
             artifactIds: artifact_ids,
             model,
         });
+        await updateSessionProjectMemory(sessionId, {
+            userText: userInput,
+            assistantText: outputText,
+            toolEvents: response?.metadata?.toolEvents || [],
+            artifacts,
+        });
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,
@@ -1151,6 +1280,25 @@ router.post('/images/generations', async (req, res, next) => {
         });
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
+        await updateSessionProjectMemory(sessionId, {
+            userText: prompt,
+            assistantText: `Generated ${Array.isArray(response?.data) ? response.data.length : n} image result(s).`,
+            artifacts: [],
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'image-generate',
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'image-generate',
+                    data: response,
+                    error: null,
+                },
+                reason: 'Image generation request',
+            }],
+        });
         setSessionHeaders(res, sessionId);
 
         res.json({

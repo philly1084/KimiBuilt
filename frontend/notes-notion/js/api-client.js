@@ -649,6 +649,9 @@ class NotesAPIClient {
                 'vision-preview',
                 'preview-tools',
                 '-tools',
+                'codex',
+                'computer-use',
+                'computer_use',
             ].some((token) => id.includes(token));
 
             return looksLikeChatModel && !looksUnsupportedForNotes;
