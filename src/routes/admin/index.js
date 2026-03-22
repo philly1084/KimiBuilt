@@ -29,6 +29,7 @@ router.get('/activity', (req, res) => getDashboardController(req).getRecentActiv
 // Prompts Management
 router.get('/prompts', callController(promptsController, 'getAll'));
 router.get('/prompts/:id', callController(promptsController, 'getById'));
+router.get('/prompts/:id/history', callController(promptsController, 'getHistory'));
 router.post('/prompts', callController(promptsController, 'create'));
 router.put('/prompts/:id', callController(promptsController, 'update'));
 router.delete('/prompts/:id', callController(promptsController, 'remove'));

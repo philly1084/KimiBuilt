@@ -436,7 +436,8 @@ class Dashboard {
      */
     async loadStats() {
         try {
-            const response = await apiClient.get('/api/admin/stats');
+            const range = document.getElementById('chartTimeRange')?.value || '24h';
+            const response = await apiClient.get('/api/admin/stats', { range });
             const payload = this.unwrapApiPayload(response, {});
             const stats = this.normalizeOverviewStats(payload);
             
@@ -447,6 +448,7 @@ class Dashboard {
             document.getElementById('successRate').textContent = `${stats.successRate}%`;
             document.getElementById('activeSessions').textContent = stats.activeSessions;
             document.getElementById('skillsLearned').textContent = stats.skillsLearned;
+            this.renderRequestChart(stats.requestChart);
             
         } catch (error) {
             console.error('Error loading stats:', error);
@@ -621,10 +623,10 @@ class Dashboard {
         this.charts.requestVolume = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: this.generateTimeLabels(24),
+                labels: [],
                 datasets: [{
                     label: 'Requests',
-                    data: this.generateRandomData(24, 50, 200),
+                    data: [],
                     borderColor: '#58a6ff',
                     backgroundColor: 'rgba(88, 166, 255, 0.1)',
                     fill: true,
@@ -1065,12 +1067,29 @@ class Dashboard {
     selectPrompt(prompt) {
         this.state.selectedPrompt = prompt;
         
-        document.getElementById('promptName').value = prompt.name;
-        document.getElementById('promptEditor').value = prompt.content || '';
+        const promptNameInput = document.getElementById('promptName');
+        const promptEditor = document.getElementById('promptEditor');
+        const savePromptBtn = document.getElementById('savePromptBtn');
+        const newPromptBtn = document.getElementById('newPromptBtn');
+
+        promptNameInput.value = prompt.name;
+        promptEditor.value = prompt.content || '';
         this.updatePromptEditor(prompt.content || '');
         const version = document.querySelector('.prompt-version');
         if (version) {
-            version.textContent = prompt.assignment || 'live slot';
+            version.textContent = prompt.assignment || 'live surface';
+        }
+
+        const readOnly = prompt.editable === false;
+        promptNameInput.readOnly = readOnly;
+        promptEditor.readOnly = readOnly;
+        if (savePromptBtn) {
+            savePromptBtn.disabled = readOnly;
+            savePromptBtn.title = readOnly ? 'Live prompt surfaces are read-only snapshots from application code.' : '';
+        }
+        if (newPromptBtn) {
+            newPromptBtn.disabled = true;
+            newPromptBtn.title = 'The dashboard now shows live prompt surfaces instead of editable prompt slots.';
         }
         
         // Update active state in list
@@ -1143,27 +1162,6 @@ class Dashboard {
         }
     }
 
-    openHistoryModal() {
-        const modal = document.getElementById('historyModal');
-        const container = document.getElementById('historyList');
-        if (!modal || !container) return;
-
-        const prompt = this.state.selectedPrompt;
-        container.innerHTML = prompt ? `
-            <div class="history-item">
-                <span class="history-version">Current</span>
-                <span class="history-date">${this.formatDate(prompt.updatedAt)}</span>
-                <span class="history-author">${this.escapeHtml(prompt.assignment || 'Live runtime slot')}</span>
-            </div>
-            <div class="history-item">
-                <span class="history-version">History unavailable</span>
-                <span class="history-date">Backend route not implemented</span>
-                <span class="history-author">This dashboard is showing live prompt data only.</span>
-            </div>
-        ` : '<div class="history-item"><span class="history-version">No prompt selected</span></div>';
-        modal.classList.add('active');
-    }
-
     async saveDefaultConfig() {
         try {
             const settings = {
@@ -1220,29 +1218,40 @@ class Dashboard {
         }
     }
     
-    openHistoryModal() {
+    async openHistoryModal() {
         const modal = document.getElementById('historyModal');
-        if (modal) {
-            // Load mock history
-            const history = [
-                { version: 'v1.3', date: new Date(Date.now() - 3600000), author: 'Admin' },
-                { version: 'v1.2', date: new Date(Date.now() - 86400000), author: 'Admin' },
-                { version: 'v1.1', date: new Date(Date.now() - 172800000), author: 'System' },
-                { version: 'v1.0', date: new Date(Date.now() - 259200000), author: 'Admin' }
-            ];
-            
-            const container = document.getElementById('historyList');
-            if (container) {
-                container.innerHTML = history.map(h => `
-                    <div class="history-item" onclick="dashboard.restoreVersion('${h.version}')">
-                        <span class="history-version">${h.version}</span>
-                        <span class="history-date">${this.formatDate(h.date)}</span>
-                        <span class="history-author">${h.author}</span>
-                    </div>
-                `).join('');
-            }
-            
+        const container = document.getElementById('historyList');
+        if (!modal || !container) {
+            return;
+        }
+
+        const prompt = this.state.selectedPrompt;
+        if (!prompt?.id) {
+            container.innerHTML = '<div class="history-item"><span class="history-version">No prompt selected</span></div>';
             modal.classList.add('active');
+            return;
+        }
+
+        container.innerHTML = '<div class="history-item"><span class="history-version">Loading history...</span></div>';
+        modal.classList.add('active');
+
+        try {
+            const response = await apiClient.getPromptHistory(prompt.id);
+            const history = this.unwrapApiPayload(response, []);
+
+            container.innerHTML = history.length > 0
+                ? history.map((entry) => `
+                    <div class="history-item">
+                        <span class="history-version">${this.escapeHtml(entry.version || entry.type || 'entry')}</span>
+                        <span class="history-date">${this.formatDate(entry.timestamp || entry.date)}</span>
+                        <span class="history-author">${this.escapeHtml(entry.author || entry.details || 'runtime')}</span>
+                    </div>
+                    ${entry.preview ? `<div class="history-item"><span class="history-author">${this.escapeHtml(entry.preview)}</span></div>` : ''}
+                `).join('')
+                : '<div class="history-item"><span class="history-version">No history recorded yet</span></div>';
+        } catch (error) {
+            console.error('Error loading prompt history:', error);
+            container.innerHTML = `<div class="history-item"><span class="history-version">Failed to load history</span><span class="history-author">${this.escapeHtml(error.message || 'Unknown error')}</span></div>`;
         }
     }
     
@@ -1633,12 +1642,32 @@ class Dashboard {
 
     normalizeOverviewStats(payload = {}) {
         const overview = payload.overview || {};
+        const tokens = payload.tokens || {};
+        const requestChart = payload.requests?.chart || {};
         return {
             totalTasks: Number(overview.totalTasks || payload.totalTasks || 0),
             successRate: Number(overview.successRate || payload.successRate || 0),
             activeSessions: Number(overview.activeSessions || payload.activeSessions || 0),
             skillsLearned: Number(overview.totalSkills || payload.skillsLearned || 0),
+            tokensTotal: Number(tokens.total || 0),
+            tokensPrompt: Number(tokens.prompt || 0),
+            tokensCompletion: Number(tokens.completion || 0),
+            requestChart: {
+                range: requestChart.range || '24h',
+                labels: Array.isArray(requestChart.labels) ? requestChart.labels : [],
+                values: Array.isArray(requestChart.values) ? requestChart.values : [],
+            },
         };
+    }
+
+    renderRequestChart(chart = {}) {
+        if (!this.charts.requestVolume) {
+            return;
+        }
+
+        this.charts.requestVolume.data.labels = Array.isArray(chart.labels) ? chart.labels : [];
+        this.charts.requestVolume.data.datasets[0].data = Array.isArray(chart.values) ? chart.values : [];
+        this.charts.requestVolume.update();
     }
 
     normalizeModel(model = {}) {
@@ -2039,14 +2068,7 @@ class Dashboard {
     }
     
     updateChartTimeRange(range) {
-        // Update chart data based on time range
-        const hours = range === '1h' ? 1 : range === '24h' ? 24 : range === '7d' ? 168 : 720;
-        
-        if (this.charts.requestVolume) {
-            this.charts.requestVolume.data.labels = this.generateTimeLabels(hours);
-            this.charts.requestVolume.data.datasets[0].data = this.generateRandomData(hours, 50, 200);
-            this.charts.requestVolume.update();
-        }
+        this.loadStats();
     }
     
     handleGlobalSearch(query) {
@@ -2225,6 +2247,8 @@ class Dashboard {
                 name: model.modelName || model.name || model.modelId || 'Unknown',
                 requests: Number(model.requests || 0),
                 avgLatency: Number(model.avgResponseTime || 0),
+                inputTokens: Number(model.tokens?.input || 0),
+                outputTokens: Number(model.tokens?.output || 0),
             }));
             const totalRequests = usage.reduce((sum, model) => sum + model.requests, 0);
             const items = usage.length > 0
@@ -2238,7 +2262,7 @@ class Dashboard {
                 <div class="model-usage-item">
                     <div class="model-info">
                         <span class="model-name">${this.escapeHtml(model.name)}</span>
-                        <span class="model-requests">${model.requests.toLocaleString()} requests${model.avgLatency ? ` | ${model.avgLatency}ms avg` : ''}</span>
+                        <span class="model-requests">${model.requests.toLocaleString()} requests${model.avgLatency ? ` | ${model.avgLatency}ms avg` : ''}${(model.inputTokens || model.outputTokens) ? ` | ${(model.inputTokens + model.outputTokens).toLocaleString()} tokens` : ''}</span>
                     </div>
                     <div class="model-bar">
                         <div class="model-fill" style="width: ${Math.max(0, Math.min(model.percent, 100))}%"></div>

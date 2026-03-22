@@ -17,11 +17,39 @@ class DashboardController {
     this.maxActivityItems = 100;
   }
 
+  estimateTokens(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+      return 0;
+    }
+
+    return Math.max(1, Math.ceil(normalized.length / 4));
+  }
+
+  inferTokenUsage(input = '', output = '', explicitUsage = 0, usageMetadata = {}) {
+    const promptTokens = Number(usageMetadata.promptTokens || usageMetadata.inputTokens || 0)
+      || this.estimateTokens(input);
+    const completionTokens = Number(usageMetadata.completionTokens || usageMetadata.outputTokens || explicitUsage || 0)
+      || this.estimateTokens(output);
+    const totalTokens = Number(usageMetadata.totalTokens || usageMetadata.tokensUsed || 0)
+      || (promptTokens + completionTokens);
+
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      inferred: !Number(usageMetadata.totalTokens || usageMetadata.tokensUsed || explicitUsage || 0),
+    };
+  }
+
   /**
    * Get dashboard statistics
    */
   async getStats(req, res) {
     try {
+      const range = String(req.query.range || '24h').toLowerCase();
+      const requestChart = this.buildRequestChart(range);
+      const tokenSummary = this.buildTokenSummary();
       const stats = {
         overview: {
           totalTasks: this.taskStore.size,
@@ -37,8 +65,10 @@ class DashboardController {
           today: this.getRequestCount('day'),
           thisWeek: this.getRequestCount('week'),
           thisMonth: this.getRequestCount('month'),
-          total: this.taskStore.size
+          total: this.taskStore.size,
+          chart: requestChart,
         },
+        tokens: tokenSummary,
         models: await this.getModelUsageStats(),
         timestamp: new Date().toISOString()
       };
@@ -403,6 +433,8 @@ class DashboardController {
       return null;
     }
 
+    const tokenUsage = this.inferTokenUsage(task.input, output, tokensUsed, metadata?.usage || metadata?.tokenUsage || {});
+
     task.status = 'completed';
     task.model = model || task.model;
     task.completedAt = new Date().toISOString();
@@ -410,7 +442,8 @@ class DashboardController {
     task.result = {
       output,
       duration,
-      tokensUsed,
+      tokensUsed: tokenUsage.totalTokens,
+      tokenUsage,
       responseId,
       metadata,
     };
@@ -420,7 +453,10 @@ class DashboardController {
       model: task.model,
       prompt: task.input,
       response: String(output || '').slice(0, 2000),
-      tokens: Number(tokensUsed || 0),
+      tokens: tokenUsage.totalTokens,
+      promptTokens: tokenUsage.promptTokens,
+      completionTokens: tokenUsage.completionTokens,
+      tokenUsageInferred: tokenUsage.inferred,
       latency: Number(duration || 0),
       status: 'success',
       message: `${task.mode} request completed`,
@@ -470,9 +506,9 @@ class DashboardController {
         },
       ],
       metrics: {
-        totalTokens: Number(tokensUsed || 0),
-        promptTokens: 0,
-        completionTokens: Number(tokensUsed || 0),
+        totalTokens: tokenUsage.totalTokens,
+        promptTokens: tokenUsage.promptTokens,
+        completionTokens: tokenUsage.completionTokens,
         toolCalls: 0,
         retries: 0,
       },
@@ -485,6 +521,7 @@ class DashboardController {
       sessionId: task.sessionId,
       model: task.model,
       duration: Number(duration || 0),
+      tokens: tokenUsage.totalTokens,
       responseId,
     });
 
@@ -496,6 +533,8 @@ class DashboardController {
     if (!task) {
       return null;
     }
+
+    const tokenUsage = this.inferTokenUsage(task.input, '', 0, metadata?.usage || metadata?.tokenUsage || {});
 
     task.status = 'failed';
     task.model = model || task.model;
@@ -512,7 +551,10 @@ class DashboardController {
       model: task.model,
       prompt: task.input,
       response: '',
-      tokens: 0,
+      tokens: tokenUsage.totalTokens,
+      promptTokens: tokenUsage.promptTokens,
+      completionTokens: tokenUsage.completionTokens,
+      tokenUsageInferred: tokenUsage.inferred,
       latency: Number(duration || 0),
       status: 'error',
       message: task.error,
@@ -561,9 +603,9 @@ class DashboardController {
         },
       ],
       metrics: {
-        totalTokens: 0,
-        promptTokens: 0,
-        completionTokens: 0,
+        totalTokens: tokenUsage.totalTokens,
+        promptTokens: tokenUsage.promptTokens,
+        completionTokens: tokenUsage.completionTokens,
         toolCalls: 0,
         retries: 0,
       },
@@ -690,6 +732,62 @@ class DashboardController {
       return 'connected';
     }
     return 'not_configured';
+  }
+
+  buildRequestChart(range = '24h') {
+    const tasks = Array.from(this.taskStore.values());
+    const now = Date.now();
+    const presets = {
+      '1h': { bucketMs: 5 * 60 * 1000, buckets: 12, label: '5m' },
+      '24h': { bucketMs: 60 * 60 * 1000, buckets: 24, label: '1h' },
+      '7d': { bucketMs: 24 * 60 * 60 * 1000, buckets: 7, label: '1d' },
+      '30d': { bucketMs: 24 * 60 * 60 * 1000, buckets: 30, label: '1d' },
+    };
+    const config = presets[range] || presets['24h'];
+    const start = now - (config.bucketMs * config.buckets);
+
+    const points = Array.from({ length: config.buckets }, (_, index) => {
+      const bucketStart = start + (index * config.bucketMs);
+      const bucketEnd = bucketStart + config.bucketMs;
+      const count = tasks.filter((task) => {
+        const createdAt = new Date(task.createdAt || 0).getTime();
+        return createdAt >= bucketStart && createdAt < bucketEnd;
+      }).length;
+
+      return {
+        label: config.bucketMs >= 24 * 60 * 60 * 1000
+          ? new Date(bucketStart).toLocaleDateString([], { month: 'short', day: 'numeric' })
+          : new Date(bucketStart).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        value: count,
+      };
+    });
+
+    return {
+      range,
+      bucket: config.label,
+      labels: points.map((point) => point.label),
+      values: points.map((point) => point.value),
+      maxValue: Math.max(...points.map((point) => point.value), 0),
+    };
+  }
+
+  buildTokenSummary() {
+    const completedTasks = Array.from(this.taskStore.values())
+      .filter((task) => task.status === 'completed');
+
+    return completedTasks.reduce((summary, task) => {
+      const usage = task.result?.tokenUsage || this.inferTokenUsage(task.input, task.result?.output || '', task.result?.tokensUsed || 0);
+      summary.total += usage.totalTokens;
+      summary.prompt += usage.promptTokens;
+      summary.completion += usage.completionTokens;
+      summary.inferredRequests += usage.inferred ? 1 : 0;
+      return summary;
+    }, {
+      total: 0,
+      prompt: 0,
+      completion: 0,
+      inferredRequests: 0,
+    });
   }
 }
 
