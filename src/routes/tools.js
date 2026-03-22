@@ -272,9 +272,8 @@ router.get('/available', async (req, res) => {
     const { category, sessionId } = req.query;
     const includeAllTools = ['1', 'true', 'yes'].includes(String(req.query?.includeAll || '').trim().toLowerCase());
     const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
-    const allowlist = PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE];
     
-    let tools = registry.getFrontendTools().filter((tool) => includeAllTools || allowlist.has(tool.id));
+    let tools = registry.getFrontendTools();
     
     if (category && category !== 'all') {
       tools = tools.filter(t => t.category === category);

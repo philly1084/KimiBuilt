@@ -1469,11 +1469,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 .map((model) => model?.id || model)
                 .filter((modelId) => isToolCompatibleNotesModelId(modelId));
 
+            fallbackModels.forEach(pushUnique);
+            compatibleAvailableModels.forEach(pushUnique);
             if (isToolCompatibleNotesModelId(preferredModel)) {
                 pushUnique(preferredModel);
             }
-            compatibleAvailableModels.forEach(pushUnique);
-            fallbackModels.forEach(pushUnique);
             if (ordered.length === 0) {
                 pushUnique(preferredModel);
             }

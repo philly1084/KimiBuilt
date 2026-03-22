@@ -173,9 +173,6 @@ function resolveConversationTaskType(payload = {}, session = null) {
         payload?.task_type,
         payload?.clientSurface,
         payload?.client_surface,
-        session?.mode,
-        session?.metadata?.taskType,
-        session?.metadata?.clientSurface,
     ];
 
     return candidates.some((value) => isNotesSurfaceValue(value)) ? 'notes' : 'chat';
