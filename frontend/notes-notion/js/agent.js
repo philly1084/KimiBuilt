@@ -1367,7 +1367,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function isInvalidGatewayResponseText(text) {
-        const normalized = String(text || '').trim().toLowerCase();
+        const normalized = String(text || '').trim().toLowerCase().replace(/[’]/g, '\'');
         if (!normalized) return false;
 
         return normalized.includes('support@backend.io') ||
@@ -1381,6 +1381,16 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             normalized.includes('current workspace in /app') ||
             normalized.includes('i do not have access to an ssh-execute tool') ||
             normalized.includes('i do not have a usable remote-build or ssh execution tool') ||
+            normalized.includes('i can\'t access the remote server from this environment') ||
+            normalized.includes('i cannot access the remote server from this environment') ||
+            normalized.includes('this session is restricted from network/ssh access') ||
+            normalized.includes('this session is restricted from network access') ||
+            normalized.includes('no ssh/network path to the remote server') ||
+            normalized.includes('no ssh path to the remote server') ||
+            normalized.includes('i can\'t run remote-build') ||
+            normalized.includes('i cannot run remote-build') ||
+            normalized.includes('i can\'t connect via ssh') ||
+            normalized.includes('i cannot connect via ssh') ||
             normalized.startsWith('<!doctype html') ||
             normalized.startsWith('<html');
     }

@@ -13,6 +13,8 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     : `${CURRENT_ORIGIN}/v1`;
 const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
+const WEB_CHAT_TASK_TYPE = 'chat';
+const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -657,6 +659,43 @@ class OpenAIAPIClient extends EventTarget {
         };
     }
 
+    filterChatModels(models = []) {
+        return models.filter((model) => {
+            const id = String(model.id || '').toLowerCase();
+            if (!id) return false;
+
+            const looksLikeChatModel = [
+                'gpt',
+                'claude',
+                'gemini',
+                'kimi',
+                'llama',
+                'mistral',
+                'qwen',
+                'phi',
+                'ollama',
+                'antigravity',
+            ].some((token) => id.includes(token));
+
+            const looksUnsupportedForWebChat = [
+                'image',
+                'embedding',
+                'tts',
+                'transcribe',
+                'audio',
+                'realtime',
+                'vision-preview',
+                'preview-tools',
+                '-tools',
+                'codex',
+                'computer-use',
+                'computer_use',
+            ].some((token) => id.includes(token));
+
+            return looksLikeChatModel && !looksUnsupportedForWebChat;
+        });
+    }
+
     async getImageModels() {
         const baseUrl = API_BASE_URL.replace('/v1', '');
 
@@ -862,6 +901,11 @@ class OpenAIAPIClient extends EventTarget {
         if (category) {
             params.set('category', category);
         }
+        params.set('taskType', WEB_CHAT_TASK_TYPE);
+        params.set('clientSurface', WEB_CHAT_CLIENT_SURFACE);
+        if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
+            params.set('sessionId', this.currentSessionId);
+        }
 
         const url = `${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`;
         const response = await fetch(url, {
@@ -902,6 +946,8 @@ class OpenAIAPIClient extends EventTarget {
                 tool: toolId,
                 params,
                 sessionId: this.currentSessionId,
+                taskType: WEB_CHAT_TASK_TYPE,
+                clientSurface: WEB_CHAT_CLIENT_SURFACE,
             }),
         });
 
