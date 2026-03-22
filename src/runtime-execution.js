@@ -131,7 +131,10 @@ function inferExecutionProfile(payload = {}) {
 
     const remoteBuildIntent = [
         /\bssh\b/,
+        /\bremote-build\b/,
+        /\bremote build\b/,
         /\b(remote host|remote server|remote machine)\b/,
+        /\b(reach|check|access|inspect)\b[\s\S]{0,30}\bremote build\b/,
         /\b(log ?in to|ssh into|ssh to|connect to)\b/,
         /\b(deploy|release|rollout|restart)\b[\s\S]{0,40}\b(server|host|container|cluster|pod|deployment)\b/,
         /\b(kubectl|kubernetes|k8s|docker compose|docker-compose|systemctl|journalctl|nginx|pm2)\b/,
