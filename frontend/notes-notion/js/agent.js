@@ -1391,6 +1391,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             normalized.includes('i cannot run remote-build') ||
             normalized.includes('i can\'t connect via ssh') ||
             normalized.includes('i cannot connect via ssh') ||
+            normalized.includes('i can\'t execute ssh from this session') ||
+            normalized.includes('i cannot execute ssh from this session') ||
+            normalized.includes('bwrap: no permissions to create a new namespace') ||
+            normalized.includes('basic local commands fail before any ssh attempt') ||
+            normalized.includes('workspace can execute anything locally') ||
+            normalized.includes('launch a remote check from /app') ||
+            normalized.includes('can\'t inspect config or launch a remote check from /app') ||
             normalized.startsWith('<!doctype html') ||
             normalized.startsWith('<html');
     }
@@ -1458,12 +1465,19 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         };
 
         if (toolSensitiveRequest) {
+            const compatibleAvailableModels = (getModels() || [])
+                .map((model) => model?.id || model)
+                .filter((modelId) => isToolCompatibleNotesModelId(modelId));
+
             if (isToolCompatibleNotesModelId(preferredModel)) {
                 pushUnique(preferredModel);
             }
+            compatibleAvailableModels.forEach(pushUnique);
             fallbackModels.forEach(pushUnique);
-            pushUnique(preferredModel);
-            return ordered;
+            if (ordered.length === 0) {
+                pushUnique(preferredModel);
+            }
+            return ordered.length > 0 ? ordered : fallbackModels;
         }
 
         pushUnique(preferredModel);
