@@ -1398,7 +1398,14 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             normalized.includes('i can\'t execute ssh from this session') ||
             normalized.includes('i cannot execute ssh from this session') ||
             normalized.includes('bwrap: no permissions to create a new namespace') ||
+            normalized.includes('bwrap: no permissions to create a new na') ||
+            normalized.includes('bwrap: no permissions') ||
             normalized.includes('basic local commands fail before any ssh attempt') ||
+            normalized.includes('testing command execution first') ||
+            normalized.includes('earlier retries were failing before any remote connection could start') ||
+            normalized.includes('local shell startup still breaks') ||
+            normalized.includes('fails before any remote connection starts') ||
+            normalized.includes('fails before any network connection starts') ||
             normalized.includes('workspace can execute anything locally') ||
             normalized.includes('launch a remote check from /app') ||
             normalized.includes('can\'t inspect config or launch a remote check from /app') ||
@@ -1442,11 +1449,69 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return isSupportedNotesModelId(id);
     }
 
+    function getAvailableNotesModelIds(options = {}) {
+        const {
+            toolCompatibleOnly = false
+        } = options;
+
+        return (getModels() || [])
+            .map((model) => model?.id || model)
+            .map((modelId) => String(modelId || '').trim())
+            .filter(Boolean)
+            .filter((modelId) => (toolCompatibleOnly ? isToolCompatibleNotesModelId(modelId) : isSupportedNotesModelId(modelId)));
+    }
+
+    function isToolExecutionFailure(error = null) {
+        const normalized = String(error?.message || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return [
+            /\bssh\b/,
+            /\bssh-execute\b/,
+            /\bremote-build\b/,
+            /\bremote command\b/,
+            /\btool invocation failed\b/,
+            /\btool execution failed\b/,
+            /\bfailed to load tools\b/,
+            /\bmissing-target\b/,
+            /\bcredential\b/,
+            /\bhost\b/,
+            /\bconnection refused\b/,
+            /\btimed out\b/,
+            /\bpermission denied\b/,
+            /\bkubectl\b/,
+            /\bk3s\b/,
+            /\bcluster\b/,
+        ].some((pattern) => pattern.test(normalized));
+    }
+
+    function shouldRetryWithAlternateModel(error = null) {
+        const status = Number(error?.status || 0);
+        const normalized = String(error?.message || '').trim().toLowerCase();
+
+        if (!normalized && !status) {
+            return false;
+        }
+
+        if (isToolExecutionFailure(error)) {
+            return false;
+        }
+
+        if (status === 404 && /\b(model|resource was not found|not found)\b/.test(normalized)) {
+            return true;
+        }
+
+        if (status === 502 && /invalid response returned by the ai gateway/.test(normalized)) {
+            return true;
+        }
+
+        return /server error|api request failed|streaming error|invalid response returned by the ai gateway|model .* failed|unsupported model/.test(normalized);
+    }
+
     function buildCandidateModelsForRequest(question = '', preferredModel = 'gpt-4o', requestOptions = {}) {
         const toolSensitiveRequest = isToolRuntimeSensitiveIntent(question, requestOptions);
-        const fallbackModels = toolSensitiveRequest
-            ? ['gpt-4o', 'gpt-4o-mini']
-            : ['gpt-4o'];
         const ordered = [];
         const pushUnique = (modelId) => {
             const normalized = String(modelId || '').trim();
@@ -1457,27 +1522,20 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         };
 
         if (toolSensitiveRequest) {
-            const availableModelIds = (getModels() || [])
-                .map((model) => model?.id || model)
-                .filter((modelId) => isToolCompatibleNotesModelId(modelId));
-            const availableModelSet = new Set(availableModelIds.map((modelId) => String(modelId || '').trim()));
+            const availableModelIds = getAvailableNotesModelIds({ toolCompatibleOnly: true });
 
             if (isToolCompatibleNotesModelId(preferredModel)) {
                 pushUnique(preferredModel);
             }
             availableModelIds.forEach(pushUnique);
-            fallbackModels
-                .filter((modelId) => availableModelSet.has(String(modelId || '').trim()))
-                .forEach(pushUnique);
             if (ordered.length === 0) {
                 pushUnique(preferredModel);
-                fallbackModels.forEach(pushUnique);
             }
             return ordered;
         }
 
         pushUnique(preferredModel);
-        fallbackModels.forEach(pushUnique);
+        getAvailableNotesModelIds().forEach(pushUnique);
         return ordered;
     }
 
@@ -2936,11 +2994,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     const hasMoreCandidates = candidateModels
                         .slice(modelIndex + 1)
                         .some((candidate) => isSupportedNotesModelId(candidate) && !attemptedModels.includes(candidate));
-                    const shouldRetryWithFallback = hasMoreCandidates &&
-                        ((error.status >= 500)
-                            || (error.status === 404 && /model|resource was not found|not found/i.test(String(error.message || '')))
-                            || error.status === 502
-                            || /server error|api request failed|streaming error|invalid response returned by the ai gateway/i.test(String(error.message || '')));
+                    const shouldRetryWithFallback = hasMoreCandidates && shouldRetryWithAlternateModel(error);
 
                     if (!shouldRetryWithFallback) {
                         throw error;

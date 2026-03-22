@@ -927,28 +927,6 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     return automaticTools.filter((entry) => selectedIds.has(entry.id));
 }
 
-function buildAutomaticToolChoice(selectedTools = [], api = 'responses') {
-    if (!selectedTools.length) {
-        return 'none';
-    }
-
-    if (selectedTools.length === 1) {
-        return api === 'chat'
-            ? {
-                type: 'function',
-                function: {
-                    name: selectedTools[0].id,
-                },
-            }
-            : {
-                type: 'function',
-                name: selectedTools[0].id,
-            };
-    }
-
-    return 'auto';
-}
-
 function inferRequiredAutomaticToolId(prompt = '') {
     if (promptHasExplicitSshIntent(prompt)) {
         return 'ssh-execute';
@@ -965,11 +943,81 @@ function inferRequiredAutomaticToolId(prompt = '') {
     return null;
 }
 
-function buildAutomaticToolGuidance(automaticTools = []) {
+function normalizeToolingModelFamily(model = '') {
+    const normalized = normalizeModelId(model).toLowerCase();
+    if (!normalized) {
+        return 'generic';
+    }
+
+    if (normalized.includes('kimi') || normalized.includes('moonshot')) {
+        return 'kimi';
+    }
+
+    if (normalized.includes('gpt') || normalized.includes('openai')) {
+        return 'openai';
+    }
+
+    return 'generic';
+}
+
+function prefersDeterministicToolChoice(model = '') {
+    return normalizeToolingModelFamily(model) === 'kimi';
+}
+
+function buildForcedToolChoice(toolId, api = 'responses') {
+    return api === 'chat'
+        ? {
+            type: 'function',
+            function: {
+                name: toolId,
+            },
+        }
+        : {
+            type: 'function',
+            name: toolId,
+        };
+}
+
+function buildAutomaticToolChoice(selectedTools = [], api = 'responses', options = {}) {
+    if (!selectedTools.length) {
+        return 'none';
+    }
+
+    const prompt = String(options.prompt || '');
+    const requiredToolId = inferRequiredAutomaticToolId(prompt);
+    if (requiredToolId && selectedTools.some((tool) => tool.id === requiredToolId)) {
+        return buildForcedToolChoice(requiredToolId, api);
+    }
+
+    if (selectedTools.length === 1) {
+        return buildForcedToolChoice(selectedTools[0].id, api);
+    }
+
+    if (prefersDeterministicToolChoice(options.model) && selectedTools.length === 2) {
+        const toolPreferenceOrder = [
+            'ssh-execute',
+            'web-search',
+            'web-scrape',
+            'web-fetch',
+            'image-from-url',
+            'image-search-unsplash',
+            'image-generate',
+        ];
+        const preferredTool = toolPreferenceOrder.find((toolId) => selectedTools.some((tool) => tool.id === toolId));
+        if (preferredTool) {
+            return buildForcedToolChoice(preferredTool, api);
+        }
+    }
+
+    return 'auto';
+}
+
+function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (!automaticTools.length) {
         return null;
     }
 
+    const deterministicTooling = prefersDeterministicToolChoice(options.model);
     const guidance = [
         'You can use the provided tools whenever they will improve accuracy or gather missing data.',
         'Treat the tool definitions attached to this request as the source of truth for tool availability.',
@@ -1048,6 +1096,11 @@ function buildAutomaticToolGuidance(automaticTools = []) {
 
     if (automaticTools.some((entry) => entry.id === 'tool-doc-read')) {
         guidance.push('- Use `tool-doc-read` when the user asks how a tool works, what parameters it takes, or what its setup/limitations are. Pass the target `toolId`.');
+    }
+
+    if (deterministicTooling) {
+        guidance.push('This model is running in a stricter tool contract. When one attached tool clearly matches the request, call it instead of describing what you would do.');
+        guidance.push('Do not answer with generic tool-availability disclaimers when the matching tool is attached.');
     }
 
     guidance.push('Prefer tools over guessing when the user asks for live web data, extraction, or verification.');
@@ -1425,7 +1478,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
 
     const workingMessages = [...messages];
     let finalResponse = null;
-    const toolGuidance = buildAutomaticToolGuidance(selectedTools);
+    const toolGuidance = buildAutomaticToolGuidance(selectedTools, { model });
     const toolEvents = [];
 
     if (toolGuidance) {
@@ -1480,7 +1533,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             input: nextInput,
             previous_response_id: previousResponseId,
             tools: remainingTools.map((entry) => entry.responseDefinition),
-            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses') : 'auto',
+            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses', { model, prompt }) : 'auto',
             parallel_tool_calls: false,
         });
 
@@ -1566,7 +1619,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     const prompt = getLastUserText(messages);
     const workingMessages = [...messages];
     let finalResponse = null;
-    const toolGuidance = buildAutomaticToolGuidance(selectedTools);
+    const toolGuidance = buildAutomaticToolGuidance(selectedTools, { model });
     const toolEvents = [];
 
     if (toolGuidance) {
@@ -1618,7 +1671,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             model,
             messages: workingMessages,
             tools: remainingTools.map((entry) => entry.chatDefinition),
-            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat') : 'auto',
+            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt }) : 'auto',
             stream: false,
         });
 

@@ -259,6 +259,73 @@ function hasAutonomyRevocation(text = '') {
     return /\b(ask me first|wait for me|hold on|stop here|pause here|don'?t continue|do not continue)\b/.test(normalized);
 }
 
+function normalizeModelFamily(model = '') {
+    const normalized = String(model || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'generic';
+    }
+
+    if (normalized.includes('kimi') || normalized.includes('moonshot')) {
+        return 'kimi';
+    }
+
+    if (normalized.includes('gpt') || normalized.includes('openai')) {
+        return 'openai';
+    }
+
+    return 'generic';
+}
+
+function prefersDeterministicToolPlanning(model = '') {
+    return normalizeModelFamily(model) === 'kimi';
+}
+
+function extractFirstUrl(text = '') {
+    const match = String(text || '').match(/https?:\/\/\S+/i);
+    return match ? match[0].replace(/[),.;!?]+$/g, '') : null;
+}
+
+function inferFallbackUnsplashQuery(text = '') {
+    return String(text || '')
+        .replace(/\b(please|can you|could you|would you|find|search|look up|browse|show|get|use|an|a|the|for|with|from|on|about|into|unsplash|image|images|photo|photos|hero|background|cover|visual|visuals)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+}
+
+function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION_PROFILE) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    if (/\b(health|status|healthy|uptime)\b/.test(normalized)) {
+        return 'hostname && uptime && (df -h / || true) && (free -m || true)';
+    }
+
+    if (/\b(k3s|k8s|kubernetes|cluster|kubectl|nodes?)\b/.test(normalized)) {
+        return 'kubectl get nodes -o wide && kubectl get pods -A';
+    }
+
+    if (/\b(pods?)\b/.test(normalized)) {
+        return 'kubectl get pods -A';
+    }
+
+    if (/\b(namespaces?)\b/.test(normalized)) {
+        return 'kubectl get namespaces';
+    }
+
+    if (/\b(docker|containers?)\b/.test(normalized)) {
+        return 'docker ps';
+    }
+
+    if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+        return 'hostname && uname -m && uptime';
+    }
+
+    return null;
+}
+
 function normalizeStepSignature(step = {}) {
     return JSON.stringify({
         tool: String(step?.tool || '').trim(),
@@ -570,6 +637,7 @@ class ConversationOrchestrator extends EventEmitter {
                         instructions,
                         contextMessages: resolvedContextMessages,
                         recentMessages: resolvedRecentMessages,
+                        session,
                         executionProfile: resolvedProfile,
                         toolPolicy,
                         model,
@@ -886,11 +954,123 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
+    buildFallbackPlan({ objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {}, model = null }) {
+        if (!toolPolicy?.candidateToolIds?.length) {
+            return [];
+        }
+
+        const prompt = String(objective || '').trim();
+        const firstUrl = extractFirstUrl(prompt);
+        const directAction = this.buildDirectAction({
+            objective,
+            session,
+            toolPolicy,
+        });
+
+        if (directAction) {
+            return [directAction];
+        }
+
+        if (toolPolicy.candidateToolIds.includes('web-search') && hasExplicitWebResearchIntentText(prompt)) {
+            const query = extractExplicitWebResearchQuery(prompt) || prompt;
+            return [{
+                tool: 'web-search',
+                reason: prefersDeterministicToolPlanning(model)
+                    ? 'Deterministic fallback for explicit research intent.'
+                    : 'Fallback for explicit research intent.',
+                params: {
+                    query,
+                    engine: 'perplexity',
+                    limit: 5,
+                    region: 'us-en',
+                    timeRange: 'all',
+                    includeSnippets: true,
+                    includeUrls: true,
+                },
+            }];
+        }
+
+        if (firstUrl && /\b(scrape|extract|selector|structured|parse)\b/i.test(prompt) && toolPolicy.candidateToolIds.includes('web-scrape')) {
+            return [{
+                tool: 'web-scrape',
+                reason: 'Deterministic fallback for explicit scrape intent.',
+                params: {
+                    url: firstUrl,
+                    browser: true,
+                },
+            }];
+        }
+
+        if (firstUrl && toolPolicy.candidateToolIds.includes('web-fetch')) {
+            return [{
+                tool: 'web-fetch',
+                reason: 'Deterministic fallback for explicit URL retrieval.',
+                params: {
+                    url: firstUrl,
+                },
+            }];
+        }
+
+        if (toolPolicy.candidateToolIds.includes('image-from-url') && firstUrl && /\.(png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i.test(firstUrl)) {
+            return [{
+                tool: 'image-from-url',
+                reason: 'Deterministic fallback for explicit image URL usage.',
+                params: {
+                    url: firstUrl,
+                },
+            }];
+        }
+
+        if (toolPolicy.candidateToolIds.includes('image-search-unsplash') && /\bunsplash\b/i.test(prompt)) {
+            const query = inferFallbackUnsplashQuery(prompt);
+            if (query) {
+                return [{
+                    tool: 'image-search-unsplash',
+                    reason: 'Deterministic fallback for explicit Unsplash request.',
+                    params: {
+                        query,
+                        perPage: 6,
+                    },
+                }];
+            }
+        }
+
+        if (toolPolicy.candidateToolIds.includes('ssh-execute')
+            && (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                || toolPolicy.hasReachableSshTarget
+                || /\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|deploy|deployment|docker)\b/i.test(prompt))) {
+            const sshContext = resolveSshRequestContext(objective, session);
+            const command = sshContext.directParams?.command || inferFallbackSshCommand(prompt, executionProfile);
+
+            if (command) {
+                return [{
+                    tool: 'ssh-execute',
+                    reason: prefersDeterministicToolPlanning(model)
+                        ? 'Deterministic fallback for explicit server or remote-build intent.'
+                        : 'Fallback for explicit server or remote-build intent.',
+                    params: sshContext.target?.host
+                        ? {
+                            host: sshContext.target.host,
+                            ...(sshContext.target.username ? { username: sshContext.target.username } : {}),
+                            ...(sshContext.target.port ? { port: sshContext.target.port } : {}),
+                            command,
+                        }
+                        : {
+                            command,
+                        },
+                }];
+            }
+        }
+
+        return [];
+    }
+
     async planToolUse({
         objective = '',
         instructions = '',
         contextMessages = [],
         recentMessages = [],
+        session = null,
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolPolicy = {},
         model = null,
@@ -902,13 +1082,23 @@ class ConversationOrchestrator extends EventEmitter {
             return [];
         }
 
+        const deterministicPlanner = prefersDeterministicToolPlanning(model);
         const toolCatalog = toolPolicy.candidateToolIds
             .map((toolId) => `- ${toolId}: ${toolPolicy.toolDescriptions?.[toolId] || toolId}`)
             .join('\n');
+        const planningPrompt = String(objective || '');
+        const plannerUrl = extractFirstUrl(planningPrompt);
         const prompt = [
             'You are planning tool usage for an application-owned agent runtime.',
             'Return JSON only.',
             'If tools are unnecessary, return {"steps":[]}.',
+            ...(deterministicPlanner
+                ? [
+                    'You are not the end-user assistant. Your only job is to emit machine-readable JSON.',
+                    'Never answer with prose, explanation, markdown fences, or apologies.',
+                    'If the user request clearly implies one of the candidate tools, emit a tool step instead of describing what you would do.',
+                ]
+                : []),
             `Execution profile: ${executionProfile}`,
             `Task type: ${taskType}`,
             'Candidate tools:',
@@ -938,6 +1128,15 @@ class ConversationOrchestrator extends EventEmitter {
             `Use at most ${MAX_PLAN_STEPS} steps.`,
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
+            ...(deterministicPlanner && hasExplicitWebResearchIntentText(planningPrompt) && toolPolicy.candidateToolIds.includes('web-search')
+                ? ['If the request is research and `web-search` is listed above, include `web-search` in the first step.']
+                : []),
+            ...(deterministicPlanner && plannerUrl && toolPolicy.candidateToolIds.includes('web-fetch')
+                ? ['If the request includes a URL and `web-fetch` is listed above, prefer a `web-fetch` step unless extraction clearly needs `web-scrape`.']
+                : []),
+            ...(deterministicPlanner && toolPolicy.candidateToolIds.includes('ssh-execute') && (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || /\b(ssh|server|cluster|k3s|k8s|kubernetes|kubectl|docker)\b/i.test(planningPrompt))
+                ? ['If the request is about SSH, server work, cluster work, or remote-build and `ssh-execute` is listed above, include an `ssh-execute` step instead of answering in prose.']
+                : []),
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious next remote-build steps.',
@@ -965,9 +1164,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         const plannerOutput = await this.completeText(prompt, { model });
         const parsed = safeJsonParse(plannerOutput);
-        const requestedSteps = Array.isArray(parsed?.steps) ? parsed.steps : [];
-
-        return requestedSteps
+        const requestedSteps = (Array.isArray(parsed?.steps) ? parsed.steps : [])
             .slice(0, MAX_PLAN_STEPS)
             .map((step) => ({
                 tool: typeof step?.tool === 'string' ? step.tool.trim() : '',
@@ -975,6 +1172,18 @@ class ConversationOrchestrator extends EventEmitter {
                 params: step?.params && typeof step.params === 'object' ? step.params : {},
             }))
             .filter((step) => step.tool && toolPolicy.candidateToolIds.includes(step.tool));
+
+        if (requestedSteps.length > 0) {
+            return requestedSteps;
+        }
+
+        return this.buildFallbackPlan({
+            objective,
+            session,
+            executionProfile,
+            toolPolicy,
+            model,
+        }).slice(0, MAX_PLAN_STEPS);
     }
 
     async executePlan({ plan = [], toolManager = null, sessionId = 'default', executionProfile = DEFAULT_EXECUTION_PROFILE, toolContext = {} }) {

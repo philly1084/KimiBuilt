@@ -368,6 +368,20 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('forces the required research tool even when multiple tools are attached', () => {
+        expect(__testUtils.buildAutomaticToolChoice(
+            [{ id: 'web-search' }, { id: 'web-fetch' }],
+            'responses',
+            {
+                model: 'kimi-k2',
+                prompt: 'Please research the latest managed Postgres options for startups.',
+            },
+        )).toEqual({
+            type: 'function',
+            name: 'web-search',
+        });
+    });
+
     test('exposes ssh-execute unconditionally when defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
@@ -448,6 +462,18 @@ describe('openai-client automatic tool orchestration helpers', () => {
 
         expect(guidance).toContain('run_shell_command');
         expect(guidance).toContain('actual SSH error');
+    });
+
+    test('adds stricter tool-contract guidance for kimi-family models', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'web-search' },
+            { id: 'ssh-execute' },
+        ], {
+            model: 'kimi-k2',
+        });
+
+        expect(guidance).toContain('stricter tool contract');
+        expect(guidance).toContain('call it instead of describing what you would do');
     });
 
     test('detects ssh as a required tool for explicit ssh prompts', () => {

@@ -451,6 +451,94 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('falls back to deterministic web-search planning for kimi when planner output is not valid json', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue('I should use web-search to research this topic.'),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'web-fetch'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Please research the best managed Postgres providers for startups.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'Please research the best managed Postgres providers for startups.',
+            executionProfile: 'default',
+            toolPolicy,
+            model: 'kimi-k2',
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'web-search',
+                params: expect.objectContaining({
+                    engine: 'perplexity',
+                    query: expect.stringContaining('managed Postgres providers for startups'),
+                }),
+            }),
+        ]);
+    });
+
+    test('falls back to deterministic ssh planning for kimi remote-build prompts', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue('I would inspect the cluster over SSH first.'),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['ssh-execute', 'remote-command', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Inspect the k3s cluster state on the server.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'Inspect the k3s cluster state on the server.',
+            executionProfile: 'remote-build',
+            toolPolicy,
+            model: 'kimi-k2',
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'ssh-execute',
+                params: expect.objectContaining({
+                    command: 'kubectl get nodes -o wide && kubectl get pods -A',
+                }),
+            }),
+        ]);
+    });
+
     test('includes Ubuntu and arm64 fallback guidance for remote-build SSH work', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
