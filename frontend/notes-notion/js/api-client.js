@@ -19,6 +19,8 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
 const BASE_URL_WITHOUT_API = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     ? 'http://localhost:3000'
     : CURRENT_ORIGIN;
+const NOTES_TASK_TYPE = 'notes';
+const NOTES_CLIENT_SURFACE = 'notes';
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -74,6 +76,16 @@ function isTerminalFinishReason(finishReason) {
     }
 
     return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
+}
+
+function buildNotesRuntimeContext(extra = {}) {
+    return {
+        task_type: NOTES_TASK_TYPE,
+        taskType: NOTES_TASK_TYPE,
+        client_surface: NOTES_CLIENT_SURFACE,
+        clientSurface: NOTES_CLIENT_SURFACE,
+        ...extra,
+    };
 }
 
 /**
@@ -143,11 +155,11 @@ class NotesAPIClient {
      * }
      */
     async *streamChat(messages, model = 'gpt-4o', signal = null, requestOptions = {}) {
-        const params = {
+        const params = buildNotesRuntimeContext({
             model,
             messages,
             stream: true,
-        };
+        });
 
         if (requestOptions.outputFormat) {
             params.output_format = requestOptions.outputFormat;
@@ -337,11 +349,11 @@ class NotesAPIClient {
      * console.log(response.content);
      */
     async chat(messages, model = 'gpt-4o', requestOptions = {}) {
-        const params = {
+        const params = buildNotesRuntimeContext({
             model,
             messages,
             stream: false,
-        };
+        });
 
         if (requestOptions.outputFormat) {
             params.output_format = requestOptions.outputFormat;
@@ -642,6 +654,11 @@ class NotesAPIClient {
         if (category) {
             params.set('category', category);
         }
+        params.set('taskType', NOTES_TASK_TYPE);
+        params.set('clientSurface', NOTES_CLIENT_SURFACE);
+        if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
+            params.set('sessionId', this.currentSessionId);
+        }
 
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tools/available${params.toString() ? `?${params.toString()}` : ''}`, {
             method: 'GET',
@@ -681,6 +698,8 @@ class NotesAPIClient {
                 tool: toolId,
                 params,
                 sessionId: this.currentSessionId,
+                taskType: NOTES_TASK_TYPE,
+                clientSurface: NOTES_CLIENT_SURFACE,
             }),
         });
 

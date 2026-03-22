@@ -346,6 +346,10 @@ GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
 - assistant_reply should be brief and user-friendly (not mention the JSON actions)
 - The editor will automatically apply your actions and show the assistant_reply to the user
+- Use \`\`\`notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.
+- If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.
+- For multi-step non-page work, continue the task with the best next concrete step and use verified prior tool results and session state before asking the user to repeat details.
+- If SSH access or a prior SSH target is already established in the session, do not ask for host/user details again unless a tool failure shows the target is missing or incorrect.
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
 - Do not invent block IDs - only use IDs that exist in the page

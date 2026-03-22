@@ -3,7 +3,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { generateImage, listModels } = require('../openai-client');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
-const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
+const { executeConversationRuntime, resolveConversationExecutorFlag, inferExecutionProfile } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
@@ -154,6 +154,31 @@ function setSessionHeaders(res, sessionId) {
     res.setHeader('X-Thread-Id', sessionId);
 }
 
+function isNotesSurfaceValue(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return [
+        'notes',
+        'notes-app',
+        'notes_app',
+        'notes-editor',
+        'notes_editor',
+    ].includes(normalized);
+}
+
+function resolveConversationTaskType(payload = {}, session = null) {
+    const candidates = [
+        payload?.taskType,
+        payload?.task_type,
+        payload?.clientSurface,
+        payload?.client_surface,
+        session?.mode,
+        session?.metadata?.taskType,
+        session?.metadata?.clientSurface,
+    ];
+
+    return candidates.some((value) => isNotesSurfaceValue(value)) ? 'notes' : 'chat';
+}
+
 function shouldInjectRecentMessages(inputMessages = []) {
     if (!Array.isArray(inputMessages)) {
         return true;
@@ -223,11 +248,12 @@ router.post('/chat/completions', async (req, res, next) => {
 
         let sessionId = resolveSessionId(req);
         let session;
+        const requestedTaskType = resolveConversationTaskType(req.body);
         if (!sessionId) {
-            session = await sessionStore.create({ mode: 'chat' });
+            session = await sessionStore.create({ mode: requestedTaskType });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: 'chat' });
+            session = await sessionStore.getOrCreate(sessionId, { mode: requestedTaskType });
         }
 
         if (!session) {
@@ -246,6 +272,18 @@ router.post('/chat/completions', async (req, res, next) => {
         const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
         const sshContext = resolveSshRequestContext(lastUserText, session);
         const effectiveInput = sshContext.effectivePrompt || lastUserText;
+        const taskType = resolveConversationTaskType(req.body, session);
+        const effectiveMessages = messages.map((message) => (
+            message.role === 'user' && message === lastUserMessage
+                ? { role: message.role, content: effectiveInput }
+                : { role: message.role, content: message.content }
+        ));
+        const effectiveExecutionProfile = inferExecutionProfile({
+            ...req.body,
+            taskType,
+            input: effectiveMessages,
+            memoryInput: lastUserText,
+        });
         const effectiveOutputFormat = output_format
             || inferOutputFormatFromText(lastUserText)
             || inferOutputFormatFromTranscript(messages, session);
@@ -271,7 +309,7 @@ router.post('/chat/completions', async (req, res, next) => {
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId,
                 session,
-                mode: 'chat',
+                mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: artifactPrompt,
                 artifactIds: effectiveArtifactIds,
@@ -283,6 +321,8 @@ router.post('/chat/completions', async (req, res, next) => {
                 metadata: {
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generation.artifact.id,
+                    taskType,
+                    clientSurface: taskType,
                 },
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage);
@@ -354,7 +394,7 @@ router.post('/chat/completions', async (req, res, next) => {
             buildContinuityInstructions(artifactInstructions),
             effectiveArtifactIds,
         );
-        const input = messages.map((message) => ({ role: message.role, content: message.content }));
+        const input = effectiveMessages;
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -435,10 +475,10 @@ router.post('/chat/completions', async (req, res, next) => {
                     route: '/v1/chat/completions',
                     transport: 'http',
                 },
-                executionProfile,
+                executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
-                taskType: 'chat',
+                taskType,
             });
             const response = execution.response;
 
@@ -474,7 +514,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
-                        mode: 'chat',
+                        mode: taskType,
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
                         prompt: artifactPrompt,
@@ -564,12 +604,6 @@ router.post('/chat/completions', async (req, res, next) => {
             });
             return;
         }
-        const effectiveMessages = messages.map((message) => (
-            message.role === 'user' && message === lastUserMessage
-                ? { role: message.role, content: effectiveInput }
-                : { role: message.role, content: message.content }
-        ));
-
         const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessages,
             sessionId,
@@ -586,10 +620,10 @@ router.post('/chat/completions', async (req, res, next) => {
                 route: '/v1/chat/completions',
                 transport: 'http',
             },
-            executionProfile,
+            executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
-            taskType: 'chat',
+            taskType,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -610,7 +644,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
-            mode: 'chat',
+            mode: taskType,
             outputFormat: effectiveOutputFormat,
             content: outputText,
             prompt: artifactPrompt,
@@ -675,11 +709,12 @@ router.post('/responses', async (req, res, next) => {
 
         let sessionId = resolveSessionId(req);
         let session;
+        const requestedTaskType = resolveConversationTaskType(req.body);
         if (!sessionId) {
-            session = await sessionStore.create({ mode: 'chat' });
+            session = await sessionStore.create({ mode: requestedTaskType });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: 'chat' });
+            session = await sessionStore.getOrCreate(sessionId, { mode: requestedTaskType });
         }
 
         if (!session) {
@@ -704,6 +739,7 @@ router.post('/responses', async (req, res, next) => {
             : normalizeMessageText(input.filter((item) => item.role === 'user').pop()?.content || '');
         const sshContext = resolveSshRequestContext(userInput, session);
         const effectiveUserInput = sshContext.effectivePrompt || userInput;
+        const taskType = resolveConversationTaskType(req.body, session);
         const effectiveOutputFormat = output_format
             || inferOutputFormatFromText(userInput)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
@@ -729,7 +765,7 @@ router.post('/responses', async (req, res, next) => {
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId,
                 session,
-                mode: 'chat',
+                mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: artifactPrompt,
                 artifactIds: effectiveArtifactIds,
@@ -741,6 +777,8 @@ router.post('/responses', async (req, res, next) => {
                 metadata: {
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generation.artifact.id,
+                    taskType,
+                    clientSurface: taskType,
                 },
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage);
@@ -806,6 +844,12 @@ router.post('/responses', async (req, res, next) => {
                     ? { ...message, content: effectiveUserInput }
                     : message;
             });
+        const effectiveExecutionProfile = inferExecutionProfile({
+            ...req.body,
+            taskType,
+            input: runtimeInput,
+            memoryInput: userInput,
+        });
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -885,10 +929,10 @@ router.post('/responses', async (req, res, next) => {
                     route: '/v1/responses',
                     transport: 'http',
                 },
-                executionProfile,
+                executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
-                taskType: 'chat',
+                taskType,
             });
             const response = execution.response;
 
@@ -915,7 +959,7 @@ router.post('/responses', async (req, res, next) => {
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
-                        mode: 'chat',
+                        mode: taskType,
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
                         prompt: artifactPrompt,
@@ -1007,10 +1051,10 @@ router.post('/responses', async (req, res, next) => {
                 route: '/v1/responses',
                 transport: 'http',
             },
-            executionProfile,
+            executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
-            taskType: 'chat',
+            taskType,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -1031,7 +1075,7 @@ router.post('/responses', async (req, res, next) => {
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
-            mode: 'chat',
+            mode: taskType,
             outputFormat: effectiveOutputFormat,
             content: outputText,
             prompt: artifactPrompt,

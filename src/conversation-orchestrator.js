@@ -154,6 +154,16 @@ function hasUsableSshDefaults() {
     );
 }
 
+function formatSshRuntimeTarget(target = null) {
+    if (!target?.host) {
+        return null;
+    }
+
+    const username = target.username ? `${target.username}@` : '';
+    const port = target.port && Number(target.port) !== 22 ? `:${target.port}` : '';
+    return `${username}${target.host}${port}`;
+}
+
 function sanitizeValue(value, depth = 0) {
     if (value == null) {
         return value;
@@ -491,6 +501,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(prompt);
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
+        const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
             [
@@ -501,7 +512,7 @@ class ConversationOrchestrator extends EventEmitter {
                 'tool-doc-read',
             ].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
 
-            if (allowedToolIds.includes('ssh-execute') && hasSshDefaults && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
+            if (allowedToolIds.includes('ssh-execute') && hasReachableSshTarget && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add('ssh-execute');
             }
             if (allowedToolIds.includes('docker-exec')) {
@@ -575,6 +586,9 @@ class ConversationOrchestrator extends EventEmitter {
             executionProfile,
             allowedToolIds,
             candidateToolIds: allowedToolIds.filter((toolId) => candidates.has(toolId)),
+            hasSshDefaults,
+            hasReachableSshTarget,
+            sshRuntimeTarget: formatSshRuntimeTarget(sshContext.target),
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
@@ -648,6 +662,12 @@ class ConversationOrchestrator extends EventEmitter {
             `Use at most ${MAX_PLAN_STEPS} steps.`,
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
+            ...(toolPolicy.candidateToolIds.includes('ssh-execute') && toolPolicy.hasReachableSshTarget
+                ? [
+                    'For ssh-execute, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.',
+                    'For server work, prefer trying ssh-execute before asking the user for host details again.',
+                ]
+                : []),
         ].join('\n');
 
         const plannerOutput = await this.completeText(prompt, { model });
@@ -737,6 +757,7 @@ class ConversationOrchestrator extends EventEmitter {
             executionProfile,
             allowedToolIds: toolPolicy.allowedToolIds,
             toolEvents,
+            toolPolicy,
         });
 
         if (toolEvents.length === 0) {
@@ -802,7 +823,7 @@ class ConversationOrchestrator extends EventEmitter {
         });
     }
 
-    buildRuntimeInstructions({ baseInstructions = '', executionProfile = DEFAULT_EXECUTION_PROFILE, allowedToolIds = [], toolEvents = [] }) {
+    buildRuntimeInstructions({ baseInstructions = '', executionProfile = DEFAULT_EXECUTION_PROFILE, allowedToolIds = [], toolEvents = [], toolPolicy = {} }) {
         const parts = [
             String(baseInstructions || '').trim(),
             `Execution profile: ${executionProfile}.`,
@@ -817,6 +838,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use the verified tool results as the source of truth over guesses.');
             parts.push('When a verified tool result includes image URLs or markdown image snippets, you may embed them with standard markdown image syntax.');
             parts.push('Do not fabricate SVG overlays, inline HTML image placeholders, or other visual stand-ins when verified image URLs are available.');
+        }
+
+        if (toolPolicy.candidateToolIds?.includes('ssh-execute') && toolPolicy.hasReachableSshTarget) {
+            parts.push(`SSH runtime target is already available${toolPolicy.sshRuntimeTarget ? ` (${toolPolicy.sshRuntimeTarget})` : ''}.`);
+            parts.push('For server work, try ssh-execute against the configured default or sticky session target before asking for host details again.');
+            parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
         }
 
         return parts.filter(Boolean).join('\n\n');
