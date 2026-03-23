@@ -8,6 +8,7 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    hasExplicitMermaidArtifactIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     resolveSshRequestContext,
@@ -169,6 +170,12 @@ function resolveConversationTaskType(payload = {}, session = null) {
     return candidates.some((value) => isNotesSurfaceValue(value)) ? 'notes' : 'chat';
 }
 
+function shouldSuppressNotesMermaidArtifact(taskType, text = '', outputFormat = null) {
+    return taskType === 'notes'
+        && String(outputFormat || '').trim().toLowerCase() === 'mermaid'
+        && !hasExplicitMermaidArtifactIntent(text);
+}
+
 function shouldInjectRecentMessages(inputMessages = []) {
     if (!Array.isArray(inputMessages)) {
         return true;
@@ -298,9 +305,12 @@ router.post('/chat/completions', async (req, res, next) => {
             memoryInput: lastUserText,
             session,
         });
-        const effectiveOutputFormat = output_format
+        let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(lastUserText)
             || inferOutputFormatFromTranscript(messages, session);
+        if (shouldSuppressNotesMermaidArtifact(taskType, lastUserText, effectiveOutputFormat)) {
+            effectiveOutputFormat = null;
+        }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
         const artifactPrompt = buildArtifactPromptFromTranscript(messages, lastUserText);
         runtimeTask = startRuntimeTask({
@@ -852,9 +862,12 @@ router.post('/responses', async (req, res, next) => {
         const sshContext = resolveSshRequestContext(userInput, session);
         const effectiveUserInput = sshContext.effectivePrompt || userInput;
         const taskType = resolveConversationTaskType(req.body, session);
-        const effectiveOutputFormat = output_format
+        let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(userInput)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
+        if (shouldSuppressNotesMermaidArtifact(taskType, userInput, effectiveOutputFormat)) {
+            effectiveOutputFormat = null;
+        }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
         const artifactPrompt = buildArtifactPromptFromTranscript(normalizedInputMessages, userInput);
         runtimeTask = startRuntimeTask({

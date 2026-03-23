@@ -376,6 +376,7 @@ GUIDELINES:
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - Prefer structural edits over append-only edits when the page needs organization: use update_block to convert block types, replace_block to rebuild a section, move_block to reorder sections, and rebuild_page when the current layout should be replaced wholesale.
 - It is acceptable to replace a single block with multiple blocks, or to rebuild the full page, if that is the clearest way to satisfy the request.
+- In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
 - Do not invent block IDs - only use IDs that exist in the page
@@ -474,7 +475,7 @@ GUIDELINES:
                 continue;
             }
 
-            const content = String(message.content || '').trim();
+            const content = unwrapGenericResponseContent(message.content || '');
             if (!content || content === excluded) {
                 continue;
             }
@@ -790,7 +791,7 @@ GUIDELINES:
     }
 
     function buildFallbackPageEditResponse(question = '', responseText = '') {
-        const directResponse = String(responseText || '').trim();
+        const directResponse = unwrapGenericResponseContent(responseText);
         const preferredSource = directResponse && !looksLikeShortAcknowledgement(directResponse)
             ? directResponse
             : getLastSubstantialAssistantMessage(directResponse);
@@ -1217,6 +1218,173 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return null;
     }
 
+    function stripDiffStylePrefixes(text = '') {
+        const source = String(text || '');
+        const lines = source.split(/\r?\n/);
+        const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+        if (nonEmptyLines.length === 0) {
+            return source.trim();
+        }
+
+        const prefixedLines = nonEmptyLines.filter((line) => /^\s*\+\s?/.test(line));
+        if (prefixedLines.length < 3 || prefixedLines.length < Math.ceil(nonEmptyLines.length * 0.4)) {
+            return source.trim();
+        }
+
+        return lines
+            .map((line) => line.replace(/^\s*\+\s?/, ''))
+            .join('\n')
+            .trim();
+    }
+
+    function extractGenericWrapperContent(value) {
+        if (typeof value === 'string') {
+            return value.trim() || null;
+        }
+
+        if (value == null) {
+            return null;
+        }
+
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const extracted = extractGenericWrapperContent(item);
+                if (extracted) {
+                    return extracted;
+                }
+            }
+            return null;
+        }
+
+        if (typeof value !== 'object') {
+            return null;
+        }
+
+        const directKeys = ['content', 'text', 'message', 'result', 'response', 'output', 'markdown'];
+        for (const key of directKeys) {
+            if (typeof value[key] === 'string' && value[key].trim()) {
+                return value[key].trim();
+            }
+        }
+
+        const nestedKeys = ['payload', 'data', 'item', 'items', 'value'];
+        for (const key of nestedKeys) {
+            const extracted = extractGenericWrapperContent(value[key]);
+            if (extracted) {
+                return extracted;
+            }
+        }
+
+        return null;
+    }
+
+    function tryParseGenericContentPayload(payloadText) {
+        if (!payloadText) {
+            return null;
+        }
+
+        const cleanedText = stripDiffStylePrefixes(unwrapCodeFence(payloadText));
+        if (!cleanedText) {
+            return null;
+        }
+
+        try {
+            const payload = JSON.parse(cleanedText);
+            if (payload && typeof payload === 'object' && Array.isArray(payload.actions)) {
+                return null;
+            }
+            if (Array.isArray(payload) && payload.some((item) => isNotesBlockDefinition(item))) {
+                return null;
+            }
+            if (isNotesBlockDefinition(payload)) {
+                return null;
+            }
+
+            const content = extractGenericWrapperContent(payload);
+            if (!content) {
+                return null;
+            }
+
+            return {
+                displayText: content,
+                actions: []
+            };
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function findBalancedGenericContentPayload(text) {
+        const source = stripDiffStylePrefixes(String(text || ''));
+        if (!source.includes('{') && !source.includes('[')) {
+            return null;
+        }
+
+        for (let start = 0; start < source.length; start++) {
+            if (!['{', '['].includes(source[start])) continue;
+
+            let depth = 0;
+            let inString = false;
+            let isEscaped = false;
+
+            for (let index = start; index < source.length; index++) {
+                const char = source[index];
+
+                if (inString) {
+                    if (isEscaped) {
+                        isEscaped = false;
+                    } else if (char === '\\') {
+                        isEscaped = true;
+                    } else if (char === '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (char === '"') {
+                    inString = true;
+                    continue;
+                }
+
+                if (char === '{' || char === '[') {
+                    depth += 1;
+                    continue;
+                }
+
+                if (char === '}' || char === ']') {
+                    depth -= 1;
+                    if (depth === 0) {
+                        const candidate = source.slice(start, index + 1);
+                        const parsed = tryParseGenericContentPayload(candidate);
+                        if (parsed) {
+                            return {
+                                parsed,
+                                candidate
+                            };
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function unwrapGenericResponseContent(text = '') {
+        const directPayload = tryParseGenericContentPayload(text);
+        if (directPayload?.displayText) {
+            return directPayload.displayText;
+        }
+
+        const balancedPayload = findBalancedGenericContentPayload(text);
+        if (balancedPayload?.parsed?.displayText) {
+            return balancedPayload.parsed.displayText;
+        }
+
+        return stripDiffStylePrefixes(text).trim();
+    }
+
     function isNotesBlockDefinition(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) {
             return false;
@@ -1461,6 +1629,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return '';
         }
 
+        const genericContent = tryParseGenericContentPayload(value) || findBalancedGenericContentPayload(value)?.parsed;
+        if (genericContent?.displayText) {
+            return genericContent.displayText;
+        }
+
         const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
@@ -1476,8 +1649,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             const directPayload = tryParseNotesActionPayload(text.trim());
             const fencedPayload = jsonFenceMatch ? tryParseNotesActionPayload(jsonFenceMatch[1].trim()) : null;
             const balancedPayload = findBalancedNotesActionPayload(text);
+            const genericPayload = tryParseGenericContentPayload(text.trim())
+                || (jsonFenceMatch ? tryParseGenericContentPayload(jsonFenceMatch[1].trim()) : null)
+                || findBalancedGenericContentPayload(text)?.parsed;
             const fragmentActions = extractBlockFragmentActions(text);
-            const parsed = directPayload || fencedPayload || balancedPayload?.parsed || (fragmentActions
+            const parsed = directPayload || fencedPayload || balancedPayload?.parsed || genericPayload || (fragmentActions
                 ? { displayText: '', actions: fragmentActions }
                 : null);
 
@@ -2989,7 +3165,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         if (/\bdocx\b|\bword document\b/.test(normalized)) return 'docx';
         if (/\bxml\b/.test(normalized)) return 'xml';
         if (/\bxlsx\b|\bexcel\b|\bspreadsheet\b/.test(normalized)) return 'xlsx';
-        if (/\bmermaid\b/.test(normalized)) return 'mermaid';
+        if (/\b(mermaid|\.mmd\b)\b/.test(normalized)
+            && /\b(export|download|save|artifact|file|mmd|link|share)\b/.test(normalized)) return 'mermaid';
         return null;
     }
 

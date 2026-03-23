@@ -72,6 +72,7 @@ function buildNotesSurfacePrompt() {
     'Use notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.',
     'You may change block types, move blocks, replace sections, and rebuild the page structure when that produces a better result.',
     'Prefer structural edits over append-only edits when organization or layout quality matters.',
+    'In notes, Mermaid usually belongs as a page block, not a downloadable artifact, unless the user explicitly asks for a file, export, or download.',
     'If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.',
     'For substantial page-writing requests, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.',
   ].join('\n');

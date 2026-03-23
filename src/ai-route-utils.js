@@ -443,6 +443,7 @@ module.exports = {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
+    hasExplicitMermaidArtifactIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     resolveSshRequestContext,
