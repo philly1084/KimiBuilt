@@ -160,6 +160,19 @@ function createToolManager() {
                 },
             },
         }],
+        ['remote-command', {
+            id: 'remote-command',
+            name: 'Remote Command',
+            description: 'Execute remote server commands over SSH',
+            inputSchema: {
+                type: 'object',
+                required: ['command'],
+                properties: {
+                    command: { type: 'string' },
+                    host: { type: 'string' },
+                },
+            },
+        }],
     ]);
 
     const skills = new Map([
@@ -175,12 +188,13 @@ function createToolManager() {
         ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'] }],
         ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'] }],
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'] }],
+        ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'] }],
     ]);
 
     return {
         getTool: (id) => tools.get(id),
         executeTool: jest.fn(async (id, params) => {
-            if (id === 'ssh-execute') {
+            if (id === 'ssh-execute' || id === 'remote-command') {
                 return {
                     success: true,
                     toolId: id,
@@ -480,6 +494,11 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.promptHasExplicitSshIntent('Can you ssh into root@77.42.44.98 and check its health?')).toBe(true);
     });
 
+    test('detects remote-command phrasing as remote execution intent', () => {
+        expect(__testUtils.promptHasExplicitSshIntent('Run a remote command on root@77.42.44.98 to check its health.')).toBe(true);
+        expect(__testUtils.promptHasExplicitSshIntent('Execute remotely on root@77.42.44.98 and check its health.')).toBe(true);
+    });
+
     test('runs explicit ssh requests directly without asking the model for tool selection', async () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: false,
@@ -513,6 +532,47 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(response.output[0].content[0].text).toContain('STDOUT:');
         expect(toolManager.executeTool).toHaveBeenCalledWith(
             'ssh-execute',
+            expect.objectContaining({
+                host: '77.42.44.98',
+                username: 'root',
+                command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+            }),
+            expect.any(Object),
+        );
+    });
+
+    test('runs explicit remote-command requests directly when that alias is selected', async () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Can you ssh into root@77.42.44.98 and check its health?',
+        ).filter((tool) => tool.id !== 'ssh-execute');
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Can you ssh into root@77.42.44.98 and check its health?',
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'remote-command',
+            selectedTools,
+            prompt: 'Can you ssh into root@77.42.44.98 and check its health?',
+            toolContext: {},
+            model: 'gemini-test',
+        });
+
+        expect(response.output[0].content[0].text).toContain('SSH command completed on 77.42.44.98:22.');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
             expect.objectContaining({
                 host: '77.42.44.98',
                 username: 'root',

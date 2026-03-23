@@ -254,7 +254,7 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
 
   await sessionStore.update(sessionId, {
     metadata: {
-      lastToolIntent: 'ssh-execute',
+      lastToolIntent: toolId,
       ...(params.host ? {
         lastSshTarget: {
           host: params.host,

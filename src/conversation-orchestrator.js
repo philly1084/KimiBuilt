@@ -414,6 +414,24 @@ function getRemoteBuildAutonomyBudget() {
     };
 }
 
+function getPreferredRemoteToolId(toolPolicy = {}) {
+    const availableToolIds = Array.isArray(toolPolicy?.candidateToolIds) && toolPolicy.candidateToolIds.length > 0
+        ? toolPolicy.candidateToolIds
+        : Array.isArray(toolPolicy?.allowedToolIds)
+            ? toolPolicy.allowedToolIds
+            : [];
+
+    if (availableToolIds.includes('ssh-execute')) {
+        return 'ssh-execute';
+    }
+
+    if (availableToolIds.includes('remote-command')) {
+        return 'remote-command';
+    }
+
+    return null;
+}
+
 function sanitizeValue(value, depth = 0) {
     if (value == null) {
         return value;
@@ -1087,6 +1105,7 @@ class ConversationOrchestrator extends EventEmitter {
 
     buildDirectAction({ objective = '', session = null, toolPolicy = {} }) {
         const researchQuery = extractExplicitWebResearchQuery(objective);
+        const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
             && researchQuery) {
@@ -1105,7 +1124,7 @@ class ConversationOrchestrator extends EventEmitter {
             };
         }
 
-        if (!toolPolicy.candidateToolIds.includes('ssh-execute')) {
+        if (!remoteToolId) {
             return null;
         }
 
@@ -1115,7 +1134,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         return {
-            tool: 'ssh-execute',
+            tool: remoteToolId,
             reason: 'Direct SSH command inferred from the user request.',
             params: sshContext.directParams,
         };
@@ -1128,6 +1147,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         const prompt = String(objective || '').trim();
         const firstUrl = extractFirstUrl(prompt);
+        const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const directAction = this.buildDirectAction({
             objective,
             session,
@@ -1202,7 +1222,7 @@ class ConversationOrchestrator extends EventEmitter {
             }
         }
 
-        if (toolPolicy.candidateToolIds.includes('ssh-execute')
+        if (remoteToolId
             && (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 || toolPolicy.hasReachableSshTarget
                 || /\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|deploy|deployment|docker)\b/i.test(prompt))) {
@@ -1211,7 +1231,7 @@ class ConversationOrchestrator extends EventEmitter {
 
             if (command) {
                 return [{
-                    tool: 'ssh-execute',
+                    tool: remoteToolId,
                     reason: prefersDeterministicToolPlanning(model)
                         ? 'Deterministic fallback for explicit server or remote-build intent.'
                         : 'Fallback for explicit server or remote-build intent.',
@@ -1250,6 +1270,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         const deterministicPlanner = prefersDeterministicToolPlanning(model);
+        const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const toolCatalog = toolPolicy.candidateToolIds
             .map((toolId) => `- ${toolId}: ${toolPolicy.toolDescriptions?.[toolId] || toolId}`)
             .join('\n');
@@ -1301,8 +1322,8 @@ class ConversationOrchestrator extends EventEmitter {
             ...(deterministicPlanner && plannerUrl && toolPolicy.candidateToolIds.includes('web-fetch')
                 ? ['If the request includes a URL and `web-fetch` is listed above, prefer a `web-fetch` step unless extraction clearly needs `web-scrape`.']
                 : []),
-            ...(deterministicPlanner && toolPolicy.candidateToolIds.includes('ssh-execute') && (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || /\b(ssh|server|cluster|k3s|k8s|kubernetes|kubectl|docker)\b/i.test(planningPrompt))
-                ? ['If the request is about SSH, server work, cluster work, or remote-build and `ssh-execute` is listed above, include an `ssh-execute` step instead of answering in prose.']
+            ...(deterministicPlanner && remoteToolId && (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || /\b(ssh|server|cluster|k3s|k8s|kubernetes|kubectl|docker)\b/i.test(planningPrompt))
+                ? [`If the request is about SSH, server work, cluster work, or remote-build and \`${remoteToolId}\` is listed above, include a \`${remoteToolId}\` step instead of answering in prose.`]
                 : []),
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
@@ -1313,18 +1334,18 @@ class ConversationOrchestrator extends EventEmitter {
                     'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, repeated tool failures, or an exhausted autonomy budget.',
                 ]
                 : []),
-            ...(toolPolicy.candidateToolIds.includes('ssh-execute') && toolPolicy.hasReachableSshTarget
+            ...(remoteToolId && toolPolicy.hasReachableSshTarget
                 ? [
-                    'For ssh-execute, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.',
-                    'For server work, prefer trying ssh-execute before asking the user for host details again.',
+                    `For ${remoteToolId}, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.`,
+                    `For server work, prefer trying ${remoteToolId} before asking the user for host details again.`,
                     'Assume a Linux server and prefer Ubuntu-friendly commands unless tool results prove otherwise.',
                     'For remote-build work, verify architecture with uname -m before installing binaries and prefer arm64/aarch64 assets when applicable.',
                     'Prefer common built-ins and standard utilities. If a nonstandard tool may be missing, use a fallback such as find/grep instead of rg, ss instead of netstat, ip addr instead of ifconfig, and docker compose instead of docker-compose.',
                 ]
-                : toolPolicy.candidateToolIds.includes('ssh-execute')
+                : remoteToolId
                     ? [
-                        'ssh-execute is still available for this request even if the runtime target is not yet verified in this prompt.',
-                        'Do not claim ssh-execute is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.',
+                        `${remoteToolId} is still available for this request even if the runtime target is not yet verified in this prompt.`,
+                        `Do not claim ${remoteToolId} is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.`,
                         'When planning server commands, prefer Ubuntu-friendly standard utilities and avoid assuming rg, ifconfig, netstat, or docker-compose are installed.',
                       ]
                     : []),
@@ -1506,6 +1527,7 @@ class ConversationOrchestrator extends EventEmitter {
     }
 
     buildRuntimeInstructions({ baseInstructions = '', executionProfile = DEFAULT_EXECUTION_PROFILE, allowedToolIds = [], toolEvents = [], toolPolicy = {} }) {
+        const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const parts = [
             String(baseInstructions || '').trim(),
             `Execution profile: ${executionProfile}.`,
@@ -1522,15 +1544,15 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Do not fabricate SVG overlays, inline HTML image placeholders, or other visual stand-ins when verified image URLs are available.');
         }
 
-        if (toolPolicy.candidateToolIds?.includes('ssh-execute') && toolPolicy.hasReachableSshTarget) {
+        if (remoteToolId && toolPolicy.hasReachableSshTarget) {
             parts.push(`SSH runtime target is already available${toolPolicy.sshRuntimeTarget ? ` (${toolPolicy.sshRuntimeTarget})` : ''}.`);
-            parts.push('For server work, try ssh-execute against the configured default or sticky session target before asking for host details again.');
+            parts.push(`For server work, try ${remoteToolId} against the configured default or sticky session target before asking for host details again.`);
             parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
             parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
             parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, `ip addr` for `ifconfig`, and `docker compose` for `docker-compose`.');
-        } else if (toolPolicy.candidateToolIds?.includes('ssh-execute')) {
-            parts.push('ssh-execute is available for this request even if the target is not currently verified in the prompt context.');
-            parts.push('Do not claim the SSH tool is unavailable. Try ssh-execute for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.');
+        } else if (remoteToolId) {
+            parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);
+            parts.push(`Do not claim the SSH tool is unavailable. Try ${remoteToolId} for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.`);
             parts.push('When constructing remote commands, assume Ubuntu/Linux defaults first and avoid depending on nonstandard utilities unless you have verified they exist.');
         }
 

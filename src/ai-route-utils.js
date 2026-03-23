@@ -182,6 +182,7 @@ function promptHasExplicitSshIntent(text = '') {
 
     return /\bssh\b/.test(normalized)
         || /\b(remote host|remote server|remote machine)\b/.test(normalized)
+        || /\b(remote command|run remotely|execute remotely)\b/.test(normalized)
         || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(normalized);
 }
 
@@ -256,6 +257,20 @@ function formatSshTarget(target = {}) {
     const username = target.username ? `${target.username}@` : '';
     const port = target.port && Number(target.port) !== 22 ? `:${target.port}` : '';
     return `${username}${target.host}${port}`;
+}
+
+function getPreferredRemoteToolId(toolManager = null) {
+    if (typeof toolManager?.getTool === 'function') {
+        if (toolManager.getTool('ssh-execute')) {
+            return 'ssh-execute';
+        }
+
+        if (toolManager.getTool('remote-command')) {
+            return 'remote-command';
+        }
+    }
+
+    return 'ssh-execute';
 }
 
 function resolveSshRequestContext(text = '', session = null) {
@@ -335,12 +350,12 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
 
         if (!host) {
             return {
-                lastToolIntent: 'ssh-execute',
+                lastToolIntent: toolName,
             };
         }
 
         return {
-            lastToolIntent: 'ssh-execute',
+            lastToolIntent: toolName,
             lastSshTarget: {
                 host,
                 username,
@@ -432,6 +447,7 @@ module.exports = {
     isArtifactContinuationPrompt,
     resolveSshRequestContext,
     formatSshToolResult,
+    getPreferredRemoteToolId,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,

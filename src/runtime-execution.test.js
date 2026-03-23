@@ -142,6 +142,7 @@ describe('runtime-execution', () => {
     test('infers the remote build execution profile from explicit routing or remote-ops prompts', () => {
         expect(inferExecutionProfile({ executionProfile: 'remote-builder' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Use kubectl to inspect the cluster and restart the deployment.' })).toBe('remote-build');
+        expect(inferExecutionProfile({ input: 'Run a remote command on root@77.42.44.98 to check its health.' })).toBe('remote-build');
         expect(inferExecutionProfile({
             taskType: 'notes',
             input: 'Can you reach the remote build now?',

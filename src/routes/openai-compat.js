@@ -12,6 +12,7 @@ const {
     isArtifactContinuationPrompt,
     resolveSshRequestContext,
     formatSshToolResult,
+    getPreferredRemoteToolId,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
@@ -422,7 +423,8 @@ router.post('/chat/completions', async (req, res, next) => {
 
             const toolManager = await ensureRuntimeToolManager(req.app);
             if (sshContext.directParams) {
-                const sshResult = await toolManager.executeTool('ssh-execute', sshContext.directParams, {
+                const remoteToolId = getPreferredRemoteToolId(toolManager);
+                const sshResult = await toolManager.executeTool(remoteToolId, sshContext.directParams, {
                     sessionId,
                     route: '/v1/chat/completions',
                     transport: 'http',
@@ -431,7 +433,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
                 await sessionStore.update(sessionId, {
                     metadata: {
-                        lastToolIntent: 'ssh-execute',
+                        lastToolIntent: remoteToolId,
                         ...(sshContext.target?.host ? {
                             lastSshTarget: {
                                 host: sshContext.target.host,
@@ -452,12 +454,12 @@ router.post('/chat/completions', async (req, res, next) => {
                     toolEvents: [{
                         toolCall: {
                             function: {
-                                name: 'ssh-execute',
+                                name: remoteToolId,
                             },
                         },
                         result: {
                             success: sshResult?.success !== false,
-                            toolId: 'ssh-execute',
+                            toolId: remoteToolId,
                             data: sshResult?.data,
                             error: sshResult?.error || null,
                         },
@@ -470,17 +472,17 @@ router.post('/chat/completions', async (req, res, next) => {
                     model: model || null,
                     duration: Date.now() - startedAt,
                     metadata: {
-                        directTool: 'ssh-execute',
+                        directTool: remoteToolId,
                         toolEvents: [{
                             toolCall: {
                                 function: {
-                                    name: 'ssh-execute',
+                                    name: remoteToolId,
                                     arguments: JSON.stringify(sshContext.directParams || {}),
                                 },
                             },
                             result: {
                                 success: sshResult?.success !== false,
-                                toolId: 'ssh-execute',
+                                toolId: remoteToolId,
                                 duration: sshResult?.duration || 0,
                                 data: sshResult?.data,
                                 error: sshResult?.error || null,
@@ -612,7 +614,8 @@ router.post('/chat/completions', async (req, res, next) => {
         setSessionHeaders(res, sessionId);
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         if (sshContext.directParams) {
-            const sshResult = await runtimeToolManager.executeTool('ssh-execute', sshContext.directParams, {
+            const remoteToolId = getPreferredRemoteToolId(runtimeToolManager);
+            const sshResult = await runtimeToolManager.executeTool(remoteToolId, sshContext.directParams, {
                 sessionId,
                 route: '/v1/chat/completions',
                 transport: 'http',
@@ -621,7 +624,7 @@ router.post('/chat/completions', async (req, res, next) => {
             const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
             await sessionStore.update(sessionId, {
                 metadata: {
-                    lastToolIntent: 'ssh-execute',
+                    lastToolIntent: remoteToolId,
                     ...(sshContext.target?.host ? {
                         lastSshTarget: {
                             host: sshContext.target.host,
@@ -642,12 +645,12 @@ router.post('/chat/completions', async (req, res, next) => {
                 toolEvents: [{
                     toolCall: {
                         function: {
-                            name: 'ssh-execute',
+                            name: remoteToolId,
                         },
                     },
                     result: {
                         success: sshResult?.success !== false,
-                        toolId: 'ssh-execute',
+                        toolId: remoteToolId,
                         data: sshResult?.data,
                         error: sshResult?.error || null,
                     },
@@ -660,17 +663,17 @@ router.post('/chat/completions', async (req, res, next) => {
                 model: model || null,
                 duration: Date.now() - startedAt,
                 metadata: {
-                    directTool: 'ssh-execute',
+                    directTool: remoteToolId,
                     toolEvents: [{
                         toolCall: {
                             function: {
-                                name: 'ssh-execute',
+                                name: remoteToolId,
                                 arguments: JSON.stringify(sshContext.directParams || {}),
                             },
                         },
                         result: {
                             success: sshResult?.success !== false,
-                            toolId: 'ssh-execute',
+                            toolId: remoteToolId,
                             duration: sshResult?.duration || 0,
                             data: sshResult?.data,
                             error: sshResult?.error || null,
@@ -974,7 +977,8 @@ router.post('/responses', async (req, res, next) => {
 
             const toolManager = await ensureRuntimeToolManager(req.app);
             if (sshContext.directParams) {
-                const sshResult = await toolManager.executeTool('ssh-execute', sshContext.directParams, {
+                const remoteToolId = getPreferredRemoteToolId(toolManager);
+                const sshResult = await toolManager.executeTool(remoteToolId, sshContext.directParams, {
                     sessionId,
                     route: '/v1/responses',
                     transport: 'http',
@@ -983,7 +987,7 @@ router.post('/responses', async (req, res, next) => {
                 const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
                 await sessionStore.update(sessionId, {
                     metadata: {
-                        lastToolIntent: 'ssh-execute',
+                        lastToolIntent: remoteToolId,
                         ...(sshContext.target?.host ? {
                             lastSshTarget: {
                                 host: sshContext.target.host,
@@ -1004,12 +1008,12 @@ router.post('/responses', async (req, res, next) => {
                     toolEvents: [{
                         toolCall: {
                             function: {
-                                name: 'ssh-execute',
+                                name: remoteToolId,
                             },
                         },
                         result: {
                             success: sshResult?.success !== false,
-                            toolId: 'ssh-execute',
+                            toolId: remoteToolId,
                             data: sshResult?.data,
                             error: sshResult?.error || null,
                         },
@@ -1035,17 +1039,17 @@ router.post('/responses', async (req, res, next) => {
                     model: model || null,
                     duration: Date.now() - startedAt,
                     metadata: {
-                        directTool: 'ssh-execute',
+                        directTool: remoteToolId,
                         toolEvents: [{
                             toolCall: {
                                 function: {
-                                    name: 'ssh-execute',
+                                    name: remoteToolId,
                                     arguments: JSON.stringify(sshContext.directParams || {}),
                                 },
                             },
                             result: {
                                 success: sshResult?.success !== false,
-                                toolId: 'ssh-execute',
+                                toolId: remoteToolId,
                                 duration: sshResult?.duration || 0,
                                 data: sshResult?.data,
                                 error: sshResult?.error || null,
@@ -1145,7 +1149,8 @@ router.post('/responses', async (req, res, next) => {
         setSessionHeaders(res, sessionId);
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         if (sshContext.directParams) {
-            const sshResult = await runtimeToolManager.executeTool('ssh-execute', sshContext.directParams, {
+            const remoteToolId = getPreferredRemoteToolId(runtimeToolManager);
+            const sshResult = await runtimeToolManager.executeTool(remoteToolId, sshContext.directParams, {
                 sessionId,
                 route: '/v1/responses',
                 transport: 'http',
@@ -1154,7 +1159,7 @@ router.post('/responses', async (req, res, next) => {
             const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
             await sessionStore.update(sessionId, {
                 metadata: {
-                    lastToolIntent: 'ssh-execute',
+                    lastToolIntent: remoteToolId,
                     ...(sshContext.target?.host ? {
                         lastSshTarget: {
                             host: sshContext.target.host,
@@ -1175,12 +1180,12 @@ router.post('/responses', async (req, res, next) => {
                 toolEvents: [{
                     toolCall: {
                         function: {
-                            name: 'ssh-execute',
+                            name: remoteToolId,
                         },
                     },
                     result: {
                         success: sshResult?.success !== false,
-                        toolId: 'ssh-execute',
+                        toolId: remoteToolId,
                         data: sshResult?.data,
                         error: sshResult?.error || null,
                     },
@@ -1204,17 +1209,17 @@ router.post('/responses', async (req, res, next) => {
                 model: model || null,
                 duration: Date.now() - startedAt,
                 metadata: {
-                    directTool: 'ssh-execute',
+                    directTool: remoteToolId,
                     toolEvents: [{
                         toolCall: {
                             function: {
-                                name: 'ssh-execute',
+                                name: remoteToolId,
                                 arguments: JSON.stringify(sshContext.directParams || {}),
                             },
                         },
                         result: {
                             success: sshResult?.success !== false,
-                            toolId: 'ssh-execute',
+                            toolId: remoteToolId,
                             duration: sshResult?.duration || 0,
                             data: sshResult?.data,
                             error: sshResult?.error || null,

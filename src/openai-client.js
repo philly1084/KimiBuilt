@@ -62,6 +62,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-search',
     'file-mkdir',
     'ssh-execute',
+    'remote-command',
     'docker-exec',
     'code-sandbox',
     'security-scan',
@@ -512,6 +513,7 @@ function promptHasExplicitSshIntent(prompt = '') {
 
     return /\bssh\b/i.test(normalizedPrompt)
         || /\b(remote host|remote server|remote machine)\b/i.test(normalizedPrompt)
+        || /\b(remote command|run remotely|execute remotely)\b/i.test(normalizedPrompt)
         || /\b(login to|log into|ssh into|ssh to|connect to)\b/i.test(normalizedPrompt)
         || (/\b(run|execute|deploy|inspect|troubleshoot|check)\b/i.test(normalizedPrompt)
             && /\b(over ssh|via ssh)\b/i.test(normalizedPrompt));
@@ -666,6 +668,9 @@ function extractRequestedDirectoryPath(prompt = '') {
 
 function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
+    const remoteToolId = availableToolIds.has('ssh-execute')
+        ? 'ssh-execute'
+        : (availableToolIds.has('remote-command') ? 'remote-command' : null);
     const actions = [];
     const webQuery = availableToolIds.has('web-search')
         ? extractExplicitWebResearchQuery(prompt)
@@ -673,10 +678,10 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const directoryPath = availableToolIds.has('file-mkdir')
         ? extractRequestedDirectoryPath(prompt)
         : null;
-    const sshCommand = availableToolIds.has('ssh-execute')
+    const sshCommand = remoteToolId
         ? extractRequestedSshCommand(prompt)
         : null;
-    const sshTarget = availableToolIds.has('ssh-execute')
+    const sshTarget = remoteToolId
         ? extractExplicitSshTarget(prompt)
         : null;
 
@@ -706,7 +711,7 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
 
     if (sshCommand && promptHasExplicitSshIntent(prompt)) {
         actions.push({
-            toolId: 'ssh-execute',
+            toolId: remoteToolId,
             params: {
                 ...(sshTarget?.host ? { host: sshTarget.host } : {}),
                 ...(sshTarget?.username ? { username: sshTarget.username } : {}),
@@ -894,8 +899,12 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         selectedIds.add('file-search');
     }
 
-    if (promptHasExplicitSshIntent(prompt)) {
-        selectedIds.add('ssh-execute');
+    const remoteToolId = availableToolIds.has('ssh-execute')
+        ? 'ssh-execute'
+        : (availableToolIds.has('remote-command') ? 'remote-command' : null);
+
+    if (promptHasExplicitSshIntent(prompt) && remoteToolId) {
+        selectedIds.add(remoteToolId);
     }
 
     if (/\b(docker|container)\b/i.test(normalizedPrompt)) {
@@ -927,9 +936,14 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     return automaticTools.filter((entry) => selectedIds.has(entry.id));
 }
 
-function inferRequiredAutomaticToolId(prompt = '') {
+function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
+    const availableToolIds = new Set(Array.isArray(availableToolIdsInput) ? availableToolIdsInput : []);
+    const remoteToolId = availableToolIds.has('ssh-execute')
+        ? 'ssh-execute'
+        : (availableToolIds.has('remote-command') ? 'remote-command' : 'ssh-execute');
+
     if (promptHasExplicitSshIntent(prompt)) {
-        return 'ssh-execute';
+        return remoteToolId;
     }
 
     if (hasExplicitWebResearchIntent(prompt)) {
@@ -984,7 +998,7 @@ function buildAutomaticToolChoice(selectedTools = [], api = 'responses', options
     }
 
     const prompt = String(options.prompt || '');
-    const requiredToolId = inferRequiredAutomaticToolId(prompt);
+    const requiredToolId = inferRequiredAutomaticToolId(prompt, selectedTools.map((tool) => tool.id));
     if (requiredToolId && selectedTools.some((tool) => tool.id === requiredToolId)) {
         return buildForcedToolChoice(requiredToolId, api);
     }
@@ -996,6 +1010,7 @@ function buildAutomaticToolChoice(selectedTools = [], api = 'responses', options
     if (prefersDeterministicToolChoice(options.model) && selectedTools.length === 2) {
         const toolPreferenceOrder = [
             'ssh-execute',
+            'remote-command',
             'web-search',
             'web-scrape',
             'web-fetch',
@@ -1069,10 +1084,14 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `file-mkdir` to create folders or directories when the user asks for them.');
     }
 
-    if (automaticTools.some((entry) => entry.id === 'ssh-execute')) {
-        guidance.push('- Use `ssh-execute` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.');
-        guidance.push('- Do not refer to internal tool names like `run_shell_command` or claim you lack generic shell access when `ssh-execute` is attached.');
-        guidance.push('- If `ssh-execute` fails, explain the actual SSH error from the tool result and ask only for the missing host or credentials if needed.');
+    const remoteGuidanceToolId = automaticTools.some((entry) => entry.id === 'ssh-execute')
+        ? 'ssh-execute'
+        : (automaticTools.some((entry) => entry.id === 'remote-command') ? 'remote-command' : null);
+
+    if (remoteGuidanceToolId) {
+        guidance.push(`- Use \`${remoteGuidanceToolId}\` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.`);
+        guidance.push(`- Do not refer to internal tool names like \`run_shell_command\` or claim you lack generic shell access when \`${remoteGuidanceToolId}\` is attached.`);
+        guidance.push(`- If \`${remoteGuidanceToolId}\` fails, explain the actual SSH error from the tool result and ask only for the missing host or credentials if needed.`);
         const sshConfig = settingsController.getEffectiveSshConfig();
 
         if (hasUsableSshDefaults()) {
@@ -1288,7 +1307,7 @@ function formatDirectToolResultMessage(toolEvent = {}) {
     const toolId = toolEvent?.toolCall?.function?.name || toolEvent?.result?.toolId || 'tool';
     const result = toolEvent?.result || {};
 
-    if (toolId === 'ssh-execute') {
+    if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         if (!result.success) {
             return `SSH request failed: ${result.error || 'Unknown SSH error'}`;
         }
@@ -1350,7 +1369,7 @@ async function runDirectRequiredToolAction({
     toolContext = {},
     model = null,
 }) {
-    if (requiredToolId !== 'ssh-execute') {
+    if (!['ssh-execute', 'remote-command'].includes(requiredToolId)) {
         return null;
     }
 
@@ -1951,15 +1970,16 @@ async function createResponse({
         }
 
         if (enableAutomaticToolCalls && toolManager) {
+            let automaticTools = [];
             try {
                 const toolExecutionContext = {
                     executionProfile,
                     previousResponseId,
                     ...toolContext,
                 };
-                const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolExecutionContext);
+                automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolExecutionContext);
                 const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
-                const requiredToolId = inferRequiredAutomaticToolId(prompt);
+                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id));
 
                 if (requiredToolId && !selectedTools.some((tool) => tool.id === requiredToolId)) {
                     throw new ToolOrchestrationError(`Required tool '${requiredToolId}' is unavailable for this request. Check tool setup and runtime registration.`, {
@@ -1994,7 +2014,8 @@ async function createResponse({
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
-                if (inferRequiredAutomaticToolId(prompt)) {
+                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id));
+                if (requiredToolId) {
                     throw toolError instanceof ToolOrchestrationError
                         ? toolError
                         : new ToolOrchestrationError(toolError.message, {
