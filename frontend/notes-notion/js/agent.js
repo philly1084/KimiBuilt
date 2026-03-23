@@ -315,7 +315,9 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
   "actions": [
     { "op": "update_page", "title": "Middle East Overnight Brief", "icon": "🌍" },
     { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
+    { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
     { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "rebuild_page", "blocks": [{ "type": "heading_1", "content": "New Structure" }, { "type": "text", "content": "Fresh opening" }] },
     { "op": "delete_block", "blockId": "block_def456" },
     { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
   ]
@@ -324,12 +326,14 @@ When the user asks you to edit, create, delete, or reorganize content, respond w
 
 VALID OPERATIONS:
 - update_page: Update page-level metadata like title, icon, cover, properties, or page default model
-- update_block: Change content of existing block (requires blockId, type, content)
+- update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
 - replace_block: Replace block with new block(s) (requires blockId, blocks array)
+- move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
 - insert_after: Add new block(s) after specified block (requires blockId, blocks array)
 - insert_before: Add new block(s) before specified block (requires blockId, blocks array)
 - append_to_page: Add block(s) at end of page (requires blocks array)
 - prepend_to_page: Add block(s) at start of page (requires blocks array)
+- rebuild_page: Replace the full page body with a new block structure when a clean rebuild is better than incremental edits (requires blocks array)
 - delete_block: Remove a block (requires blockId)
 
 BLOCK TYPES:
@@ -346,10 +350,22 @@ BLOCK TYPES:
 - image: Image (content: {url: "...", caption: "..."})
 - bookmark: Link bookmark (content: {url: "...", title: "..."})
 
+BLOCK DESIGN HEURISTICS:
+- Use heading blocks to create hierarchy before adding details.
+- Use callout blocks for takeaways, warnings, decisions, or highlighted facts.
+- Use bulleted or numbered lists for grouped items instead of long paragraphs.
+- Use todo blocks for action items or checklists.
+- Use quote blocks for direct excerpts or testimonial-style content.
+- Use divider blocks to break up dense sections.
+- Use image or ai_image blocks when visuals should live on the page, not in chat.
+- Use mermaid blocks for flows, processes, systems, org charts, and diagrams.
+- Use database blocks for comparison tables, trackers, or structured matrices.
+
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
 - assistant_reply should be brief and user-friendly (not mention the JSON actions)
 - The editor will automatically apply your actions and show the assistant_reply to the user
+- You are free to change block types, replace weak sections, move blocks, delete redundant content, and rebuild the page structure when that produces a better result.
 - In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
 - If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions, not a request to inspect a remote server or codebase.
 - Use \`\`\`notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.
@@ -358,6 +374,8 @@ GUIDELINES:
 - If SSH access or a prior SSH target is already established in the session, do not ask for host/user details again unless a tool failure shows the target is missing or incorrect.
 - For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
+- Prefer structural edits over append-only edits when the page needs organization: use update_block to convert block types, replace_block to rebuild a section, move_block to reorder sections, and rebuild_page when the current layout should be replaced wholesale.
+- It is acceptable to replace a single block with multiple blocks, or to rebuild the full page, if that is the clearest way to satisfy the request.
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
 - Do not invent block IDs - only use IDs that exist in the page
@@ -1600,6 +1618,18 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         appliedCount++;
                         break;
                     }
+                    case 'move_block':
+                    case 'reorder_block':
+                    case 'move': {
+                        const moveBlockId = targetBlockId || rawAction.draggedBlockId || rawAction.sourceBlockId || null;
+                        const destinationBlockId = rawAction.targetBlockId || rawAction.destinationBlockId || rawAction.referenceBlockId || rawAction.anchorBlockId || null;
+                        const position = String(rawAction.position || 'after').toLowerCase() === 'before' ? 'before' : 'after';
+                        if (!moveBlockId || !destinationBlockId || moveBlockId === destinationBlockId) return;
+                        editor.reorderBlocks?.(moveBlockId, destinationBlockId, position);
+                        focusBlockId = moveBlockId;
+                        appliedCount++;
+                        break;
+                    }
                     case 'insert_after': {
                         const insertAfterId = targetBlockId || getLastBlockId();
                         const blocksToInsert = blockDefinitions.length ? blockDefinitions : [{
@@ -1664,6 +1694,28 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                             ? (editor.insertBlocksBefore?.(firstBlockId, normalizedBlocks) || [])
                             : (editor.insertBlocksAfter?.(null, normalizedBlocks) || []);
                         focusBlockId = inserted[inserted.length - 1]?.id || focusBlockId;
+                        appliedCount++;
+                        break;
+                    }
+                    case 'rebuild_page':
+                    case 'replace_page': {
+                        const rebuiltBlocks = (blockDefinitions.length ? blockDefinitions : []).map((blockDef) => normalizeActionBlock(blockDef, {
+                            defaultType: blockDef.type || 'text'
+                        }));
+                        if (!editor.importBlocks || rebuiltBlocks.length === 0) return;
+
+                        const pageUpdates = {};
+                        ['title', 'icon', 'cover', 'properties', 'defaultModel'].forEach((key) => {
+                            if (Object.prototype.hasOwnProperty.call(rawAction, key)) {
+                                pageUpdates[key] = rawAction[key];
+                            }
+                        });
+                        if (Object.keys(pageUpdates).length > 0) {
+                            editor.updatePageMetadata?.(pageUpdates);
+                        }
+
+                        editor.importBlocks(rebuiltBlocks, { replace: true });
+                        focusBlockId = window.Editor?.getCurrentPage?.()?.blocks?.[0]?.id || focusBlockId;
                         appliedCount++;
                         break;
                     }
@@ -1972,6 +2024,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         actions.forEach(action => {
             if (action.blockId) blockIds.add(action.blockId);
             if (action.targetBlockId) blockIds.add(action.targetBlockId);
+            if (action.draggedBlockId) blockIds.add(action.draggedBlockId);
+            if (action.sourceBlockId) blockIds.add(action.sourceBlockId);
+            if (action.destinationBlockId) blockIds.add(action.destinationBlockId);
+            if (action.referenceBlockId) blockIds.add(action.referenceBlockId);
+            if (action.anchorBlockId) blockIds.add(action.anchorBlockId);
             
             // Also check for blocks being inserted (they won't have IDs yet, but their neighbors will)
             if (action.blocks && Array.isArray(action.blocks)) {

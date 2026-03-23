@@ -70,6 +70,8 @@ function buildNotesSurfacePrompt() {
     'In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.',
     'If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions.',
     'Use notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.',
+    'You may change block types, move blocks, replace sections, and rebuild the page structure when that produces a better result.',
+    'Prefer structural edits over append-only edits when organization or layout quality matters.',
     'If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.',
     'For substantial page-writing requests, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.',
   ].join('\n');
