@@ -544,7 +544,7 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
-    test('falls back to deterministic web-search planning for kimi when planner output is not valid json', async () => {
+    test('falls back to web-search planning when planner output is not valid json', async () => {
         const llmClient = {
             createResponse: jest.fn(),
             complete: jest.fn().mockResolvedValue('I should use web-search to research this topic.'),
@@ -570,7 +570,6 @@ describe('ConversationOrchestrator', () => {
             objective: 'Please research the best managed Postgres providers for startups.',
             executionProfile: 'default',
             toolPolicy,
-            model: 'kimi-k2',
         });
 
         expect(plan).toEqual([
@@ -584,7 +583,7 @@ describe('ConversationOrchestrator', () => {
         ]);
     });
 
-    test('falls back to deterministic ssh planning for kimi remote-build prompts', async () => {
+    test('falls back to ssh planning for remote-build prompts', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -619,7 +618,6 @@ describe('ConversationOrchestrator', () => {
             objective: 'Inspect the k3s cluster state on the server.',
             executionProfile: 'remote-build',
             toolPolicy,
-            model: 'kimi-k2',
         });
 
         expect(plan).toEqual([
@@ -667,7 +665,6 @@ describe('ConversationOrchestrator', () => {
             objective: 'Inspect the k3s cluster state on the server.',
             executionProfile: 'remote-build',
             toolPolicy,
-            model: 'kimi-k2',
         });
 
         expect(plan).toEqual([

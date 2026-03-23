@@ -957,27 +957,6 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
     return null;
 }
 
-function normalizeToolingModelFamily(model = '') {
-    const normalized = normalizeModelId(model).toLowerCase();
-    if (!normalized) {
-        return 'generic';
-    }
-
-    if (normalized.includes('kimi') || normalized.includes('moonshot')) {
-        return 'kimi';
-    }
-
-    if (normalized.includes('gpt') || normalized.includes('openai')) {
-        return 'openai';
-    }
-
-    return 'generic';
-}
-
-function prefersDeterministicToolChoice(model = '') {
-    return normalizeToolingModelFamily(model) === 'kimi';
-}
-
 function buildForcedToolChoice(toolId, api = 'responses') {
     return api === 'chat'
         ? {
@@ -1007,23 +986,6 @@ function buildAutomaticToolChoice(selectedTools = [], api = 'responses', options
         return buildForcedToolChoice(selectedTools[0].id, api);
     }
 
-    if (prefersDeterministicToolChoice(options.model) && selectedTools.length === 2) {
-        const toolPreferenceOrder = [
-            'ssh-execute',
-            'remote-command',
-            'web-search',
-            'web-scrape',
-            'web-fetch',
-            'image-from-url',
-            'image-search-unsplash',
-            'image-generate',
-        ];
-        const preferredTool = toolPreferenceOrder.find((toolId) => selectedTools.some((tool) => tool.id === toolId));
-        if (preferredTool) {
-            return buildForcedToolChoice(preferredTool, api);
-        }
-    }
-
     return 'auto';
 }
 
@@ -1032,7 +994,6 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         return null;
     }
 
-    const deterministicTooling = prefersDeterministicToolChoice(options.model);
     const guidance = [
         'You can use the provided tools whenever they will improve accuracy or gather missing data.',
         'Treat the tool definitions attached to this request as the source of truth for tool availability.',
@@ -1115,11 +1076,6 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'tool-doc-read')) {
         guidance.push('- Use `tool-doc-read` when the user asks how a tool works, what parameters it takes, or what its setup/limitations are. Pass the target `toolId`.');
-    }
-
-    if (deterministicTooling) {
-        guidance.push('This model is running in a stricter tool contract. When one attached tool clearly matches the request, call it instead of describing what you would do.');
-        guidance.push('Do not answer with generic tool-availability disclaimers when the matching tool is attached.');
     }
 
     guidance.push('Prefer tools over guessing when the user asks for live web data, extraction, or verification.');

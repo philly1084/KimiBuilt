@@ -259,27 +259,6 @@ function hasAutonomyRevocation(text = '') {
     return /\b(ask me first|wait for me|hold on|stop here|pause here|don'?t continue|do not continue)\b/.test(normalized);
 }
 
-function normalizeModelFamily(model = '') {
-    const normalized = String(model || '').trim().toLowerCase();
-    if (!normalized) {
-        return 'generic';
-    }
-
-    if (normalized.includes('kimi') || normalized.includes('moonshot')) {
-        return 'kimi';
-    }
-
-    if (normalized.includes('gpt') || normalized.includes('openai')) {
-        return 'openai';
-    }
-
-    return 'generic';
-}
-
-function prefersDeterministicToolPlanning(model = '') {
-    return normalizeModelFamily(model) === 'kimi';
-}
-
 function extractFirstUrl(text = '') {
     const match = String(text || '').match(/https?:\/\/\S+/i);
     return match ? match[0].replace(/[),.;!?]+$/g, '') : null;
@@ -1140,7 +1119,7 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    buildFallbackPlan({ objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {}, model = null }) {
+    buildFallbackPlan({ objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
         if (!toolPolicy?.candidateToolIds?.length) {
             return [];
         }
@@ -1162,9 +1141,7 @@ class ConversationOrchestrator extends EventEmitter {
             const query = extractExplicitWebResearchQuery(prompt) || prompt;
             return [{
                 tool: 'web-search',
-                reason: prefersDeterministicToolPlanning(model)
-                    ? 'Deterministic fallback for explicit research intent.'
-                    : 'Fallback for explicit research intent.',
+                reason: 'Fallback for explicit research intent.',
                 params: {
                     query,
                     engine: 'perplexity',
@@ -1232,9 +1209,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (command) {
                 return [{
                     tool: remoteToolId,
-                    reason: prefersDeterministicToolPlanning(model)
-                        ? 'Deterministic fallback for explicit server or remote-build intent.'
-                        : 'Fallback for explicit server or remote-build intent.',
+                    reason: 'Fallback for explicit server or remote-build intent.',
                     params: sshContext.target?.host
                         ? {
                             host: sshContext.target.host,
@@ -1269,24 +1244,15 @@ class ConversationOrchestrator extends EventEmitter {
             return [];
         }
 
-        const deterministicPlanner = prefersDeterministicToolPlanning(model);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const toolCatalog = toolPolicy.candidateToolIds
             .map((toolId) => `- ${toolId}: ${toolPolicy.toolDescriptions?.[toolId] || toolId}`)
             .join('\n');
         const planningPrompt = String(objective || '');
-        const plannerUrl = extractFirstUrl(planningPrompt);
         const prompt = [
             'You are planning tool usage for an application-owned agent runtime.',
             'Return JSON only.',
             'If tools are unnecessary, return {"steps":[]}.',
-            ...(deterministicPlanner
-                ? [
-                    'You are not the end-user assistant. Your only job is to emit machine-readable JSON.',
-                    'Never answer with prose, explanation, markdown fences, or apologies.',
-                    'If the user request clearly implies one of the candidate tools, emit a tool step instead of describing what you would do.',
-                ]
-                : []),
             `Execution profile: ${executionProfile}`,
             `Task type: ${taskType}`,
             'Candidate tools:',
@@ -1316,15 +1282,6 @@ class ConversationOrchestrator extends EventEmitter {
             `Use at most ${MAX_PLAN_STEPS} steps.`,
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
-            ...(deterministicPlanner && hasExplicitWebResearchIntentText(planningPrompt) && toolPolicy.candidateToolIds.includes('web-search')
-                ? ['If the request is research and `web-search` is listed above, include `web-search` in the first step.']
-                : []),
-            ...(deterministicPlanner && plannerUrl && toolPolicy.candidateToolIds.includes('web-fetch')
-                ? ['If the request includes a URL and `web-fetch` is listed above, prefer a `web-fetch` step unless extraction clearly needs `web-scrape`.']
-                : []),
-            ...(deterministicPlanner && remoteToolId && (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || /\b(ssh|server|cluster|k3s|k8s|kubernetes|kubectl|docker)\b/i.test(planningPrompt))
-                ? [`If the request is about SSH, server work, cluster work, or remote-build and \`${remoteToolId}\` is listed above, include a \`${remoteToolId}\` step instead of answering in prose.`]
-                : []),
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious next remote-build steps.',
@@ -1371,7 +1328,6 @@ class ConversationOrchestrator extends EventEmitter {
             session,
             executionProfile,
             toolPolicy,
-            model,
         }).slice(0, MAX_PLAN_STEPS);
     }
 
