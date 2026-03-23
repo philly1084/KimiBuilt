@@ -1179,8 +1179,57 @@ const Blocks = (function() {
             block.content = content;
         }
 
+        const hasUnsplashResults = Array.isArray(content.unsplashResults) && content.unsplashResults.length > 0;
+        const hasAssetRef = Boolean(content.imageAssetId);
+        const hasDirectImageUrl = Boolean(content.imageUrl);
+        const hasRenderableImage = hasAssetRef || hasDirectImageUrl;
+        const normalizedStatus = content.status
+            || (hasUnsplashResults ? 'search_results' : (hasRenderableImage ? 'done' : 'pending'));
+        if (content.status !== normalizedStatus) {
+            content.status = normalizedStatus;
+        }
+
         const assetRef = content.imageAssetId ? `asset://${content.imageAssetId}` : content.imageUrl;
         const displayImageUrl = content._resolvedImageUrl || (assetRef && !String(assetRef).startsWith('asset://') ? assetRef : null);
+
+        if (content.source === 'unsplash'
+            && content.prompt
+            && !hasRenderableImage
+            && !hasUnsplashResults
+            && !content._unsplashAutoRequested
+            && window.API?.searchUnsplash) {
+            content._unsplashAutoRequested = true;
+            content.status = 'generating';
+
+            window.API.searchUnsplash(content.prompt, { perPage: 1 })
+                .then((result) => {
+                    const firstPhoto = Array.isArray(result?.results) ? result.results[0] : null;
+                    if (!firstPhoto?.urls?.regular) {
+                        content.status = 'error';
+                        content.errorMessage = `No Unsplash images found for "${content.prompt}".`;
+                    } else {
+                        content.imageUrl = firstPhoto.urls.regular;
+                        content.status = 'done';
+                        content.source = 'unsplash';
+                        content.selectedUnsplashId = firstPhoto.id || null;
+                        content.unsplashPhotographer = firstPhoto.user?.name || null;
+                        content.unsplashPhotographerUrl = firstPhoto.user?.links?.html || firstPhoto.user?.portfolio_url || null;
+                        content.unsplashResults = null;
+                        content.errorMessage = null;
+                    }
+
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderAIImageBlock(block, isEditable));
+                    window.Editor?.savePage?.();
+                })
+                .catch((error) => {
+                    console.error('Unsplash auto-search error:', error);
+                    content.status = 'error';
+                    content.errorMessage = 'Failed to load Unsplash image. Please try again.';
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderAIImageBlock(block, isEditable));
+                });
+        }
 
         if (content.status === 'done' && !displayImageUrl && assetRef && String(assetRef).startsWith('asset://') && !content._assetLoading && window.Storage?.resolveImageAsset) {
             content._assetLoading = true;

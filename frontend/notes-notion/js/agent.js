@@ -429,6 +429,367 @@ GUIDELINES:
         ].some((pattern) => pattern.test(normalized));
     }
 
+    function looksLikeShortAcknowledgement(text = '') {
+        const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!normalized) {
+            return true;
+        }
+
+        if (normalized.length > 180) {
+            return false;
+        }
+
+        const acknowledgementStart = /^(sure|yes|okay|ok|done|absolutely|certainly|yep|yeah|i('|’)ll|i can|i have|i did)\b/i.test(normalized);
+        const placementIntent = /\b(place|put|add|insert|apply|placed|added|inserted|applied)\b[\s\S]{0,30}\b(page|note|document)\b/i.test(normalized);
+        const pageReference = /\b(on|into|to|in)\s+(the\s+)?(page|note|document)\b/i.test(normalized);
+
+        return (acknowledgementStart && pageReference) || placementIntent;
+    }
+
+    function getLastSubstantialAssistantMessage(excludeText = '') {
+        syncConversationWithCurrentPage({ emitEvent: false });
+        const excluded = String(excludeText || '').trim();
+
+        for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+            const message = state.messages[index];
+            if (!message || message.role !== 'assistant' || message.hidden || message.transient) {
+                continue;
+            }
+
+            const content = String(message.content || '').trim();
+            if (!content || content === excluded) {
+                continue;
+            }
+
+            if (message.appliedCount > 0 || /^Applied \d+ page change/i.test(content)) {
+                continue;
+            }
+
+            if (content.length < 160 && looksLikeShortAcknowledgement(content)) {
+                continue;
+            }
+
+            return content;
+        }
+
+        return '';
+    }
+
+    function getPageRootBlocks() {
+        const page = window.Editor?.getCurrentPage?.();
+        return Array.isArray(page?.blocks) ? page.blocks : [];
+    }
+
+    function pageHasOnlyPlaceholderContent() {
+        const blocks = getPageRootBlocks();
+        if (blocks.length === 0) {
+            return true;
+        }
+
+        if (blocks.length !== 1) {
+            return false;
+        }
+
+        const [block] = blocks;
+        const text = extractBlockTextValue(block).trim();
+        return ['text', 'heading_1', 'heading_2', 'heading_3'].includes(block?.type) && !text;
+    }
+
+    function isStructuralTextBoundary(line = '') {
+        const normalized = String(line || '').trim();
+        if (!normalized) return true;
+
+        return /^#{1,3}\s+/.test(normalized) ||
+            /^>\s+/.test(normalized) ||
+            /^[-*]\s+/.test(normalized) ||
+            /^\d+\.\s+/.test(normalized) ||
+            /^\[![a-z_ -]+\]$/i.test(normalized) ||
+            /^!\s*\S+/.test(normalized) ||
+            /^```/.test(normalized) ||
+            /^---+$/.test(normalized);
+    }
+
+    function inferHeadingLevel(line = '', isFirstHeading = false) {
+        const normalized = String(line || '').trim();
+        if (!normalized) {
+            return null;
+        }
+
+        if (/^#{1,3}\s+/.test(normalized)) {
+            const level = normalized.match(/^#+/)[0].length;
+            return `heading_${Math.min(level, 3)}`;
+        }
+
+        if (normalized.length > 90) {
+            return null;
+        }
+
+        if (/[.:;!?]$/.test(normalized)) {
+            return null;
+        }
+
+        if (normalized.split(/\s+/).length > 8) {
+            return null;
+        }
+
+        if (isFirstHeading) {
+            return 'heading_1';
+        }
+
+        return /^(summary|overview|background|market position|what the company does|core solution areas|business strengths|strategic direction|bottom line|sources)$/i.test(normalized)
+            ? 'heading_2'
+            : null;
+    }
+
+    function getCalloutIconForMarker(marker = '') {
+        const normalized = String(marker || '').trim().toLowerCase();
+        return {
+            summary: '!',
+            info: 'i',
+            important: '!!',
+            tip: '+',
+            warning: '!',
+            note: '*',
+            callout: '!'
+        }[normalized] || '!';
+    }
+
+    function buildBlocksFromRichText(sourceText = '') {
+        const text = String(sourceText || '').replace(/\r\n/g, '\n').trim();
+        if (!text) {
+            return [];
+        }
+
+        const blocks = [];
+        const lines = text.split('\n');
+        let index = 0;
+        let usedTitle = false;
+
+        while (index < lines.length) {
+            const rawLine = lines[index];
+            const line = rawLine.trim();
+
+            if (!line) {
+                index += 1;
+                continue;
+            }
+
+            if (/^```/.test(line)) {
+                const language = line.slice(3).trim() || 'plain';
+                const codeLines = [];
+                index += 1;
+                while (index < lines.length && !/^```/.test(lines[index].trim())) {
+                    codeLines.push(lines[index]);
+                    index += 1;
+                }
+                if (index < lines.length) {
+                    index += 1;
+                }
+                blocks.push({
+                    type: 'code',
+                    content: {
+                        language,
+                        text: codeLines.join('\n')
+                    }
+                });
+                continue;
+            }
+
+            const calloutMatch = line.match(/^\[!([a-z_ -]+)\]$/i);
+            if (calloutMatch) {
+                const calloutLines = [];
+                index += 1;
+                while (index < lines.length) {
+                    const nextLine = lines[index].trim();
+                    if (!nextLine) {
+                        if (calloutLines.length > 0) break;
+                        index += 1;
+                        continue;
+                    }
+                    if (isStructuralTextBoundary(nextLine)) {
+                        break;
+                    }
+                    calloutLines.push(nextLine);
+                    index += 1;
+                }
+                blocks.push({
+                    type: 'callout',
+                    content: {
+                        text: calloutLines.join(' ').trim() || calloutMatch[1],
+                        icon: getCalloutIconForMarker(calloutMatch[1])
+                    }
+                });
+                continue;
+            }
+
+            const imagePromptMatch = line.match(/^!\s*(.+)$/);
+            if (imagePromptMatch && !/^!\[/.test(line)) {
+                blocks.push({
+                    type: 'ai_image',
+                    content: {
+                        prompt: imagePromptMatch[1].trim(),
+                        caption: '',
+                        imageUrl: null,
+                        model: null,
+                        size: '1536x1024',
+                        quality: 'standard',
+                        style: 'natural',
+                        source: 'unsplash',
+                        status: 'pending',
+                        unsplashResults: null,
+                        selectedUnsplashId: null,
+                        unsplashPhotographer: null,
+                        unsplashPhotographerUrl: null,
+                        imageAssetId: null
+                    }
+                });
+                index += 1;
+                continue;
+            }
+
+            if (/^---+$/.test(line)) {
+                blocks.push({ type: 'divider', content: '' });
+                index += 1;
+                continue;
+            }
+
+            const headingLevel = inferHeadingLevel(line, !usedTitle);
+            const nextLine = lines[index + 1]?.trim() || '';
+            if (headingLevel && (!nextLine || !/^[a-z]/.test(nextLine))) {
+                blocks.push({
+                    type: headingLevel,
+                    content: line.replace(/^#{1,3}\s+/, '').trim()
+                });
+                usedTitle = true;
+                index += 1;
+                continue;
+            }
+
+            if (/^>\s+/.test(line)) {
+                blocks.push({
+                    type: 'quote',
+                    content: line.replace(/^>\s+/, '').trim()
+                });
+                index += 1;
+                continue;
+            }
+
+            if (/^[-*]\s+/.test(line)) {
+                while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+                    blocks.push({
+                        type: 'bulleted_list',
+                        content: lines[index].trim().replace(/^[-*]\s+/, '')
+                    });
+                    index += 1;
+                }
+                continue;
+            }
+
+            if (/^\d+\.\s+/.test(line)) {
+                while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+                    blocks.push({
+                        type: 'numbered_list',
+                        content: lines[index].trim().replace(/^\d+\.\s+/, '')
+                    });
+                    index += 1;
+                }
+                continue;
+            }
+
+            const paragraphLines = [line];
+            index += 1;
+            while (index < lines.length) {
+                const next = lines[index].trim();
+                if (!next || isStructuralTextBoundary(next) || inferHeadingLevel(next, false)) {
+                    break;
+                }
+                paragraphLines.push(next);
+                index += 1;
+            }
+
+            blocks.push({
+                type: 'text',
+                content: paragraphLines.join(' ').trim()
+            });
+        }
+
+        return blocks.filter((block) => {
+            if (!block || !block.type) return false;
+            if (typeof block.content === 'string') return block.content.trim().length > 0 || block.type === 'divider';
+            if (block.type === 'callout') return Boolean(block.content?.text);
+            if (block.type === 'code') return Boolean(block.content?.text);
+            if (block.type === 'ai_image') return Boolean(block.content?.prompt);
+            return true;
+        });
+    }
+
+    function buildFallbackNotesActionsFromText(sourceText = '') {
+        const importedPage = window.ImportExport?.importFromMarkdown?.(sourceText);
+        const importedBlocks = Array.isArray(importedPage?.blocks)
+            ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))
+            : [];
+        const richTextBlocks = buildBlocksFromRichText(sourceText);
+        const blocks = richTextBlocks.length >= importedBlocks.length ? richTextBlocks : importedBlocks;
+
+        if (!blocks.length) {
+            return null;
+        }
+
+        const actions = [];
+        const importedTitle = String(importedPage?.title || '').trim();
+        const currentPage = window.Editor?.getCurrentPage?.();
+        const currentTitle = String(currentPage?.title || '').trim();
+
+        if (importedTitle && (!currentTitle || /^untitled$/i.test(currentTitle))) {
+            actions.push({
+                op: 'update_page',
+                title: importedTitle
+            });
+        }
+
+        if (pageHasOnlyPlaceholderContent()) {
+            const firstBlockId = getPageRootBlocks()[0]?.id || null;
+            if (firstBlockId) {
+                actions.push({
+                    op: 'replace_block',
+                    blockId: firstBlockId,
+                    blocks
+                });
+            } else {
+                actions.push({
+                    op: 'append_to_page',
+                    blocks
+                });
+            }
+        } else {
+            actions.push({
+                op: 'append_to_page',
+                blocks
+            });
+        }
+
+        return actions;
+    }
+
+    function buildFallbackPageEditResponse(question = '', responseText = '') {
+        const directResponse = String(responseText || '').trim();
+        const preferredSource = directResponse && !looksLikeShortAcknowledgement(directResponse)
+            ? directResponse
+            : getLastSubstantialAssistantMessage(directResponse);
+        const actions = buildFallbackNotesActionsFromText(preferredSource);
+
+        if (!actions || actions.length === 0) {
+            return null;
+        }
+
+        return {
+            displayText: /blank page|place it on|put it on|add it to|insert it into/i.test(String(question || '').toLowerCase())
+                ? 'Placed that on the page.'
+                : 'Added that to the page.',
+            appliedCount: applyNotesActions(actions).appliedCount
+        };
+    }
+
     function normalizeHiddenDraftResult(text = '', fallback = null) {
         const parsed = safeJsonParse(text);
         if (parsed) {
@@ -2855,7 +3216,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 const useMultiPassDraft = shouldUseMultiPassNotesDraft(question, context, requestOptions);
                 const explicitPageEditIntent = isExplicitPageEditIntent(question);
                 const effectiveQuestion = explicitPageEditIntent
-                    ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. Apply the requested content to this notes page with notes-actions unless the user explicitly says web page, site page, repo file, or server component.`
+                    ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Do not reply with chat prose alone.`
                     : question;
                 let messages = [
                     { role: 'system', content: systemPrompt },
@@ -2956,6 +3317,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                                 : ''),
                             appliedCount: 0
                         };
+                    }
+
+                    if (explicitPageEditIntent && preparedResponse.appliedCount === 0) {
+                        const fallbackPageEdit = buildFallbackPageEditResponse(question, responseText);
+                        if (fallbackPageEdit?.appliedCount > 0) {
+                            preparedResponse = fallbackPageEdit;
+                        }
                     }
 
                     if (generatedArtifacts.length > 0 && requestedArtifactFormat) {

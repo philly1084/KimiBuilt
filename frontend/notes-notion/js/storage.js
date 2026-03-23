@@ -242,6 +242,7 @@ const Storage = (function() {
             const nextContent = { ...nextBlock.content };
             delete nextContent._resolvedImageUrl;
             delete nextContent._assetLoading;
+            delete nextContent._unsplashAutoRequested;
             delete nextContent.unsplashResults;
             delete nextContent.errorMessage;
 
