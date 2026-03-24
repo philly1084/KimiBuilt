@@ -2,6 +2,8 @@ const { artifactService } = require('./artifacts/artifact-service');
 const { normalizeFormat } = require('./artifacts/constants');
 const { buildSessionInstructions } = require('./session-instructions');
 
+const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 async function buildInstructionsWithArtifacts(session, baseInstructions = '', artifactIds = []) {
     let artifactContext = '';
     try {
@@ -241,14 +243,35 @@ function extractRequestedSshCommand(text = '') {
     return null;
 }
 
-function isSshContinuationPrompt(text = '') {
+function hasRecentRemoteWorkingState(session = null) {
+    const remoteWorkingState = session?.metadata?.remoteWorkingState;
+    if (!remoteWorkingState || typeof remoteWorkingState !== 'object') {
+        return false;
+    }
+
+    const lastUpdated = Date.parse(remoteWorkingState.lastUpdated || '');
+    if (Number.isFinite(lastUpdated)) {
+        return (Date.now() - lastUpdated) <= REMOTE_CONTINUATION_MAX_AGE_MS;
+    }
+
+    return Boolean(
+        remoteWorkingState?.target?.host
+        || remoteWorkingState?.lastCommand
+        || remoteWorkingState?.lastError,
+    );
+}
+
+function isSshContinuationPrompt(text = '', { allowGenericContinuation = false } = {}) {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
         return false;
     }
 
-    return /^(continue|finish|refine|update|configure|set up|setup|install|apply|use|lets|let's|now|then|next|okay|ok|go ahead)\b/.test(normalized)
-        || /\b(traefik|tls|ssl|acme|let'?s encrypt|certificate|cert|ingress|kubectl|namespace|pod|deployment|service|container|docker|restart|logs?|tunnel)\b/.test(normalized);
+    const genericContinuation = /^(continue|finish|keep going|go ahead|next|then|retry|rerun|re-run|recheck)\b/.test(normalized)
+        || /\b(keep going|go ahead|retry that|rerun that|re-run that|recheck that|keep working on it)\b/.test(normalized);
+    const remoteSpecificLanguage = /\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|node|namespace|pod|deployment|service|container|docker|helm|traefik|ingress|tls|ssl|acme|let'?s encrypt|certificate|cert|journalctl|systemctl|restart|rollout|daemonset|statefulset|logs?|tunnel)\b/.test(normalized);
+
+    return remoteSpecificLanguage || (allowGenericContinuation && genericContinuation);
 }
 
 function formatSshTarget(target = {}) {
@@ -359,7 +382,12 @@ function resolveSshRequestContext(text = '', session = null) {
     const sessionTarget = session?.metadata?.lastSshTarget || null;
     const target = explicitTarget || sessionTarget;
     const stickySsh = isRemoteCommandToolId(session?.metadata?.lastToolIntent);
-    const continuation = !explicitIntent && stickySsh && target?.host && isSshContinuationPrompt(prompt);
+    const continuation = !explicitIntent
+        && stickySsh
+        && target?.host
+        && isSshContinuationPrompt(prompt, {
+            allowGenericContinuation: hasRecentRemoteWorkingState(session),
+        });
     const effectivePrompt = continuation
         ? `SSH into ${formatSshTarget(target)} and ${prompt}`
         : prompt;

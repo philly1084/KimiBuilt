@@ -153,4 +153,52 @@ describe('ai-route-utils', () => {
         expect(sshContext.command).toBeNull();
         expect(sshContext.directParams).toBeNull();
     });
+
+    test('resolveSshRequestContext does not keep generic go-ahead sticky without fresh remote state', () => {
+        const sshContext = resolveSshRequestContext(
+            'go ahead',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: 'test.demoserver2.buzz',
+                        username: 'root',
+                        port: 22,
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(false);
+        expect(sshContext.effectivePrompt).toBe('go ahead');
+    });
+
+    test('resolveSshRequestContext keeps generic go-ahead sticky while remote state is fresh', () => {
+        const sshContext = resolveSshRequestContext(
+            'go ahead',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: 'test.demoserver2.buzz',
+                        username: 'root',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        target: {
+                            host: 'test.demoserver2.buzz',
+                            username: 'root',
+                            port: 22,
+                        },
+                        lastCommand: 'kubectl describe pod -n gitea gitea-5479f795f8-pk2dp',
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.effectivePrompt).toContain('SSH into root@test.demoserver2.buzz');
+        expect(sshContext.command).toBeNull();
+    });
 });

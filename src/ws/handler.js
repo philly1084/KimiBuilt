@@ -7,8 +7,6 @@ const {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     resolveSshRequestContext,
-    formatSshToolResult,
-    getPreferredRemoteToolId,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
@@ -155,77 +153,6 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
 
     try {
         const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
-
-        if (sshContext.directParams) {
-            const remoteToolId = getPreferredRemoteToolId(runtimeToolManager);
-            const sshResult = await runtimeToolManager.executeTool(remoteToolId, sshContext.directParams, {
-                sessionId: session.id,
-                route: '/ws',
-                transport: 'ws',
-                toolManager: runtimeToolManager,
-            });
-            const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
-            await sessionStore.update(session.id, {
-                metadata: {
-                    lastToolIntent: remoteToolId,
-                    ...(sshContext.target?.host ? {
-                        lastSshTarget: {
-                            host: sshContext.target.host,
-                            username: sshContext.target.username || '',
-                            port: sshContext.target.port || 22,
-                        },
-                    } : {}),
-                },
-            });
-            memoryService.rememberResponse(session.id, assistantMessage);
-            await sessionStore.appendMessages(session.id, [
-                { role: 'user', content: message },
-                { role: 'assistant', content: assistantMessage },
-            ]);
-            await updateSessionProjectMemory(session.id, {
-                userText: message,
-                assistantText: assistantMessage,
-                toolEvents: [{
-                    toolCall: { function: { name: remoteToolId } },
-                    result: {
-                        success: sshResult?.success !== false,
-                        toolId: remoteToolId,
-                        data: sshResult?.data,
-                        error: sshResult?.error || null,
-                    },
-                    reason: 'Direct SSH execution',
-                }],
-            });
-            completeRuntimeTask(runtimeTask?.id, {
-                responseId: `tool-ssh-${Date.now()}`,
-                output: assistantMessage,
-                model: model || null,
-                duration: Date.now() - startedAt,
-                metadata: {
-                    directTool: remoteToolId,
-                    toolEvents: [{
-                        toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
-                        result: {
-                            success: sshResult?.success !== false,
-                            toolId: remoteToolId,
-                            duration: sshResult?.duration || 0,
-                            data: sshResult?.data,
-                            error: sshResult?.error || null,
-                            timestamp: sshResult?.timestamp || new Date().toISOString(),
-                        },
-                        reason: 'Direct SSH execution',
-                    }],
-                },
-            });
-            ws.send(JSON.stringify({ type: 'delta', content: assistantMessage }));
-            ws.send(JSON.stringify({
-                type: 'done',
-                sessionId: session.id,
-                responseId: null,
-                artifacts: [],
-            }));
-            return;
-        }
 
         if (effectiveOutputFormat) {
             const generation = await generateOutputArtifactFromPrompt({

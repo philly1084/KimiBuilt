@@ -10,8 +10,6 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     resolveSshRequestContext,
-    formatSshToolResult,
-    getPreferredRemoteToolId,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
@@ -182,65 +180,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
             const toolManager = await ensureRuntimeToolManager(req.app);
 
-            if (sshContext.directParams) {
-                const remoteToolId = getPreferredRemoteToolId(toolManager);
-                const sshResult = await toolManager.executeTool(remoteToolId, sshContext.directParams, {
-                    sessionId,
-                    route: '/api/chat',
-                    transport: 'http',
-                    toolManager,
-                });
-                const toolEvents = [{
-                    toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
-                    result: {
-                        success: sshResult?.success !== false,
-                        toolId: remoteToolId,
-                        duration: sshResult?.duration || 0,
-                        data: sshResult?.data,
-                        error: sshResult?.error || null,
-                        timestamp: sshResult?.timestamp || new Date().toISOString(),
-                    },
-                    reason: 'Direct SSH execution',
-                }];
-                const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
-                await sessionStore.update(sessionId, {
-                    metadata: {
-                        lastToolIntent: remoteToolId,
-                        ...(sshContext.target?.host ? {
-                            lastSshTarget: {
-                                host: sshContext.target.host,
-                                username: sshContext.target.username || '',
-                                port: sshContext.target.port || 22,
-                            },
-                        } : {}),
-                    },
-                });
-                memoryService.rememberResponse(sessionId, assistantMessage);
-                await sessionStore.appendMessages(sessionId, [
-                    { role: 'user', content: message },
-                    { role: 'assistant', content: assistantMessage },
-                ]);
-                await updateSessionProjectMemory(sessionId, {
-                    userText: message,
-                    assistantText: assistantMessage,
-                    toolEvents,
-                });
-                completeRuntimeTask(runtimeTask?.id, {
-                    responseId: `tool-ssh-${Date.now()}`,
-                    output: assistantMessage,
-                    model: model || session?.metadata?.model || null,
-                    duration: Date.now() - startedAt,
-                    metadata: {
-                        directTool: remoteToolId,
-                        toolEvents,
-                    },
-                });
-                res.write(`data: ${JSON.stringify({ type: 'delta', content: assistantMessage })}\n\n`);
-                res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: null, artifacts: [], toolEvents })}\n\n`);
-                res.end();
-                return;
-            }
-
             const execution = await executeConversationRuntime(req.app, {
                 input: effectiveMessage,
                 sessionId,
@@ -319,69 +258,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
 
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
-        if (sshContext.directParams) {
-            const remoteToolId = getPreferredRemoteToolId(runtimeToolManager);
-            const sshResult = await runtimeToolManager.executeTool(remoteToolId, sshContext.directParams, {
-                sessionId,
-                route: '/api/chat',
-                transport: 'http',
-                toolManager: runtimeToolManager,
-            });
-            const toolEvents = [{
-                toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
-                result: {
-                    success: sshResult?.success !== false,
-                    toolId: remoteToolId,
-                    duration: sshResult?.duration || 0,
-                    data: sshResult?.data,
-                    error: sshResult?.error || null,
-                    timestamp: sshResult?.timestamp || new Date().toISOString(),
-                },
-                reason: 'Direct SSH execution',
-            }];
-            const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
-            await sessionStore.update(sessionId, {
-                metadata: {
-                    lastToolIntent: remoteToolId,
-                    ...(sshContext.target?.host ? {
-                        lastSshTarget: {
-                            host: sshContext.target.host,
-                            username: sshContext.target.username || '',
-                            port: sshContext.target.port || 22,
-                        },
-                    } : {}),
-                },
-            });
-            memoryService.rememberResponse(sessionId, assistantMessage);
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: message },
-                { role: 'assistant', content: assistantMessage },
-            ]);
-            await updateSessionProjectMemory(sessionId, {
-                userText: message,
-                assistantText: assistantMessage,
-                toolEvents,
-            });
-            completeRuntimeTask(runtimeTask?.id, {
-                responseId: `tool-ssh-${Date.now()}`,
-                output: assistantMessage,
-                model: model || session?.metadata?.model || null,
-                duration: Date.now() - startedAt,
-                metadata: {
-                    directTool: remoteToolId,
-                    toolEvents,
-                },
-            });
-            res.json({
-                sessionId,
-                responseId: null,
-                message: assistantMessage,
-                artifacts: [],
-                toolEvents,
-            });
-            return;
-        }
-
         const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessage,
             sessionId,
