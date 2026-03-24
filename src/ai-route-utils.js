@@ -261,16 +261,16 @@ function formatSshTarget(target = {}) {
 
 function getPreferredRemoteToolId(toolManager = null) {
     if (typeof toolManager?.getTool === 'function') {
-        if (toolManager.getTool('ssh-execute')) {
-            return 'ssh-execute';
-        }
-
         if (toolManager.getTool('remote-command')) {
             return 'remote-command';
         }
+
+        if (toolManager.getTool('ssh-execute')) {
+            return 'ssh-execute';
+        }
     }
 
-    return 'ssh-execute';
+    return 'remote-command';
 }
 
 function resolveSshRequestContext(text = '', session = null) {

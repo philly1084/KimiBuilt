@@ -11,6 +11,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
+    getPreferredRemoteToolId,
     resolveArtifactContextIds,
 } = require('./ai-route-utils');
 
@@ -118,5 +119,17 @@ describe('ai-route-utils', () => {
                 lastGeneratedArtifactId: 'artifact-1',
             },
         }, [])).toEqual(['artifact-1']);
+    });
+
+    test('getPreferredRemoteToolId prefers remote-command when both SSH tools exist', () => {
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['ssh-execute', 'remote-command'].includes(toolId)
+                    ? { id: toolId }
+                    : null
+            )),
+        };
+
+        expect(getPreferredRemoteToolId(toolManager)).toBe('remote-command');
     });
 });

@@ -344,6 +344,32 @@ function isInvalidRuntimeResponseText(text = '') {
     ].some((pattern) => normalized.includes(pattern));
 }
 
+function hasExplicitLocalSandboxIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(run|execute|test)\b[\s\S]{0,40}\b(code|script|snippet)\b/.test(normalized)
+        || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
+}
+
+function canRecoverFromInvalidRuntimeResponse({ output = '', toolEvents = [], toolPolicy = {} } = {}) {
+    if (!isInvalidRuntimeResponseText(output) || !Array.isArray(toolPolicy?.candidateToolIds) || toolPolicy.candidateToolIds.length === 0) {
+        return false;
+    }
+
+    if (!Array.isArray(toolEvents) || toolEvents.length === 0) {
+        return true;
+    }
+
+    return !toolEvents.some((event) => {
+        const toolName = String(event?.toolCall?.function?.name || '').trim().toLowerCase();
+        const succeeded = event?.result?.success !== false;
+        return succeeded && toolName !== 'code-sandbox';
+    });
+}
+
 function normalizeStepSignature(step = {}) {
     return JSON.stringify({
         tool: String(step?.tool || '').trim(),
@@ -400,12 +426,12 @@ function getPreferredRemoteToolId(toolPolicy = {}) {
             ? toolPolicy.allowedToolIds
             : [];
 
-    if (availableToolIds.includes('ssh-execute')) {
-        return 'ssh-execute';
-    }
-
     if (availableToolIds.includes('remote-command')) {
         return 'remote-command';
+    }
+
+    if (availableToolIds.includes('ssh-execute')) {
+        return 'ssh-execute';
     }
 
     return null;
@@ -820,7 +846,7 @@ class ConversationOrchestrator extends EventEmitter {
             });
 
             output = extractResponseText(finalResponse);
-            if (isInvalidRuntimeResponseText(output) && toolEvents.length === 0 && toolPolicy.candidateToolIds.length > 0) {
+            if (canRecoverFromInvalidRuntimeResponse({ output, toolEvents, toolPolicy })) {
                 const recoveryPlan = this.buildFallbackPlan({
                     objective,
                     session,
@@ -994,7 +1020,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (allowedToolIds.includes('docker-exec')) {
                 candidates.add('docker-exec');
             }
-            if (allowedToolIds.includes('code-sandbox')) {
+            if (allowedToolIds.includes('code-sandbox') && hasExplicitLocalSandboxIntent(prompt)) {
                 candidates.add('code-sandbox');
             }
             if (hasImageIntent && allowedToolIds.includes('image-generate')) {

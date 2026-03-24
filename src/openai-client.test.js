@@ -342,6 +342,27 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
     });
 
+    test('prefers remote-command for deterministic ssh preflight when both SSH tools are available', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'ssh-execute' },
+                { id: 'remote-command' },
+            ],
+            'Can you ssh into root@77.42.44.98 and check its health?',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'remote-command',
+                params: {
+                    host: '77.42.44.98',
+                    username: 'root',
+                    command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+                },
+            },
+        ]);
+    });
+
     test('narrows tool exposure to relevant tools for the current prompt', () => {
         const toolManager = createToolManager();
         const automaticTools = __testUtils.buildAutomaticToolDefinitions(

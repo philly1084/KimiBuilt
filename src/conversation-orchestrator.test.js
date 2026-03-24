@@ -622,7 +622,7 @@ describe('ConversationOrchestrator', () => {
 
         expect(plan).toEqual([
             expect.objectContaining({
-                tool: 'ssh-execute',
+                tool: 'remote-command',
                 params: expect.objectContaining({
                     command: 'kubectl get nodes -o wide && kubectl get pods -A',
                 }),
@@ -675,6 +675,73 @@ describe('ConversationOrchestrator', () => {
                 }),
             }),
         ]);
+    });
+
+    test('does not offer code-sandbox for generic remote-build tasks', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['ssh-execute', 'remote-command', 'code-sandbox'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Inspect the k3s cluster state on the server and continue setup.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('code-sandbox');
+    });
+
+    test('offers code-sandbox for remote-build tasks only when local code execution is explicit', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['ssh-execute', 'remote-command', 'code-sandbox'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'SSH into the server, then run this code snippet in a sandbox locally to verify output.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('code-sandbox');
     });
 
     test('includes Ubuntu and arm64 fallback guidance for remote-build SSH work', async () => {

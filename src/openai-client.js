@@ -668,9 +668,9 @@ function extractRequestedDirectoryPath(prompt = '') {
 
 function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
-    const remoteToolId = availableToolIds.has('ssh-execute')
-        ? 'ssh-execute'
-        : (availableToolIds.has('remote-command') ? 'remote-command' : null);
+    const remoteToolId = availableToolIds.has('remote-command')
+        ? 'remote-command'
+        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
     const actions = [];
     const webQuery = availableToolIds.has('web-search')
         ? extractExplicitWebResearchQuery(prompt)
@@ -899,9 +899,9 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         selectedIds.add('file-search');
     }
 
-    const remoteToolId = availableToolIds.has('ssh-execute')
-        ? 'ssh-execute'
-        : (availableToolIds.has('remote-command') ? 'remote-command' : null);
+    const remoteToolId = availableToolIds.has('remote-command')
+        ? 'remote-command'
+        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
 
     if (promptHasExplicitSshIntent(prompt) && remoteToolId) {
         selectedIds.add(remoteToolId);
@@ -938,9 +938,9 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
 
 function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
     const availableToolIds = new Set(Array.isArray(availableToolIdsInput) ? availableToolIdsInput : []);
-    const remoteToolId = availableToolIds.has('ssh-execute')
-        ? 'ssh-execute'
-        : (availableToolIds.has('remote-command') ? 'remote-command' : 'ssh-execute');
+    const remoteToolId = availableToolIds.has('remote-command')
+        ? 'remote-command'
+        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : 'remote-command');
 
     if (promptHasExplicitSshIntent(prompt)) {
         return remoteToolId;
@@ -1045,9 +1045,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `file-mkdir` to create folders or directories when the user asks for them.');
     }
 
-    const remoteGuidanceToolId = automaticTools.some((entry) => entry.id === 'ssh-execute')
-        ? 'ssh-execute'
-        : (automaticTools.some((entry) => entry.id === 'remote-command') ? 'remote-command' : null);
+    const remoteGuidanceToolId = automaticTools.some((entry) => entry.id === 'remote-command')
+        ? 'remote-command'
+        : (automaticTools.some((entry) => entry.id === 'ssh-execute') ? 'ssh-execute' : null);
 
     if (remoteGuidanceToolId) {
         guidance.push(`- Use \`${remoteGuidanceToolId}\` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.`);
