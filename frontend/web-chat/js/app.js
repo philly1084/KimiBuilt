@@ -529,7 +529,7 @@ class ChatApp {
                         this.handleDelta(chunk.content);
                         break;
                     case 'done':
-                        this.handleDone();
+                        this.handleDone(chunk);
                         break;
                     case 'error':
                         if (chunk.cancelled) {
@@ -828,9 +828,12 @@ class ChatApp {
             id: searchMessageId,
             role: 'assistant',
             type: 'unsplash-search',
+            content: `Unsplash options for "${query}"`,
             query: query,
             isLoading: true,
             loadingText: 'Searching Unsplash...',
+            currentPage: 1,
+            perPage: 9,
             timestamp: new Date().toISOString()
         };
         
@@ -845,50 +848,44 @@ class ChatApp {
         
         try {
             // Call the Unsplash search API
-            const result = await apiClient.searchUnsplash(query, { perPage: 9 });
-            
-            // Update the message with the results
-            const messages = sessionManager.getMessages(sessionId);
-            const msgIndex = messages.findIndex(m => m.id === searchMessageId);
-            if (msgIndex >= 0) {
-                messages[msgIndex] = {
-                    ...messages[msgIndex],
-                    isLoading: false,
-                    results: result.results,
-                    total: result.total,
-                    query: result.query
-                };
-                sessionManager.saveToStorage();
-            }
-            
-            // Update UI with results
-            uiHelpers.updateUnsplashSearchMessage(searchMessageId, {
-                results: result.results,
-                total: result.total,
-                query: result.query
+            const result = await apiClient.searchUnsplash(query, { page: 1, perPage: 9 });
+            const totalPages = result.totalPages || result.total_pages || 1;
+            const nextMessage = this.upsertSessionMessage(sessionId, {
+                id: searchMessageId,
+                role: 'assistant',
+                type: 'unsplash-search',
+                content: `Unsplash options for "${result.query || query}"`,
+                query: result.query || query,
+                isLoading: false,
+                results: Array.isArray(result.results) ? result.results : [],
+                total: result.total || 0,
+                totalPages,
+                currentPage: 1,
+                perPage: 9,
+                timestamp: new Date().toISOString()
             });
+
+            this.renderOrReplaceMessage(nextMessage || searchMessage);
             
-            uiHelpers.showToast(`Found ${result.results.length} images on Unsplash`, 'success');
+            uiHelpers.showToast(`Found ${(result.results || []).length} images on Unsplash`, 'success');
             
         } catch (error) {
             console.error('Unsplash search failed:', error);
             
-            // Update message with error
-            uiHelpers.updateUnsplashSearchMessage(searchMessageId, {
-                error: error.message || 'Failed to search Unsplash'
+            const failedMessage = this.upsertSessionMessage(sessionId, {
+                id: searchMessageId,
+                role: 'assistant',
+                type: 'unsplash-search',
+                content: `Unsplash options for "${query}"`,
+                query,
+                isLoading: false,
+                currentPage: 1,
+                perPage: 9,
+                error: error.message || 'Failed to search Unsplash',
+                timestamp: new Date().toISOString()
             });
-            
-            // Remove from session
-            const messages = sessionManager.getMessages(sessionId);
-            const msgIndex = messages.findIndex(m => m.id === searchMessageId);
-            if (msgIndex >= 0) {
-                messages[msgIndex] = {
-                    ...messages[msgIndex],
-                    isLoading: false,
-                    error: error.message || 'Failed to search Unsplash'
-                };
-                sessionManager.saveToStorage();
-            }
+
+            this.renderOrReplaceMessage(failedMessage || searchMessage);
             
             uiHelpers.showToast(error.message || 'Failed to search Unsplash', 'error');
         } finally {
@@ -904,9 +901,14 @@ class ChatApp {
      * @param {string} messageId - The message ID containing the search results
      * @param {Object} image - The selected image data
      */
-    async selectUnsplashImage(messageId, image) {
+    async selectUnsplashImage(messageId, imageOrIndex) {
         const sessionId = sessionManager.currentSessionId;
         if (!sessionId) return;
+
+        const image = typeof imageOrIndex === 'number'
+            ? this.getSelectionItem(messageId, imageOrIndex)
+            : imageOrIndex;
+        if (!image) return;
         
         // Create a new message with the selected image
         const imageMessageId = uiHelpers.generateMessageId();
@@ -932,6 +934,367 @@ class ChatApp {
         uiHelpers.scrollToBottom();
         
         uiHelpers.showToast('Image added to conversation', 'success');
+        this.updateSessionInfo();
+        uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+    }
+
+    selectGeneratedImage(messageId, index) {
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId) return;
+
+        const message = this.getSessionMessage(sessionId, messageId);
+        const image = this.getSelectionItem(messageId, index);
+        if (!message || !image?.imageUrl) return;
+
+        const imageMessage = {
+            id: uiHelpers.generateMessageId(),
+            role: 'assistant',
+            type: 'image',
+            imageUrl: image.imageUrl,
+            thumbnailUrl: image.thumbnailUrl || image.imageUrl,
+            prompt: image.alt || image.prompt || message.prompt || 'Generated image',
+            revisedPrompt: image.revisedPrompt || '',
+            model: image.model || message.model || '',
+            source: 'generated',
+            timestamp: new Date().toISOString()
+        };
+
+        sessionManager.addMessage(sessionId, imageMessage);
+        this.messagesContainer.appendChild(uiHelpers.renderImageMessage(imageMessage));
+        uiHelpers.reinitializeIcons(this.messagesContainer.lastElementChild);
+        uiHelpers.scrollToBottom();
+
+        uiHelpers.showToast('Image added to conversation', 'success');
+        this.updateSessionInfo();
+        uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+    }
+
+    async loadUnsplashPage(messageId, page) {
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId || !Number.isFinite(page) || page < 1) return;
+
+        const currentMessage = this.getSessionMessage(sessionId, messageId);
+        if (!currentMessage?.query) return;
+
+        const perPage = currentMessage.perPage || 9;
+        const totalPages = currentMessage.totalPages || 1;
+        if (page > totalPages) return;
+
+        const loadingMessage = this.upsertSessionMessage(sessionId, {
+            id: messageId,
+            isLoading: true,
+            loadingText: `Loading page ${page}...`,
+            error: null,
+            currentPage: page,
+            timestamp: new Date().toISOString()
+        });
+        this.renderOrReplaceMessage(loadingMessage || currentMessage);
+
+        try {
+            const result = await apiClient.searchUnsplash(currentMessage.query, {
+                page,
+                perPage,
+                orientation: currentMessage.orientation || null,
+            });
+
+            const nextMessage = this.upsertSessionMessage(sessionId, {
+                id: messageId,
+                role: 'assistant',
+                type: 'unsplash-search',
+                content: `Unsplash options for "${result.query || currentMessage.query}"`,
+                query: result.query || currentMessage.query,
+                isLoading: false,
+                results: Array.isArray(result.results) ? result.results : [],
+                total: result.total || 0,
+                totalPages: result.totalPages || result.total_pages || totalPages,
+                currentPage: page,
+                perPage,
+                orientation: currentMessage.orientation || null,
+                error: null,
+                timestamp: new Date().toISOString()
+            });
+
+            this.renderOrReplaceMessage(nextMessage || currentMessage);
+        } catch (error) {
+            const failedMessage = this.upsertSessionMessage(sessionId, {
+                id: messageId,
+                isLoading: false,
+                currentPage: currentMessage.currentPage || 1,
+                error: error.message || 'Failed to load Unsplash results',
+                timestamp: new Date().toISOString()
+            });
+            this.renderOrReplaceMessage(failedMessage || currentMessage);
+            uiHelpers.showToast(error.message || 'Failed to load Unsplash results', 'error');
+        }
+    }
+
+    useSearchResult(messageId, index) {
+        const result = this.getSelectionItem(messageId, index);
+        if (!result?.url) return;
+
+        this.setInput(`Use this page as a source for the next answer:\n${result.url}`);
+        uiHelpers.showToast('Page added to the input', 'success');
+    }
+
+    openSearchResult(messageId, index) {
+        const result = this.getSelectionItem(messageId, index);
+        if (!result?.url) return;
+
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+    }
+
+    getSessionMessage(sessionId, messageId) {
+        if (!sessionId || !messageId) {
+            return null;
+        }
+
+        if (typeof sessionManager.getMessage === 'function') {
+            return sessionManager.getMessage(sessionId, messageId);
+        }
+
+        return sessionManager.getMessages(sessionId).find((message) => message.id === messageId) || null;
+    }
+
+    getSelectionItem(messageId, index, key = 'results') {
+        if (!Number.isInteger(index)) {
+            return null;
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+        const message = this.getSessionMessage(sessionId, messageId);
+        const items = Array.isArray(message?.[key]) ? message[key] : [];
+        return items[index] || null;
+    }
+
+    upsertSessionMessage(sessionId, message) {
+        if (typeof sessionManager.upsertMessage === 'function') {
+            return sessionManager.upsertMessage(sessionId, message);
+        }
+
+        const messages = sessionManager.getMessages(sessionId);
+        const index = message?.id
+            ? messages.findIndex((entry) => entry.id === message.id)
+            : -1;
+
+        if (index === -1) {
+            return sessionManager.addMessage(sessionId, message);
+        }
+
+        messages[index] = {
+            ...messages[index],
+            ...message,
+        };
+        sessionManager.saveToStorage();
+        return messages[index];
+    }
+
+    renderOrReplaceMessage(message) {
+        if (!message?.id) {
+            return null;
+        }
+
+        const nextEl = uiHelpers.renderMessage(message);
+        const existingEl = document.getElementById(message.id);
+
+        if (existingEl) {
+            existingEl.replaceWith(nextEl);
+        } else {
+            this.messagesContainer.appendChild(nextEl);
+        }
+
+        uiHelpers.reinitializeIcons(nextEl);
+        return nextEl;
+    }
+
+    parseToolArguments(rawArgs) {
+        if (!rawArgs) {
+            return {};
+        }
+
+        if (typeof rawArgs === 'object') {
+            return rawArgs;
+        }
+
+        if (typeof rawArgs !== 'string') {
+            return {};
+        }
+
+        try {
+            return JSON.parse(rawArgs);
+        } catch (_error) {
+            return {};
+        }
+    }
+
+    normalizeUnsplashResult(image) {
+        if (!image || typeof image !== 'object') {
+            return null;
+        }
+
+        const urls = image.urls || {};
+        const regular = urls.regular || image.url || urls.full || urls.small || image.thumbUrl || '';
+        const small = urls.small || image.thumbUrl || regular;
+        if (!regular && !small) {
+            return null;
+        }
+
+        const authorName = image.author?.name || image.author || '';
+        const authorLink = image.author?.link || image.authorLink || '';
+        const unsplashLink = image.links?.html || image.unsplashLink || '';
+        const description = image.description || image.altDescription || image.alt || '';
+
+        return {
+            id: image.id || `unsplash-${Math.random().toString(36).slice(2, 10)}`,
+            description,
+            altDescription: description,
+            urls: {
+                small,
+                regular,
+            },
+            author: {
+                name: authorName,
+                link: authorLink || unsplashLink,
+            },
+            links: {
+                html: unsplashLink,
+            },
+        };
+    }
+
+    normalizeGeneratedImage(image, fallbackPrompt = '', fallbackModel = '') {
+        if (!image || typeof image !== 'object') {
+            return null;
+        }
+
+        let imageUrl = image.url || '';
+        if (!imageUrl && typeof image.b64_json === 'string' && !/\[truncated \d+ chars\]/.test(image.b64_json)) {
+            imageUrl = `data:image/png;base64,${image.b64_json}`;
+        }
+
+        if (!imageUrl) {
+            return null;
+        }
+
+        return {
+            imageUrl,
+            thumbnailUrl: image.thumbnailUrl || imageUrl,
+            alt: image.alt || image.revisedPrompt || fallbackPrompt || 'Generated image',
+            revisedPrompt: image.revisedPrompt || image.revised_prompt || '',
+            prompt: fallbackPrompt,
+            model: image.model || fallbackModel || '',
+        };
+    }
+
+    normalizeSearchResult(result) {
+        if (!result || typeof result !== 'object' || !result.url) {
+            return null;
+        }
+
+        return {
+            title: result.title || result.url,
+            url: result.url,
+            snippet: result.snippet || '',
+            source: result.source || '',
+            publishedAt: result.publishedAt || '',
+        };
+    }
+
+    appendToolSelectionMessages(parentMessageId, toolEvents = []) {
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId || !parentMessageId || !Array.isArray(toolEvents) || toolEvents.length === 0) {
+            return;
+        }
+
+        const nextMessages = [];
+
+        toolEvents.forEach((event, index) => {
+            const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+            const args = this.parseToolArguments(event?.toolCall?.function?.arguments);
+            const data = event?.result?.data || {};
+
+            if (toolId === 'image-search-unsplash') {
+                const results = (Array.isArray(data.images) ? data.images : [])
+                    .map((image) => this.normalizeUnsplashResult(image))
+                    .filter(Boolean);
+
+                if (results.length === 0) {
+                    return;
+                }
+
+                nextMessages.push({
+                    id: `${parentMessageId}-unsplash-${index}`,
+                    parentMessageId,
+                    role: 'assistant',
+                    type: 'unsplash-search',
+                    content: `Unsplash options for "${data.query || args.query || 'image search'}"`,
+                    query: data.query || args.query || '',
+                    results,
+                    total: data.total || results.length,
+                    totalPages: data.totalPages || args.totalPages || 1,
+                    currentPage: args.page || 1,
+                    perPage: args.perPage || results.length || 6,
+                    orientation: args.orientation || null,
+                    timestamp: new Date().toISOString(),
+                });
+                return;
+            }
+
+            if (toolId === 'web-search') {
+                const results = (Array.isArray(data.results) ? data.results : [])
+                    .map((result) => this.normalizeSearchResult(result))
+                    .filter(Boolean);
+
+                if (results.length === 0) {
+                    return;
+                }
+
+                nextMessages.push({
+                    id: `${parentMessageId}-search-${index}`,
+                    parentMessageId,
+                    role: 'assistant',
+                    type: 'search-results',
+                    content: `Source pages for "${data.query || args.query || 'research'}"`,
+                    query: data.query || args.query || '',
+                    results,
+                    total: results.length,
+                    timestamp: new Date().toISOString(),
+                });
+                return;
+            }
+
+            if (toolId === 'image-generate') {
+                const results = (Array.isArray(data.images) ? data.images : [])
+                    .map((image) => this.normalizeGeneratedImage(image, data.prompt || args.prompt || '', data.model || ''))
+                    .filter(Boolean);
+
+                if (results.length === 0) {
+                    return;
+                }
+
+                nextMessages.push({
+                    id: `${parentMessageId}-image-${index}`,
+                    parentMessageId,
+                    role: 'assistant',
+                    type: 'image-selection',
+                    content: `Generated image options for "${data.prompt || args.prompt || 'image'}"`,
+                    prompt: data.prompt || args.prompt || '',
+                    model: data.model || '',
+                    results,
+                    timestamp: new Date().toISOString(),
+                });
+            }
+        });
+
+        if (nextMessages.length === 0) {
+            return;
+        }
+
+        nextMessages.forEach((message) => {
+            const savedMessage = this.upsertSessionMessage(sessionId, message);
+            this.renderOrReplaceMessage(savedMessage || message);
+        });
+
+        uiHelpers.scrollToBottom(false);
         this.updateSessionInfo();
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
     }
@@ -976,13 +1339,14 @@ class ChatApp {
         }
     }
 
-    handleDone() {
+    handleDone(chunk = {}) {
         if (!this.currentStreamingMessageId) return;
         
         // Reset retry counter on success
         this.retryAttempt = 0;
         
         const sessionId = sessionManager.currentSessionId;
+        const parentMessageId = this.currentStreamingMessageId;
         
         // Finalize message
         sessionManager.finalizeLastMessage(sessionId);
@@ -1001,6 +1365,10 @@ class ChatApp {
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
         this.updateSendButton();
+
+        if (Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
+            this.appendToolSelectionMessages(parentMessageId, chunk.toolEvents);
+        }
         
         // Update session info (timestamp changed)
         this.updateSessionInfo();
@@ -1223,7 +1591,7 @@ class ChatApp {
                         this.handleDelta(chunk.content);
                         break;
                     case 'done':
-                        this.handleDone();
+                        this.handleDone(chunk);
                         break;
                     case 'error':
                         if (chunk.cancelled) {

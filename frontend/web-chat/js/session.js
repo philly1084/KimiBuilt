@@ -445,6 +445,43 @@ class SessionManager extends EventTarget {
         return messageWithMeta;
     }
 
+    upsertMessage(sessionId, message) {
+        if (!message || !sessionId) {
+            return null;
+        }
+
+        if (!this.sessionMessages.has(sessionId)) {
+            this.sessionMessages.set(sessionId, []);
+        }
+
+        const messages = this.sessionMessages.get(sessionId);
+        const messageId = message.id || null;
+        const index = messageId
+            ? messages.findIndex((entry) => entry.id === messageId)
+            : -1;
+
+        if (index === -1) {
+            return this.addMessage(sessionId, message);
+        }
+
+        const mergedMessage = {
+            ...messages[index],
+            ...message,
+            id: messages[index].id,
+            timestamp: message.timestamp || messages[index].timestamp || new Date().toISOString(),
+        };
+
+        messages[index] = mergedMessage;
+
+        const session = this.sessions.find((entry) => entry.id === sessionId);
+        if (session) {
+            session.updatedAt = new Date().toISOString();
+        }
+
+        this.saveToStorage();
+        return mergedMessage;
+    }
+
     updateLastMessage(sessionId, content) {
         if (!this.sessionMessages.has(sessionId)) {
             return false;
@@ -506,6 +543,10 @@ class SessionManager extends EventTarget {
 
     getMessages(sessionId) {
         return this.sessionMessages.get(sessionId) || [];
+    }
+
+    getMessage(sessionId, messageId) {
+        return this.getMessages(sessionId).find((message) => message.id === messageId) || null;
     }
 
     getCurrentSession() {

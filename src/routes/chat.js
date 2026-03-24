@@ -151,6 +151,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     sessionId,
                     responseId: generation.responseId,
                     artifacts: generation.artifacts,
+                    toolEvents: [],
                 })}\n\n`);
                 res.end();
                 return;
@@ -161,6 +162,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 responseId: generation.responseId,
                 message: generation.assistantMessage,
                 artifacts: generation.artifacts,
+                toolEvents: [],
             });
             return;
         }
@@ -187,6 +189,18 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     transport: 'http',
                     toolManager,
                 });
+                const toolEvents = [{
+                    toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
+                    result: {
+                        success: sshResult?.success !== false,
+                        toolId: remoteToolId,
+                        duration: sshResult?.duration || 0,
+                        data: sshResult?.data,
+                        error: sshResult?.error || null,
+                        timestamp: sshResult?.timestamp || new Date().toISOString(),
+                    },
+                    reason: 'Direct SSH execution',
+                }];
                 const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
                 await sessionStore.update(sessionId, {
                     metadata: {
@@ -208,16 +222,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 await updateSessionProjectMemory(sessionId, {
                     userText: message,
                     assistantText: assistantMessage,
-                    toolEvents: [{
-                        toolCall: { function: { name: remoteToolId } },
-                        result: {
-                            success: sshResult?.success !== false,
-                            toolId: remoteToolId,
-                            data: sshResult?.data,
-                            error: sshResult?.error || null,
-                        },
-                        reason: 'Direct SSH execution',
-                    }],
+                    toolEvents,
                 });
                 completeRuntimeTask(runtimeTask?.id, {
                     responseId: `tool-ssh-${Date.now()}`,
@@ -226,22 +231,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     duration: Date.now() - startedAt,
                     metadata: {
                         directTool: remoteToolId,
-                        toolEvents: [{
-                            toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
-                            result: {
-                                success: sshResult?.success !== false,
-                                toolId: remoteToolId,
-                                duration: sshResult?.duration || 0,
-                                data: sshResult?.data,
-                                error: sshResult?.error || null,
-                                timestamp: sshResult?.timestamp || new Date().toISOString(),
-                            },
-                            reason: 'Direct SSH execution',
-                        }],
+                        toolEvents,
                     },
                 });
                 res.write(`data: ${JSON.stringify({ type: 'delta', content: assistantMessage })}\n\n`);
-                res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: null, artifacts: [] })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: null, artifacts: [], toolEvents })}\n\n`);
                 res.end();
                 return;
             }
@@ -277,6 +271,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
+                    const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
                         memoryService.rememberResponse(sessionId, fullText);
@@ -304,7 +299,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     await updateSessionProjectMemory(sessionId, {
                         userText: message,
                         assistantText: fullText,
-                        toolEvents: event.response?.metadata?.toolEvents || [],
+                        toolEvents,
                         artifacts,
                     });
                     completeRuntimeTask(runtimeTask?.id, {
@@ -314,7 +309,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         duration: Date.now() - startedAt,
                         metadata: event.response?.metadata || {},
                     });
-                    res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts, toolEvents })}\n\n`);
                 }
             }
 
@@ -331,6 +326,18 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 transport: 'http',
                 toolManager: runtimeToolManager,
             });
+            const toolEvents = [{
+                toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
+                result: {
+                    success: sshResult?.success !== false,
+                    toolId: remoteToolId,
+                    duration: sshResult?.duration || 0,
+                    data: sshResult?.data,
+                    error: sshResult?.error || null,
+                    timestamp: sshResult?.timestamp || new Date().toISOString(),
+                },
+                reason: 'Direct SSH execution',
+            }];
             const assistantMessage = formatSshToolResult(sshResult, sshContext.target);
             await sessionStore.update(sessionId, {
                 metadata: {
@@ -352,16 +359,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             await updateSessionProjectMemory(sessionId, {
                 userText: message,
                 assistantText: assistantMessage,
-                toolEvents: [{
-                    toolCall: { function: { name: remoteToolId } },
-                    result: {
-                        success: sshResult?.success !== false,
-                        toolId: remoteToolId,
-                        data: sshResult?.data,
-                        error: sshResult?.error || null,
-                    },
-                    reason: 'Direct SSH execution',
-                }],
+                toolEvents,
             });
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: `tool-ssh-${Date.now()}`,
@@ -370,18 +368,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 duration: Date.now() - startedAt,
                 metadata: {
                     directTool: remoteToolId,
-                    toolEvents: [{
-                        toolCall: { function: { name: remoteToolId, arguments: JSON.stringify(sshContext.directParams || {}) } },
-                        result: {
-                            success: sshResult?.success !== false,
-                            toolId: remoteToolId,
-                            duration: sshResult?.duration || 0,
-                            data: sshResult?.data,
-                            error: sshResult?.error || null,
-                            timestamp: sshResult?.timestamp || new Date().toISOString(),
-                        },
-                        reason: 'Direct SSH execution',
-                    }],
+                    toolEvents,
                 },
             });
             res.json({
@@ -389,6 +376,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 responseId: null,
                 message: assistantMessage,
                 artifacts: [],
+                toolEvents,
             });
             return;
         }
@@ -465,6 +453,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             responseId: response.id,
             message: outputText,
             artifacts,
+            toolEvents: response?.metadata?.toolEvents || [],
         });
     } catch (err) {
         failRuntimeTask(runtimeTask?.id, {

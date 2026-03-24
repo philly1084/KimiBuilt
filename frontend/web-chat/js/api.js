@@ -160,6 +160,31 @@ class OpenAIAPIClient extends EventTarget {
         return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
     }
 
+    extractToolEvents(payload = {}) {
+        if (!payload || typeof payload !== 'object') {
+            return [];
+        }
+
+        if (Array.isArray(payload.toolEvents)) {
+            return payload.toolEvents;
+        }
+
+        if (Array.isArray(payload.tool_events)) {
+            return payload.tool_events;
+        }
+
+        const message = payload.choices?.[0]?.message || {};
+        if (Array.isArray(message.toolEvents)) {
+            return message.toolEvents;
+        }
+
+        if (Array.isArray(message.tool_events)) {
+            return message.tool_events;
+        }
+
+        return [];
+    }
+
     /**
      * Parse error response to get user-friendly message
      */
@@ -302,6 +327,7 @@ class OpenAIAPIClient extends EventTarget {
                 let pendingDone = {
                     sessionId: this.currentSessionId,
                     artifacts: [],
+                    toolEvents: [],
                 };
                 
                 try {
@@ -321,6 +347,7 @@ class OpenAIAPIClient extends EventTarget {
                                         type: 'done',
                                         sessionId: pendingDone.sessionId || this.currentSessionId,
                                         artifacts: pendingDone.artifacts || [],
+                                        toolEvents: pendingDone.toolEvents || [],
                                     };
                                     return;
                                 }
@@ -341,11 +368,17 @@ class OpenAIAPIClient extends EventTarget {
                                         pendingDone.artifacts = parsed.artifacts;
                                     }
 
+                                    const toolEvents = this.extractToolEvents(parsed);
+                                    if (toolEvents.length > 0) {
+                                        pendingDone.toolEvents = toolEvents;
+                                    }
+
                                     if (parsed.type === 'done') {
                                         yield {
                                             type: 'done',
                                             sessionId: pendingDone.sessionId || this.currentSessionId,
                                             artifacts: pendingDone.artifacts || [],
+                                            toolEvents: pendingDone.toolEvents || [],
                                         };
                                         return;
                                     }
@@ -361,6 +394,7 @@ class OpenAIAPIClient extends EventTarget {
                                             type: 'done',
                                             sessionId: pendingDone.sessionId || this.currentSessionId,
                                             artifacts: pendingDone.artifacts || [],
+                                            toolEvents: pendingDone.toolEvents || [],
                                         };
                                         return;
                                     }
@@ -385,6 +419,7 @@ class OpenAIAPIClient extends EventTarget {
                     type: 'done',
                     sessionId: pendingDone.sessionId || this.currentSessionId,
                     artifacts: pendingDone.artifacts || [],
+                    toolEvents: pendingDone.toolEvents || [],
                 };
                 return;
                 
@@ -449,13 +484,14 @@ class OpenAIAPIClient extends EventTarget {
                     yield {
                         type: 'done',
                         sessionId: this.currentSessionId,
+                        toolEvents: this.extractToolEvents(chunk),
                     };
                     return;
                 }
             }
             
             // Ensure we always send done
-            yield { type: 'done', sessionId: this.currentSessionId };
+            yield { type: 'done', sessionId: this.currentSessionId, toolEvents: [] };
         } catch (error) {
             if (error.name === 'AbortError') {
                 yield { type: 'error', error: 'Request cancelled', cancelled: true };
@@ -463,7 +499,7 @@ class OpenAIAPIClient extends EventTarget {
                 const message = this.parseErrorMessage(error);
                 yield { type: 'error', error: message };
             }
-            yield { type: 'done', sessionId: this.currentSessionId };
+            yield { type: 'done', sessionId: this.currentSessionId, toolEvents: [] };
         }
     }
 
@@ -528,12 +564,14 @@ class OpenAIAPIClient extends EventTarget {
             return {
                 content: response.choices[0]?.message?.content || '',
                 sessionId: this.currentSessionId,
+                toolEvents: this.extractToolEvents(response),
             };
         } catch (error) {
             console.error('Chat error:', error);
             return {
                 content: `[Error: ${this.parseErrorMessage(error)}]`,
                 sessionId: this.currentSessionId,
+                toolEvents: [],
                 error: true
             };
         }
@@ -575,6 +613,7 @@ class OpenAIAPIClient extends EventTarget {
                 return {
                     content: data.choices?.[0]?.message?.content || '',
                     sessionId: this.currentSessionId,
+                    toolEvents: this.extractToolEvents(data),
                 };
             } catch (error) {
                 lastError = error;

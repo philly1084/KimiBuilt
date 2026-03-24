@@ -395,6 +395,18 @@ class UIHelpers {
     // ============================================
 
     renderMessage(message, isStreaming = false) {
+        if (message.type === 'unsplash-search') {
+            return this.renderUnsplashSearchMessage(message);
+        }
+
+        if (message.type === 'search-results') {
+            return this.renderSearchResultsMessage(message);
+        }
+
+        if (message.type === 'image-selection') {
+            return this.renderImageSelectionMessage(message);
+        }
+
         // Handle image messages
         if (message.type === 'image' || message.imageUrl) {
             return this.renderImageMessage(message);
@@ -617,6 +629,8 @@ class UIHelpers {
         const query = message.query;
         const results = message.results || [];
         const total = message.total || 0;
+        const currentPage = Math.max(1, Number(message.currentPage) || 1);
+        const totalPages = Math.max(1, Number(message.totalPages) || 1);
         const error = message.error;
         
         const messageEl = document.createElement('div');
@@ -651,21 +665,37 @@ class UIHelpers {
                     </div>
                     <div class="unsplash-results-grid">
                         ${results.map((image, index) => `
-                            <div class="unsplash-result-item" 
-                                 onclick="app.selectUnsplashImage('${messageId}', ${JSON.stringify(this.escapeHtmlForJSON(image)).replace(/"/g, '&quot;')})"
-                                 role="button"
-                                 tabindex="0"
-                                 aria-label="Select image by ${image.author ? image.author.name : 'Unknown'}"
-                                 title="Photo by ${image.author ? image.author.name : 'Unknown'} - Click to select">
-                                <img src="${image.urls.small}" 
+                            <button type="button"
+                                 class="unsplash-result-item"
+                                 onclick="app.selectUnsplashImage('${messageId}', ${index})"
+                                 aria-label="${this.escapeHtmlAttr(`Select image by ${image.author ? image.author.name : 'Unknown'}`)}"
+                                 title="${this.escapeHtmlAttr(`Photo by ${image.author ? image.author.name : 'Unknown'} - Click to select`)}">
+                                <img src="${this.escapeHtmlAttr(image.urls.small)}"
                                      alt="${this.escapeHtmlAttr(image.altDescription || image.description || 'Unsplash image')}" 
                                      loading="lazy">
                                 <div class="unsplash-result-overlay">
                                     <span class="unsplash-result-author">${image.author ? this.escapeHtml(image.author.name) : 'Unknown'}</span>
                                 </div>
-                            </div>
+                            </button>
                         `).join('')}
                     </div>
+                    ${totalPages > 1 ? `
+                    <div class="selection-pagination">
+                        <button type="button"
+                            class="selection-action-btn"
+                            onclick="app.loadUnsplashPage('${messageId}', ${currentPage - 1})"
+                            ${currentPage <= 1 ? 'disabled' : ''}>
+                            Previous
+                        </button>
+                        <span class="selection-pagination-label">Page ${currentPage} of ${totalPages}</span>
+                        <button type="button"
+                            class="selection-action-btn"
+                            onclick="app.loadUnsplashPage('${messageId}', ${currentPage + 1})"
+                            ${currentPage >= totalPages ? 'disabled' : ''}>
+                            Next
+                        </button>
+                    </div>
+                    ` : ''}
                 </div>
             `;
         } else {
@@ -702,6 +732,156 @@ class UIHelpers {
         return messageEl;
     }
 
+    formatToolResultDate(value) {
+        if (!value) {
+            return '';
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+
+        return date.toLocaleDateString();
+    }
+
+    renderSearchResultsMessage(message) {
+        const messageId = message.id || this.generateMessageId();
+        const time = this.formatTime(message.timestamp);
+        const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
+        const query = message.query || '';
+        const results = Array.isArray(message.results) ? message.results : [];
+
+        const messageEl = document.createElement('div');
+        messageEl.className = 'message assistant';
+        messageEl.id = messageId;
+        messageEl.dataset.messageId = messageId;
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', 'Search result choices');
+
+        const contentHtml = results.length > 0
+            ? `
+                <div class="search-results-list">
+                    ${results.map((result, index) => `
+                        <div class="search-result-card">
+                            <div class="search-result-topline">
+                                <div class="search-result-title">${this.escapeHtml(result.title || result.url)}</div>
+                                <div class="search-result-meta">
+                                    ${result.source ? `<span>${this.escapeHtml(result.source)}</span>` : ''}
+                                    ${this.formatToolResultDate(result.publishedAt) ? `<span>${this.escapeHtml(this.formatToolResultDate(result.publishedAt))}</span>` : ''}
+                                </div>
+                            </div>
+                            <a class="search-result-url" href="${this.escapeHtmlAttr(result.url)}" target="_blank" rel="noopener noreferrer nofollow">${this.escapeHtml(result.url)}</a>
+                            ${result.snippet ? `<p class="search-result-snippet">${this.escapeHtml(result.snippet)}</p>` : ''}
+                            <div class="search-result-actions">
+                                <button type="button" class="selection-action-btn primary" onclick="app.useSearchResult('${messageId}', ${index})">
+                                    Use This Page
+                                </button>
+                                <button type="button" class="selection-action-btn" onclick="app.openSearchResult('${messageId}', ${index})">
+                                    Open
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `
+            : `
+                <div class="unsplash-search-empty">
+                    <i data-lucide="search-x" class="w-8 h-8" aria-hidden="true"></i>
+                    <p>No source pages were returned.</p>
+                </div>
+            `;
+
+        messageEl.innerHTML = `
+            <div class="message-avatar assistant" aria-hidden="true">
+                <i data-lucide="globe" class="w-4 h-4"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-author">Source Pages</span>
+                    <span class="message-time" title="${fullTimestamp}">${time}</span>
+                </div>
+                <div class="message-selection-panel">
+                    <div class="selection-panel-info">
+                        <div class="icon" aria-hidden="true">
+                            <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+                        </div>
+                        <span class="text">Choose a page</span>
+                        <span class="meta">${results.length} options</span>
+                    </div>
+                    ${query ? `<p class="selection-panel-query">"${this.escapeHtml(query)}"</p>` : ''}
+                    ${contentHtml}
+                </div>
+            </div>
+        `;
+
+        return messageEl;
+    }
+
+    renderImageSelectionMessage(message) {
+        const messageId = message.id || this.generateMessageId();
+        const time = this.formatTime(message.timestamp);
+        const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
+        const prompt = message.prompt || '';
+        const results = Array.isArray(message.results) ? message.results : [];
+        const model = message.model || '';
+
+        const messageEl = document.createElement('div');
+        messageEl.className = 'message assistant';
+        messageEl.id = messageId;
+        messageEl.dataset.messageId = messageId;
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', 'Generated image choices');
+
+        const contentHtml = results.length > 0
+            ? `
+                <div class="image-selection-grid">
+                    ${results.map((image, index) => `
+                        <button type="button"
+                            class="image-selection-item"
+                            onclick="app.selectGeneratedImage('${messageId}', ${index})"
+                            aria-label="Add generated image ${index + 1} to the conversation">
+                            <img src="${this.escapeHtmlAttr(image.thumbnailUrl || image.imageUrl)}"
+                                alt="${this.escapeHtmlAttr(image.alt || prompt || 'Generated image')}"
+                                loading="lazy">
+                            <span class="image-selection-overlay">Add To Chat</span>
+                        </button>
+                    `).join('')}
+                </div>
+            `
+            : `
+                <div class="unsplash-search-empty">
+                    <i data-lucide="image-off" class="w-8 h-8" aria-hidden="true"></i>
+                    <p>No generated image options were returned.</p>
+                </div>
+            `;
+
+        messageEl.innerHTML = `
+            <div class="message-avatar assistant" aria-hidden="true">
+                <i data-lucide="image-plus" class="w-4 h-4"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-author">Image Options</span>
+                    <span class="message-time" title="${fullTimestamp}">${time}</span>
+                </div>
+                <div class="message-selection-panel">
+                    <div class="selection-panel-info">
+                        <div class="icon accent-purple" aria-hidden="true">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                        </div>
+                        <span class="text">Choose an image</span>
+                        <span class="meta">${model || `${results.length} options`}</span>
+                    </div>
+                    ${prompt ? `<p class="selection-panel-query">"${this.escapeHtml(prompt)}"</p>` : ''}
+                    ${contentHtml}
+                </div>
+            </div>
+        `;
+
+        return messageEl;
+    }
+
     /**
      * Update an Unsplash search message with results or error
      * @param {string} messageId - The message ID to update
@@ -716,12 +896,18 @@ class UIHelpers {
             id: messageId,
             role: 'assistant',
             type: 'unsplash-search',
+            content: data.content,
             query: data.query,
-            isLoading: false,
+            isLoading: Boolean(data.isLoading),
+            loadingText: data.loadingText,
             results: data.results,
             total: data.total,
+            totalPages: data.totalPages,
+            currentPage: data.currentPage,
+            perPage: data.perPage,
+            orientation: data.orientation,
             error: data.error,
-            timestamp: new Date().toISOString()
+            timestamp: data.timestamp || new Date().toISOString()
         };
         
         const newEl = this.renderUnsplashSearchMessage(newMessage);
