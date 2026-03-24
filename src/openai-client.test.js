@@ -147,6 +147,69 @@ function createToolManager() {
                 },
             },
         }],
+        ['architecture-design', {
+            id: 'architecture-design',
+            name: 'Architecture Designer',
+            description: 'Generate architecture designs',
+            inputSchema: {
+                type: 'object',
+                required: ['requirements'],
+                properties: {
+                    requirements: { type: 'string' },
+                },
+            },
+        }],
+        ['uml-generate', {
+            id: 'uml-generate',
+            name: 'UML Generator',
+            description: 'Generate UML diagrams',
+            inputSchema: {
+                type: 'object',
+                required: ['source'],
+                properties: {
+                    source: { type: 'string' },
+                    type: { type: 'string' },
+                },
+            },
+        }],
+        ['api-design', {
+            id: 'api-design',
+            name: 'API Designer',
+            description: 'Design API contracts',
+            inputSchema: {
+                type: 'object',
+                required: ['name', 'resources'],
+                properties: {
+                    name: { type: 'string' },
+                    resources: { type: 'array' },
+                },
+            },
+        }],
+        ['schema-generate', {
+            id: 'schema-generate',
+            name: 'Schema Generator',
+            description: 'Generate database schemas',
+            inputSchema: {
+                type: 'object',
+                required: ['entities'],
+                properties: {
+                    entities: { type: 'array' },
+                },
+            },
+        }],
+        ['migration-create', {
+            id: 'migration-create',
+            name: 'Migration Generator',
+            description: 'Generate schema migrations',
+            inputSchema: {
+                type: 'object',
+                required: ['from', 'to'],
+                properties: {
+                    from: { type: 'object' },
+                    to: { type: 'object' },
+                },
+            },
+        }],
         ['ssh-execute', {
             id: 'ssh-execute',
             name: 'SSH Command',
@@ -187,6 +250,11 @@ function createToolManager() {
         ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'] }],
         ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'] }],
         ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'] }],
+        ['architecture-design', { enabled: true, triggerPatterns: ['design architecture', 'system design'] }],
+        ['uml-generate', { enabled: true, triggerPatterns: ['generate uml', 'class diagram'] }],
+        ['api-design', { enabled: true, triggerPatterns: ['design api', 'openapi'] }],
+        ['schema-generate', { enabled: true, triggerPatterns: ['database schema', 'generate ddl'] }],
+        ['migration-create', { enabled: true, triggerPatterns: ['create migration', 'schema migration'] }],
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'] }],
         ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'] }],
     ]);
@@ -393,6 +461,26 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).toEqual(expect.arrayContaining([
             'image-search-unsplash',
             'image-from-url',
+        ]));
+    });
+
+    test('selects promoted architecture, api, schema, and migration tools for matching prompts', () => {
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Design the system architecture, produce an OpenAPI spec, generate a database schema, and create a migration.',
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Design the system architecture, produce an OpenAPI spec, generate a database schema, and create a migration.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(expect.arrayContaining([
+            'architecture-design',
+            'api-design',
+            'schema-generate',
+            'migration-create',
         ]));
     });
 

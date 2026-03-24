@@ -11,63 +11,16 @@ const {
     buildProjectMemoryUpdate,
     mergeProjectMemory,
 } = require('./project-memory');
-
-const DEFAULT_EXECUTION_PROFILE = 'default';
-const NOTES_EXECUTION_PROFILE = 'notes';
-const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
+const {
+    DEFAULT_EXECUTION_PROFILE,
+    NOTES_EXECUTION_PROFILE,
+    REMOTE_BUILD_EXECUTION_PROFILE,
+    PROFILE_TOOL_ALLOWLISTS,
+} = require('./tool-execution-profiles');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = 12000;
 const RECENT_TRANSCRIPT_LIMIT = 12;
-
-const PROFILE_TOOL_ALLOWLISTS = {
-    [DEFAULT_EXECUTION_PROFILE]: [
-        'web-search',
-        'web-fetch',
-        'web-scrape',
-        'image-generate',
-        'image-search-unsplash',
-        'image-from-url',
-        'file-read',
-        'file-write',
-        'file-search',
-        'file-mkdir',
-        'tool-doc-read',
-    ],
-    [NOTES_EXECUTION_PROFILE]: [
-        'ssh-execute',
-        'remote-command',
-        'docker-exec',
-        'web-search',
-        'web-fetch',
-        'web-scrape',
-        'image-generate',
-        'image-search-unsplash',
-        'image-from-url',
-        'file-read',
-        'file-write',
-        'file-search',
-        'file-mkdir',
-        'tool-doc-read',
-    ],
-    [REMOTE_BUILD_EXECUTION_PROFILE]: [
-        'ssh-execute',
-        'remote-command',
-        'docker-exec',
-        'web-search',
-        'web-fetch',
-        'web-scrape',
-        'image-generate',
-        'image-search-unsplash',
-        'image-from-url',
-        'file-read',
-        'file-write',
-        'file-search',
-        'file-mkdir',
-        'code-sandbox',
-        'tool-doc-read',
-    ],
-};
 
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -352,6 +305,60 @@ function hasExplicitLocalSandboxIntent(text = '') {
 
     return /\b(run|execute|test)\b[\s\S]{0,40}\b(code|script|snippet)\b/.test(normalized)
         || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
+}
+
+function hasArchitectureDesignIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(architecture|system design|service diagram|deployment diagram|architecture diagram|design the system)\b/.test(normalized);
+}
+
+function hasUmlDiagramIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(uml|class diagram|sequence diagram|activity diagram|use ?case diagram|state diagram|component diagram)\b/.test(normalized);
+}
+
+function hasApiDesignIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/.test(normalized);
+}
+
+function hasSchemaDesignIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/.test(normalized);
+}
+
+function hasMigrationIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/.test(normalized);
+}
+
+function hasSecurityScanIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(security|vulnerab|audit|scan|secret)\b/.test(normalized);
 }
 
 function canRecoverFromInvalidRuntimeResponse({ output = '', toolEvents = [], toolPolicy = {} } = {}) {
@@ -998,6 +1005,12 @@ class ConversationOrchestrator extends EventEmitter {
         const hasUnsplashIntent = /\bunsplash\b/.test(prompt);
         const hasImageUrlIntent = hasImageIntent && /\b(url|link)\b/.test(prompt);
         const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(prompt);
+        const hasArchitectureIntent = hasArchitectureDesignIntent(prompt);
+        const hasUmlIntent = hasUmlDiagramIntent(prompt);
+        const hasApiIntent = hasApiDesignIntent(prompt);
+        const hasSchemaIntent = hasSchemaDesignIntent(prompt);
+        const hasMigrationChangeIntent = hasMigrationIntent(prompt);
+        const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
@@ -1022,6 +1035,24 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (allowedToolIds.includes('code-sandbox') && hasExplicitLocalSandboxIntent(prompt)) {
                 candidates.add('code-sandbox');
+            }
+            if (hasArchitectureIntent && allowedToolIds.includes('architecture-design')) {
+                candidates.add('architecture-design');
+            }
+            if (hasUmlIntent && allowedToolIds.includes('uml-generate')) {
+                candidates.add('uml-generate');
+            }
+            if (hasApiIntent && allowedToolIds.includes('api-design')) {
+                candidates.add('api-design');
+            }
+            if (hasSchemaIntent && allowedToolIds.includes('schema-generate')) {
+                candidates.add('schema-generate');
+            }
+            if (hasMigrationChangeIntent && allowedToolIds.includes('migration-create')) {
+                candidates.add('migration-create');
+            }
+            if (hasSecurityIntent && allowedToolIds.includes('security-scan')) {
+                candidates.add('security-scan');
             }
             if (hasImageIntent && allowedToolIds.includes('image-generate')) {
                 candidates.add('image-generate');
@@ -1087,6 +1118,24 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/.test(prompt) && allowedToolIds.includes('tool-doc-read')) {
                 candidates.add('tool-doc-read');
+            }
+            if (hasArchitectureIntent && allowedToolIds.includes('architecture-design')) {
+                candidates.add('architecture-design');
+            }
+            if (hasUmlIntent && allowedToolIds.includes('uml-generate')) {
+                candidates.add('uml-generate');
+            }
+            if (hasApiIntent && allowedToolIds.includes('api-design')) {
+                candidates.add('api-design');
+            }
+            if (hasSchemaIntent && allowedToolIds.includes('schema-generate')) {
+                candidates.add('schema-generate');
+            }
+            if (hasMigrationChangeIntent && allowedToolIds.includes('migration-create')) {
+                candidates.add('migration-create');
+            }
+            if (hasSecurityIntent && allowedToolIds.includes('security-scan')) {
+                candidates.add('security-scan');
             }
         }
 
@@ -1518,6 +1567,30 @@ class ConversationOrchestrator extends EventEmitter {
         if (allowedToolIds.length > 0) {
             parts.push(`Runtime-available tools for this request: ${allowedToolIds.join(', ')}.`);
             parts.push('Do not claim tools are unavailable if they are listed as runtime-available tools.');
+        }
+
+        if (allowedToolIds.includes('architecture-design')) {
+            parts.push('Use `architecture-design` when the user asks for architecture recommendations, system design, or deployment/component overviews.');
+        }
+
+        if (allowedToolIds.includes('uml-generate')) {
+            parts.push('Use `uml-generate` for class, sequence, activity, component, or state diagrams instead of hand-writing ad hoc diagram syntax.');
+        }
+
+        if (allowedToolIds.includes('api-design')) {
+            parts.push('Use `api-design` for REST, OpenAPI, GraphQL, or gRPC contract design work.');
+        }
+
+        if (allowedToolIds.includes('schema-generate')) {
+            parts.push('Use `schema-generate` for DDL, ORM schema generation, or ER-style database design output.');
+        }
+
+        if (allowedToolIds.includes('migration-create')) {
+            parts.push('Use `migration-create` when the user asks for schema diffs or migration up/down scripts.');
+        }
+
+        if (allowedToolIds.includes('security-scan')) {
+            parts.push('Use `security-scan` for code audits, secret detection, and vulnerability checks when code is available in the request.');
         }
 
         if (toolEvents.length > 0) {

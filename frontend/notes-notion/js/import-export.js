@@ -1392,6 +1392,108 @@ const ImportExport = (function() {
         return 'plain';
     }
 
+    function parseMarkdownImageDestination(destination = '') {
+        let value = String(destination || '').trim();
+        if (!value) {
+            return { url: '', title: '' };
+        }
+
+        if (/^<[^>]+>$/.test(value)) {
+            value = value.slice(1, -1).trim();
+        }
+
+        let title = '';
+        const titleMatch = value.match(/\s+(["'])(.*?)\1\s*$/);
+        if (titleMatch) {
+            title = titleMatch[2].trim();
+            value = value.slice(0, titleMatch.index).trim();
+        }
+
+        return {
+            url: value,
+            title
+        };
+    }
+
+    function buildBlockFromMarkdownImage(altText = '', destination = '') {
+        const { url, title } = parseMarkdownImageDestination(destination);
+        if (!/^https?:\/\//i.test(url)) {
+            return null;
+        }
+
+        const normalizedAlt = String(altText || '').trim();
+        const normalizedTitle = String(title || '').trim();
+        const isExplicitAIImage = /^ai(?:\s+image)?:\s*/i.test(normalizedAlt);
+        const promptText = normalizedAlt.replace(/^ai(?:\s+image)?:\s*/i, '').trim();
+        const caption = promptText || normalizedAlt || normalizedTitle;
+        let hostname = '';
+
+        try {
+            hostname = new URL(url).hostname;
+        } catch (_error) {
+            hostname = '';
+        }
+
+        if (isExplicitAIImage || /(?:^|\.)unsplash\.com$/i.test(hostname)) {
+            return Blocks.createBlock('ai_image', {
+                prompt: caption || (isExplicitAIImage ? 'AI image' : 'Unsplash image'),
+                caption: normalizedTitle || caption || '',
+                imageUrl: url,
+                model: null,
+                size: isExplicitAIImage ? '1024x1024' : '1536x1024',
+                quality: 'standard',
+                style: isExplicitAIImage ? 'vivid' : 'natural',
+                source: isExplicitAIImage ? 'ai' : 'unsplash',
+                status: 'done',
+                unsplashResults: null,
+                selectedUnsplashId: null,
+                unsplashPhotographer: null,
+                unsplashPhotographerUrl: null,
+                imageAssetId: null
+            });
+        }
+
+        return Blocks.createBlock('image', {
+            url,
+            caption: normalizedAlt || normalizedTitle || ''
+        });
+    }
+
+    function extractMarkdownImageBlocksFromLine(line = '') {
+        const source = String(line || '').trim();
+        if (!source.startsWith('![')) {
+            return [];
+        }
+
+        const matches = [...source.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)];
+        if (matches.length === 0) {
+            return [];
+        }
+
+        let cursor = 0;
+        const blocks = [];
+
+        for (const match of matches) {
+            if (source.slice(cursor, match.index).trim()) {
+                return [];
+            }
+
+            const block = buildBlockFromMarkdownImage(match[1], match[2]);
+            if (!block) {
+                return [];
+            }
+
+            blocks.push(block);
+            cursor = match.index + match[0].length;
+        }
+
+        if (source.slice(cursor).trim()) {
+            return [];
+        }
+
+        return blocks;
+    }
+
     /**
      * Import from Markdown
      */
@@ -1445,6 +1547,12 @@ const ImportExport = (function() {
 
             if (inCodeBlock) {
                 codeBlock += (codeBlock ? '\n' : '') + line;
+                return;
+            }
+
+            const markdownImageBlocks = extractMarkdownImageBlocksFromLine(line);
+            if (markdownImageBlocks.length > 0) {
+                page.blocks.push(...markdownImageBlocks);
                 return;
             }
 

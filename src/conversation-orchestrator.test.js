@@ -830,4 +830,65 @@ describe('ConversationOrchestrator', () => {
         expect(unsplashPolicy.candidateToolIds).toContain('image-search-unsplash');
         expect(urlPolicy.candidateToolIds).toContain('image-from-url');
     });
+
+    test('promotes security, design, and database tools into the default execution profile', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    [
+                        'security-scan',
+                        'architecture-design',
+                        'uml-generate',
+                        'api-design',
+                        'schema-generate',
+                        'migration-create',
+                    ].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const securityPolicy = orchestrator.buildToolPolicy({
+            objective: 'Run a security audit on this code.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const architecturePolicy = orchestrator.buildToolPolicy({
+            objective: 'Design the system architecture for a multi-tenant SaaS app.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const umlPolicy = orchestrator.buildToolPolicy({
+            objective: 'Generate a UML class diagram for these services.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const apiPolicy = orchestrator.buildToolPolicy({
+            objective: 'Create an OpenAPI design for the billing API.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const schemaPolicy = orchestrator.buildToolPolicy({
+            objective: 'Generate a database schema and DDL for orders and invoices.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const migrationPolicy = orchestrator.buildToolPolicy({
+            objective: 'Create a migration for the schema change.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(securityPolicy.candidateToolIds).toContain('security-scan');
+        expect(architecturePolicy.candidateToolIds).toContain('architecture-design');
+        expect(umlPolicy.candidateToolIds).toContain('uml-generate');
+        expect(apiPolicy.candidateToolIds).toContain('api-design');
+        expect(schemaPolicy.candidateToolIds).toContain('schema-generate');
+        expect(migrationPolicy.candidateToolIds).toContain('migration-create');
+    });
 });

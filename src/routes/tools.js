@@ -12,59 +12,15 @@ const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { inferExecutionProfile } = require('../runtime-execution');
+const {
+  DEFAULT_EXECUTION_PROFILE,
+  NOTES_EXECUTION_PROFILE,
+  REMOTE_BUILD_EXECUTION_PROFILE,
+  HIDDEN_FRONTEND_TOOL_IDS,
+  getAllowedToolIdsForProfile,
+} = require('../tool-execution-profiles');
 
 const registry = getUnifiedRegistry();
-const DEFAULT_EXECUTION_PROFILE = 'default';
-const NOTES_EXECUTION_PROFILE = 'notes';
-const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
-const PROFILE_TOOL_ALLOWLISTS = {
-  [DEFAULT_EXECUTION_PROFILE]: new Set([
-    'web-search',
-    'web-fetch',
-    'web-scrape',
-    'image-generate',
-    'image-search-unsplash',
-    'image-from-url',
-    'file-read',
-    'file-write',
-    'file-search',
-    'file-mkdir',
-    'tool-doc-read',
-  ]),
-  [NOTES_EXECUTION_PROFILE]: new Set([
-    'ssh-execute',
-    'remote-command',
-    'docker-exec',
-    'web-search',
-    'web-fetch',
-    'web-scrape',
-    'image-generate',
-    'image-search-unsplash',
-    'image-from-url',
-    'file-read',
-    'file-write',
-    'file-search',
-    'file-mkdir',
-    'tool-doc-read',
-  ]),
-  [REMOTE_BUILD_EXECUTION_PROFILE]: new Set([
-    'ssh-execute',
-    'remote-command',
-    'docker-exec',
-    'web-search',
-    'web-fetch',
-    'web-scrape',
-    'image-generate',
-    'image-search-unsplash',
-    'image-from-url',
-    'file-read',
-    'file-write',
-    'file-search',
-    'file-mkdir',
-    'code-sandbox',
-    'tool-doc-read',
-  ]),
-};
 
 async function ensureToolManagerInitialized() {
   const toolManager = getToolManager();
@@ -131,6 +87,14 @@ function buildToolRuntime(toolId) {
     };
   }
 
+  if (toolId === 'code-sandbox') {
+    return {
+      configured: Boolean(process.env.DOCKER_HOST),
+      provider: 'docker',
+      dockerHost: process.env.DOCKER_HOST || '',
+    };
+  }
+
   if (toolId === 'web-search') {
     return {
       configured: Boolean(process.env.PERPLEXITY_API_KEY),
@@ -140,9 +104,9 @@ function buildToolRuntime(toolId) {
 
   if (toolId === 'image-generate') {
     return {
-      configured: Boolean(process.env.OPENAI_API_KEY),
-      provider: process.env.OPENAI_BASE_URL ? 'gateway' : 'openai',
-      model: process.env.OPENAI_MEDIA_IMAGE_MODEL || process.env.OPENAI_IMAGE_MODEL || '',
+      configured: Boolean(config.media.apiKey || config.openai.apiKey),
+      provider: config.media.apiKey ? 'official-openai' : (config.openai.baseURL ? 'gateway' : 'openai'),
+      model: config.media.imageModel || config.openai.imageModel || '',
     };
   }
 
@@ -160,7 +124,87 @@ function buildToolRuntime(toolId) {
     };
   }
 
+  if ([
+    'web-fetch',
+    'web-scrape',
+    'file-read',
+    'file-write',
+    'file-search',
+    'file-mkdir',
+    'tool-doc-read',
+    'security-scan',
+    'architecture-design',
+    'uml-generate',
+    'api-design',
+    'schema-generate',
+    'migration-create',
+  ].includes(toolId)) {
+    return {
+      configured: true,
+      provider: 'local',
+    };
+  }
+
   return null;
+}
+
+function isToolVisibleByRuntime(toolId, runtime = null, support = null) {
+  if (HIDDEN_FRONTEND_TOOL_IDS.includes(toolId)) {
+    return false;
+  }
+
+  if (['docker-exec', 'code-sandbox'].includes(toolId)) {
+    return Boolean(support?.runtime?.ready || runtime?.configured);
+  }
+
+  if (['web-search', 'image-generate', 'image-search-unsplash'].includes(toolId)) {
+    return Boolean(runtime?.configured);
+  }
+
+  return true;
+}
+
+async function buildFrontendToolCatalog({ req, category = null, sessionId = null, includeAllTools = false }) {
+  const toolManager = await ensureToolManagerInitialized();
+  const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
+  const allowedToolIds = getAllowedToolIdsForProfile(executionProfile);
+
+  const manifestTools = registry.getFrontendTools()
+    .filter((tool) => !HIDDEN_FRONTEND_TOOL_IDS.includes(tool.id));
+
+  const enrichedTools = await Promise.all(manifestTools.map(async (tool) => {
+    const runtime = buildToolRuntime(tool.id);
+    const docMetadata = await getToolDocMetadata(tool.id);
+    const availableInExecutionProfile = allowedToolIds.includes(tool.id);
+    const runtimeVisible = isToolVisibleByRuntime(tool.id, runtime, docMetadata.support);
+
+    return {
+      ...tool,
+      runtime,
+      availableInExecutionProfile,
+      runtimeVisible,
+      ...docMetadata,
+    };
+  }));
+
+  const filteredTools = enrichedTools.filter((tool) => {
+    if (category && category !== 'all' && tool.category !== category) {
+      return false;
+    }
+
+    if (includeAllTools) {
+      return true;
+    }
+
+    return tool.availableInExecutionProfile && tool.runtimeVisible;
+  });
+
+  return {
+    toolManager,
+    executionProfile,
+    includeAllTools,
+    tools: filteredTools,
+  };
 }
 
 function buildToolExecutionContext(toolManager, req, sessionId = null) {
@@ -272,29 +316,25 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
  */
 router.get('/available', async (req, res) => {
   try {
-    const toolManager = await ensureToolManagerInitialized();
     const { category, sessionId } = req.query;
     const includeAllTools = ['1', 'true', 'yes'].includes(String(req.query?.includeAll || '').trim().toLowerCase());
-    const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
-    
-    let tools = registry.getFrontendTools();
-    
-    if (category && category !== 'all') {
-      tools = tools.filter(t => t.category === category);
-    }
-    
-    const enrichedTools = await Promise.all(tools.map(async (tool) => ({
-      ...tool,
-      runtime: buildToolRuntime(tool.id),
-      ...(await getToolDocMetadata(tool.id)),
-    })));
+    const {
+      toolManager,
+      executionProfile,
+      tools,
+    } = await buildFrontendToolCatalog({
+      req,
+      category,
+      sessionId,
+      includeAllTools,
+    });
 
     res.json({
       success: true,
-      data: enrichedTools,
+      data: tools,
       meta: {
-        total: enrichedTools.length,
-        categories: [...new Set(enrichedTools.map(t => t.category))],
+        total: tools.length,
+        categories: [...new Set(tools.map(t => t.category))],
         executionProfile,
         includeAllTools,
         runtime: buildRuntimeSummary(toolManager),
@@ -312,10 +352,15 @@ router.get('/available', async (req, res) => {
  */
 router.get('/categories', async (req, res) => {
   try {
-    await ensureToolManagerInitialized();
-    const categories = registry.getCategories();
-    const tools = registry.getFrontendTools();
-    
+    const { sessionId } = req.query;
+    const includeAllTools = ['1', 'true', 'yes'].includes(String(req.query?.includeAll || '').trim().toLowerCase());
+    const { executionProfile, tools } = await buildFrontendToolCatalog({
+      req,
+      sessionId,
+      includeAllTools,
+    });
+    const categories = [...new Set(tools.map((tool) => tool.category))];
+
     const result = categories.map(cat => ({
       id: cat,
       name: cat.charAt(0).toUpperCase() + cat.slice(1),
@@ -323,7 +368,14 @@ router.get('/categories', async (req, res) => {
       icon: getCategoryIcon(cat)
     }));
     
-    res.json({ success: true, data: result });
+    res.json({
+      success: true,
+      data: result,
+      meta: {
+        executionProfile,
+        includeAllTools,
+      },
+    });
   } catch (error) {
     console.error('Error getting categories:', error);
     res.status(500).json({ success: false, error: error.message });

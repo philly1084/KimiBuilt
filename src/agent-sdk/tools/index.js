@@ -353,7 +353,7 @@ class ToolManager {
           requiresConfirmation: true
         },
         frontend: {
-          exposeToFrontend: true,
+          exposeToFrontend: false,
           icon: 'code',
           uiComponent: 'CodeExecutorPanel'
         }

@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
 const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
+const { PROMOTED_LOCAL_TOOL_IDS } = require('./tool-execution-profiles');
 
 let chatClient = null;
 
@@ -66,6 +67,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'docker-exec',
     'code-sandbox',
     'security-scan',
+    ...PROMOTED_LOCAL_TOOL_IDS,
     'tool-doc-read',
 ]);
 
@@ -842,6 +844,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         return [];
     }
 
+    const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
     const selectedIds = new Set();
     const normalizedPrompt = String(prompt || '').toLowerCase();
     const hasUrl = /https?:\/\//i.test(normalizedPrompt);
@@ -853,6 +856,11 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const hasImageIntent = /\b(image|images|visual|visuals|illustration|illustrations|photo|photos|hero image|background image|cover image)\b/i.test(normalizedPrompt);
     const hasUnsplashIntent = /\bunsplash\b/i.test(normalizedPrompt);
     const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(normalizedPrompt);
+    const hasArchitectureIntent = /\b(architecture|system design|service diagram|deployment diagram|architecture diagram|design the system)\b/i.test(normalizedPrompt);
+    const hasUmlIntent = /\b(uml|class diagram|sequence diagram|activity diagram|use ?case diagram|state diagram|component diagram)\b/i.test(normalizedPrompt);
+    const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
+    const hasSchemaIntent = /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/i.test(normalizedPrompt);
+    const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
 
     if (hasWebResearchIntent) {
         selectedIds.add('web-search');
@@ -917,6 +925,26 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
 
     if (/\b(security|vulnerab|audit|scan|secret)\b/i.test(normalizedPrompt)) {
         selectedIds.add('security-scan');
+    }
+
+    if (hasArchitectureIntent) {
+        selectedIds.add('architecture-design');
+    }
+
+    if (hasUmlIntent) {
+        selectedIds.add('uml-generate');
+    }
+
+    if (hasApiDesignIntent) {
+        selectedIds.add('api-design');
+    }
+
+    if (hasSchemaIntent) {
+        selectedIds.add('schema-generate');
+    }
+
+    if (hasMigrationIntent) {
+        selectedIds.add('migration-create');
     }
 
     if (/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/i.test(normalizedPrompt)
@@ -1072,6 +1100,26 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'security-scan')) {
         guidance.push('- Use `security-scan` for code audits, secret detection, and vulnerability checks when code is present.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'architecture-design')) {
+        guidance.push('- Use `architecture-design` for architecture recommendations, deployment/component overviews, and system design documentation.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'uml-generate')) {
+        guidance.push('- Use `uml-generate` for UML, Mermaid, or PlantUML class/sequence/activity/component/state diagrams from code or descriptions.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'api-design')) {
+        guidance.push('- Use `api-design` for REST, OpenAPI, GraphQL, or gRPC contract design work.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'schema-generate')) {
+        guidance.push('- Use `schema-generate` for DDL, ORM schema generation, and ER-diagram style database design output.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'migration-create')) {
+        guidance.push('- Use `migration-create` when the user asks for migration up/down scripts or schema diff output.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'tool-doc-read')) {

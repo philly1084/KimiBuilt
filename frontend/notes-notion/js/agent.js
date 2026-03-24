@@ -573,6 +573,284 @@ GUIDELINES:
         }[normalized] || '!';
     }
 
+    function escapeMarkdownAltText(value = '') {
+        return String(value || '')
+            .replace(/\\/g, '\\\\')
+            .replace(/\]/g, '\\]');
+    }
+
+    function buildMarkdownImageLine(url = '', altText = 'Image') {
+        const normalizedUrl = String(url || '').trim();
+        if (!/^https?:\/\//i.test(normalizedUrl)) {
+            return null;
+        }
+
+        const normalizedAlt = String(altText || '').replace(/\s+/g, ' ').trim() || 'Image';
+        return `![${escapeMarkdownAltText(normalizedAlt)}](${normalizedUrl})`;
+    }
+
+    function looksLikeEmbeddableImageUrl(url = '') {
+        const normalizedUrl = String(url || '').trim();
+        if (!/^https?:\/\//i.test(normalizedUrl)) {
+            return false;
+        }
+
+        if (/\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#].*)?$/i.test(normalizedUrl)) {
+            return true;
+        }
+
+        try {
+            const hostname = new URL(normalizedUrl).hostname.toLowerCase();
+            return /(?:^|\.)unsplash\.com$/.test(hostname) ||
+                /(?:^|\.)oaiusercontent\.com$/.test(hostname) ||
+                /(?:^|\.)openai\.com$/.test(hostname) ||
+                /blob\.core\.windows\.net$/.test(hostname);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    function isImageLikePayload(value) {
+        if (!value || typeof value !== 'object') {
+            return false;
+        }
+
+        return Object.prototype.hasOwnProperty.call(value, 'imageUrl') ||
+            Object.prototype.hasOwnProperty.call(value, 'thumbUrl') ||
+            Object.prototype.hasOwnProperty.call(value, 'b64_json') ||
+            Object.prototype.hasOwnProperty.call(value, 'markdownImage') ||
+            Object.prototype.hasOwnProperty.call(value, 'markdownImages') ||
+            Object.prototype.hasOwnProperty.call(value, 'images') ||
+            Object.prototype.hasOwnProperty.call(value, 'image') ||
+            Object.prototype.hasOwnProperty.call(value, 'alt') ||
+            Object.prototype.hasOwnProperty.call(value, 'prompt') ||
+            Object.prototype.hasOwnProperty.call(value, 'revisedPrompt') ||
+            /^(generated|unsplash|url)$/i.test(String(value.source || '').trim()) ||
+            looksLikeEmbeddableImageUrl(value.url || value.normalizedUrl || '');
+    }
+
+    function parseMarkdownImageDestination(destination = '') {
+        let value = String(destination || '').trim();
+        if (!value) {
+            return { url: '', title: '' };
+        }
+
+        if (/^<[^>]+>$/.test(value)) {
+            value = value.slice(1, -1).trim();
+        }
+
+        let title = '';
+        const titleMatch = value.match(/\s+(["'])(.*?)\1\s*$/);
+        if (titleMatch) {
+            title = titleMatch[2].trim();
+            value = value.slice(0, titleMatch.index).trim();
+        }
+
+        return {
+            url: value,
+            title
+        };
+    }
+
+    function buildBlockFromMarkdownImage(altText = '', destination = '') {
+        const { url, title } = parseMarkdownImageDestination(destination);
+        if (!/^https?:\/\//i.test(url)) {
+            return null;
+        }
+
+        const normalizedAlt = String(altText || '').trim();
+        const normalizedTitle = String(title || '').trim();
+        const isExplicitAIImage = /^ai(?:\s+image)?:\s*/i.test(normalizedAlt);
+        const promptText = normalizedAlt.replace(/^ai(?:\s+image)?:\s*/i, '').trim();
+        const caption = promptText || normalizedAlt || normalizedTitle;
+        let hostname = '';
+        try {
+            hostname = new URL(url).hostname;
+        } catch (_error) {
+            hostname = '';
+        }
+
+        if (isExplicitAIImage || /(?:^|\.)unsplash\.com$/i.test(hostname)) {
+            return {
+                type: 'ai_image',
+                content: {
+                    prompt: caption || (isExplicitAIImage ? 'AI image' : 'Unsplash image'),
+                    caption: normalizedTitle || caption || '',
+                    imageUrl: url,
+                    model: null,
+                    size: isExplicitAIImage ? '1024x1024' : '1536x1024',
+                    quality: 'standard',
+                    style: isExplicitAIImage ? 'vivid' : 'natural',
+                    source: isExplicitAIImage ? 'ai' : 'unsplash',
+                    status: 'done',
+                    unsplashResults: null,
+                    selectedUnsplashId: null,
+                    unsplashPhotographer: null,
+                    unsplashPhotographerUrl: null,
+                    imageAssetId: null
+                }
+            };
+        }
+
+        return {
+            type: 'image',
+            content: {
+                url,
+                caption: normalizedAlt || normalizedTitle || ''
+            }
+        };
+    }
+
+    function extractMarkdownImageBlocksFromLine(line = '') {
+        const source = String(line || '').trim();
+        if (!source.startsWith('![')) {
+            return [];
+        }
+
+        const matches = [...source.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)];
+        if (matches.length === 0) {
+            return [];
+        }
+
+        let cursor = 0;
+        const blocks = [];
+
+        for (const match of matches) {
+            if (source.slice(cursor, match.index).trim()) {
+                return [];
+            }
+
+            const block = buildBlockFromMarkdownImage(match[1], match[2]);
+            if (!block) {
+                return [];
+            }
+
+            blocks.push(block);
+            cursor = match.index + match[0].length;
+        }
+
+        if (source.slice(cursor).trim()) {
+            return [];
+        }
+
+        return blocks;
+    }
+
+    function extractMarkdownImageContent(value, seen = new WeakSet()) {
+        if (value == null) {
+            return null;
+        }
+
+        if (typeof value === 'string') {
+            const normalized = value.trim();
+            return normalized.startsWith('![') ? normalized : null;
+        }
+
+        if (typeof value !== 'object') {
+            return null;
+        }
+
+        if (seen.has(value)) {
+            return null;
+        }
+        seen.add(value);
+
+        if (Array.isArray(value)) {
+            const arrayImages = value
+                .map((entry) => extractMarkdownImageContent(entry, seen))
+                .filter(Boolean);
+            return arrayImages.length ? arrayImages.join('\n\n') : null;
+        }
+
+        if (typeof value.markdownImage === 'string' && value.markdownImage.trim()) {
+            return value.markdownImage.trim();
+        }
+
+        if (Array.isArray(value.markdownImages)) {
+            const markdownImages = value.markdownImages
+                .map((entry) => typeof entry === 'string' ? entry.trim() : '')
+                .filter(Boolean);
+            if (markdownImages.length) {
+                return markdownImages.join('\n\n');
+            }
+        }
+
+        const collectedImages = [];
+
+        if (value.image && typeof value.image === 'object') {
+            const singleImage = buildMarkdownImageLine(
+                value.image.url || value.image.imageUrl || value.image.normalizedUrl || '',
+                value.image.alt || value.image.prompt || value.image.caption || value.image.title || 'Image'
+            );
+            if (singleImage) {
+                collectedImages.push(singleImage);
+            }
+        }
+
+        if (Array.isArray(value.images)) {
+            value.images.forEach((image) => {
+                if (!image || typeof image !== 'object') return;
+                const markdownImage = buildMarkdownImageLine(
+                    image.url || image.imageUrl || image.normalizedUrl || image.thumbUrl || '',
+                    image.alt || image.prompt || image.caption || image.title || value.query || 'Image'
+                );
+                if (markdownImage) {
+                    collectedImages.push(markdownImage);
+                }
+            });
+        }
+
+        if (!collectedImages.length) {
+            const directImageUrl = value.url || value.imageUrl || value.normalizedUrl || '';
+            const directImage = buildMarkdownImageLine(
+                isImageLikePayload(value) && looksLikeEmbeddableImageUrl(directImageUrl) ? directImageUrl : '',
+                value.alt || value.prompt || value.caption || value.title || value.query || value.description || value.text || 'Image'
+            );
+            if (directImage) {
+                collectedImages.push(directImage);
+            }
+        }
+
+        return collectedImages.length ? collectedImages.join('\n\n') : null;
+    }
+
+    function scoreFallbackBlocks(blocks = []) {
+        return blocks.reduce((score, block) => {
+            const type = block?.type;
+            if (!type) {
+                return score;
+            }
+
+            let nextScore = score + 1;
+            if (['image', 'ai_image', 'bookmark', 'database'].includes(type)) nextScore += 8;
+            if (['heading_1', 'heading_2', 'heading_3', 'callout', 'quote'].includes(type)) nextScore += 2;
+            if (type === 'divider') nextScore += 0.5;
+            if (type === 'code') nextScore -= 0.5;
+            return nextScore;
+        }, 0);
+    }
+
+    function selectPreferredFallbackBlocks(importedBlocks = [], richTextBlocks = []) {
+        if (!importedBlocks.length) return richTextBlocks;
+        if (!richTextBlocks.length) return importedBlocks;
+
+        const importedHasMedia = importedBlocks.some((block) => ['image', 'ai_image', 'bookmark', 'database'].includes(block?.type));
+        const richTextHasMedia = richTextBlocks.some((block) => ['image', 'ai_image', 'bookmark', 'database'].includes(block?.type));
+
+        if (importedHasMedia !== richTextHasMedia) {
+            return importedHasMedia ? importedBlocks : richTextBlocks;
+        }
+
+        const importedScore = scoreFallbackBlocks(importedBlocks);
+        const richTextScore = scoreFallbackBlocks(richTextBlocks);
+
+        if (importedScore === richTextScore) {
+            return richTextBlocks.length >= importedBlocks.length ? richTextBlocks : importedBlocks;
+        }
+
+        return richTextScore > importedScore ? richTextBlocks : importedBlocks;
+    }
+
     function buildBlocksFromRichText(sourceText = '') {
         const text = String(sourceText || '').replace(/\r\n/g, '\n').trim();
         if (!text) {
@@ -611,6 +889,13 @@ GUIDELINES:
                         text: codeLines.join('\n')
                     }
                 });
+                continue;
+            }
+
+            const markdownImageBlocks = extractMarkdownImageBlocksFromLine(line);
+            if (markdownImageBlocks.length > 0) {
+                blocks.push(...markdownImageBlocks);
+                index += 1;
                 continue;
             }
 
@@ -748,7 +1033,7 @@ GUIDELINES:
             ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))
             : [];
         const richTextBlocks = buildBlocksFromRichText(sourceText);
-        const blocks = richTextBlocks.length >= importedBlocks.length ? richTextBlocks : importedBlocks;
+        const blocks = selectPreferredFallbackBlocks(importedBlocks, richTextBlocks);
 
         if (!blocks.length) {
             return null;
@@ -1260,14 +1545,30 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return null;
         }
 
+        const imageMarkdown = extractMarkdownImageContent(value);
+
         const directKeys = ['content', 'text', 'message', 'result', 'response', 'output', 'markdown'];
+        let primaryText = null;
         for (const key of directKeys) {
             if (typeof value[key] === 'string' && value[key].trim()) {
-                return value[key].trim();
+                primaryText = value[key].trim();
+                break;
             }
         }
 
-        const nestedKeys = ['payload', 'data', 'item', 'items', 'value'];
+        if (primaryText && imageMarkdown && !primaryText.includes('![')) {
+            return `${primaryText}\n\n${imageMarkdown}`.trim();
+        }
+
+        if (primaryText) {
+            return primaryText;
+        }
+
+        if (imageMarkdown) {
+            return imageMarkdown;
+        }
+
+        const nestedKeys = ['payload', 'data', 'item', 'items', 'value', 'result', 'details', 'toolResult'];
         for (const key of nestedKeys) {
             const extracted = extractGenericWrapperContent(value[key]);
             if (extracted) {
