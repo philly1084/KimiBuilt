@@ -6,6 +6,8 @@ const settingsController = require('./routes/admin/settings.controller');
 const {
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
+    canonicalizeRemoteToolId,
+    isRemoteCommandToolId,
 } = require('./ai-route-utils');
 const {
     buildProjectMemoryUpdate,
@@ -21,6 +23,23 @@ const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = 12000;
 const RECENT_TRANSCRIPT_LIMIT = 12;
+const MAX_STEP_SIGNATURE_REPEATS = 3;
+const REMOTE_BLOCKING_ERROR_PATTERNS = [
+    /no ssh host configured/i,
+    /no ssh username configured/i,
+    /no ssh password or private key configured/i,
+    /permission denied/i,
+    /all configured authentication methods failed/i,
+    /could not resolve hostname/i,
+    /name or service not known/i,
+    /temporary failure in name resolution/i,
+    /no route to host/i,
+    /network is unreachable/i,
+    /connection refused/i,
+    /connection timed out/i,
+    /operation timed out/i,
+    /connection closed by remote host/i,
+];
 
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -421,9 +440,109 @@ function shouldRepairInvalidRuntimeResponse({ output = '', toolEvents = [], tool
 
 function normalizeStepSignature(step = {}) {
     return JSON.stringify({
-        tool: String(step?.tool || '').trim(),
+        tool: canonicalizeRemoteToolId(String(step?.tool || '').trim()),
         params: step?.params && typeof step.params === 'object' ? step.params : {},
     });
+}
+
+function extractExecutedStepSignature(toolEvent = {}) {
+    const toolName = toolEvent?.toolCall?.function?.name || toolEvent?.result?.toolId || '';
+    let params = {};
+
+    try {
+        params = JSON.parse(toolEvent?.toolCall?.function?.arguments || '{}');
+    } catch (_error) {
+        params = {};
+    }
+
+    return normalizeStepSignature({
+        tool: toolName,
+        params,
+    });
+}
+
+function shouldSkipStepSignature(signature = '', signatureHistory = [], signatureCounts = new Map()) {
+    if (!signature) {
+        return false;
+    }
+
+    if (signatureHistory[signatureHistory.length - 1] === signature) {
+        return true;
+    }
+
+    return (signatureCounts.get(signature) || 0) >= MAX_STEP_SIGNATURE_REPEATS;
+}
+
+function filterRepeatedPlanSteps(steps = [], signatureHistory = [], signatureCounts = new Map()) {
+    const accepted = [];
+    const plannedHistory = [...signatureHistory];
+    const plannedCounts = new Map(signatureCounts);
+
+    for (const step of Array.isArray(steps) ? steps : []) {
+        const signature = normalizeStepSignature(step);
+        if (shouldSkipStepSignature(signature, plannedHistory, plannedCounts)) {
+            continue;
+        }
+
+        accepted.push(step);
+        plannedHistory.push(signature);
+        plannedCounts.set(signature, (plannedCounts.get(signature) || 0) + 1);
+    }
+
+    return accepted;
+}
+
+function recordExecutedStepSignatures(toolEvents = [], signatureHistory = [], signatureCounts = new Map()) {
+    for (const event of Array.isArray(toolEvents) ? toolEvents : []) {
+        const signature = extractExecutedStepSignature(event);
+        if (!signature) {
+            continue;
+        }
+
+        signatureHistory.push(signature);
+        signatureCounts.set(signature, (signatureCounts.get(signature) || 0) + 1);
+    }
+}
+
+function classifyToolFailure(event = {}, executionProfile = DEFAULT_EXECUTION_PROFILE) {
+    if (!event || event?.result?.success !== false) {
+        return null;
+    }
+
+    const rawToolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+    const toolId = canonicalizeRemoteToolId(rawToolId);
+    const error = String(event?.result?.error || '').trim();
+    const isRemoteFailure = isRemoteCommandToolId(toolId);
+
+    if (!isRemoteFailure) {
+        return {
+            toolId,
+            error,
+            blocking: true,
+            category: 'non-remote-tool-failure',
+        };
+    }
+
+    const blocking = REMOTE_BLOCKING_ERROR_PATTERNS.some((pattern) => pattern.test(error));
+    return {
+        toolId,
+        error,
+        blocking,
+        category: blocking ? 'remote-blocking' : 'remote-recoverable',
+    };
+}
+
+function summarizeRoundFailures(toolEvents = [], executionProfile = DEFAULT_EXECUTION_PROFILE) {
+    const failures = (Array.isArray(toolEvents) ? toolEvents : [])
+        .map((event) => classifyToolFailure(event, executionProfile))
+        .filter(Boolean);
+
+    return {
+        failures,
+        anyFailed: failures.length > 0,
+        blockingFailures: failures.filter((entry) => entry.blocking),
+        recoverableFailures: failures.filter((entry) => !entry.blocking),
+    };
 }
 
 function summarizeToolEventsForPlanner(toolEvents = []) {
@@ -735,7 +854,8 @@ class ConversationOrchestrator extends EventEmitter {
                 }));
             }
 
-            const executedStepSignatures = new Set();
+            const executedStepSignatures = [];
+            const executedStepSignatureCounts = new Map();
             let round = 0;
 
             while (round < maxAutonomousRounds) {
@@ -807,14 +927,7 @@ class ConversationOrchestrator extends EventEmitter {
                     }
                 }
 
-                nextPlan = nextPlan.filter((step) => {
-                    const signature = normalizeStepSignature(step);
-                    if (executedStepSignatures.has(signature)) {
-                        return false;
-                    }
-                    executedStepSignatures.add(signature);
-                    return true;
-                });
+                nextPlan = filterRepeatedPlanSteps(nextPlan, executedStepSignatures, executedStepSignatureCounts);
 
                 if (autonomyApproved && nextPlan.length > 0) {
                     const remainingToolBudget = Math.max(0, maxAutonomousToolCalls - toolEvents.length);
@@ -855,8 +968,11 @@ class ConversationOrchestrator extends EventEmitter {
                 });
 
                 toolEvents.push(...roundToolEvents);
+                recordExecutedStepSignatures(roundToolEvents, executedStepSignatures, executedStepSignatureCounts);
 
-                const roundFailed = roundToolEvents.some((event) => event?.result?.success === false);
+                const roundFailureSummary = summarizeRoundFailures(roundToolEvents, resolvedProfile);
+                const roundFailed = roundFailureSummary.anyFailed;
+                const blockingRoundFailure = roundFailureSummary.blockingFailures.length > 0;
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'execution',
                     name: `Execution round ${round}`,
@@ -867,15 +983,37 @@ class ConversationOrchestrator extends EventEmitter {
                         round,
                         toolCalls: roundToolEvents.length,
                         failed: roundFailed,
+                        blockingFailure: blockingRoundFailure,
                         tools: roundToolEvents.map((event) => ({
                             tool: event?.toolCall?.function?.name || '',
                             success: event?.result?.success !== false,
                             reason: event?.reason || '',
                             error: event?.result?.error || null,
                         })),
+                        failures: roundFailureSummary.failures.map((failure) => ({
+                            tool: failure.toolId,
+                            error: failure.error || null,
+                            blocking: failure.blocking,
+                            category: failure.category,
+                        })),
                     },
                 }));
-                if (!autonomyApproved || roundFailed || roundToolEvents.length === 0) {
+
+                if (autonomyApproved && roundFailed && !blockingRoundFailure) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'replan',
+                        name: `Recoverable remote failure after round ${round}`,
+                        details: {
+                            round,
+                            failures: roundFailureSummary.recoverableFailures.map((failure) => ({
+                                tool: failure.toolId,
+                                error: failure.error || null,
+                            })),
+                        },
+                    }));
+                }
+
+                if (!autonomyApproved || blockingRoundFailure || roundToolEvents.length === 0) {
                     break;
                 }
             }
@@ -904,12 +1042,16 @@ class ConversationOrchestrator extends EventEmitter {
                     executionProfile: resolvedProfile,
                     toolPolicy,
                     model,
-                }).filter((step) => !executedStepSignatures.has(normalizeStepSignature(step)));
+                });
+                const filteredRecoveryPlan = filterRepeatedPlanSteps(
+                    recoveryPlan,
+                    executedStepSignatures,
+                    executedStepSignatureCounts,
+                );
 
-                if (recoveryPlan.length > 0) {
+                if (filteredRecoveryPlan.length > 0) {
                     runtimeMode = 'recovered-tools';
                     const recoveryPlanningStartedAt = new Date().toISOString();
-                    recoveryPlan.forEach((step) => executedStepSignatures.add(normalizeStepSignature(step)));
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'planning',
                         name: 'Recovery plan',
@@ -917,8 +1059,8 @@ class ConversationOrchestrator extends EventEmitter {
                         endedAt: new Date().toISOString(),
                         details: {
                             invalidModelResponse: true,
-                            stepCount: recoveryPlan.length,
-                            steps: recoveryPlan.map((step) => ({
+                            stepCount: filteredRecoveryPlan.length,
+                            steps: filteredRecoveryPlan.map((step) => ({
                                 tool: step.tool,
                                 reason: step.reason,
                             })),
@@ -927,7 +1069,7 @@ class ConversationOrchestrator extends EventEmitter {
 
                     const recoveryExecutionStartedAt = new Date().toISOString();
                     const recoveryToolEvents = await this.executePlan({
-                        plan: recoveryPlan,
+                        plan: filteredRecoveryPlan,
                         toolManager: runtimeToolManager,
                         sessionId,
                         executionProfile: resolvedProfile,
@@ -936,6 +1078,7 @@ class ConversationOrchestrator extends EventEmitter {
                         session,
                     });
                     toolEvents.push(...recoveryToolEvents);
+                    recordExecutedStepSignatures(recoveryToolEvents, executedStepSignatures, executedStepSignatureCounts);
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'execution',
                         name: 'Recovery execution',
@@ -1078,6 +1221,7 @@ class ConversationOrchestrator extends EventEmitter {
             .filter((toolId) => toolManager?.getTool?.(toolId));
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
         const candidates = new Set();
+        const remoteToolId = getPreferredRemoteToolId({ allowedToolIds });
         const hasUrl = /https?:\/\//i.test(prompt);
         const hasExplicitWebResearchIntent = hasExplicitWebResearchIntentText(prompt);
         const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/.test(prompt);
@@ -1104,11 +1248,8 @@ class ConversationOrchestrator extends EventEmitter {
                 'tool-doc-read',
             ].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
 
-            if (allowedToolIds.includes('ssh-execute') && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
-                candidates.add('ssh-execute');
-            }
-            if (allowedToolIds.includes('remote-command') && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
-                candidates.add('remote-command');
+            if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
+                candidates.add(remoteToolId);
             }
             if (allowedToolIds.includes('docker-exec')) {
                 candidates.add('docker-exec');
@@ -1150,11 +1291,8 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('file-mkdir');
             }
         } else {
-            if (allowedToolIds.includes('ssh-execute') && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
-                candidates.add('ssh-execute');
-            }
-            if (allowedToolIds.includes('remote-command') && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
-                candidates.add('remote-command');
+            if (remoteToolId && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
+                candidates.add(remoteToolId);
             }
             if ((hasExplicitWebResearchIntent || /\b(latest|current|today|news|research|look up|search|browse)\b/.test(prompt)) && allowedToolIds.includes('web-search')) {
                 candidates.add('web-search');
@@ -1287,12 +1425,12 @@ class ConversationOrchestrator extends EventEmitter {
 
     normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE } = {}) {
         const normalizedStep = {
-            tool: typeof step?.tool === 'string' ? step.tool.trim() : '',
+            tool: canonicalizeRemoteToolId(typeof step?.tool === 'string' ? step.tool.trim() : ''),
             reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
             params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
         };
 
-        if (!['ssh-execute', 'remote-command'].includes(normalizedStep.tool)) {
+        if (!isRemoteCommandToolId(normalizedStep.tool)) {
             return normalizedStep;
         }
 
@@ -1485,7 +1623,7 @@ class ConversationOrchestrator extends EventEmitter {
             `Use at most ${MAX_PLAN_STEPS} steps.`,
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
-            'Every `ssh-execute` or `remote-command` step must include a non-empty `params.command` string.',
+            'Every `remote-command` step must include a non-empty `params.command` string.',
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious next remote-build steps.',
@@ -1496,7 +1634,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'Prefer the next distinct action that most directly advances the original ask, not the safest-sounding minimal action.',
                     'Keep going until the goal is reached, a real blocker appears, or the autonomous runtime budget is exhausted.',
                     'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, repeated tool failures, or an exhausted autonomy budget.',
-                    'When verified remote tool results already exist, do not repeat the same command and do not return {"steps":[]} unless the task is truly complete or genuinely blocked.',
+                    'When verified remote tool results already exist, do not repeat the same command back-to-back without an intervening fix or new reason, and do not return {"steps":[]} unless the task is truly complete or genuinely blocked.',
                     'If the last remote step was only an initial inspection, return the next distinct remote step instead of ending the plan.',
                 ]
                 : []),

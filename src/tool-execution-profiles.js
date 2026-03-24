@@ -31,13 +31,11 @@ const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
         ...BASE_SHARED_TOOL_IDS,
     ]),
     [NOTES_EXECUTION_PROFILE]: Object.freeze([
-        'ssh-execute',
         'remote-command',
         'docker-exec',
         ...BASE_SHARED_TOOL_IDS,
     ]),
     [REMOTE_BUILD_EXECUTION_PROFILE]: Object.freeze([
-        'ssh-execute',
         'remote-command',
         'docker-exec',
         ...BASE_SHARED_TOOL_IDS,

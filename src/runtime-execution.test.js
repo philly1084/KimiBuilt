@@ -41,7 +41,7 @@ describe('runtime-execution', () => {
 
         const result = await executeConversationRuntime({
             locals: {
-                agentOrchestrator: {
+                conversationOrchestrator: {
                     executeConversation,
                 },
             },
@@ -69,7 +69,7 @@ describe('runtime-execution', () => {
 
         const result = await executeConversationRuntime({
             locals: {
-                agentOrchestrator: {
+                conversationOrchestrator: {
                     executeConversation,
                 },
             },
@@ -99,7 +99,7 @@ describe('runtime-execution', () => {
 
         const result = await executeConversationRuntime({
             locals: {
-                agentOrchestrator: {
+                conversationOrchestrator: {
                     executeConversation,
                 },
             },
@@ -112,6 +112,31 @@ describe('runtime-execution', () => {
         expect(executeConversation).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-remote-1',
             executionProfile: 'remote-build',
+        }));
+        expect(createResponse).not.toHaveBeenCalled();
+        expect(result.runtimeMode).toBe('orchestrated');
+    });
+
+    test('falls back to agentOrchestrator only when conversationOrchestrator is unavailable', async () => {
+        const executeConversation = jest.fn().mockResolvedValue({
+            success: true,
+            response: { id: 'resp_agent_fallback' },
+        });
+
+        const result = await executeConversationRuntime({
+            locals: {
+                agentOrchestrator: {
+                    executeConversation,
+                },
+            },
+        }, {
+            sessionId: 'session-agent-fallback',
+            input: 'Fallback to the legacy executor.',
+        });
+
+        expect(executeConversation).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-agent-fallback',
+            executionProfile: 'default',
         }));
         expect(createResponse).not.toHaveBeenCalled();
         expect(result.runtimeMode).toBe('orchestrated');

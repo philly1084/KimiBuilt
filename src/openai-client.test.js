@@ -552,7 +552,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.shouldAutoUseTool('ssh-execute', 'SSH into root@77.42.44.98 and check its health.')).toBe(true);
     });
 
-    test('does not expose ssh-execute when SSH defaults are not configured', () => {
+    test('does not expose remote-command when SSH defaults are not configured', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: false,
             host: '',
@@ -568,10 +568,10 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'SSH into the server and run kubectl get pods',
         );
 
-        expect(selectedTools.map((tool) => tool.id)).not.toContain('ssh-execute');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('remote-command');
     });
 
-    test('exposes ssh-execute even without explicit SSH intent if defaults exist', () => {
+    test('exposes remote-command even without explicit SSH intent if defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -587,7 +587,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'Say hello',
         );
 
-        expect(selectedTools.map((tool) => tool.id)).toContain('ssh-execute');
+        expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('ssh-execute');
     });
 
     test('ssh tool guidance forbids made-up shell tool excuses', () => {
@@ -601,7 +602,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
 
         const guidance = __testUtils.buildAutomaticToolGuidance([
-            { id: 'ssh-execute' },
+            { id: 'remote-command' },
         ]);
 
         expect(guidance).toContain('run_shell_command');
@@ -617,7 +618,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(__testUtils.promptHasExplicitSshIntent('Execute remotely on root@77.42.44.98 and check its health.')).toBe(true);
     });
 
-    test('runs explicit ssh requests directly without asking the model for tool selection', async () => {
+    test('runs explicit ssh requests directly through remote-command without asking the model for tool selection', async () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: false,
             host: '',
@@ -639,7 +640,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
 
         const response = await __testUtils.runDirectRequiredToolAction({
             toolManager,
-            requiredToolId: 'ssh-execute',
+            requiredToolId: 'remote-command',
             selectedTools,
             prompt: 'Can you ssh into root@77.42.44.98 and check its health?',
             toolContext: {},
@@ -649,7 +650,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(response.output[0].content[0].text).toContain('SSH command completed on 77.42.44.98:22.');
         expect(response.output[0].content[0].text).toContain('STDOUT:');
         expect(toolManager.executeTool).toHaveBeenCalledWith(
-            'ssh-execute',
+            'remote-command',
             expect.objectContaining({
                 host: '77.42.44.98',
                 username: 'root',
@@ -673,7 +674,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         const automaticTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
             'Can you ssh into root@77.42.44.98 and check its health?',
-        ).filter((tool) => tool.id !== 'ssh-execute');
+        );
         const selectedTools = __testUtils.selectAutomaticToolDefinitions(
             automaticTools,
             'Can you ssh into root@77.42.44.98 and check its health?',
@@ -749,10 +750,10 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'Summarize the deployment approach for this project.',
         );
 
-        expect(automaticTools.some((tool) => tool.id === 'ssh-execute')).toBe(false);
+        expect(automaticTools.some((tool) => tool.id === 'remote-command')).toBe(false);
     });
 
-    test('exposes ssh to the automatic tool catalog for remote build sessions', () => {
+    test('exposes remote-command to the automatic tool catalog for remote build sessions', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
             host: '77.42.44.98',
@@ -769,7 +770,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
             { executionProfile: 'remote-build' },
         );
 
-        expect(automaticTools.some((tool) => tool.id === 'ssh-execute')).toBe(true);
+        expect(automaticTools.some((tool) => tool.id === 'remote-command')).toBe(true);
+        expect(automaticTools.some((tool) => tool.id === 'ssh-execute')).toBe(false);
     });
 
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {

@@ -259,6 +259,83 @@ function formatSshTarget(target = {}) {
     return `${username}${target.host}${port}`;
 }
 
+function isRemoteCommandToolId(toolId = '') {
+    const normalized = String(toolId || '').trim().toLowerCase();
+    return normalized === 'ssh-execute' || normalized === 'remote-command';
+}
+
+function canonicalizeRemoteToolId(toolId = '') {
+    return isRemoteCommandToolId(toolId) ? 'remote-command' : String(toolId || '').trim();
+}
+
+function previewRemoteText(value = '', limit = 240) {
+    const text = String(value || '').trim();
+    if (!text) {
+        return '';
+    }
+
+    return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
+function detectRemoteArchitecture(text = '') {
+    const normalized = String(text || '').toLowerCase();
+
+    if (/\b(aarch64|arm64)\b/.test(normalized)) {
+        return 'arm64';
+    }
+
+    if (/\b(x86_64|amd64)\b/.test(normalized)) {
+        return 'amd64';
+    }
+
+    return null;
+}
+
+function detectRemoteOs(text = '') {
+    const source = String(text || '');
+    const prettyName = source.match(/PRETTY_NAME="?([^"\r\n]+)"?/i);
+    if (prettyName?.[1]) {
+        return previewRemoteText(prettyName[1], 120);
+    }
+
+    const name = source.match(/\bNAME="?([^"\r\n]+)"?/i);
+    const version = source.match(/\bVERSION="?([^"\r\n]+)"?/i);
+    const parts = [name?.[1], version?.[1]].filter(Boolean);
+    return parts.length > 0 ? previewRemoteText(parts.join(' '), 120) : null;
+}
+
+function buildRemoteWorkingStateFromEvent(event = {}, parsedArgs = {}, { host = null, username = null, port = null } = {}) {
+    const result = event?.result || {};
+    const data = result?.data || {};
+    const command = String(parsedArgs?.command || '').trim();
+    const stdout = previewRemoteText(data?.stdout || '', 320);
+    const stderr = previewRemoteText(data?.stderr || '', 240);
+    const combinedOutput = [command, data?.stdout || '', data?.stderr || ''].join('\n');
+    const detectedArchitecture = detectRemoteArchitecture(combinedOutput);
+    const detectedOs = detectRemoteOs(combinedOutput);
+    const target = host
+        ? {
+            host,
+            ...(username ? { username } : {}),
+            port: port || 22,
+        }
+        : null;
+
+    return {
+        lastUpdated: result?.timestamp || new Date().toISOString(),
+        toolId: canonicalizeRemoteToolId(event?.toolCall?.function?.name || result?.toolId || ''),
+        ...(target ? { target } : {}),
+        ...(command ? { lastCommand: command } : {}),
+        lastCommandSucceeded: result?.success !== false,
+        ...(Number.isInteger(data?.exitCode) ? { lastExitCode: data.exitCode } : {}),
+        ...(result?.success === false && result?.error ? { lastError: previewRemoteText(result.error, 200) } : {}),
+        ...(stdout ? { lastStdoutPreview: stdout } : {}),
+        ...(stderr ? { lastStderrPreview: stderr } : {}),
+        ...(detectedArchitecture ? { detectedArchitecture } : {}),
+        ...(detectedOs ? { detectedOs } : {}),
+    };
+}
+
 function getPreferredRemoteToolId(toolManager = null) {
     if (typeof toolManager?.getTool === 'function') {
         if (toolManager.getTool('remote-command')) {
@@ -279,8 +356,7 @@ function resolveSshRequestContext(text = '', session = null) {
     const explicitTarget = extractExplicitSshTarget(prompt);
     const sessionTarget = session?.metadata?.lastSshTarget || null;
     const target = explicitTarget || sessionTarget;
-    const stickySsh = session?.metadata?.lastToolIntent === 'ssh-execute'
-        || session?.metadata?.lastToolIntent === 'remote-command';
+    const stickySsh = isRemoteCommandToolId(session?.metadata?.lastToolIntent);
     const continuation = !explicitIntent && stickySsh && target?.host && isSshContinuationPrompt(prompt);
     const effectivePrompt = continuation
         ? `SSH into ${formatSshTarget(target)} and ${prompt}`
@@ -329,9 +405,10 @@ function formatSshToolResult(result = {}, fallbackTarget = null) {
 function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
 
-    for (const event of events) {
-        const toolName = event?.toolCall?.function?.name;
-        if (toolName !== 'ssh-execute' && toolName !== 'remote-command') {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        const toolName = canonicalizeRemoteToolId(event?.toolCall?.function?.name);
+        if (!isRemoteCommandToolId(toolName)) {
             continue;
         }
 
@@ -341,16 +418,21 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
         } catch (_error) {
             args = {};
         }
-
         const hostField = String(event?.result?.data?.host || '').trim();
         const hostMatch = hostField.match(/^(?<host>[^:]+)(?::(?<port>\d+))?$/);
         const host = args.host || hostMatch?.groups?.host || null;
         const port = args.port || (hostMatch?.groups?.port ? Number(hostMatch.groups.port) : null);
         const username = args.username || null;
+        const remoteWorkingState = buildRemoteWorkingStateFromEvent(event, args, {
+            host,
+            username,
+            port,
+        });
 
         if (!host) {
             return {
                 lastToolIntent: toolName,
+                remoteWorkingState,
             };
         }
 
@@ -361,6 +443,7 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
                 username,
                 port: port || 22,
             },
+            remoteWorkingState,
         };
     }
 
@@ -449,6 +532,8 @@ module.exports = {
     resolveSshRequestContext,
     formatSshToolResult,
     getPreferredRemoteToolId,
+    canonicalizeRemoteToolId,
+    isRemoteCommandToolId,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,

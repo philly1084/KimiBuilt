@@ -100,7 +100,7 @@ describe('ConversationOrchestrator', () => {
             complete: jest.fn().mockResolvedValue(JSON.stringify({
                 steps: [
                     {
-                        tool: 'ssh-execute',
+                        tool: 'remote-command',
                         reason: 'Inspect service state on the remote host',
                         params: {
                             command: 'hostname && uptime',
@@ -111,14 +111,14 @@ describe('ConversationOrchestrator', () => {
         };
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
                     .includes(toolId)
                     ? { id: toolId }
                     : null
             )),
             executeTool: jest.fn().mockResolvedValue({
                 success: true,
-                toolId: 'ssh-execute',
+                toolId: 'remote-command',
                 data: {
                     stdout: 'host-a\nup 10 days',
                     stderr: '',
@@ -154,7 +154,7 @@ describe('ConversationOrchestrator', () => {
 
         expect(llmClient.complete).toHaveBeenCalledTimes(1);
         expect(toolManager.executeTool).toHaveBeenCalledWith(
-            'ssh-execute',
+            'remote-command',
             expect.objectContaining({
                 command: 'hostname && uptime',
             }),
@@ -271,7 +271,7 @@ describe('ConversationOrchestrator', () => {
                 .mockResolvedValueOnce(JSON.stringify({
                     steps: [
                         {
-                            tool: 'ssh-execute',
+                            tool: 'remote-command',
                             reason: 'Check node status first',
                             params: {
                                 command: 'kubectl get nodes -o wide',
@@ -282,7 +282,7 @@ describe('ConversationOrchestrator', () => {
                 .mockResolvedValueOnce(JSON.stringify({
                     steps: [
                         {
-                            tool: 'ssh-execute',
+                            tool: 'remote-command',
                             reason: 'Check pods after confirming nodes',
                             params: {
                                 command: 'kubectl get pods -A -o wide',
@@ -295,7 +295,7 @@ describe('ConversationOrchestrator', () => {
 
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
@@ -303,7 +303,7 @@ describe('ConversationOrchestrator', () => {
             executeTool: jest.fn()
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: {
                         stdout: 'node-1 Ready',
                         stderr: '',
@@ -312,7 +312,7 @@ describe('ConversationOrchestrator', () => {
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: {
                         stdout: 'kube-system traefik Running',
                         stderr: '',
@@ -351,13 +351,13 @@ describe('ConversationOrchestrator', () => {
         expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
         expect(toolManager.executeTool).toHaveBeenNthCalledWith(
             1,
-            'ssh-execute',
+            'remote-command',
             expect.objectContaining({ command: 'kubectl get nodes -o wide' }),
             expect.objectContaining({ executionProfile: 'remote-build' }),
         );
         expect(toolManager.executeTool).toHaveBeenNthCalledWith(
             2,
-            'ssh-execute',
+            'remote-command',
             expect.objectContaining({ command: 'kubectl get pods -A -o wide' }),
             expect.objectContaining({ executionProfile: 'remote-build' }),
         );
@@ -392,7 +392,7 @@ describe('ConversationOrchestrator', () => {
                 .mockResolvedValueOnce(JSON.stringify({
                     steps: [
                         {
-                            tool: 'ssh-execute',
+                            tool: 'remote-command',
                             reason: 'Inspect the node first',
                             params: {
                                 command: 'hostname && uname -m',
@@ -403,7 +403,7 @@ describe('ConversationOrchestrator', () => {
                 .mockResolvedValueOnce(JSON.stringify({
                     steps: [
                         {
-                            tool: 'ssh-execute',
+                            tool: 'remote-command',
                             reason: 'Inspect pods after node verification',
                             params: {
                                 command: 'kubectl get pods -A',
@@ -416,7 +416,7 @@ describe('ConversationOrchestrator', () => {
 
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
@@ -424,12 +424,12 @@ describe('ConversationOrchestrator', () => {
             executeTool: jest.fn()
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: { stdout: 'host-a\naarch64', stderr: '', host: '10.0.0.5:22' },
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: { stdout: 'kube-system traefik Running', stderr: '', host: '10.0.0.5:22' },
                 }),
         };
@@ -486,23 +486,23 @@ describe('ConversationOrchestrator', () => {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Remote work completed after multiple autonomous rounds.', 'resp_long_auto')),
             complete: jest.fn()
                 .mockResolvedValueOnce(JSON.stringify({
-                    steps: [{ tool: 'ssh-execute', reason: 'Round 1', params: { command: 'echo round-1' } }],
+                    steps: [{ tool: 'remote-command', reason: 'Round 1', params: { command: 'echo round-1' } }],
                 }))
                 .mockResolvedValueOnce(JSON.stringify({
-                    steps: [{ tool: 'ssh-execute', reason: 'Round 2', params: { command: 'echo round-2' } }],
+                    steps: [{ tool: 'remote-command', reason: 'Round 2', params: { command: 'echo round-2' } }],
                 }))
                 .mockResolvedValueOnce(JSON.stringify({
-                    steps: [{ tool: 'ssh-execute', reason: 'Round 3', params: { command: 'echo round-3' } }],
+                    steps: [{ tool: 'remote-command', reason: 'Round 3', params: { command: 'echo round-3' } }],
                 }))
                 .mockResolvedValueOnce(JSON.stringify({
-                    steps: [{ tool: 'ssh-execute', reason: 'Round 4', params: { command: 'echo round-4' } }],
+                    steps: [{ tool: 'remote-command', reason: 'Round 4', params: { command: 'echo round-4' } }],
                 }))
                 .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
         };
 
         const toolManager = {
             getTool: jest.fn((toolId) => (
-                ['ssh-execute', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
                     .includes(toolId)
                     ? { id: toolId, description: toolId }
                     : null
@@ -510,22 +510,22 @@ describe('ConversationOrchestrator', () => {
             executeTool: jest.fn()
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: { stdout: 'round-1', stderr: '', host: '10.0.0.5:22' },
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: { stdout: 'round-2', stderr: '', host: '10.0.0.5:22' },
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: { stdout: 'round-3', stderr: '', host: '10.0.0.5:22' },
                 })
                 .mockResolvedValueOnce({
                     success: true,
-                    toolId: 'ssh-execute',
+                    toolId: 'remote-command',
                     data: { stdout: 'round-4', stderr: '', host: '10.0.0.5:22' },
                 }),
         };
@@ -563,6 +563,221 @@ describe('ConversationOrchestrator', () => {
             'Plan round 4',
             'Execution round 4',
         ]));
+    });
+
+    test('continues autonomous remote-build work after a recoverable remote-command failure', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Recovered from the missing service name and kept troubleshooting.', 'resp_recoverable')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Check the expected Gitea service first',
+                        params: {
+                            command: 'systemctl status gitea --no-pager',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'List matching services after the missing unit failure',
+                        params: {
+                            command: 'systemctl list-units --type=service --all | grep -i gitea || true',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    toolId: 'remote-command',
+                    error: 'Unit gitea.service could not be found.',
+                    data: {
+                        host: '10.0.0.5:22',
+                        stderr: 'Unit gitea.service could not be found.',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '10.0.0.5:22',
+                        stdout: 'gitea-web.service loaded inactive dead',
+                        stderr: '',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-recoverable-remote', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-recoverable-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to troubleshoot Gitea on the server and keep going through the obvious next steps.',
+            sessionId: 'session-recoverable-remote',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            1,
+            'remote-command',
+            expect.objectContaining({ command: 'systemctl status gitea --no-pager' }),
+            expect.objectContaining({ executionProfile: 'remote-build' }),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            2,
+            'remote-command',
+            expect.objectContaining({ command: 'systemctl list-units --type=service --all | grep -i gitea || true' }),
+            expect.objectContaining({ executionProfile: 'remote-build' }),
+        );
+        expect(result.response.metadata.executionTrace.map((entry) => entry.name)).toContain('Recoverable remote failure after round 1');
+        expect(sessionStore.update).toHaveBeenLastCalledWith('session-recoverable-remote', expect.objectContaining({
+            metadata: expect.objectContaining({
+                lastToolIntent: 'remote-command',
+                remoteWorkingState: expect.objectContaining({
+                    lastCommand: 'systemctl list-units --type=service --all | grep -i gitea || true',
+                    lastCommandSucceeded: true,
+                }),
+            }),
+        }));
+    });
+
+    test('allows re-running the same remote verification command after an intervening fix', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const verificationCommand = 'curl -IkfsS --max-time 20 https://git.example.com';
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Verified the endpoint again after the restart.', 'resp_reverify')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Verify the endpoint first',
+                        params: {
+                            command: verificationCommand,
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Restart Gitea before re-checking the endpoint',
+                        params: {
+                            command: 'sudo systemctl restart gitea-web',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Re-run the same endpoint verification after the restart',
+                        params: {
+                            command: verificationCommand,
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { host: '10.0.0.5:22', stdout: 'HTTP/2 502', stderr: '' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { host: '10.0.0.5:22', stdout: '', stderr: '' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { host: '10.0.0.5:22', stdout: 'HTTP/2 200', stderr: '' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-reverify-remote', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-reverify-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to troubleshoot Git access on the server and keep going until it works.',
+            sessionId: 'session-reverify-remote',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(3);
+        expect(toolManager.executeTool.mock.calls[0][1].command).toBe(verificationCommand);
+        expect(toolManager.executeTool.mock.calls[1][1].command).toBe('sudo systemctl restart gitea-web');
+        expect(toolManager.executeTool.mock.calls[2][1].command).toBe(verificationCommand);
+        expect(result.response.metadata.toolEvents).toHaveLength(3);
     });
 
     test('treats explicit web research and scrape requests as first-class tool intents', () => {
@@ -754,7 +969,7 @@ describe('ConversationOrchestrator', () => {
         ]);
     });
 
-    test('falls back to remote-command when ssh-execute is not available', async () => {
+    test('falls back to remote-command when it is the only remote tool available', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -952,7 +1167,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['ssh-execute', 'remote-command', 'code-sandbox'].includes(toolId)
+                    ['remote-command', 'code-sandbox'].includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
                 )),
@@ -986,7 +1201,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['ssh-execute', 'remote-command', 'code-sandbox'].includes(toolId)
+                    ['remote-command', 'code-sandbox'].includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
                 )),
@@ -1020,7 +1235,7 @@ describe('ConversationOrchestrator', () => {
             llmClient,
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['ssh-execute', 'remote-command'].includes(toolId)
+                    ['remote-command'].includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
                 )),
@@ -1046,12 +1261,12 @@ describe('ConversationOrchestrator', () => {
             toolPolicy,
         });
 
-        expect(toolPolicy.candidateToolIds).toContain('ssh-execute');
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
         expect(runtimeInstructions).toContain('verify architecture with `uname -m`');
         expect(runtimeInstructions).toContain('`find`/`grep -R` for `rg`');
         expect(runtimeInstructions).toContain('`docker compose` for `docker-compose`');
         expect(plannerPrompt).toContain('find/grep instead of rg');
-        expect(plannerPrompt).toContain('do not repeat the same command');
+        expect(plannerPrompt).toContain('do not repeat the same command back-to-back');
         expect(plannerPrompt).toContain('non-empty `params.command` string');
     });
 

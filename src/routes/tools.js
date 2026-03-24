@@ -12,6 +12,7 @@ const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { inferExecutionProfile } = require('../runtime-execution');
+const { canonicalizeRemoteToolId, isRemoteCommandToolId } = require('../ai-route-utils');
 const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
@@ -70,7 +71,7 @@ function buildRuntimeSummary(toolManager) {
 }
 
 function buildToolRuntime(toolId) {
-  if (toolId === 'ssh-execute' || toolId === 'remote-command') {
+  if (isRemoteCommandToolId(toolId)) {
     const ssh = settingsController.getEffectiveSshConfig();
     return {
       configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
@@ -170,7 +171,8 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
   const allowedToolIds = getAllowedToolIdsForProfile(executionProfile);
 
   const manifestTools = registry.getFrontendTools()
-    .filter((tool) => !HIDDEN_FRONTEND_TOOL_IDS.includes(tool.id));
+    .filter((tool) => !HIDDEN_FRONTEND_TOOL_IDS.includes(tool.id))
+    .filter((tool) => tool.id !== 'ssh-execute');
 
   const enrichedTools = await Promise.all(manifestTools.map(async (tool) => {
     const runtime = buildToolRuntime(tool.id);
@@ -236,7 +238,7 @@ function looksLikeNotesSurface(value = '') {
 
 function hasStickyRemoteSession(session = null) {
   const metadata = session?.metadata || {};
-  return ['ssh-execute', 'remote-command'].includes(String(metadata.lastToolIntent || '').trim().toLowerCase())
+  return isRemoteCommandToolId(metadata.lastToolIntent)
     || Boolean(metadata.lastSshTarget?.host);
 }
 
@@ -292,13 +294,13 @@ async function resolveToolSessionId(requestedSessionId = null) {
 }
 
 async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
-  if (!sessionId || (toolId !== 'ssh-execute' && toolId !== 'remote-command')) {
+  if (!sessionId || !isRemoteCommandToolId(toolId)) {
     return;
   }
 
   await sessionStore.update(sessionId, {
     metadata: {
-      lastToolIntent: toolId,
+      lastToolIntent: canonicalizeRemoteToolId(toolId),
       ...(params.host ? {
         lastSshTarget: {
           host: params.host,

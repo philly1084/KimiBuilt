@@ -142,7 +142,7 @@ class ToolManager {
       tools.forEach(tool => {
         const definition = this.createToolDefinition(tool, {
           frontend: {
-            exposeToFrontend: true,
+            exposeToFrontend: tool.id !== 'ssh-execute',
             icon: 'terminal',
             requiresSetup: true // SSH needs key configuration
           },

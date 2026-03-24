@@ -272,7 +272,6 @@ async function start() {
         console.log('[Boot] Conversation orchestrator ready');
 
         app.locals.conversationOrchestrator = conversationOrchestrator;
-        app.locals.agentOrchestrator = conversationOrchestrator;
         app.locals.dashboardController = new DashboardController(conversationOrchestrator);
         setDashboardController(app.locals.dashboardController);
         startupState.ready = true;

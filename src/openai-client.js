@@ -836,7 +836,10 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
         return [];
     }
 
+    const hasRemoteCommandAlias = Boolean(toolManager.getTool('remote-command'));
+
     return Array.from(AUTO_TOOL_ALLOWLIST)
+        .filter((toolId) => !(toolId === 'ssh-execute' && hasRemoteCommandAlias))
         .map((toolId) => {
             const tool = toolManager.getTool(toolId);
             const skill = toolManager.registry.getSkill(toolId);

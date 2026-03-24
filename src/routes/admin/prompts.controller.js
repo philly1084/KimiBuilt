@@ -51,10 +51,11 @@ function buildPlannerPromptSurface() {
     'Use at most 4 steps.',
     'Avoid redundant tool calls.',
     'Do not invent SSH hosts, usernames, file paths, or credentials.',
-    'Every ssh-execute or remote-command step must include a non-empty params.command string.',
-    'When an SSH runtime target is already available, prefer trying ssh-execute before asking the user for host details again.',
+    'Every remote-command step must include a non-empty params.command string.',
+    'When an SSH runtime target is already available, prefer trying remote-command before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
     'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
+    'Do not repeat the same remote-command call back-to-back without an intervening fix or new reason. Re-running a verification command after a fix is allowed.',
   ].join('\n');
 }
 

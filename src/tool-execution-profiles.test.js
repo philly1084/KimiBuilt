@@ -20,15 +20,15 @@ describe('tool execution profiles', () => {
         ]));
     });
 
-    test('notes profile keeps remote tools and promoted local tools', () => {
+    test('notes profile keeps remote-command and promoted local tools', () => {
         const toolIds = getAllowedToolIdsForProfile(NOTES_EXECUTION_PROFILE);
 
         expect(toolIds).toEqual(expect.arrayContaining([
             'remote-command',
-            'ssh-execute',
             'architecture-design',
             'schema-generate',
         ]));
+        expect(toolIds).not.toContain('ssh-execute');
     });
 
     test('remote-build profile adds code-sandbox without exposing code-execute', () => {
