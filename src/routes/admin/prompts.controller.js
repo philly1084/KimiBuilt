@@ -68,6 +68,8 @@ function buildNotesSurfacePrompt() {
     'Prefer structural edits over append-only edits when organization or layout quality matters.',
     'In notes, Mermaid usually belongs as a page block, not a downloadable artifact, unless the user explicitly asks for a file, export, or download.',
     'If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.',
+    'For multi-step non-page work, keep ownership of the original ask and continue through the next concrete diagnostic, repair, and verification steps instead of turning each intermediate issue into a new user task.',
+    'Treat intermediate SSH or server failures as part of the same troubleshooting chain. Ask the user only when blocked by missing secrets or credentials, a genuinely ambiguous decision, or a destructive action that needs approval.',
     'For substantial page-writing requests, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.',
   ].join('\n');
 }

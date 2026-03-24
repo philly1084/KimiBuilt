@@ -234,8 +234,10 @@ class NotesAPIClient {
             stream: true,
             taskType: NOTES_TASK_TYPE,
             clientSurface: NOTES_CLIENT_SURFACE,
+            enableConversationExecutor: true,
             metadata: {
                 remoteBuildAutonomyApproved: NOTES_REMOTE_BUILD_AUTONOMY_APPROVED,
+                enableConversationExecutor: true,
                 clientSurface: NOTES_CLIENT_SURFACE,
                 ...(requestOptions.metadata && typeof requestOptions.metadata === 'object'
                     ? requestOptions.metadata
@@ -482,8 +484,10 @@ class NotesAPIClient {
             stream: false,
             taskType: NOTES_TASK_TYPE,
             clientSurface: NOTES_CLIENT_SURFACE,
+            enableConversationExecutor: true,
             metadata: {
                 remoteBuildAutonomyApproved: NOTES_REMOTE_BUILD_AUTONOMY_APPROVED,
+                enableConversationExecutor: true,
                 clientSurface: NOTES_CLIENT_SURFACE,
                 ...(requestOptions.metadata && typeof requestOptions.metadata === 'object'
                     ? requestOptions.metadata

@@ -1489,8 +1489,11 @@ class ConversationOrchestrator extends EventEmitter {
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious next remote-build steps.',
+                    'Treat the original user request as the active objective; intermediate failures discovered during troubleshooting are part of the same task, not separate tasks that require user approval.',
                     'Do not stop after a single inspection if the next server action is routine and clearly implied by the verified results.',
+                    'Do not stop just to report an intermediate issue when you can inspect, test, or apply the next routine fix yourself.',
                     'Keep moving through setup, inspection, verification, and routine fixes without asking for confirmation between each step.',
+                    'Prefer the next distinct action that most directly advances the original ask, not the safest-sounding minimal action.',
                     'Keep going until the goal is reached, a real blocker appears, or the autonomous runtime budget is exhausted.',
                     'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, repeated tool failures, or an exhausted autonomy budget.',
                     'When verified remote tool results already exist, do not repeat the same command and do not return {"steps":[]} unless the task is truly complete or genuinely blocked.',
@@ -1730,6 +1733,7 @@ class ConversationOrchestrator extends EventEmitter {
                 ? [
                     'The user has already approved continuing through obvious remote-build steps.',
                     'Summarize the work completed in this run and only ask for input if you hit a real blocker or need an external decision.',
+                    'Do not turn routine next troubleshooting steps into homework for the user when the runtime could have executed them in this run.',
                 ]
                 : []),
             `Task type: ${taskType}`,

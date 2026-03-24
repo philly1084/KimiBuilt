@@ -1126,7 +1126,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push(`- Use \`${remoteGuidanceToolId}\` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.`);
         guidance.push(`- Do not refer to internal tool names like \`run_shell_command\` or claim you lack generic shell access when \`${remoteGuidanceToolId}\` is attached.`);
         guidance.push(`- Every \`${remoteGuidanceToolId}\` call must include a non-empty \`command\` string. Host, username, and port may be omitted only when runtime defaults already exist.`);
+        guidance.push(`- Keep ownership of the original remote troubleshooting request. Treat intermediate failures as part of the same task and continue with the next reasonable command instead of asking the user to choose each step.`);
         guidance.push(`- If \`${remoteGuidanceToolId}\` fails, explain the actual SSH error from the tool result and ask only for the missing host or credentials if needed.`);
+        guidance.push('- Ask for user input only when a tool result shows missing credentials or host details, a destructive action needs approval, or the next move depends on a real external decision.');
         guidance.push('- For reconnect or baseline remote checks, assume Ubuntu/Linux first and use a concrete command such as `hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime`.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 
