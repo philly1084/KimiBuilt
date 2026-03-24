@@ -12,6 +12,7 @@ const {
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
     getPreferredRemoteToolId,
+    resolveSshRequestContext,
     resolveArtifactContextIds,
 } = require('./ai-route-utils');
 
@@ -131,5 +132,25 @@ describe('ai-route-utils', () => {
         };
 
         expect(getPreferredRemoteToolId(toolManager)).toBe('remote-command');
+    });
+
+    test('resolveSshRequestContext does not infer kubectl pod listing for generic cluster deployment continuations', () => {
+        const sshContext = resolveSshRequestContext(
+            'can you please set this up on the cluster. you will find everything you need on that cluster to deploy, you can move it to a pod on the cluster if you would like.',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: 'test.demoserver2.buzz',
+                        username: 'root',
+                        port: 22,
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.command).toBeNull();
+        expect(sshContext.directParams).toBeNull();
     });
 });

@@ -209,6 +209,8 @@ function extractRequestedSshCommand(text = '') {
     if (!prompt) {
         return null;
     }
+    const normalized = prompt.toLowerCase();
+    const hasInspectionIntent = /\b(check|inspect|verify|diagnose|debug|troubleshoot|status|state|health|healthy|look at|show|list|see what'?s wrong)\b/.test(normalized);
 
     const quotedPatterns = [
         /\b(?:run|execute)\s+`([^`]+)`/i,
@@ -228,11 +230,11 @@ function extractRequestedSshCommand(text = '') {
         return 'hostname && uptime && (df -h / || true) && (free -m || true)';
     }
 
-    if (/\b(?:namespace|namespaces)\b/i.test(prompt) && /\b(kubernetes|k8s|cluster|kubectl)\b/i.test(prompt)) {
+    if (hasInspectionIntent && /\b(?:namespace|namespaces)\b/i.test(prompt) && /\b(kubernetes|k8s|cluster|kubectl)\b/i.test(prompt)) {
         return 'kubectl get namespaces';
     }
 
-    if (/\b(?:pod|pods)\b/i.test(prompt) && /\b(kubernetes|k8s|cluster|kubectl)\b/i.test(prompt)) {
+    if (hasInspectionIntent && /\b(?:pod|pods)\b/i.test(prompt) && /\b(kubernetes|k8s|cluster|kubectl)\b/i.test(prompt)) {
         return 'kubectl get pods -A';
     }
 

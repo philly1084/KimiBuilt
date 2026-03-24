@@ -774,6 +774,31 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(automaticTools.some((tool) => tool.id === 'ssh-execute')).toBe(false);
     });
 
+    test('does not create a deterministic remote-command preflight for generic cluster deployment wording', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '77.42.44.98',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'can you please set this up on the cluster. you will find everything you need on that cluster to deploy, you can move it to a pod on the cluster if you would like.',
+            { executionProfile: 'remote-build' },
+        );
+
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            automaticTools,
+            'can you please set this up on the cluster. you will find everything you need on that cluster to deploy, you can move it to a pod on the cluster if you would like.',
+        );
+
+        expect(actions).toEqual([]);
+    });
+
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {
         expect(__testUtils.isTerminalFinishReason('tool_calls')).toBe(false);
         expect(__testUtils.isTerminalFinishReason('stop')).toBe(true);
