@@ -799,6 +799,34 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(actions).toEqual([]);
     });
 
+    test('prefers remote-command and suppresses local file tools for remote website replacement prompts', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '77.42.44.98',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Create a whole new HTML file, replace the existing website on the cluster, and restart the workload.',
+            { executionProfile: 'remote-build' },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Create a whole new HTML file, replace the existing website on the cluster, and restart the workload.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('file-read');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('file-search');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('file-write');
+    });
+
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {
         expect(__testUtils.isTerminalFinishReason('tool_calls')).toBe(false);
         expect(__testUtils.isTerminalFinishReason('stop')).toBe(true);

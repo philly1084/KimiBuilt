@@ -584,6 +584,32 @@ function extractRequestedSshCommand(prompt = '') {
     return null;
 }
 
+function hasExplicitLocalArtifactReference(prompt = '') {
+    const source = String(prompt || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    const normalized = source.toLowerCase();
+    return /\b(artifact|attach|attached|upload|uploaded|workspace|repo|repository|local file|local html|local artifact|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
+        || /\/api\/artifacts\//i.test(source)
+        || /[a-z]:\\[^"'`\s]+/i.test(source)
+        || /\b[a-z0-9._-]+-[a-z0-9]{6}\.(html|htm|css|js)\b/i.test(source);
+}
+
+function hasRemoteWebsiteUpdateIntent(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const hasWebsiteTarget = /\b(website|web site|webpage|web page|landing page|homepage|home page|site|html|index\.html|page)\b/.test(normalized);
+    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|kubectl|pod|deployment|workload|rollout|restart|redeploy|configmap|container|ingress)\b/.test(normalized);
+    const hasWriteIntent = /\b(write|replace|overwrite|update|edit|change|deploy|redeploy|restart|publish|push|apply|rollout|create|generate|make)\b/.test(normalized);
+
+    return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
+}
+
 function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
     const executionProfile = normalizeExecutionProfile(
         options?.executionProfile
@@ -914,6 +940,12 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
     const hasSchemaIntent = /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/i.test(normalizedPrompt);
     const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
+    const remoteToolId = availableToolIds.has('remote-command')
+        ? 'remote-command'
+        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
+    const explicitLocalArtifact = hasExplicitLocalArtifactReference(prompt);
+    const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
+    const shouldPreferRemoteWebsiteSource = Boolean(remoteToolId && remoteWebsiteUpdateIntent && !explicitLocalArtifact);
 
     if (hasWebResearchIntent) {
         selectedIds.add('web-search');
@@ -944,27 +976,23 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         selectedIds.add('image-from-url');
     }
 
-    if (extractRequestedDirectoryPath(prompt)) {
+    if (!shouldPreferRemoteWebsiteSource && extractRequestedDirectoryPath(prompt)) {
         selectedIds.add('file-mkdir');
     }
 
-    if (/\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWebsiteSource && /\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
         selectedIds.add('file-read');
     }
 
-    if (/\b(write|save|create|update|edit)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWebsiteSource && /\b(write|save|create|update|edit)\b[\s\S]{0,40}\bfile\b/i.test(normalizedPrompt)) {
         selectedIds.add('file-write');
     }
 
-    if (/\b(find|search|locate|list)\b[\s\S]{0,40}\bfiles?\b/i.test(normalizedPrompt)) {
+    if (!shouldPreferRemoteWebsiteSource && /\b(find|search|locate|list)\b[\s\S]{0,40}\bfiles?\b/i.test(normalizedPrompt)) {
         selectedIds.add('file-search');
     }
 
-    const remoteToolId = availableToolIds.has('remote-command')
-        ? 'remote-command'
-        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
-
-    if (promptHasExplicitSshIntent(prompt) && remoteToolId) {
+    if (remoteToolId && (promptHasExplicitSshIntent(prompt) || shouldPreferRemoteWebsiteSource)) {
         selectedIds.add(remoteToolId);
     }
 
@@ -1022,6 +1050,12 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : 'remote-command');
+
+    if (remoteToolId
+        && hasRemoteWebsiteUpdateIntent(prompt)
+        && !hasExplicitLocalArtifactReference(prompt)) {
+        return remoteToolId;
+    }
 
     if (promptHasExplicitSshIntent(prompt)) {
         return remoteToolId;
@@ -1144,6 +1178,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Ask for user input only when a tool result shows missing credentials or host details, a destructive action needs approval, or the next move depends on a real external decision.');
         guidance.push('- For reconnect or baseline remote checks, assume Ubuntu/Linux first and use a concrete command such as `hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime`.');
         guidance.push('- For Kubernetes troubleshooting, if `kubectl describe` or pod status output shows CrashLoopBackOff, an init container failure, or Exit Code > 0, follow it with `kubectl logs` for the failing container or init container instead of handing that next command back to the user.');
+        guidance.push('- For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or local path.');
+        guidance.push('- If the user asks for a fresh replacement page, generate the full HTML and write it remotely instead of blocking on a missing local artifact.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 
         if (hasUsableSshDefaults()) {

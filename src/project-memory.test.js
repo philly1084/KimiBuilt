@@ -71,5 +71,6 @@ describe('project-memory', () => {
         expect(instructions).toContain('https://example.com/spec');
         expect(instructions).toContain('brief.html');
         expect(instructions).toContain('Researched the brief structure.');
+        expect(instructions).toContain('artifact references, not guaranteed local workspace files');
     });
 });

@@ -12,6 +12,8 @@ function buildContinuityInstructions(extra = '') {
         'For remote server or remote-build work, assume an Ubuntu/Linux target unless tool results prove otherwise. A safe reconnect baseline is: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
         'For remote troubleshooting, keep ownership of the original ask: continue through routine diagnostics, fixes, and verification instead of turning each intermediate issue into a new user task.',
         'Treat newly discovered server errors or sub-issues as part of the same troubleshooting chain. Ask the user only when blocked by missing secrets or credentials, an ambiguous product decision, a destructive action that needs approval, or an exhausted runtime budget.',
+        'For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or readable local path.',
+        'If the user asks for a fresh replacement page, you may generate the full HTML yourself and write it remotely instead of blocking on a missing local artifact.',
         'If a tool call fails, report the exact tool error plainly instead of saying tools are unavailable.',
         'Be concise and informative.',
         extra || '',

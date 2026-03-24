@@ -311,6 +311,36 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
     return null;
 }
 
+function hasExplicitLocalArtifactReference(text = '') {
+    const source = String(text || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    const normalized = source.toLowerCase();
+    return /\b(artifact|attach|attached|upload|uploaded|workspace|repo|repository|local file|local html|local artifact|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
+        || /\/api\/artifacts\//i.test(source)
+        || /[a-z]:\\[^"'`\s]+/i.test(source)
+        || /\b[a-z0-9._-]+-[a-z0-9]{6}\.(html|htm|css|js)\b/i.test(source);
+}
+
+function hasRemoteWebsiteUpdateIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const hasWebsiteTarget = /\b(website|web site|webpage|web page|landing page|homepage|home page|site|html|index\.html|page)\b/.test(normalized);
+    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|kubectl|pod|deployment|workload|rollout|restart|redeploy|configmap|container|ingress)\b/.test(normalized);
+    const hasWriteIntent = /\b(write|replace|overwrite|update|edit|change|deploy|redeploy|restart|publish|push|apply|rollout|create|generate|make)\b/.test(normalized);
+
+    return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
+}
+
+function buildRemoteWebsiteSourceInspectionCommand() {
+    return "hostname && uname -m && (test -f /root/website.html && sed -n '1,220p' /root/website.html || test -f /root/index.html && sed -n '1,220p' /root/index.html || find /root /srv /var/www -maxdepth 3 -type f \\( -name 'index.html' -o -name '*.html' \\) 2>/dev/null | head -n 20) && (kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page' | head -n 20 || true)";
+}
+
 function getLastRemoteToolEvent(toolEvents = []) {
     for (let index = (Array.isArray(toolEvents) ? toolEvents.length : 0) - 1; index >= 0; index -= 1) {
         const event = toolEvents[index];
@@ -407,6 +437,37 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', executionProfil
     const remoteToolId = getPreferredRemoteToolId(toolPolicy);
     if (executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE || !remoteToolId) {
         return [];
+    }
+
+    if (hasRemoteWebsiteUpdateIntent(objective) && !hasExplicitLocalArtifactReference(objective)) {
+        const missingLocalHtmlArtifact = [...(Array.isArray(toolEvents) ? toolEvents : [])]
+            .reverse()
+            .find((event) => {
+                const toolId = canonicalizeRemoteToolId(event?.toolCall?.function?.name || event?.result?.toolId || '');
+                const error = String(event?.result?.error || '').trim();
+                let args = {};
+                try {
+                    args = JSON.parse(event?.toolCall?.function?.arguments || '{}');
+                } catch (_error) {
+                    args = {};
+                }
+                const path = String(args?.path || '').trim();
+
+                return toolId === 'file-read'
+                    && event?.result?.success === false
+                    && /\b(enoent|no such file or directory)\b/i.test(error)
+                    && (!path || /\.(html?|css|js)$/i.test(path));
+            });
+
+        if (missingLocalHtmlArtifact) {
+            return [{
+                tool: remoteToolId,
+                reason: 'A local HTML artifact could not be read. Inspect the remote website source and cluster ConfigMaps instead of blocking on the missing local file.',
+                params: {
+                    command: buildRemoteWebsiteSourceInspectionCommand(),
+                },
+            }];
+        }
     }
 
     const lastRemoteEvent = getLastRemoteToolEvent(toolEvents);
@@ -652,6 +713,17 @@ function classifyToolFailure(event = {}, executionProfile = DEFAULT_EXECUTION_PR
     const isRemoteFailure = isRemoteCommandToolId(toolId);
 
     if (!isRemoteFailure) {
+        if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            && toolId === 'file-read'
+            && /\b(enoent|no such file or directory)\b/i.test(error)) {
+            return {
+                toolId,
+                error,
+                blocking: false,
+                category: 'missing-local-file-recoverable',
+            };
+        }
+
         return {
             toolId,
             error,
@@ -1384,6 +1456,11 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSchemaIntent = hasSchemaDesignIntent(prompt);
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
+        const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(`${objective || ''}\n${instructions || ''}`);
+        const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
+        const shouldPreferRemoteWebsiteSource = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            && remoteWebsiteUpdateIntent
+            && !hasExplicitLocalArtifacts;
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
@@ -1392,10 +1469,12 @@ class ConversationOrchestrator extends EventEmitter {
             [
                 'web-search',
                 'web-fetch',
-                'file-read',
-                'file-search',
                 'tool-doc-read',
             ].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+
+            if (!shouldPreferRemoteWebsiteSource) {
+                ['file-read', 'file-search'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+            }
 
             if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add(remoteToolId);
@@ -1433,10 +1512,14 @@ class ConversationOrchestrator extends EventEmitter {
             if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
                 candidates.add('image-from-url');
             }
-            if (allowedToolIds.includes('file-write') && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
+            if (!shouldPreferRemoteWebsiteSource
+                && allowedToolIds.includes('file-write')
+                && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
                 candidates.add('file-write');
             }
-            if (allowedToolIds.includes('file-mkdir') && /\b(create|make|mkdir)\b/.test(prompt)) {
+            if (!shouldPreferRemoteWebsiteSource
+                && allowedToolIds.includes('file-mkdir')
+                && /\b(create|make|mkdir)\b/.test(prompt)) {
                 candidates.add('file-mkdir');
             }
         } else {
@@ -1773,6 +1856,13 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
+            ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasRemoteWebsiteUpdateIntent(planningPrompt)
+                ? [
+                    'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',
+                    'When the user asks to replace the page with a new file, you may generate the full replacement HTML yourself and write it remotely with `remote-command`.',
+                    'If a local HTML artifact or local file read fails, pivot to the remote file, ConfigMap, or deployed content as the source of truth instead of stopping.',
+                ]
+                : []),
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious next remote-build steps.',
@@ -2121,6 +2211,8 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`When calling ${remoteToolId}, always include a concrete command string. Omitting host/username/port is allowed when the runtime target is already configured, but omitting command is never allowed.`);
             parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
             parts.push('For Kubernetes pod failures, follow describe/status output with `kubectl logs` for the failing container or init container instead of asking the user to run that next step.');
+            parts.push('For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or path.');
+            parts.push('If the user asks for a fresh replacement page, generate the full HTML and write it remotely instead of blocking on a missing local artifact.');
             parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, `ip addr` for `ifconfig`, and `docker compose` for `docker-compose`.');
         } else if (remoteToolId) {
             parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);

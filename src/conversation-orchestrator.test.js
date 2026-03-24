@@ -1077,6 +1077,43 @@ describe('ConversationOrchestrator', () => {
         expect(plan[0].params.command).not.toContain('kubectl get pods -A');
     });
 
+    test('prefers remote-command over local file tools for remote website replacement prompts without explicit local artifacts', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'file-write', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Create a whole new HTML file, replace the existing website on the cluster, and restart the workload.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-read');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-search');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-write');
+    });
+
     test('falls back to ssh planning for remote-build prompts', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

@@ -285,6 +285,7 @@ function buildProjectMemoryInstructions(session = null) {
     if (Array.isArray(memory.artifacts) && memory.artifacts.length > 0) {
         lines.push('');
         lines.push('Generated artifacts:');
+        lines.push('These are artifact references, not guaranteed local workspace files. Do not use local file tools on them unless the user explicitly provides a readable local path.');
         memory.artifacts.slice(-6).forEach((artifact) => {
             const download = artifact.downloadUrl ? ` -> ${artifact.downloadUrl}` : '';
             lines.push(`- ${artifact.filename || artifact.id} (${artifact.format || 'file'})${download}`);
