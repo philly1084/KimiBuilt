@@ -219,6 +219,8 @@ function hasAutonomousRemoteApproval(text = '') {
         /\b(do what you need|take it from here|handle it|run with it|finish it|finish setup|finish the setup|complete the setup)\b/,
         /\b(keep going|continue|proceed|go ahead|next steps|do the next steps|obvious next steps)\b/,
         /\b(start the build|continue the build|continue on the server|keep working on the server)\b/,
+        /\b(solve|fix|resolve|repair)\b[\s\S]{0,24}\b(issue|problem|it|this)\b/,
+        /\b(you have|use)\s+root access\b/,
     ].some((pattern) => pattern.test(normalized));
 }
 
@@ -275,6 +277,7 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
     if (!normalized) {
         return null;
     }
+    const hasInspectionIntent = /\b(check|inspect|verify|diagnose|debug|troubleshoot|status|state|health|healthy|look at|show|list|what'?s running|see what'?s wrong)\b/.test(normalized);
 
     const firstUrl = extractFirstUrl(source);
     if (firstUrl && /\b(curl|reach|reachable|endpoint|url|auth|login|gitea)\b/.test(normalized)) {
@@ -285,15 +288,15 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
         return 'hostname && uptime && (df -h / || true) && (free -m || true)';
     }
 
-    if (/\b(k3s|k8s|kubernetes|cluster|kubectl|nodes?)\b/.test(normalized)) {
+    if (hasInspectionIntent && /\b(k3s|k8s|kubernetes|cluster|kubectl|nodes?)\b/.test(normalized)) {
         return 'kubectl get nodes -o wide && kubectl get pods -A';
     }
 
-    if (/\b(pods?)\b/.test(normalized)) {
+    if (hasInspectionIntent && /\b(pods?)\b/.test(normalized)) {
         return 'kubectl get pods -A';
     }
 
-    if (/\b(namespaces?)\b/.test(normalized)) {
+    if (hasInspectionIntent && /\b(namespaces?)\b/.test(normalized)) {
         return 'kubectl get namespaces';
     }
 
@@ -306,6 +309,137 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
     }
 
     return null;
+}
+
+function getLastRemoteToolEvent(toolEvents = []) {
+    for (let index = (Array.isArray(toolEvents) ? toolEvents.length : 0) - 1; index >= 0; index -= 1) {
+        const event = toolEvents[index];
+        if (isRemoteCommandToolId(event?.toolCall?.function?.name || event?.result?.toolId || '')) {
+            return event;
+        }
+    }
+
+    return null;
+}
+
+function parseKubernetesInitContainerFailure(output = '') {
+    const text = String(output || '');
+    if (!text || !/\bInit Containers:\b/.test(text) || !/\b(CrashLoopBackOff|Exit Code:\s*[1-9])\b/.test(text)) {
+        return null;
+    }
+
+    const lines = text.split(/\r?\n/);
+    let podName = null;
+    let namespace = null;
+    let inInitContainers = false;
+    let currentInit = null;
+    const initContainers = [];
+
+    for (const rawLine of lines) {
+        const line = String(rawLine || '');
+
+        const podMatch = line.match(/^Name:\s+(\S+)/);
+        if (podMatch) {
+            podName = podMatch[1];
+        }
+
+        const namespaceMatch = line.match(/^Namespace:\s+(\S+)/);
+        if (namespaceMatch) {
+            namespace = namespaceMatch[1];
+        }
+
+        if (/^Init Containers:\s*$/.test(line)) {
+            inInitContainers = true;
+            currentInit = null;
+            continue;
+        }
+
+        if (inInitContainers && /^[A-Z][A-Za-z ]+:\s*$/.test(line) && !/^Init Containers:\s*$/.test(line)) {
+            inInitContainers = false;
+            currentInit = null;
+        }
+
+        if (!inInitContainers) {
+            continue;
+        }
+
+        const initMatch = line.match(/^\s{2}([A-Za-z0-9._-]+):\s*$/);
+        if (initMatch) {
+            currentInit = {
+                name: initMatch[1],
+                crashLoop: false,
+                lastStateError: false,
+                exitCode: 0,
+            };
+            initContainers.push(currentInit);
+            continue;
+        }
+
+        if (!currentInit) {
+            continue;
+        }
+
+        if (/Reason:\s+CrashLoopBackOff/.test(line)) {
+            currentInit.crashLoop = true;
+        }
+        if (/Reason:\s+Error/.test(line)) {
+            currentInit.lastStateError = true;
+        }
+        const exitCodeMatch = line.match(/Exit Code:\s+(\d+)/);
+        if (exitCodeMatch) {
+            currentInit.exitCode = Number(exitCodeMatch[1]) || 0;
+        }
+    }
+
+    const failingInit = initContainers.find((container) => container.crashLoop || container.lastStateError || container.exitCode > 0);
+    if (!podName || !namespace || !failingInit?.name) {
+        return null;
+    }
+
+    return {
+        podName,
+        namespace,
+        containerName: failingInit.name,
+    };
+}
+
+function buildRemoteFollowupPlanFromToolEvents({ objective = '', executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {}, toolEvents = [] } = {}) {
+    const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+    if (executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE || !remoteToolId) {
+        return [];
+    }
+
+    const lastRemoteEvent = getLastRemoteToolEvent(toolEvents);
+    if (!lastRemoteEvent || lastRemoteEvent?.result?.success === false) {
+        return [];
+    }
+
+    let lastArgs = {};
+    try {
+        lastArgs = JSON.parse(lastRemoteEvent?.toolCall?.function?.arguments || '{}');
+    } catch (_error) {
+        lastArgs = {};
+    }
+
+    const combinedOutput = [
+        objective,
+        lastArgs.command || '',
+        lastRemoteEvent?.result?.data?.stdout || '',
+        lastRemoteEvent?.result?.data?.stderr || '',
+    ].join('\n');
+
+    const initFailure = parseKubernetesInitContainerFailure(combinedOutput);
+    if (initFailure) {
+        return [{
+            tool: remoteToolId,
+            reason: `Fetch failing init container logs for ${initFailure.namespace}/${initFailure.podName} after detecting an init container crash.`,
+            params: {
+                command: `kubectl logs -n ${shellQuote(initFailure.namespace)} ${shellQuote(initFailure.podName)} -c ${shellQuote(initFailure.containerName)} --previous || kubectl logs -n ${shellQuote(initFailure.namespace)} ${shellQuote(initFailure.podName)} -c ${shellQuote(initFailure.containerName)}`,
+            },
+        }];
+    }
+
+    return [];
 }
 
 function isInvalidRuntimeResponseText(text = '') {
@@ -347,6 +481,9 @@ function isInvalidRuntimeResponseText(text = '') {
         'i don\'t have any remote execution tools available',
         'i do not have any remote execution tools available',
         'remote execution tools available in this turn',
+        'i don\'t have tool access in this session',
+        'i do not have tool access in this session',
+        'unfortunately i don\'t have tool access in this session',
     ].some((pattern) => normalized.includes(pattern));
 }
 
@@ -924,6 +1061,18 @@ class ConversationOrchestrator extends EventEmitter {
                     });
                     if (nextPlan.length > 0 && runtimeMode === 'plain') {
                         runtimeMode = 'planned-tools';
+                    }
+                }
+
+                if (nextPlan.length === 0 && autonomyApproved) {
+                    nextPlan = buildRemoteFollowupPlanFromToolEvents({
+                        objective,
+                        executionProfile: resolvedProfile,
+                        toolPolicy,
+                        toolEvents,
+                    });
+                    if (nextPlan.length > 0 && runtimeMode === 'plain') {
+                        runtimeMode = 'guided-tools';
                     }
                 }
 
@@ -1644,12 +1793,14 @@ class ConversationOrchestrator extends EventEmitter {
                     `For server work, prefer trying ${remoteToolId} before asking the user for host details again.`,
                     'Assume a Linux server and prefer Ubuntu-friendly commands unless tool results prove otherwise.',
                     'For remote-build work, verify architecture with uname -m before installing binaries and prefer arm64/aarch64 assets when applicable.',
+                    'For Kubernetes troubleshooting, if a pod describe or status result shows CrashLoopBackOff, an init container failure, or Exit Code > 0, the next step is usually kubectl logs for the failing container or init container rather than asking the user what to run next.',
                     'Prefer common built-ins and standard utilities. If a nonstandard tool may be missing, use a fallback such as find/grep instead of rg, ss instead of netstat, ip addr instead of ifconfig, and docker compose instead of docker-compose.',
                 ]
                 : remoteToolId
                     ? [
                         `${remoteToolId} is still available for this request even if the runtime target is not yet verified in this prompt.`,
                         `Do not claim ${remoteToolId} is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.`,
+                        'For Kubernetes pod failures, follow describe/status output with kubectl logs for the failing container before handing work back to the user.',
                         'When planning server commands, prefer Ubuntu-friendly standard utilities and avoid assuming rg, ifconfig, netstat, or docker-compose are installed.',
                       ]
                     : []),
@@ -1969,6 +2120,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
             parts.push(`When calling ${remoteToolId}, always include a concrete command string. Omitting host/username/port is allowed when the runtime target is already configured, but omitting command is never allowed.`);
             parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
+            parts.push('For Kubernetes pod failures, follow describe/status output with `kubectl logs` for the failing container or init container instead of asking the user to run that next step.');
             parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, `ip addr` for `ifconfig`, and `docker compose` for `docker-compose`.');
         } else if (remoteToolId) {
             parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);

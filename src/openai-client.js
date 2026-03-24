@@ -1133,6 +1133,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push(`- If \`${remoteGuidanceToolId}\` fails, explain the actual SSH error from the tool result and ask only for the missing host or credentials if needed.`);
         guidance.push('- Ask for user input only when a tool result shows missing credentials or host details, a destructive action needs approval, or the next move depends on a real external decision.');
         guidance.push('- For reconnect or baseline remote checks, assume Ubuntu/Linux first and use a concrete command such as `hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime`.');
+        guidance.push('- For Kubernetes troubleshooting, if `kubectl describe` or pod status output shows CrashLoopBackOff, an init container failure, or Exit Code > 0, follow it with `kubectl logs` for the failing container or init container instead of handing that next command back to the user.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 
         if (hasUsableSshDefaults()) {

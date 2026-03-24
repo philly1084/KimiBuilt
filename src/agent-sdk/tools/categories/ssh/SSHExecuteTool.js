@@ -170,6 +170,8 @@ class SSHExecuteTool extends ToolBase {
       '-o',
       'UserKnownHostsFile=/dev/null',
       '-o',
+      'LogLevel=ERROR',
+      '-o',
       'ConnectTimeout=15',
       '-o',
       'ServerAliveInterval=15',
@@ -217,7 +219,7 @@ class SSHExecuteTool extends ToolBase {
 
       return {
         stdout: result.stdout,
-        stderr: result.stderr,
+        stderr: this.stripBenignSshWarnings(result.stderr),
         exitCode: result.exitCode,
         duration: Date.now() - startedAt,
         host: `${connection.host}:${connection.port}`,
@@ -295,9 +297,17 @@ class SSHExecuteTool extends ToolBase {
     return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
   }
 
+  stripBenignSshWarnings(text = '') {
+    return String(text || '')
+      .split(/\r?\n/)
+      .filter((line) => !/Warning: Permanently added .* to the list of known hosts\./i.test(String(line || '').trim()))
+      .join('\n')
+      .trim();
+  }
+
   enrichExecutionError(error, { command = '', host = '' } = {}) {
     const enrichedError = error;
-    const stderr = String(error?.stderr || '').trim();
+    const stderr = this.stripBenignSshWarnings(error?.stderr || '');
     const stdout = String(error?.stdout || '').trim();
     const combined = `${stderr}\n${stdout}\n${error?.message || ''}`.toLowerCase();
     const hints = [];

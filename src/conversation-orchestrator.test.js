@@ -780,6 +780,112 @@ describe('ConversationOrchestrator', () => {
         expect(result.response.metadata.toolEvents).toHaveLength(3);
     });
 
+    test('follows a crashing init container describe step with kubectl logs instead of handing off the next tool call', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Fetched the failing init container logs and continued troubleshooting.', 'resp_init_logs')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Describe the crashing Gitea pod first',
+                        params: {
+                            command: 'kubectl describe pod -n gitea gitea-5479f795f8-pk2dp',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const describeOutput = [
+            'Name:         gitea-5479f795f8-pk2dp',
+            'Namespace:    gitea',
+            'Init Containers:',
+            '  init-directories:',
+            '    State:          Terminated',
+            '      Reason:       Completed',
+            '  init-app-ini:',
+            '    State:          Waiting',
+            '      Reason:       CrashLoopBackOff',
+            '    Last State:     Terminated',
+            '      Reason:       Error',
+            '      Exit Code:    1',
+            'Containers:',
+            '  gitea:',
+            '    State: Waiting',
+        ].join('\n');
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '10.0.0.5:22',
+                        stdout: describeOutput,
+                        stderr: '',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '10.0.0.5:22',
+                        stdout: '/usr/sbinx/config_environment.sh: not found',
+                        stderr: '',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-init-logs', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-init-logs', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'You have root access on the whole cluster. Can you solve this issue with the crashing Gitea init container?',
+            sessionId: 'session-init-logs',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(toolManager.executeTool.mock.calls[0][1].command).toBe('kubectl describe pod -n gitea gitea-5479f795f8-pk2dp');
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain("kubectl logs -n 'gitea' 'gitea-5479f795f8-pk2dp' -c 'init-app-ini' --previous");
+    });
+
     test('treats explicit web research and scrape requests as first-class tool intents', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
@@ -920,6 +1026,55 @@ describe('ConversationOrchestrator', () => {
                 }),
             }),
         ]);
+    });
+
+    test('does not let a generic cluster deployment request collapse into kubectl pod listing fallback', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue('I should probably inspect the cluster first.'),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Can you please set this up on the cluster and deploy it into a pod if needed?',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'Can you please set this up on the cluster and deploy it into a pod if needed?',
+            executionProfile: 'remote-build',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'remote-command',
+                params: expect.objectContaining({
+                    command: expect.stringContaining('uname -m'),
+                }),
+            }),
+        ]);
+        expect(plan[0].params.command).not.toContain('kubectl get nodes -o wide');
+        expect(plan[0].params.command).not.toContain('kubectl get pods -A');
     });
 
     test('falls back to ssh planning for remote-build prompts', async () => {

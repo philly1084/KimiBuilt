@@ -56,4 +56,14 @@ describe('SSHExecuteTool', () => {
     ]));
     expect(enriched.message).toContain('Hints:');
   });
+
+  test('stripBenignSshWarnings removes known-hosts noise from stderr', () => {
+    const tool = new SSHExecuteTool();
+    const cleaned = tool.stripBenignSshWarnings([
+      "Warning: Permanently added 'test.demoserver2.buzz' (ED25519) to the list of known hosts.",
+      'kubectl: command not found',
+    ].join('\n'));
+
+    expect(cleaned).toBe('kubectl: command not found');
+  });
 });
