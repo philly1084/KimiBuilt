@@ -175,10 +175,18 @@ const Agent = (function() {
             case 'image':
                 return content.caption || content.alt || content.url || 'Image block';
             case 'ai_image': {
-                const source = content.source === 'unsplash' ? 'Unsplash' : 'AI image';
+                if (content.source === 'artifact' && Array.isArray(content.artifactResults) && content.artifactResults.length > 0) {
+                    const sourceHost = content.sourceHost || content.artifactResults[0]?.sourceHost || 'captured source';
+                    return `Captured images from ${sourceHost}: ${content.artifactResults.length} options`;
+                }
+
+                const source = content.source === 'unsplash'
+                    ? 'Unsplash'
+                    : (content.source === 'artifact' ? 'Captured image' : 'AI image');
                 const details = [
                     content.prompt || '',
                     content.unsplashPhotographer ? `photo by ${content.unsplashPhotographer}` : '',
+                    content.sourceHost && content.source === 'artifact' ? `captured from ${content.sourceHost}` : '',
                     content.imageUrl || ''
                 ].filter(Boolean);
                 return details.length ? `${source}: ${details.join(' | ')}` : source;
@@ -600,7 +608,11 @@ GUIDELINES:
         }
 
         try {
-            const hostname = new URL(normalizedUrl).hostname.toLowerCase();
+            const parsed = new URL(normalizedUrl);
+            const hostname = parsed.hostname.toLowerCase();
+            if (/\/api\/artifacts\/[^/]+\/download\b/i.test(parsed.pathname)) {
+                return true;
+            }
             return /(?:^|\.)unsplash\.com$/.test(hostname) ||
                 /(?:^|\.)oaiusercontent\.com$/.test(hostname) ||
                 /(?:^|\.)openai\.com$/.test(hostname) ||
@@ -608,6 +620,186 @@ GUIDELINES:
         } catch (_error) {
             return false;
         }
+    }
+
+    function buildArtifactDisplayUrl(path = '', options = {}) {
+        const normalizedPath = String(path || '').trim();
+        if (!normalizedPath) {
+            return '';
+        }
+
+        try {
+            const url = new URL(normalizedPath, window.location.origin);
+            if (options.inline) {
+                url.searchParams.set('inline', '1');
+            }
+            return url.toString();
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    function extractHostLabel(value = '') {
+        try {
+            return new URL(String(value || '').trim()).hostname.replace(/^www\./i, '');
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    function normalizeBlindArtifactItem(item, fallbackPrompt = '', fallbackHost = '') {
+        if (!item || typeof item !== 'object') {
+            return null;
+        }
+
+        const downloadUrl = buildArtifactDisplayUrl(item.downloadPath || item.downloadUrl || '');
+        const inlineUrl = buildArtifactDisplayUrl(
+            item.inlinePath || item.downloadPath || item.downloadUrl || '',
+            { inline: true },
+        );
+        if (!downloadUrl || !inlineUrl) {
+            return null;
+        }
+
+        const sourceHost = item.sourceHost || fallbackHost || '';
+        const filename = item.filename || `captured-image-${item.index || 1}`;
+        const alt = filename
+            .replace(/\.[a-z0-9]{2,5}$/i, '')
+            .replace(/[-_]+/g, ' ')
+            .trim() || fallbackPrompt || 'Captured image';
+
+        return {
+            artifactId: item.artifactId || null,
+            filename,
+            mimeType: item.mimeType || '',
+            sizeBytes: item.sizeBytes || 0,
+            sourceHost,
+            downloadUrl,
+            inlineUrl,
+            imageUrl: inlineUrl,
+            alt,
+        };
+    }
+
+    function parseToolArguments(rawArgs) {
+        if (!rawArgs) {
+            return {};
+        }
+
+        if (typeof rawArgs === 'object') {
+            return rawArgs;
+        }
+
+        if (typeof rawArgs !== 'string') {
+            return {};
+        }
+
+        try {
+            return JSON.parse(rawArgs);
+        } catch (_error) {
+            return {};
+        }
+    }
+
+    function extractBlindArtifactSelectionsFromToolEvents(toolEvents = []) {
+        if (!Array.isArray(toolEvents) || toolEvents.length === 0) {
+            return [];
+        }
+
+        const selections = [];
+
+        toolEvents.forEach((event) => {
+            const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+            if (toolId !== 'web-scrape') {
+                return;
+            }
+
+            const args = parseToolArguments(event?.toolCall?.function?.arguments);
+            const data = event?.result?.data || {};
+            const imageCapture = data.imageCapture && typeof data.imageCapture === 'object'
+                ? data.imageCapture
+                : (event?.result?.imageCapture && typeof event.result.imageCapture === 'object'
+                    ? event.result.imageCapture
+                    : null);
+            if (imageCapture?.mode !== 'blind-artifacts') {
+                return;
+            }
+
+            const fallbackHost = extractHostLabel(data.url || args.url || '') || imageCapture.items?.[0]?.sourceHost || '';
+            const items = (Array.isArray(imageCapture.items) ? imageCapture.items : [])
+                .map((item) => normalizeBlindArtifactItem(item, data.title || data.url || args.url || '', fallbackHost))
+                .filter(Boolean);
+            if (items.length === 0) {
+                return;
+            }
+
+            selections.push({
+                prompt: data.title || data.url || args.url || `Captured images from ${fallbackHost || 'scraped page'}`,
+                sourceHost: fallbackHost,
+                items,
+            });
+        });
+
+        return selections;
+    }
+
+    function isEmptyStarterBlock(block) {
+        if (!block || block.type !== 'text' || (Array.isArray(block.children) && block.children.length > 0)) {
+            return false;
+        }
+
+        return !extractBlockTextValue(block).trim();
+    }
+
+    function appendBlindArtifactSelectionBlocks(toolEvents = []) {
+        const selections = extractBlindArtifactSelectionsFromToolEvents(toolEvents);
+        if (!selections.length || !window.Blocks?.createBlock || !window.Editor?.getCurrentPage) {
+            return { appliedCount: 0, selectionCount: 0, imageCount: 0 };
+        }
+
+        const page = window.Editor.getCurrentPage();
+        if (!page) {
+            return { appliedCount: 0, selectionCount: 0, imageCount: 0 };
+        }
+
+        const blocks = selections.map((selection) => window.Blocks.createBlock('ai_image', {
+            prompt: selection.prompt,
+            caption: '',
+            imageUrl: null,
+            model: null,
+            size: '1536x1024',
+            quality: 'standard',
+            style: 'natural',
+            source: 'artifact',
+            status: 'search_results',
+            unsplashResults: null,
+            artifactResults: selection.items,
+            selectedUnsplashId: null,
+            selectedArtifactId: null,
+            imageAssetId: null,
+            artifactId: null,
+            downloadUrl: null,
+            sourceHost: selection.sourceHost || null,
+        }));
+
+        if (blocks.length === 0) {
+            return { appliedCount: 0, selectionCount: 0, imageCount: 0 };
+        }
+
+        const existingBlocks = Array.isArray(page.blocks) ? page.blocks : [];
+        const inserted = existingBlocks.length === 1 && isEmptyStarterBlock(existingBlocks[0])
+            ? (window.Editor.replaceBlockWithBlocks?.(existingBlocks[0].id, blocks) || [])
+            : (window.Editor.insertBlocksAfter?.(existingBlocks.length ? existingBlocks[existingBlocks.length - 1].id : null, blocks) || []);
+
+        if (inserted.length > 0) {
+            window.Editor.savePage?.();
+        }
+
+        return {
+            appliedCount: inserted.length,
+            selectionCount: inserted.length,
+            imageCount: selections.reduce((total, selection) => total + selection.items.length, 0),
+        };
     }
 
     function isImageLikePayload(value) {
@@ -625,7 +817,7 @@ GUIDELINES:
             Object.prototype.hasOwnProperty.call(value, 'alt') ||
             Object.prototype.hasOwnProperty.call(value, 'prompt') ||
             Object.prototype.hasOwnProperty.call(value, 'revisedPrompt') ||
-            /^(generated|unsplash|url)$/i.test(String(value.source || '').trim()) ||
+            /^(generated|unsplash|artifact|url)$/i.test(String(value.source || '').trim()) ||
             looksLikeEmbeddableImageUrl(value.url || value.normalizedUrl || '');
     }
 
@@ -1285,7 +1477,9 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     : { url: '', caption: coerceTextValue(value) };
             case 'ai_image':
                 if (value && typeof value === 'object') {
-                    const hasSearchResults = Array.isArray(value.unsplashResults) && value.unsplashResults.length > 0;
+                    const hasSearchResults =
+                        (Array.isArray(value.unsplashResults) && value.unsplashResults.length > 0) ||
+                        (Array.isArray(value.artifactResults) && value.artifactResults.length > 0);
                     const hasImage = Boolean(value.imageUrl || value.url || value.imageAssetId);
                     return {
                         prompt: coerceTextValue(value.prompt || value.text || value.description || ''),
@@ -1295,13 +1489,18 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         size: value.size || '1024x1024',
                         quality: value.quality || 'standard',
                         style: value.style || 'vivid',
-                        source: value.source === 'unsplash' ? 'unsplash' : 'ai',
+                        source: value.source === 'unsplash' ? 'unsplash' : (value.source === 'artifact' ? 'artifact' : 'ai'),
                         status: value.status || (hasSearchResults ? 'search_results' : (hasImage ? 'done' : 'pending')),
-                        unsplashResults: hasSearchResults ? value.unsplashResults : null,
+                        unsplashResults: Array.isArray(value.unsplashResults) && value.unsplashResults.length > 0 ? value.unsplashResults : null,
+                        artifactResults: Array.isArray(value.artifactResults) && value.artifactResults.length > 0 ? value.artifactResults : null,
                         selectedUnsplashId: value.selectedUnsplashId || null,
+                        selectedArtifactId: value.selectedArtifactId || null,
                         unsplashPhotographer: value.unsplashPhotographer || null,
                         unsplashPhotographerUrl: value.unsplashPhotographerUrl || null,
-                        imageAssetId: value.imageAssetId || null
+                        imageAssetId: value.imageAssetId || null,
+                        artifactId: value.artifactId || null,
+                        downloadUrl: value.downloadUrl || null,
+                        sourceHost: value.sourceHost || null,
                     };
                 }
                 return {
@@ -1315,10 +1514,15 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     source: 'ai',
                     status: 'pending',
                     unsplashResults: null,
+                    artifactResults: null,
                     selectedUnsplashId: null,
+                    selectedArtifactId: null,
                     unsplashPhotographer: null,
                     unsplashPhotographerUrl: null,
-                    imageAssetId: null
+                    imageAssetId: null,
+                    artifactId: null,
+                    downloadUrl: null,
+                    sourceHost: null,
                 };
             case 'bookmark':
                 if (value && typeof value === 'object') {
@@ -1437,10 +1641,15 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         source: definition.source || 'ai',
                         status: definition.status,
                         unsplashResults: definition.unsplashResults || null,
+                        artifactResults: definition.artifactResults || null,
                         selectedUnsplashId: definition.selectedUnsplashId || null,
+                        selectedArtifactId: definition.selectedArtifactId || null,
                         unsplashPhotographer: definition.unsplashPhotographer || null,
                         unsplashPhotographerUrl: definition.unsplashPhotographerUrl || null,
-                        imageAssetId: definition.imageAssetId || null
+                        imageAssetId: definition.imageAssetId || null,
+                        artifactId: definition.artifactId || null,
+                        downloadUrl: definition.downloadUrl || null,
+                        sourceHost: definition.sourceHost || null,
                     };
                     break;
                 case 'bookmark':
@@ -3762,6 +3971,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 let jsonBuffer = '';
                 let inJsonBlock = false;
                 let generatedArtifacts = [];
+                let generatedToolEvents = [];
 
                 try {
                     if (useMultiPassDraft) {
@@ -3811,8 +4021,9 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                                 continue;
                             }
 
-                            if (chunk.type === 'done' && Array.isArray(chunk.artifacts)) {
-                                generatedArtifacts = chunk.artifacts;
+                            if (chunk.type === 'done') {
+                                generatedArtifacts = Array.isArray(chunk.artifacts) ? chunk.artifacts : [];
+                                generatedToolEvents = Array.isArray(chunk.toolEvents) ? chunk.toolEvents : [];
                                 continue;
                             }
 
@@ -3832,6 +4043,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                         responseText = response.content || response.message || String(response);
                         generatedArtifacts = Array.isArray(response.artifacts) ? response.artifacts : [];
+                        generatedToolEvents = Array.isArray(response.toolEvents) ? response.toolEvents : [];
                     }
 
                     if (isInvalidGatewayResponseText(responseText)) {
@@ -3861,6 +4073,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         }
                     }
 
+                    const blindArtifactSelectionResult = appendBlindArtifactSelectionBlocks(generatedToolEvents);
+
                     if (generatedArtifacts.length > 0 && requestedArtifactFormat) {
                         generatedArtifacts.forEach((artifact) => appendArtifactBookmark(artifact, requestedArtifactFormat));
                     }
@@ -3868,14 +4082,21 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     const artifactLinkNotice = generatedArtifacts.length > 0 && requestedArtifactFormat
                         ? `\n\nDownload link added at the bottom of the page for the generated ${requestedArtifactFormat.toUpperCase()} export.`
                         : '';
-                    const visibleResponse = (preparedResponse.displayText || responseText) + artifactLinkNotice;
+                    const blindArtifactNotice = blindArtifactSelectionResult.selectionCount > 0
+                        ? `\n\nAdded ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
+                        : '';
+                    const baseVisibleResponse = preparedResponse.displayText || responseText || '';
+                    const visibleResponse = `${baseVisibleResponse}${artifactLinkNotice}${blindArtifactNotice}`.trim()
+                        || (blindArtifactSelectionResult.selectionCount > 0
+                            ? `Added ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
+                            : '');
                     const assistantMessage = hiddenAssistantMessage
                         ? null
                         : addMessage('assistant', visibleResponse, {
                             model,
                             tokensUsed: estimateTokens(question + visibleResponse),
                             source: 'api',
-                            appliedCount: preparedResponse.appliedCount || 0
+                            appliedCount: (preparedResponse.appliedCount || 0) + (blindArtifactSelectionResult.appliedCount || 0)
                         });
 
                     if (model !== state.selectedModel && !toolSensitiveRequest) {

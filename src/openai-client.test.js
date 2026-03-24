@@ -410,6 +410,28 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
     });
 
+    test('builds deterministic blind scrape actions for explicit sensitive image scraping requests', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'web-scrape' },
+            ],
+            'Scrape images from https://example.com/gallery without exposing the agent to the adult content.',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'web-scrape',
+                params: expect.objectContaining({
+                    url: 'https://example.com/gallery',
+                    browser: true,
+                    captureImages: true,
+                    blindImageCapture: true,
+                    imageLimit: 12,
+                }),
+            },
+        ]);
+    });
+
     test('prefers remote-command for deterministic ssh preflight when both SSH tools are available', () => {
         const actions = __testUtils.buildDeterministicPreflightActions(
             [
@@ -673,6 +695,39 @@ describe('openai-client automatic tool orchestration helpers', () => {
                 host: '77.42.44.98',
                 username: 'root',
                 command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+            }),
+            expect.any(Object),
+        );
+    });
+
+    test('runs explicit web-scrape requests directly for sensitive image capture flows', async () => {
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Scrape images from https://example.com/gallery without exposing the agent to the adult content.',
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Scrape images from https://example.com/gallery without exposing the agent to the adult content.',
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'web-scrape',
+            selectedTools,
+            prompt: 'Scrape images from https://example.com/gallery without exposing the agent to the adult content.',
+            toolContext: {},
+            model: 'gemini-test',
+        });
+
+        expect(response.output[0].content[0].text).toContain('Web scrape completed for https://example.com/gallery.');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'web-scrape',
+            expect.objectContaining({
+                url: 'https://example.com/gallery',
+                browser: true,
+                captureImages: true,
+                blindImageCapture: true,
             }),
             expect.any(Object),
         );

@@ -3221,6 +3221,35 @@ code[class*="language-"] {
     display: block;
 }
 
+.image-selection-meta {
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.55rem 0.65rem;
+    border-radius: var(--radius-md);
+    background: rgba(13, 13, 13, 0.62);
+    color: white;
+    backdrop-filter: blur(6px);
+}
+
+.image-selection-caption {
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.25;
+    word-break: break-word;
+}
+
+.image-selection-host {
+    font-size: 0.68rem;
+    opacity: 0.82;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .image-selection-overlay {
     position: absolute;
     left: 0.75rem;

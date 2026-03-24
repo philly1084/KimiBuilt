@@ -946,16 +946,23 @@ class ChatApp {
         const image = this.getSelectionItem(messageId, index);
         if (!message || !image?.imageUrl) return;
 
+        const sourceKind = image.source || message.sourceKind || 'generated';
+        const isArtifact = sourceKind === 'artifact';
+
         const imageMessage = {
             id: uiHelpers.generateMessageId(),
             role: 'assistant',
             type: 'image',
             imageUrl: image.imageUrl,
             thumbnailUrl: image.thumbnailUrl || image.imageUrl,
-            prompt: image.alt || image.prompt || message.prompt || 'Generated image',
+            prompt: image.alt || image.prompt || message.prompt || (isArtifact ? 'Captured image' : 'Generated image'),
             revisedPrompt: image.revisedPrompt || '',
-            model: image.model || message.model || '',
-            source: 'generated',
+            model: isArtifact ? '' : (image.model || message.model || ''),
+            source: isArtifact ? 'artifact' : 'generated',
+            downloadUrl: image.downloadUrl || '',
+            artifactId: image.artifactId || '',
+            filename: image.filename || '',
+            sourceHost: image.sourceHost || message.sourceHost || '',
             timestamp: new Date().toISOString()
         };
 
@@ -1126,6 +1133,31 @@ class ChatApp {
         }
     }
 
+    buildArtifactUrl(path, { inline = false } = {}) {
+        const normalizedPath = typeof path === 'string' ? path.trim() : '';
+        if (!normalizedPath) {
+            return '';
+        }
+
+        try {
+            const url = new URL(normalizedPath, window.location.origin);
+            if (inline) {
+                url.searchParams.set('inline', '1');
+            }
+            return url.toString();
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    extractHostLabel(value = '') {
+        try {
+            return new URL(String(value || '').trim()).hostname.replace(/^www\./i, '');
+        } catch (_error) {
+            return '';
+        }
+    }
+
     normalizeUnsplashResult(image) {
         if (!image || typeof image !== 'object') {
             return null;
@@ -1182,6 +1214,44 @@ class ChatApp {
             revisedPrompt: image.revisedPrompt || image.revised_prompt || '',
             prompt: fallbackPrompt,
             model: image.model || fallbackModel || '',
+            source: 'generated',
+        };
+    }
+
+    normalizeArtifactImage(image, fallbackPrompt = '', fallbackHost = '') {
+        if (!image || typeof image !== 'object') {
+            return null;
+        }
+
+        const downloadUrl = this.buildArtifactUrl(image.downloadPath || image.downloadUrl || '');
+        const inlineUrl = this.buildArtifactUrl(
+            image.inlinePath || image.downloadPath || image.downloadUrl || '',
+            { inline: true },
+        );
+
+        if (!downloadUrl || !inlineUrl) {
+            return null;
+        }
+
+        const sourceHost = image.sourceHost || fallbackHost || '';
+        const filename = image.filename || `captured-image-${image.index || 1}`;
+        const alt = filename
+            .replace(/\.[a-z0-9]{2,5}$/i, '')
+            .replace(/[-_]+/g, ' ')
+            .trim() || fallbackPrompt || 'Captured image';
+
+        return {
+            imageUrl: inlineUrl,
+            thumbnailUrl: inlineUrl,
+            downloadUrl,
+            artifactId: image.artifactId || '',
+            filename,
+            mimeType: image.mimeType || '',
+            sizeBytes: image.sizeBytes || 0,
+            sourceHost,
+            alt,
+            prompt: fallbackPrompt || `Captured image from ${sourceHost || 'scraped page'}`,
+            source: 'artifact',
         };
     }
 
@@ -1279,6 +1349,40 @@ class ChatApp {
                     content: `Generated image options for "${data.prompt || args.prompt || 'image'}"`,
                     prompt: data.prompt || args.prompt || '',
                     model: data.model || '',
+                    results,
+                    timestamp: new Date().toISOString(),
+                });
+                return;
+            }
+
+            if (toolId === 'web-scrape') {
+                const imageCapture = data.imageCapture && typeof data.imageCapture === 'object'
+                    ? data.imageCapture
+                    : (event?.result?.imageCapture && typeof event.result.imageCapture === 'object'
+                        ? event.result.imageCapture
+                        : null);
+                if (imageCapture?.mode !== 'blind-artifacts') {
+                    return;
+                }
+
+                const fallbackHost = this.extractHostLabel(data.url || args.url || '') || imageCapture.items?.[0]?.sourceHost || '';
+                const results = (Array.isArray(imageCapture.items) ? imageCapture.items : [])
+                    .map((image) => this.normalizeArtifactImage(image, data.title || data.url || args.url || '', fallbackHost))
+                    .filter(Boolean);
+
+                if (results.length === 0) {
+                    return;
+                }
+
+                nextMessages.push({
+                    id: `${parentMessageId}-artifact-${index}`,
+                    parentMessageId,
+                    role: 'assistant',
+                    type: 'image-selection',
+                    sourceKind: 'artifact',
+                    content: `Captured image options from ${fallbackHost || 'the scraped page'}`,
+                    prompt: data.title || data.url || args.url || '',
+                    sourceHost: fallbackHost,
                     results,
                     timestamp: new Date().toISOString(),
                 });

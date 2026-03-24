@@ -637,6 +637,33 @@ function extractExplicitWebResearchQuery(prompt = '') {
         .trim();
 }
 
+function extractFirstUrl(prompt = '') {
+    const text = String(prompt || '');
+    if (!text.trim()) {
+        return null;
+    }
+
+    const match = text.match(/https?:\/\/[^\s<>"')]+/i);
+    return match ? match[0].replace(/[),.;!?]+$/, '') : null;
+}
+
+function inferScrapeParams(prompt = '', firstUrl = '') {
+    const text = String(prompt || '');
+    const normalized = text.toLowerCase();
+    const hasImageIntent = /\b(image|images|photo|photos|thumbnail|thumbnails|gallery|galleries|poster|posters|pics?)\b/i.test(text);
+    const hasBlindIntent = /\b(blind|opaque|without exposing|without showing|without viewing|without looking at|do not show|don't show)\b/i.test(text);
+    const hasSensitiveIntent = /\b(adult|explicit|nsfw|porn)\b/i.test(text);
+    const captureImages = hasImageIntent || hasBlindIntent || hasSensitiveIntent;
+
+    return {
+        url: firstUrl,
+        browser: true,
+        ...(captureImages ? { captureImages: true, imageLimit: 12 } : {}),
+        ...((captureImages && (hasBlindIntent || hasSensitiveIntent)) ? { blindImageCapture: true } : {}),
+        ...(normalized.includes('javascript') ? { javascript: true } : {}),
+    };
+}
+
 function extractRequestedDirectoryPath(prompt = '') {
     const text = String(prompt || '');
     if (!text.trim()) {
@@ -674,8 +701,14 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
     const actions = [];
+    const firstUrl = extractFirstUrl(prompt);
     const webQuery = availableToolIds.has('web-search')
         ? extractExplicitWebResearchQuery(prompt)
+        : null;
+    const scrapeUrl = availableToolIds.has('web-scrape')
+        && firstUrl
+        && /\b(scrape|extract|selector|structured|parse)\b/i.test(prompt)
+        ? firstUrl
         : null;
     const directoryPath = availableToolIds.has('file-mkdir')
         ? extractRequestedDirectoryPath(prompt)
@@ -698,6 +731,13 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
                 includeSnippets: true,
                 includeUrls: true,
             },
+        });
+    }
+
+    if (scrapeUrl) {
+        actions.push({
+            toolId: 'web-scrape',
+            params: inferScrapeParams(prompt, scrapeUrl),
         });
     }
 
@@ -978,6 +1018,10 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
         return 'web-search';
     }
 
+    if (extractFirstUrl(prompt) && /\b(scrape|extract|selector|structured|parse)\b/i.test(prompt)) {
+        return 'web-scrape';
+    }
+
     if (extractRequestedDirectoryPath(prompt)) {
         return 'file-mkdir';
     }
@@ -1039,6 +1083,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
         guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+        guidance.push('- When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores binary artifacts and returns only safe metadata.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-generate')) {
@@ -1338,6 +1383,29 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         return `${toolId} failed: ${result.error || 'Unknown error'}`;
     }
 
+    if (toolId === 'web-scrape') {
+        const scraped = result?.data || {};
+        const sections = [
+            `Web scrape completed for ${scraped.url || 'the requested page'}.`,
+        ];
+
+        if (scraped.title) {
+            sections.push(`Title: ${scraped.title}`);
+        }
+
+        if (scraped.method) {
+            sections.push(`Method: ${scraped.method}`);
+        }
+
+        if (scraped.data && Object.keys(scraped.data).length > 0) {
+            sections.push(`Extracted data:\n${JSON.stringify(scraped.data, null, 2)}`);
+        } else {
+            sections.push(`Scrape result:\n${JSON.stringify(scraped, null, 2)}`);
+        }
+
+        return sections.join('\n\n');
+    }
+
     return JSON.stringify(result?.data || {}, null, 2);
 }
 
@@ -1373,7 +1441,7 @@ async function runDirectRequiredToolAction({
     toolContext = {},
     model = null,
 }) {
-    if (!['ssh-execute', 'remote-command'].includes(requiredToolId)) {
+    if (!['ssh-execute', 'remote-command', 'web-scrape'].includes(requiredToolId)) {
         return null;
     }
 

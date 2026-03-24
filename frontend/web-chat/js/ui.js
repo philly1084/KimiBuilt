@@ -520,17 +520,21 @@ class UIHelpers {
         const revisedPrompt = message.revisedPrompt;
         const prompt = message.prompt;
         const source = message.source || 'generated';
+        const isUnsplash = source === 'unsplash';
+        const isArtifact = source === 'artifact';
+        const downloadableUrl = message.downloadUrl || imageUrl;
+        const shareableUrl = message.downloadUrl || imageUrl;
         
         const messageEl = document.createElement('div');
         messageEl.className = 'message assistant';
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
         messageEl.setAttribute('role', 'article');
-        messageEl.setAttribute('aria-label', source === 'unsplash' ? 'Unsplash image' : 'Generated image');
+        messageEl.setAttribute('aria-label', isUnsplash ? 'Unsplash image' : (isArtifact ? 'Captured image' : 'Generated image'));
         
         // Build attribution for Unsplash images
         let attributionHtml = '';
-        if (source === 'unsplash' && message.author) {
+        if (isUnsplash && message.author) {
             attributionHtml = `
                 <div class="image-attribution">
                     Photo by <a href="${message.author.link}?utm_source=lillybuilt&utm_medium=referral" target="_blank" rel="noopener">${this.escapeHtml(message.author.name)}</a> on 
@@ -561,15 +565,15 @@ class UIHelpers {
                 </div>
             ` : ''}
             <div class="image-actions">
-                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${imageUrl}', '${this.escapeHtmlAttr(prompt || 'image')}.jpg')" aria-label="Download image">
+                <button class="image-action-btn" onclick="uiHelpers.downloadImage('${this.escapeHtmlAttr(downloadableUrl)}', '${this.escapeHtmlAttr(prompt || message.filename || 'image')}.jpg')" aria-label="Download image">
                     <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Download</span>
                 </button>
-                <button class="image-action-btn" onclick="uiHelpers.copyImageUrl('${imageUrl}')" aria-label="Copy image URL">
+                <button class="image-action-btn" onclick="uiHelpers.copyImageUrl('${this.escapeHtmlAttr(shareableUrl)}')" aria-label="Copy image URL">
                     <i data-lucide="link" class="w-4 h-4" aria-hidden="true"></i>
                     <span>Copy URL</span>
                 </button>
-                ${source === 'unsplash' ? `
+                ${isUnsplash ? `
                 <button class="image-action-btn" onclick="window.open('${message.unsplashLink}?utm_source=lillybuilt&utm_medium=referral', '_blank')" aria-label="View on Unsplash">
                     <i data-lucide="external-link" class="w-4 h-4" aria-hidden="true"></i>
                     <span>View on Unsplash</span>
@@ -578,17 +582,18 @@ class UIHelpers {
             </div>
         `;
         
-        const sourceIcon = source === 'unsplash' ? 'camera' : 'sparkles';
-        const sourceText = source === 'unsplash' ? 'Unsplash' : (message.model || 'Generated');
-        const sourceLabel = source === 'unsplash' ? 'Stock Photo' : 'Generated Image';
+        const sourceIcon = isUnsplash ? 'camera' : (isArtifact ? 'scan-search' : 'sparkles');
+        const sourceText = isUnsplash ? 'Unsplash' : (isArtifact ? (message.sourceHost || 'Artifact capture') : (message.model || 'Generated'));
+        const sourceLabel = isUnsplash ? 'Stock Photo' : (isArtifact ? 'Captured Image' : 'Generated Image');
+        const authorLabel = isUnsplash ? 'Unsplash' : (isArtifact ? 'Captured Image' : 'AI Image Generator');
         
         messageEl.innerHTML = `
             <div class="message-avatar assistant" aria-hidden="true">
-                <i data-lucide="${source === 'unsplash' ? 'camera' : 'image'}" class="w-4 h-4"></i>
+                <i data-lucide="${isUnsplash ? 'camera' : (isArtifact ? 'images' : 'image')}" class="w-4 h-4"></i>
             </div>
             <div class="message-content">
                 <div class="message-header">
-                    <span class="message-author">${source === 'unsplash' ? 'Unsplash' : 'AI Image Generator'}</span>
+                    <span class="message-author">${authorLabel}</span>
                     <span class="message-time" title="${fullTimestamp}">${time}</span>
                     <div class="message-actions">
                         ${!isLoading ? `
@@ -825,13 +830,16 @@ class UIHelpers {
         const prompt = message.prompt || '';
         const results = Array.isArray(message.results) ? message.results : [];
         const model = message.model || '';
+        const sourceKind = message.sourceKind || 'generated';
+        const isArtifact = sourceKind === 'artifact';
+        const sourceHost = message.sourceHost || '';
 
         const messageEl = document.createElement('div');
         messageEl.className = 'message assistant';
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
         messageEl.setAttribute('role', 'article');
-        messageEl.setAttribute('aria-label', 'Generated image choices');
+        messageEl.setAttribute('aria-label', isArtifact ? 'Captured image choices' : 'Generated image choices');
 
         const contentHtml = results.length > 0
             ? `
@@ -840,10 +848,16 @@ class UIHelpers {
                         <button type="button"
                             class="image-selection-item"
                             onclick="app.selectGeneratedImage('${messageId}', ${index})"
-                            aria-label="Add generated image ${index + 1} to the conversation">
+                            aria-label="Add image ${index + 1} to the conversation">
                             <img src="${this.escapeHtmlAttr(image.thumbnailUrl || image.imageUrl)}"
-                                alt="${this.escapeHtmlAttr(image.alt || prompt || 'Generated image')}"
+                                alt="${this.escapeHtmlAttr(image.alt || prompt || (isArtifact ? 'Captured image' : 'Generated image'))}"
                                 loading="lazy">
+                            ${image.filename || image.sourceHost ? `
+                            <div class="image-selection-meta">
+                                <span class="image-selection-caption">${this.escapeHtml(image.filename || image.alt || `Image ${index + 1}`)}</span>
+                                ${image.sourceHost ? `<span class="image-selection-host">${this.escapeHtml(image.sourceHost)}</span>` : ''}
+                            </div>
+                            ` : ''}
                             <span class="image-selection-overlay">Add To Chat</span>
                         </button>
                     `).join('')}
@@ -852,26 +866,26 @@ class UIHelpers {
             : `
                 <div class="unsplash-search-empty">
                     <i data-lucide="image-off" class="w-8 h-8" aria-hidden="true"></i>
-                    <p>No generated image options were returned.</p>
+                    <p>No ${isArtifact ? 'captured' : 'generated'} image options were returned.</p>
                 </div>
             `;
 
         messageEl.innerHTML = `
             <div class="message-avatar assistant" aria-hidden="true">
-                <i data-lucide="image-plus" class="w-4 h-4"></i>
+                <i data-lucide="${isArtifact ? 'images' : 'image-plus'}" class="w-4 h-4"></i>
             </div>
             <div class="message-content">
                 <div class="message-header">
-                    <span class="message-author">Image Options</span>
+                    <span class="message-author">${isArtifact ? 'Captured Images' : 'Image Options'}</span>
                     <span class="message-time" title="${fullTimestamp}">${time}</span>
                 </div>
                 <div class="message-selection-panel">
                     <div class="selection-panel-info">
-                        <div class="icon accent-purple" aria-hidden="true">
-                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                        <div class="icon ${isArtifact ? '' : 'accent-purple'}" aria-hidden="true">
+                            <i data-lucide="${isArtifact ? 'scan-search' : 'sparkles'}" class="w-3.5 h-3.5"></i>
                         </div>
-                        <span class="text">Choose an image</span>
-                        <span class="meta">${model || `${results.length} options`}</span>
+                        <span class="text">${isArtifact ? 'Choose a captured image' : 'Choose an image'}</span>
+                        <span class="meta">${isArtifact ? (sourceHost || `${results.length} options`) : (model || `${results.length} options`)}</span>
                     </div>
                     ${prompt ? `<p class="selection-panel-query">"${this.escapeHtml(prompt)}"</p>` : ''}
                     ${contentHtml}

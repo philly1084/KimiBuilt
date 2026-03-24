@@ -1171,8 +1171,13 @@ const Blocks = (function() {
             source: 'ai',
             status: 'pending',
             unsplashResults: null,
+            artifactResults: null,
             selectedUnsplashId: null,
+            selectedArtifactId: null,
             imageAssetId: null,
+            artifactId: null,
+            downloadUrl: null,
+            sourceHost: null,
         };
         
         if (typeof block.content !== 'object') {
@@ -1180,11 +1185,12 @@ const Blocks = (function() {
         }
 
         const hasUnsplashResults = Array.isArray(content.unsplashResults) && content.unsplashResults.length > 0;
+        const hasArtifactResults = Array.isArray(content.artifactResults) && content.artifactResults.length > 0;
         const hasAssetRef = Boolean(content.imageAssetId);
         const hasDirectImageUrl = Boolean(content.imageUrl);
         const hasRenderableImage = hasAssetRef || hasDirectImageUrl;
         const normalizedStatus = content.status
-            || (hasUnsplashResults ? 'search_results' : (hasRenderableImage ? 'done' : 'pending'));
+            || ((hasUnsplashResults || hasArtifactResults) ? 'search_results' : (hasRenderableImage ? 'done' : 'pending'));
         if (content.status !== normalizedStatus) {
             content.status = normalizedStatus;
         }
@@ -1316,28 +1322,75 @@ const Blocks = (function() {
             header.querySelector('.close-results').addEventListener('click', () => {
                 content.status = 'pending';
                 content.unsplashResults = null;
+                content.artifactResults = null;
                 wrapper.innerHTML = '';
                 wrapper.appendChild(renderAIImageBlock(block, isEditable));
             });
             resultsContainer.appendChild(header);
-            
-            if (content.unsplashResults && content.unsplashResults.length > 0) {
+
+            if (content.source === 'artifact' && hasArtifactResults) {
                 const grid = document.createElement('div');
                 grid.className = 'unsplash-results-grid';
-                
+
+                content.artifactResults.forEach((item, index) => {
+                    const previewUrl = item.inlineUrl || item.imageUrl || item.downloadUrl || '';
+                    if (!previewUrl) {
+                        return;
+                    }
+
+                    const card = document.createElement('div');
+                    card.className = 'unsplash-result-item';
+                    card.style.backgroundImage = `url(${previewUrl})`;
+                    card.title = item.filename || `Captured image ${index + 1}`;
+
+                    const overlay = document.createElement('div');
+                    overlay.className = 'unsplash-result-overlay';
+                    overlay.innerHTML = `
+                        <span class="unsplash-photographer">${escapeHtml(item.sourceHost || item.filename || `Image ${index + 1}`)}</span>
+                        <button class="unsplash-select-btn">Select</button>
+                    `;
+
+                    overlay.querySelector('.unsplash-select-btn').addEventListener('click', () => {
+                        content.imageUrl = previewUrl;
+                        content.downloadUrl = item.downloadUrl || previewUrl;
+                        content.status = 'done';
+                        content.source = 'artifact';
+                        content.selectedArtifactId = item.artifactId || null;
+                        content.artifactId = item.artifactId || null;
+                        content.sourceHost = item.sourceHost || content.sourceHost || null;
+                        content.caption = content.caption || item.filename || '';
+                        content.artifactResults = null;
+                        wrapper.innerHTML = '';
+                        wrapper.appendChild(renderAIImageBlock(block, isEditable));
+                        if (window.Editor) {
+                            window.Editor.savePage();
+                        }
+                    });
+
+                    card.appendChild(overlay);
+                    grid.appendChild(card);
+                });
+
+                if (grid.children.length > 0) {
+                    resultsContainer.appendChild(grid);
+                }
+            } else if (content.unsplashResults && content.unsplashResults.length > 0) {
+                const grid = document.createElement('div');
+                grid.className = 'unsplash-results-grid';
+
                 content.unsplashResults.forEach((photo) => {
                     const item = document.createElement('div');
                     item.className = 'unsplash-result-item';
                     item.style.backgroundImage = `url(${photo.urls.small})`;
                     item.title = `Photo by ${photo.user.name}`;
-                    
+
                     const overlay = document.createElement('div');
                     overlay.className = 'unsplash-result-overlay';
                     overlay.innerHTML = `
                         <span class="unsplash-photographer">${escapeHtml(photo.user.name)}</span>
                         <button class="unsplash-select-btn">Select</button>
                     `;
-                    
+
                     overlay.querySelector('.unsplash-select-btn').addEventListener('click', () => {
                         content.imageUrl = photo.urls.regular;
                         content.status = 'done';
@@ -1351,11 +1404,11 @@ const Blocks = (function() {
                             window.Editor.savePage();
                         }
                     });
-                    
+
                     item.appendChild(overlay);
                     grid.appendChild(item);
                 });
-                
+
                 resultsContainer.appendChild(grid);
             } else {
                 const noResults = document.createElement('div');
@@ -1371,6 +1424,7 @@ const Blocks = (function() {
                 noResults.querySelector('.ai-image-btn').addEventListener('click', () => {
                     content.status = 'pending';
                     content.unsplashResults = null;
+                    content.artifactResults = null;
                     wrapper.innerHTML = '';
                     wrapper.appendChild(renderAIImageBlock(block, isEditable));
                 });

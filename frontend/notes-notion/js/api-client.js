@@ -105,6 +105,31 @@ function isTerminalFinishReason(finishReason) {
     return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
 }
 
+function extractToolEvents(payload = {}) {
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    if (Array.isArray(payload.toolEvents)) {
+        return payload.toolEvents;
+    }
+
+    if (Array.isArray(payload.tool_events)) {
+        return payload.tool_events;
+    }
+
+    const message = payload.choices?.[0]?.message || {};
+    if (Array.isArray(message.toolEvents)) {
+        return message.toolEvents;
+    }
+
+    if (Array.isArray(message.tool_events)) {
+        return message.tool_events;
+    }
+
+    return [];
+}
+
 function extractErrorDetailsMessage(details) {
     if (!details) {
         return '';
@@ -308,7 +333,11 @@ class NotesAPIClient {
                 const decoder = new TextDecoder();
                 let buffer = '';
                 
-                let finalArtifacts = [];
+                let pendingDone = {
+                    sessionId: this.currentSessionId,
+                    artifacts: [],
+                    toolEvents: [],
+                };
 
                 try {
                     while (true) {
@@ -325,7 +354,12 @@ class NotesAPIClient {
                                 
                                 // Check for stream termination
                                 if (data === '[DONE]') {
-                                    yield { type: 'done', sessionId: this.currentSessionId };
+                                    yield {
+                                        type: 'done',
+                                        sessionId: pendingDone.sessionId || this.currentSessionId,
+                                        artifacts: pendingDone.artifacts || [],
+                                        toolEvents: pendingDone.toolEvents || [],
+                                    };
                                     return;
                                 }
                                 
@@ -339,6 +373,7 @@ class NotesAPIClient {
 
                                     if (parsed.session_id || parsed.sessionId) {
                                         this.currentSessionId = parsed.session_id || parsed.sessionId;
+                                        pendingDone.sessionId = this.currentSessionId;
                                     }
                                     
                                     // Extract content from delta
@@ -348,12 +383,32 @@ class NotesAPIClient {
                                     }
                                     
                                     if (Array.isArray(parsed.artifacts)) {
-                                        finalArtifacts = parsed.artifacts;
+                                        pendingDone.artifacts = parsed.artifacts;
+                                    }
+
+                                    const toolEvents = extractToolEvents(parsed);
+                                    if (toolEvents.length > 0) {
+                                        pendingDone.toolEvents = toolEvents;
+                                    }
+
+                                    if (parsed.type === 'done') {
+                                        yield {
+                                            type: 'done',
+                                            sessionId: pendingDone.sessionId || this.currentSessionId,
+                                            artifacts: pendingDone.artifacts || [],
+                                            toolEvents: pendingDone.toolEvents || [],
+                                        };
+                                        return;
                                     }
 
                                     // Check if generation is complete
                                     if (isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
-                                        yield { type: 'done', sessionId: this.currentSessionId, artifacts: finalArtifacts };
+                                        yield {
+                                            type: 'done',
+                                            sessionId: pendingDone.sessionId || this.currentSessionId,
+                                            artifacts: pendingDone.artifacts || [],
+                                            toolEvents: pendingDone.toolEvents || [],
+                                        };
                                         return;
                                     }
                                 } catch (e) {
@@ -373,7 +428,12 @@ class NotesAPIClient {
                 
                 // Success - reset retry count
                 this.retryCount = 0;
-                yield { type: 'done', sessionId: this.currentSessionId, artifacts: finalArtifacts };
+                yield {
+                    type: 'done',
+                    sessionId: pendingDone.sessionId || this.currentSessionId,
+                    artifacts: pendingDone.artifacts || [],
+                    toolEvents: pendingDone.toolEvents || [],
+                };
                 return;
                 
             } catch (error) {
@@ -389,7 +449,7 @@ class NotesAPIClient {
                 if (!isRetryableError(error)) {
                     const message = parseErrorMessage(error, error.response);
                     yield { type: 'error', error: message, status: error.status, details: error.details };
-                    yield { type: 'done', sessionId: this.currentSessionId };
+                    yield { type: 'done', sessionId: this.currentSessionId, artifacts: [], toolEvents: [] };
                     return;
                 }
                 
@@ -397,7 +457,7 @@ class NotesAPIClient {
                 if (attempt === RETRY_CONFIG.maxRetries) {
                     const message = parseErrorMessage(error, error.response);
                     yield { type: 'error', error: message, status: error.status, details: error.details, retriesExhausted: true };
-                    yield { type: 'done', sessionId: this.currentSessionId };
+                    yield { type: 'done', sessionId: this.currentSessionId, artifacts: [], toolEvents: [] };
                     return;
                 }
             }
@@ -491,6 +551,7 @@ class NotesAPIClient {
                     content: data.choices?.[0]?.message?.content || '',
                     sessionId: this.currentSessionId,
                     artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+                    toolEvents: extractToolEvents(data),
                 };
                 
             } catch (error) {
@@ -501,6 +562,8 @@ class NotesAPIClient {
                     return {
                         content: `[Error: ${parseErrorMessage(error)}]`,
                         sessionId: this.currentSessionId,
+                        artifacts: [],
+                        toolEvents: [],
                         error: true
                     };
                 }

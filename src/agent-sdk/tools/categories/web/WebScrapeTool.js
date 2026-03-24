@@ -10,6 +10,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { config } = require('../../../../config');
+const { artifactService } = require('../../../../artifacts/artifact-service');
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BROWSER_CANDIDATES = [
@@ -82,6 +83,21 @@ class WebScrapeTool extends ToolBase {
             type: 'string',
             description: 'Wait for a selector in the rendered DOM before extracting (browser mode)'
           },
+          captureImages: {
+            type: 'boolean',
+            description: 'Extract image references from the page. When blindImageCapture is enabled, download them as opaque artifacts instead of exposing image content to the model.',
+            default: false,
+          },
+          blindImageCapture: {
+            type: 'boolean',
+            description: 'Download captured images as binary artifacts and return only safe metadata such as artifact ids, filenames, and download paths.',
+            default: false,
+          },
+          imageLimit: {
+            type: 'integer',
+            description: 'Maximum number of images to capture from the page',
+            default: 12,
+          },
           javascript: {
             type: 'boolean',
             description: 'Use the backend headless browser and rendered DOM for JavaScript-heavy pages',
@@ -118,6 +134,9 @@ class WebScrapeTool extends ToolBase {
       xpath,
       aiExtraction,
       waitForSelector,
+      captureImages = false,
+      blindImageCapture = false,
+      imageLimit = 12,
       javascript = false,
       browser = false,
       timeout = 30000
@@ -187,16 +206,101 @@ class WebScrapeTool extends ToolBase {
       method = 'ai-assisted';
     }
 
+    let imageCapture = null;
+    if (captureImages || blindImageCapture) {
+      imageCapture = await this.captureImages({
+        html,
+        pageUrl: finalUrl,
+        context,
+        blindImageCapture,
+        imageLimit,
+        timeout,
+      });
+    }
+
     return {
       url: finalUrl,
       title,
       data: extractedData,
+      imageCapture,
       extractedAt: new Date().toISOString(),
       method,
       stats: {
         htmlSize: html.length,
-        fieldsExtracted: Object.keys(extractedData).length
+        fieldsExtracted: Object.keys(extractedData).length,
+        imagesCaptured: imageCapture?.count || 0,
       }
+    };
+  }
+
+  async captureImages({ html, pageUrl, context = {}, blindImageCapture = false, imageLimit = 12, timeout = 30000 }) {
+    const imageUrls = this.extractImageUrls(html, pageUrl, imageLimit);
+    if (imageUrls.length === 0) {
+      return {
+        mode: blindImageCapture ? 'blind-artifacts' : 'listed',
+        count: 0,
+        items: [],
+      };
+    }
+
+    if (!blindImageCapture) {
+      return {
+        mode: 'listed',
+        count: imageUrls.length,
+        items: imageUrls.map((url, index) => ({
+          index: index + 1,
+          sourceUrl: url,
+        })),
+      };
+    }
+
+    const sessionId = context.sessionId;
+    if (!sessionId) {
+      throw new Error('blindImageCapture requires a sessionId in the tool context');
+    }
+
+    const items = [];
+    for (let index = 0; index < imageUrls.length; index += 1) {
+      const sourceUrl = imageUrls[index];
+      const downloaded = await this.downloadImageBinary(sourceUrl, timeout);
+      const extension = this.resolveImageExtension(sourceUrl, downloaded.mimeType);
+      const filename = `blind-image-${String(index + 1).padStart(2, '0')}.${extension}`;
+      const stored = await artifactService.createStoredArtifact({
+        sessionId,
+        direction: 'generated',
+        sourceMode: 'chat',
+        filename,
+        extension,
+        mimeType: downloaded.mimeType,
+        buffer: downloaded.buffer,
+        extractedText: '',
+        previewHtml: '',
+        metadata: {
+          blindCapture: true,
+          sourceHost: this.getHostname(sourceUrl),
+          sourceUrl,
+          capturedFromPage: pageUrl,
+          contentClassification: 'uninspected-sensitive-image',
+        },
+        vectorize: false,
+      });
+
+      items.push({
+        index: index + 1,
+        artifactId: stored.id,
+        filename: stored.filename,
+        mimeType: stored.mimeType,
+        sizeBytes: stored.sizeBytes,
+        sourceHost: this.getHostname(sourceUrl),
+        downloadPath: `/api/artifacts/${stored.id}/download`,
+        inlinePath: `/api/artifacts/${stored.id}/download?inline=1`,
+      });
+    }
+
+    return {
+      mode: 'blind-artifacts',
+      count: items.length,
+      items,
     };
   }
 
@@ -330,6 +434,119 @@ class WebScrapeTool extends ToolBase {
       return parsed.toString();
     } catch (error) {
       throw new Error(`Invalid URL '${value}': ${error.message}`);
+    }
+  }
+
+  extractImageUrls(html, pageUrl, imageLimit = 12) {
+    const matches = Array.from(String(html || '').matchAll(/<img\b[^>]*>/gi));
+    const unique = new Set();
+    const results = [];
+
+    for (const match of matches) {
+      const tag = match[0] || '';
+      const candidate = this.extractImageSourceFromTag(tag);
+      const normalized = this.normalizeImageCandidateUrl(candidate, pageUrl);
+      if (!normalized || unique.has(normalized)) {
+        continue;
+      }
+
+      unique.add(normalized);
+      results.push(normalized);
+      if (results.length >= Math.max(1, Math.min(Number(imageLimit) || 12, 50))) {
+        break;
+      }
+    }
+
+    return results;
+  }
+
+  extractImageSourceFromTag(tag = '') {
+    const candidates = [
+      /(?:src|data-src|data-lazy-src|data-original)=["']([^"']+)["']/i,
+      /srcset=["']([^"']+)["']/i,
+    ];
+
+    for (const pattern of candidates) {
+      const match = String(tag || '').match(pattern);
+      if (!match?.[1]) {
+        continue;
+      }
+
+      const value = match[1].split(',')[0].trim().split(/\s+/)[0].trim();
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  normalizeImageCandidateUrl(candidate, pageUrl) {
+    const value = String(candidate || '').trim();
+    if (!value || value.startsWith('data:')) {
+      return null;
+    }
+
+    try {
+      const normalized = new URL(value, pageUrl).toString();
+      return /^https?:\/\//i.test(normalized) ? normalized : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  async downloadImageBinary(url, timeout = 30000) {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'LillyBuilt-Agent/1.0 (Blind Image Capture)',
+        'Accept': 'image/*,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to download image (${response.status}) from ${url}`);
+    }
+
+    const mimeType = String(response.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim() || 'application/octet-stream';
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return { mimeType, buffer };
+  }
+
+  resolveImageExtension(url, mimeType = '') {
+    const byMime = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+      'image/svg+xml': 'svg',
+      'image/avif': 'avif',
+    };
+
+    if (byMime[mimeType]) {
+      return byMime[mimeType];
+    }
+
+    try {
+      const pathname = new URL(url).pathname || '';
+      const match = pathname.match(/\.([a-z0-9]{2,5})$/i);
+      if (match?.[1]) {
+        return match[1].toLowerCase();
+      }
+    } catch (_error) {
+      // Ignore URL parsing errors here; caller already normalized the URL.
+    }
+
+    return 'bin';
+  }
+
+  getHostname(url = '') {
+    try {
+      return new URL(url).hostname.replace(/^www\./i, '');
+    } catch (_error) {
+      return '';
     }
   }
 

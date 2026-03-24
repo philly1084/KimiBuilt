@@ -106,8 +106,12 @@ router.get('/:id/download', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Artifact not found' } });
         }
 
+        const inlineRequested = ['1', 'true', 'yes'].includes(String(req.query.inline || '').toLowerCase());
         res.setHeader('Content-Type', artifact.mimeType);
-        res.setHeader('Content-Disposition', `attachment; filename="${artifact.filename}"`);
+        res.setHeader(
+            'Content-Disposition',
+            `${inlineRequested ? 'inline' : 'attachment'}; filename="${artifact.filename}"`,
+        );
         res.send(artifact.contentBuffer);
     } catch (err) {
         next(err);

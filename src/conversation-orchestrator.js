@@ -225,6 +225,23 @@ function inferFallbackUnsplashQuery(text = '') {
         .slice(0, 120);
 }
 
+function inferBlindScrapeParams(text = '', firstUrl = '') {
+    const prompt = String(text || '');
+    const normalized = prompt.toLowerCase();
+    const hasImageIntent = /\b(image|images|photo|photos|thumbnail|thumbnails|gallery|galleries|poster|posters|pics?)\b/i.test(prompt);
+    const hasBlindIntent = /\b(blind|opaque|without exposing|without showing|without viewing|without looking at|do not show|don't show)\b/i.test(prompt);
+    const hasSensitiveIntent = /\b(adult|explicit|nsfw|porn)\b/i.test(prompt);
+    const captureImages = hasImageIntent || hasBlindIntent || hasSensitiveIntent;
+
+    return {
+        url: firstUrl,
+        browser: true,
+        ...(captureImages ? { captureImages: true, imageLimit: 12 } : {}),
+        ...((captureImages && (hasBlindIntent || hasSensitiveIntent)) ? { blindImageCapture: true } : {}),
+        ...(normalized.includes('javascript') ? { javascript: true } : {}),
+    };
+}
+
 function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION_PROFILE) {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1159,6 +1176,7 @@ class ConversationOrchestrator extends EventEmitter {
 
     buildDirectAction({ objective = '', session = null, toolPolicy = {} }) {
         const researchQuery = extractExplicitWebResearchQuery(objective);
+        const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
@@ -1175,6 +1193,16 @@ class ConversationOrchestrator extends EventEmitter {
                     includeSnippets: true,
                     includeUrls: true,
                 },
+            };
+        }
+
+        if (firstUrl
+            && toolPolicy.candidateToolIds.includes('web-scrape')
+            && /\b(scrape|extract|selector|structured|parse)\b/i.test(objective)) {
+            return {
+                tool: 'web-scrape',
+                reason: 'Explicit scrape request with a direct URL should start with deterministic web scraping.',
+                params: inferBlindScrapeParams(objective, firstUrl),
             };
         }
 
@@ -1233,10 +1261,7 @@ class ConversationOrchestrator extends EventEmitter {
             return [{
                 tool: 'web-scrape',
                 reason: 'Deterministic fallback for explicit scrape intent.',
-                params: {
-                    url: firstUrl,
-                    browser: true,
-                },
+                params: inferBlindScrapeParams(prompt, firstUrl),
             }];
         }
 
@@ -1591,6 +1616,11 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes('security-scan')) {
             parts.push('Use `security-scan` for code audits, secret detection, and vulnerability checks when code is available in the request.');
+        }
+
+        if (allowedToolIds.includes('web-scrape')) {
+            parts.push('Use `web-scrape` for structured extraction from URLs. Prefer `browser: true` for JS-heavy pages or certificate/TLS problems.');
+            parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');
         }
 
         if (toolEvents.length > 0) {

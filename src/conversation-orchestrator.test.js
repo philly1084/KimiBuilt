@@ -540,6 +540,43 @@ describe('ConversationOrchestrator', () => {
             params: expect.objectContaining({
                 engine: 'perplexity',
                 query: 'managed Postgres providers for startups',
+                }),
+        });
+    });
+
+    test('forces a direct blind web-scrape action for explicit sensitive image scraping requests', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'web-scrape'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Scrape images from https://example.com/gallery without exposing the agent to the adult content.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective: 'Scrape images from https://example.com/gallery without exposing the agent to the adult content.',
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'web-scrape',
+            reason: 'Explicit scrape request with a direct URL should start with deterministic web scraping.',
+            params: expect.objectContaining({
+                url: 'https://example.com/gallery',
+                browser: true,
+                captureImages: true,
+                blindImageCapture: true,
             }),
         });
     });
