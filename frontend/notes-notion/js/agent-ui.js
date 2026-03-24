@@ -258,6 +258,11 @@ const AgentUI = (function() {
                     renderMessages();
                     scrollToBottom();
                 },
+                onStreamComplete: () => {
+                    setStreamState({ active: false, content: '', error: null });
+                    renderMessages();
+                    scrollToBottom();
+                },
                 onComplete: () => {
                     setStreamState({ active: false, content: '', error: null });
                     renderMessages();

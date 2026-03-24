@@ -422,6 +422,10 @@ GUIDELINES:
         }
     }
 
+    function normalizeStructuredPayloadText(text = '') {
+        return stripDiffStylePrefixes(unwrapCodeFence(text)).trim();
+    }
+
     function shouldUseMultiPassNotesDraft(question = '', context = null, requestOptions = {}) {
         if (requestOptions?.outputFormat) {
             return false;
@@ -1694,18 +1698,53 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return block;
     }
 
+    function getNotesPayloadActions(payload) {
+        if (!payload || typeof payload !== 'object') {
+            return null;
+        }
+
+        if (Array.isArray(payload.actions)) {
+            return payload.actions;
+        }
+
+        if (Array.isArray(payload.operations)) {
+            return payload.operations;
+        }
+
+        if (Array.isArray(payload.edits)) {
+            return payload.edits;
+        }
+
+        return null;
+    }
+
+    function getNotesPayloadReply(payload) {
+        if (!payload || typeof payload !== 'object') {
+            return '';
+        }
+
+        return String(
+            payload.assistant_reply
+            || payload.assistantReply
+            || payload.reply
+            || payload.message
+            || ''
+        ).trim();
+    }
+
     function tryParseNotesActionPayload(payloadText) {
         if (!payloadText) return null;
 
         try {
-            const payload = JSON.parse(payloadText);
-            if (payload && typeof payload === 'object' && Array.isArray(payload.actions)) {
+            const payload = JSON.parse(normalizeStructuredPayloadText(payloadText));
+            const actions = getNotesPayloadActions(payload);
+            if (payload && typeof payload === 'object' && Array.isArray(actions)) {
                 return {
-                    displayText: String(payload.assistant_reply || '').trim(),
-                    actions: payload.actions
+                    displayText: getNotesPayloadReply(payload),
+                    actions
                 };
             }
-        } catch (error) {
+        } catch (_error) {
             return null;
         }
 
@@ -2067,7 +2106,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
     function findBalancedNotesActionPayload(text) {
         const source = String(text || '');
-        if (!source.includes('"actions"')) {
+        if (!/"(?:actions|operations|edits)"\s*:/i.test(source)) {
             return null;
         }
 
@@ -2127,7 +2166,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return /```notes-actions/i.test(value) ||
             /```json/i.test(value) ||
             /"assistant_reply"\s*:/i.test(value) ||
-            /"actions"\s*:/i.test(value) ||
+            /"assistantReply"\s*:/i.test(value) ||
+            /"(?:actions|operations|edits)"\s*:/i.test(value) ||
             (/"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i.test(value) &&
                 /"content"\s*:/i.test(value)) ||
             startsWithMermaidResponse(value);
@@ -2144,7 +2184,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return genericContent.displayText;
         }
 
-        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"actions"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
+        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"assistantReply"\s*:|"(?:actions|operations|edits)"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
         }
@@ -2190,7 +2230,14 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const payloadText = match[1].trim();
         const visibleText = text.replace(match[0], '').trim();
 
-        const parsed = tryParseNotesActionPayload(payloadText);
+        const directPayload = tryParseNotesActionPayload(payloadText);
+        const balancedPayload = findBalancedNotesActionPayload(payloadText);
+        const genericPayload = tryParseGenericContentPayload(payloadText)
+            || findBalancedGenericContentPayload(payloadText)?.parsed;
+        const fragmentActions = extractBlockFragmentActions(payloadText);
+        const parsed = directPayload || balancedPayload?.parsed || genericPayload || (fragmentActions
+            ? { displayText: '', actions: fragmentActions }
+            : null);
         if (!parsed) {
             console.warn('Failed to parse notes action plan payload');
             return {
@@ -2442,6 +2489,35 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     function prepareAssistantResponse(responseText) {
         const parsed = extractNotesActionPlan(responseText);
         const applied = applyNotesActions(parsed.actions);
+        const actionCount = Array.isArray(parsed.actions) ? parsed.actions.length : 0;
+
+        if (actionCount > 0 || parsed.parseFailed) {
+            const detail = {
+                actionCount,
+                appliedCount: applied.appliedCount,
+                parseFailed: Boolean(parsed.parseFailed),
+                structuredResponse: looksLikeNotesActionResponse(responseText),
+                responseLength: String(responseText || '').length
+            };
+
+            try {
+                window.dispatchEvent(new CustomEvent('notes-agent-parse', {
+                    detail: {
+                        model: state.selectedModel,
+                        ...detail
+                    }
+                }));
+            } catch (error) {
+                console.warn('Failed to dispatch notes parse event:', error);
+            }
+
+            if (parsed.parseFailed || (actionCount > 0 && applied.appliedCount === 0)) {
+                console.warn('Notes structured response was not fully applied:', detail);
+            } else if (actionCount > 0) {
+                console.info('Notes structured response parsed and applied:', detail);
+            }
+        }
+
         const fallbackReply = applied.appliedCount > 0
             ? `Applied ${applied.appliedCount} page change${applied.appliedCount === 1 ? '' : 's'}.`
             : '';
@@ -2458,7 +2534,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const value = String(text || '');
         const trimmed = value.trim();
 
-        if (/^\{[\s\S]*"actions"\s*:/i.test(trimmed) && /"assistant_reply"\s*:/i.test(trimmed)) {
+        if (/^\{[\s\S]*"(?:actions|operations|edits)"\s*:/i.test(trimmed)
+            && /"(?:assistant_reply|assistantReply)"\s*:/i.test(trimmed)) {
             return '';
         }
 
@@ -2851,6 +2928,17 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         } catch (error) {
             console.warn('Failed to dispatch agent processing event:', error);
         }
+    }
+
+    function yieldToBrowser() {
+        return new Promise((resolve) => {
+            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(() => resolve());
+                return;
+            }
+
+            setTimeout(resolve, 0);
+        });
     }
 
     const MODEL_DISPLAY_NAMES = {
@@ -3845,6 +3933,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     async function ask(question, options = {}) {
         const {
             onChunk,
+            onStreamComplete,
             onComplete,
             onError,
             hiddenUserMessage = false,
@@ -3886,6 +3975,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 try {
                     const responseText = await askWithAPI(question, context, {
                         onChunk,
+                        onStreamComplete,
                         onComplete,
                         onError,
                         hiddenAssistantMessage
@@ -3906,6 +3996,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             // Fallback to stub mode (offline/no API client)
             return await askWithStub(question, context, {
                 onChunk,
+                onStreamComplete,
                 onComplete,
                 onError,
                 hiddenAssistantMessage
@@ -3927,7 +4018,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     
     // Call the real API with streaming support
     async function askWithAPI(question, context, options) {
-        const { onChunk, onComplete, onError, hiddenAssistantMessage = false } = options;
+        const { onChunk, onStreamComplete, onComplete, onError, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
         syncAPIClientSession(apiClient, context);
         const requestedArtifactFormat = isArtifactGenerationIntent(question)
@@ -3972,6 +4063,32 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 let inJsonBlock = false;
                 let generatedArtifacts = [];
                 let generatedToolEvents = [];
+                let processingReleased = false;
+
+                const releaseProcessing = async (detail = {}) => {
+                    if (processingReleased) {
+                        return;
+                    }
+
+                    processingReleased = true;
+                    setProcessingState(false, {
+                        phase: 'response-received',
+                        ...detail
+                    });
+
+                    if (onStreamComplete) {
+                        try {
+                            onStreamComplete({
+                                model,
+                                ...detail
+                            });
+                        } catch (callbackError) {
+                            console.warn('notes onStreamComplete callback failed:', callbackError);
+                        }
+                    }
+
+                    await yieldToBrowser();
+                };
 
                 try {
                     if (useMultiPassDraft) {
@@ -4046,6 +4163,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         generatedToolEvents = Array.isArray(response.toolEvents) ? response.toolEvents : [];
                     }
 
+                    await releaseProcessing({
+                        requestType: hiddenAssistantMessage ? 'internal' : 'chat'
+                    });
+
                     if (isInvalidGatewayResponseText(responseText)) {
                         const invalidGatewayError = new Error('Invalid response returned by the AI gateway.');
                         invalidGatewayError.status = 502;
@@ -4106,8 +4227,6 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         showToast(`Switched AI model to ${model} after the previous model failed.`, 'info');
                     }
 
-                    setProcessingState(false);
-
                     if (onComplete) {
                         onComplete(visibleResponse, assistantMessage);
                     }
@@ -4143,7 +4262,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     
     // Stub mode for offline/no API
     async function askWithStub(question, context, options) {
-        const { onChunk, onComplete, onError, hiddenAssistantMessage = false } = options;
+        const { onChunk, onStreamComplete, onComplete, onError, hiddenAssistantMessage = false } = options;
         
         try {
             // Simulate processing delay
@@ -4169,6 +4288,21 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     }
                 }
             }
+
+            setProcessingState(false, {
+                phase: 'response-received',
+                requestType: hiddenAssistantMessage ? 'internal' : 'chat'
+            });
+            if (onStreamComplete) {
+                try {
+                    onStreamComplete({
+                        requestType: hiddenAssistantMessage ? 'internal' : 'chat'
+                    });
+                } catch (callbackError) {
+                    console.warn('notes onStreamComplete callback failed:', callbackError);
+                }
+            }
+            await yieldToBrowser();
             
             // Add assistant message
             const preparedResponse = prepareAssistantResponse(responseText);
@@ -4183,8 +4317,6 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     appliedCount: preparedResponse.appliedCount || 0
                 });
 
-            setProcessingState(false);
-            
             if (onComplete) {
                 onComplete(visibleResponse, assistantMessage);
             }

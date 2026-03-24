@@ -21,6 +21,7 @@ const {
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
+const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
 
@@ -101,16 +102,7 @@ function buildArtifactPromptFromTranscript(messages = [], fallbackPrompt = '') {
 }
 
 function buildContinuityInstructions(extra = '') {
-    return [
-        'You are a helpful AI assistant.',
-        'Use the recent session transcript as the primary context for follow-up references like "that", "again", "same as before", or "the number from earlier".',
-        'Use recalled memory only as supplemental context.',
-        'Do not claim you lack access to prior conversation if session transcript or recalled context is available in the prompt.',
-        'Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that.',
-        'For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying.',
-        'Be concise and informative.',
-        extra || '',
-    ].filter(Boolean).join('\n');
+    return buildBaseContinuityInstructions(extra);
 }
 
 function getHeaderValue(req, headerName) {

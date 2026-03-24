@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { artifactService } = require('../../artifacts/artifact-service');
+const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../../runtime-prompts');
 
 const READ_ONLY_MESSAGE = 'Runtime prompt editing is deprecated. The dashboard now shows read-only snapshots of the live prompt/instruction surfaces used by application code.';
 
@@ -38,16 +39,7 @@ function truncate(text = '', limit = 180) {
 }
 
 function buildContinuityInstructions(extra = '') {
-  return [
-    'You are a helpful AI assistant.',
-    'Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before".',
-    'Use recalled memory only as supplemental context.',
-    'Do not claim you lack access to prior conversation if session transcript or recalled context is available in the prompt.',
-    'Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that.',
-    'For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying.',
-    'Be concise and informative.',
-    extra || '',
-  ].filter(Boolean).join('\n');
+  return buildBaseContinuityInstructions(extra);
 }
 
 function buildPlannerPromptSurface() {
@@ -59,8 +51,10 @@ function buildPlannerPromptSurface() {
     'Use at most 4 steps.',
     'Avoid redundant tool calls.',
     'Do not invent SSH hosts, usernames, file paths, or credentials.',
+    'Every ssh-execute or remote-command step must include a non-empty params.command string.',
     'When an SSH runtime target is already available, prefer trying ssh-execute before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
+    'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
   ].join('\n');
 }
 

@@ -168,6 +168,93 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('Deployment is healthy.');
     });
 
+    test('repairs invalid final responses that deny remote tools after successful remote execution', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce(buildResponse(
+                    'I successfully connected to your server, but I don\'t have any remote execution tools available in this turn to run more commands.',
+                    'resp_invalid_remote',
+                ))
+                .mockResolvedValueOnce(buildResponse(
+                    'I connected to the server and completed the verified remote check. If you want me to continue, I need the next concrete server task rather than assuming tool access is missing.',
+                    'resp_repaired_remote',
+                )),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: 'host-a\naarch64\nup 2 days',
+                    stderr: '',
+                    host: '10.0.0.5:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Use remote-build to inspect the server.',
+            sessionId: 'session-remote',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
+            expect.objectContaining({
+                command: expect.stringContaining('uname -m'),
+            }),
+            expect.objectContaining({
+                executionProfile: 'remote-build',
+                sessionId: 'session-remote',
+            }),
+        );
+        expect(toolManager.executeTool.mock.calls[0][1].command).toContain('/etc/os-release');
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(llmClient.createResponse.mock.calls[1][0]).toEqual(expect.objectContaining({
+            enableAutomaticToolCalls: false,
+        }));
+        expect(llmClient.createResponse.mock.calls[1][0].input).toContain('Previous invalid draft:');
+        expect(result.output).toBe('I connected to the server and completed the verified remote check. If you want me to continue, I need the next concrete server task rather than assuming tool access is missing.');
+        expect(result.trace.runtimeMode).toBe('repaired-final');
+        expect(result.trace.executionTrace.map((entry) => entry.name)).toContain('Response repair');
+    });
+
     test('continues through multiple remote-build rounds after broad user approval', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -714,6 +801,140 @@ describe('ConversationOrchestrator', () => {
         ]);
     });
 
+    test('repairs planner-provided remote-command steps that omit params.command', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'remote-command',
+                        reason: 'Reconnect to the existing default server target, verify architecture with `uname -m`, and confirm the Gitea endpoint https://git.example.com is reachable from the server before attempting auth.',
+                        params: {},
+                    },
+                ],
+            })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'ssh-execute', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Reconnect to the server and test https://git.example.com auth flow.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'Reconnect to the server and test https://git.example.com auth flow.',
+            executionProfile: 'remote-build',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'remote-command',
+                params: expect.objectContaining({
+                    command: expect.stringContaining('curl -IkfsS --max-time 20'),
+                }),
+            }),
+        ]);
+        expect(plan[0].params.command).toContain('uname -m');
+        expect(plan[0].params.command).toContain('https://git.example.com');
+    });
+
+    test('normalizes missing remote-command commands before execution', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Remote baseline completed.', 'resp_remote_baseline')),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'remote-command',
+                        reason: 'Reconnect to the server and verify Ubuntu architecture before continuing.',
+                        params: {},
+                    },
+                ],
+            })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: 'host-a\naarch64\nNAME=\"Ubuntu\"',
+                    stderr: '',
+                    host: '10.0.0.5:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote-normalized', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'Reconnect to the Ubuntu server and continue the remote-build setup.',
+            sessionId: 'session-remote-normalized',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
+            expect.objectContaining({
+                command: expect.stringContaining('uname -m'),
+            }),
+            expect.objectContaining({
+                executionProfile: 'remote-build',
+                sessionId: 'session-remote-normalized',
+            }),
+        );
+    });
+
     test('does not offer code-sandbox for generic remote-build tasks', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -830,6 +1051,8 @@ describe('ConversationOrchestrator', () => {
         expect(runtimeInstructions).toContain('`find`/`grep -R` for `rg`');
         expect(runtimeInstructions).toContain('`docker compose` for `docker-compose`');
         expect(plannerPrompt).toContain('find/grep instead of rg');
+        expect(plannerPrompt).toContain('do not repeat the same command');
+        expect(plannerPrompt).toContain('non-empty `params.command` string');
     });
 
     test('treats image generation, unsplash, and direct image URLs as first-class tool intents', () => {

@@ -217,6 +217,14 @@ function extractFirstUrl(text = '') {
     return match ? match[0].replace(/[),.;!?]+$/g, '') : null;
 }
 
+function shellQuote(value = '') {
+    return `'${String(value || '').replace(/'/g, "'\\''")}'`;
+}
+
+function buildUbuntuMasterRemoteCommand() {
+    return "hostname && uname -m && (test -f /etc/os-release && sed -n '1,3p' /etc/os-release || true) && uptime";
+}
+
 function inferFallbackUnsplashQuery(text = '') {
     return String(text || '')
         .replace(/\b(please|can you|could you|would you|find|search|look up|browse|show|get|use|an|a|the|for|with|from|on|about|into|unsplash|image|images|photo|photos|hero|background|cover|visual|visuals)\b/gi, ' ')
@@ -243,9 +251,15 @@ function inferBlindScrapeParams(text = '', firstUrl = '') {
 }
 
 function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION_PROFILE) {
-    const normalized = String(text || '').trim().toLowerCase();
+    const source = String(text || '').trim();
+    const normalized = source.toLowerCase();
     if (!normalized) {
         return null;
+    }
+
+    const firstUrl = extractFirstUrl(source);
+    if (firstUrl && /\b(curl|reach|reachable|endpoint|url|auth|login|gitea)\b/.test(normalized)) {
+        return `hostname && uname -m && curl -IkfsS --max-time 20 ${shellQuote(firstUrl)}`;
     }
 
     if (/\b(health|status|healthy|uptime)\b/.test(normalized)) {
@@ -269,7 +283,7 @@ function inferFallbackSshCommand(text = '', executionProfile = DEFAULT_EXECUTION
     }
 
     if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
-        return 'hostname && uname -m && uptime';
+        return buildUbuntuMasterRemoteCommand();
     }
 
     return null;
@@ -311,6 +325,9 @@ function isInvalidRuntimeResponseText(text = '') {
         'workspace can execute anything locally',
         'launch a remote check from /app',
         'can\'t inspect config or launch a remote check from /app',
+        'i don\'t have any remote execution tools available',
+        'i do not have any remote execution tools available',
+        'remote execution tools available in this turn',
     ].some((pattern) => normalized.includes(pattern));
 }
 
@@ -392,6 +409,14 @@ function canRecoverFromInvalidRuntimeResponse({ output = '', toolEvents = [], to
         const succeeded = event?.result?.success !== false;
         return succeeded && toolName !== 'code-sandbox';
     });
+}
+
+function shouldRepairInvalidRuntimeResponse({ output = '', toolEvents = [], toolPolicy = {} } = {}) {
+    return isInvalidRuntimeResponseText(output)
+        && Array.isArray(toolPolicy?.candidateToolIds)
+        && toolPolicy.candidateToolIds.length > 0
+        && Array.isArray(toolEvents)
+        && toolEvents.length > 0;
 }
 
 function normalizeStepSignature(step = {}) {
@@ -825,6 +850,8 @@ class ConversationOrchestrator extends EventEmitter {
                     sessionId,
                     executionProfile: resolvedProfile,
                     toolContext,
+                    objective,
+                    session,
                 });
 
                 toolEvents.push(...roundToolEvents);
@@ -905,6 +932,8 @@ class ConversationOrchestrator extends EventEmitter {
                         sessionId,
                         executionProfile: resolvedProfile,
                         toolContext,
+                        objective,
+                        session,
                     });
                     toolEvents.push(...recoveryToolEvents);
                     executionTrace.push(createExecutionTraceEntry({
@@ -941,6 +970,40 @@ class ConversationOrchestrator extends EventEmitter {
                     output = extractResponseText(finalResponse);
                 }
             }
+
+            if (shouldRepairInvalidRuntimeResponse({ output, toolEvents, toolPolicy })) {
+                runtimeMode = 'repaired-final';
+                const repairStartedAt = new Date().toISOString();
+                const previousInvalidOutput = output;
+
+                finalResponse = await this.repairInvalidFinalResponse({
+                    invalidOutput: previousInvalidOutput,
+                    objective,
+                    instructions,
+                    contextMessages: resolvedContextMessages,
+                    recentMessages: resolvedRecentMessages,
+                    model,
+                    taskType,
+                    executionProfile: resolvedProfile,
+                    toolPolicy,
+                    toolEvents,
+                    runtimeMode,
+                    autonomyApproved,
+                    executionTrace,
+                });
+                output = extractResponseText(finalResponse);
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'repair',
+                    name: 'Response repair',
+                    startedAt: repairStartedAt,
+                    endedAt: new Date().toISOString(),
+                    details: {
+                        reason: 'Invalid tool-availability claim after verified tool execution',
+                        previousOutput: truncateText(previousInvalidOutput, 800),
+                    },
+                }));
+            }
+
             await this.persistConversationState({
                 sessionId,
                 userText: objective,
@@ -1222,6 +1285,46 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
+    normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE } = {}) {
+        const normalizedStep = {
+            tool: typeof step?.tool === 'string' ? step.tool.trim() : '',
+            reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
+            params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
+        };
+
+        if (!['ssh-execute', 'remote-command'].includes(normalizedStep.tool)) {
+            return normalizedStep;
+        }
+
+        const sshContext = resolveSshRequestContext(objective, session);
+        if (sshContext.target?.host && !normalizedStep.params.host) {
+            normalizedStep.params.host = sshContext.target.host;
+        }
+        if (sshContext.target?.username && !normalizedStep.params.username) {
+            normalizedStep.params.username = sshContext.target.username;
+        }
+        if (sshContext.target?.port && !normalizedStep.params.port) {
+            normalizedStep.params.port = sshContext.target.port;
+        }
+
+        const existingCommand = typeof normalizedStep.params.command === 'string'
+            ? normalizedStep.params.command.trim()
+            : '';
+        if (existingCommand) {
+            normalizedStep.params.command = existingCommand;
+            return normalizedStep;
+        }
+
+        const inferenceSource = [normalizedStep.reason, objective].filter(Boolean).join('\n');
+        normalizedStep.params.command = sshContext.directParams?.command
+            || inferFallbackSshCommand(inferenceSource, executionProfile)
+            || (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                ? buildUbuntuMasterRemoteCommand()
+                : 'hostname && uptime && (df -h / || true) && (free -m || true)');
+
+        return normalizedStep;
+    }
+
     buildFallbackPlan({ objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
         if (!toolPolicy?.candidateToolIds?.length) {
             return [];
@@ -1382,6 +1485,7 @@ class ConversationOrchestrator extends EventEmitter {
             `Use at most ${MAX_PLAN_STEPS} steps.`,
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
+            'Every `ssh-execute` or `remote-command` step must include a non-empty `params.command` string.',
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious next remote-build steps.',
@@ -1389,6 +1493,8 @@ class ConversationOrchestrator extends EventEmitter {
                     'Keep moving through setup, inspection, verification, and routine fixes without asking for confirmation between each step.',
                     'Keep going until the goal is reached, a real blocker appears, or the autonomous runtime budget is exhausted.',
                     'Stop only when blocked by missing secrets, DNS/domain values, ambiguous product decisions, destructive resets/wipes, repeated tool failures, or an exhausted autonomy budget.',
+                    'When verified remote tool results already exist, do not repeat the same command and do not return {"steps":[]} unless the task is truly complete or genuinely blocked.',
+                    'If the last remote step was only an initial inspection, return the next distinct remote step instead of ending the plan.',
                 ]
                 : []),
             ...(remoteToolId && toolPolicy.hasReachableSshTarget
@@ -1412,10 +1518,10 @@ class ConversationOrchestrator extends EventEmitter {
         const parsed = safeJsonParse(plannerOutput);
         const requestedSteps = (Array.isArray(parsed?.steps) ? parsed.steps : [])
             .slice(0, MAX_PLAN_STEPS)
-            .map((step) => ({
-                tool: typeof step?.tool === 'string' ? step.tool.trim() : '',
-                reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
-                params: step?.params && typeof step.params === 'object' ? step.params : {},
+            .map((step) => this.normalizePlannedStep(step, {
+                objective,
+                session,
+                executionProfile,
             }))
             .filter((step) => step.tool && toolPolicy.candidateToolIds.includes(step.tool));
 
@@ -1431,14 +1537,26 @@ class ConversationOrchestrator extends EventEmitter {
         }).slice(0, MAX_PLAN_STEPS);
     }
 
-    async executePlan({ plan = [], toolManager = null, sessionId = 'default', executionProfile = DEFAULT_EXECUTION_PROFILE, toolContext = {} }) {
+    async executePlan({
+        plan = [],
+        toolManager = null,
+        sessionId = 'default',
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        toolContext = {},
+        objective = '',
+        session = null,
+    }) {
         const toolEvents = [];
         if (!toolManager) {
             return toolEvents;
         }
 
         for (let index = 0; index < plan.length; index += 1) {
-            const step = plan[index];
+            const step = this.normalizePlannedStep(plan[index], {
+                objective,
+                session,
+                executionProfile,
+            });
             const toolCall = {
                 id: `tool_call_${index + 1}`,
                 type: 'function',
@@ -1484,6 +1602,80 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         return toolEvents;
+    }
+
+    async repairInvalidFinalResponse({
+        invalidOutput = '',
+        objective = '',
+        instructions = '',
+        contextMessages = [],
+        recentMessages = [],
+        model = null,
+        taskType = 'chat',
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        toolPolicy = {},
+        toolEvents = [],
+        runtimeMode = 'plain',
+        autonomyApproved = false,
+        executionTrace = [],
+    }) {
+        const runtimeInstructions = this.buildRuntimeInstructions({
+            baseInstructions: instructions,
+            executionProfile,
+            allowedToolIds: toolPolicy.allowedToolIds,
+            toolEvents,
+            toolPolicy,
+        });
+
+        const repairPrompt = [
+            'The previous draft was invalid because it claimed runtime tools were unavailable after verified tool execution.',
+            'Rewrite the answer using only the verified tool results below.',
+            'Do not mention turn-level tool availability, missing tools, sandbox limits, or inability to execute commands.',
+            'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
+            'If a tool failed, state the exact tool failure plainly.',
+            `Task type: ${taskType}`,
+            '',
+            'User request:',
+            objective || '(empty)',
+            '',
+            'Previous invalid draft:',
+            invalidOutput || '(empty)',
+            '',
+            ...(extractVerifiedImageEmbeds(toolEvents).length > 0
+                ? [
+                    'Verified embeddable images:',
+                    ...extractVerifiedImageEmbeds(toolEvents),
+                    '',
+                    'Reuse those image embeds directly when they satisfy the request.',
+                    '',
+                ]
+                : []),
+            'Verified tool results:',
+            JSON.stringify(toolEvents.map((event) => ({
+                tool: event.toolCall?.function?.name,
+                reason: event.reason || '',
+                result: event.result,
+            })), null, 2),
+        ].join('\n');
+
+        const response = await this.llmClient.createResponse({
+            input: repairPrompt,
+            instructions: runtimeInstructions,
+            contextMessages,
+            recentMessages,
+            stream: false,
+            model,
+            enableAutomaticToolCalls: false,
+        });
+
+        return this.withResponseMetadata(response, {
+            executionProfile,
+            runtimeMode,
+            toolEvents,
+            toolPolicy,
+            autonomyApproved,
+            executionTrace,
+        });
     }
 
     async buildFinalResponse({
@@ -1633,11 +1825,13 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`SSH runtime target is already available${toolPolicy.sshRuntimeTarget ? ` (${toolPolicy.sshRuntimeTarget})` : ''}.`);
             parts.push(`For server work, try ${remoteToolId} against the configured default or sticky session target before asking for host details again.`);
             parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
+            parts.push(`When calling ${remoteToolId}, always include a concrete command string. Omitting host/username/port is allowed when the runtime target is already configured, but omitting command is never allowed.`);
             parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
             parts.push('Use fallbacks when common extras are missing: `find`/`grep -R` for `rg`, `ss -tulpn` for `netstat`, `ip addr` for `ifconfig`, and `docker compose` for `docker-compose`.');
         } else if (remoteToolId) {
             parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);
             parts.push(`Do not claim the SSH tool is unavailable. Try ${remoteToolId} for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.`);
+            parts.push(`When calling ${remoteToolId}, always include a concrete command string.`);
             parts.push('When constructing remote commands, assume Ubuntu/Linux defaults first and avoid depending on nonstandard utilities unless you have verified they exist.');
         }
 

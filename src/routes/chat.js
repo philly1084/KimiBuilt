@@ -18,6 +18,7 @@ const {
 } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
+const { buildContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
 
@@ -169,7 +170,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            'You are a helpful AI assistant. Use the recent session transcript as the primary context for follow-up references like "that", "again", or "same as before". Use recalled memory only as supplemental context. Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that. For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying. Be concise and informative.',
+            buildContinuityInstructions(),
             effectiveArtifactIds,
         );
 
