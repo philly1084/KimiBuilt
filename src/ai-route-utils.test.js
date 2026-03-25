@@ -9,11 +9,13 @@ const { artifactService } = require('./artifacts/artifact-service');
 const {
     buildArtifactCompletionMessage,
     generateOutputArtifactFromPrompt,
+    hasExplicitMermaidFileIntent,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
     getPreferredRemoteToolId,
     resolveSshRequestContext,
     resolveArtifactContextIds,
+    shouldSuppressImplicitMermaidArtifact,
 } = require('./ai-route-utils');
 
 describe('ai-route-utils', () => {
@@ -96,6 +98,35 @@ describe('ai-route-utils', () => {
     test('inferRequestedOutputFormat requires an explicit mermaid export request', () => {
         expect(inferRequestedOutputFormat('Create a Mermaid diagram for the auth flow')).toBe('mermaid');
         expect(inferRequestedOutputFormat('Export this as a Mermaid file')).toBe('mermaid');
+    });
+
+    test('hasExplicitMermaidFileIntent only returns true for file-like Mermaid requests', () => {
+        expect(hasExplicitMermaidFileIntent('Create a Mermaid diagram for the auth flow')).toBe(false);
+        expect(hasExplicitMermaidFileIntent('Export this as a Mermaid file')).toBe(true);
+        expect(hasExplicitMermaidFileIntent('Share a .mmd artifact for this flow')).toBe(true);
+    });
+
+    test('shouldSuppressImplicitMermaidArtifact keeps Mermaid inline for notes unless export was explicit', () => {
+        expect(shouldSuppressImplicitMermaidArtifact({
+            taskType: 'notes',
+            text: 'Create a Mermaid diagram for the auth flow inside this page',
+            outputFormat: 'mermaid',
+            outputFormatProvided: false,
+        })).toBe(true);
+
+        expect(shouldSuppressImplicitMermaidArtifact({
+            taskType: 'notes',
+            text: 'Export this as a Mermaid file',
+            outputFormat: 'mermaid',
+            outputFormatProvided: false,
+        })).toBe(false);
+
+        expect(shouldSuppressImplicitMermaidArtifact({
+            taskType: 'notes',
+            text: 'Create a Mermaid diagram for the auth flow',
+            outputFormat: 'mermaid',
+            outputFormatProvided: true,
+        })).toBe(false);
     });
 
     test('inferOutputFormatFromSession does not keep mermaid sticky on generic continuation turns', () => {

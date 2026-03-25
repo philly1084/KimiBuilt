@@ -9,6 +9,7 @@ const {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
+    shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -53,6 +54,21 @@ const chatSchema = {
     metadata: { required: false, type: 'object' },
 };
 
+function resolveConversationTaskType(metadata = {}, session = null) {
+    const candidates = [
+        metadata?.taskType,
+        metadata?.task_type,
+        metadata?.clientSurface,
+        metadata?.client_surface,
+        session?.metadata?.taskType,
+        session?.metadata?.task_type,
+        session?.metadata?.clientSurface,
+        session?.metadata?.client_surface,
+    ];
+
+    return candidates.find((value) => typeof value === 'string' && value.trim()) || 'chat';
+}
+
 router.post('/', validate(chatSchema), async (req, res, next) => {
     let runtimeTask = null;
     const startedAt = Date.now();
@@ -86,9 +102,18 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         const sshContext = resolveSshRequestContext(message, session);
         const effectiveMessage = sshContext.effectivePrompt || message;
-        const effectiveOutputFormat = outputFormat
+        const taskType = resolveConversationTaskType(requestMetadata, session);
+        let effectiveOutputFormat = outputFormat
             || inferRequestedOutputFormat(message)
             || inferOutputFormatFromSession(message, session);
+        if (shouldSuppressImplicitMermaidArtifact({
+            taskType,
+            text: message,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(outputFormat),
+        })) {
+            effectiveOutputFormat = null;
+        }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
         runtimeTask = startRuntimeTask({
             sessionId,

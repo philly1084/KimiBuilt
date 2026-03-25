@@ -6,6 +6,8 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
+    inferRequestedOutputFormat,
+    shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -43,19 +45,23 @@ async function updateSessionProjectMemory(sessionId, updates = {}) {
     });
 }
 
-function inferOutputFormatFromText(text = '') {
-    const normalized = String(text || '').toLowerCase();
-    const checks = [
-        ['power-query', /\b(power\s*query|\.(pq|m)\b)/],
-        ['xlsx', /\b(xlsx|spreadsheet|excel|workbook)\b/],
-        ['pdf', /\bpdf\b/],
-        ['docx', /\b(docx|word document)\b/],
-        ['xml', /\bxml\b/],
-        ['mermaid', /\bmermaid\b/],
-        ['html', /\bhtml\b/],
+function resolveConversationTaskType(payload = {}, session = null) {
+    const candidates = [
+        payload?.taskType,
+        payload?.task_type,
+        payload?.clientSurface,
+        payload?.client_surface,
+        payload?.metadata?.taskType,
+        payload?.metadata?.task_type,
+        payload?.metadata?.clientSurface,
+        payload?.metadata?.client_surface,
+        session?.metadata?.taskType,
+        session?.metadata?.task_type,
+        session?.metadata?.clientSurface,
+        session?.metadata?.client_surface,
     ];
 
-    return checks.find(([, pattern]) => pattern.test(normalized))?.[0] || null;
+    return candidates.find((value) => typeof value === 'string' && value.trim()) || 'chat';
 }
 
 function setupWebSocket(wss, app = null) {
@@ -138,9 +144,18 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
 
     const sshContext = resolveSshRequestContext(message, session);
     const effectiveMessage = sshContext.effectivePrompt || message;
-    const effectiveOutputFormat = outputFormat
-        || inferOutputFormatFromText(message)
+    const taskType = resolveConversationTaskType(payload, session);
+    let effectiveOutputFormat = outputFormat
+        || inferRequestedOutputFormat(message)
         || inferOutputFormatFromSession(message, session);
+    if (shouldSuppressImplicitMermaidArtifact({
+        taskType,
+        text: message,
+        outputFormat: effectiveOutputFormat,
+        outputFormatProvided: Boolean(outputFormat),
+    })) {
+        effectiveOutputFormat = null;
+    }
     const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
     runtimeTask = startRuntimeTask({
         sessionId: session.id,

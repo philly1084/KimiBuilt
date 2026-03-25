@@ -35,6 +35,7 @@ jest.mock('../ai-route-utils', () => ({
     maybeGenerateOutputArtifact: jest.fn(),
     generateOutputArtifactFromPrompt: jest.fn(),
     inferRequestedOutputFormat: jest.fn(() => null),
+    shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
     resolveSshRequestContext: jest.fn(),
     extractSshSessionMetadataFromToolEvents: jest.fn(() => null),
     inferOutputFormatFromSession: jest.fn(() => null),
@@ -61,8 +62,10 @@ const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { executeConversationRuntime } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
+    generateOutputArtifactFromPrompt,
     maybeGenerateOutputArtifact,
     resolveSshRequestContext,
+    shouldSuppressImplicitMermaidArtifact,
 } = require('../ai-route-utils');
 
 const chatRouter = require('./chat');
@@ -151,5 +154,52 @@ describe('/api/chat route', () => {
             }),
         );
         expect(toolManager.executeTool).not.toHaveBeenCalled();
+    });
+
+    test('suppresses implicit Mermaid artifact fallback for notes-style requests', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Create a Mermaid diagram for the auth flow inside this page',
+        });
+        shouldSuppressImplicitMermaidArtifact.mockReturnValue(true);
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-notes-1',
+                model: 'gemini-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Returned through normal runtime' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Create a Mermaid diagram for the auth flow inside this page',
+                stream: false,
+                metadata: { taskType: 'notes', clientSurface: 'notes' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Returned through normal runtime');
+        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
+        expect(executeConversationRuntime).toHaveBeenCalled();
+        expect(shouldSuppressImplicitMermaidArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            taskType: 'notes',
+            text: 'Create a Mermaid diagram for the auth flow inside this page',
+            outputFormatProvided: false,
+        }));
     });
 });

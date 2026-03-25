@@ -120,6 +120,47 @@ function hasExplicitMermaidArtifactIntent(text = '') {
         || /\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\s+(?:file|artifact|export)\b/i.test(normalized);
 }
 
+function hasExplicitMermaidFileIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\.(?:mmd)\b/i.test(normalized)
+        || (/\bmermaid\b/i.test(normalized)
+            && /\b(file|artifact|export|download|save|share|shareable|link)\b/i.test(normalized))
+        || /\b(export|download|save|share|shareable|link)\b[\s\S]{0,60}\b(mermaid|mmd|diagram)\b/i.test(normalized)
+        || /\b(mermaid|mmd)\s+(?:file|artifact|export|download)\b/i.test(normalized);
+}
+
+function isNotesSurfaceTaskType(taskType = '') {
+    const normalized = String(taskType || '').trim().toLowerCase();
+    return [
+        'notes',
+        'notes-app',
+        'notes_app',
+        'notes-editor',
+        'notes_editor',
+    ].includes(normalized);
+}
+
+function shouldSuppressImplicitMermaidArtifact({
+    taskType = '',
+    text = '',
+    outputFormat = null,
+    outputFormatProvided = false,
+} = {}) {
+    if (normalizeFormat(outputFormat) !== 'mermaid' || outputFormatProvided) {
+        return false;
+    }
+
+    if (isNotesSurfaceTaskType(taskType)) {
+        return !hasExplicitMermaidFileIntent(text);
+    }
+
+    return false;
+}
+
 function inferRequestedOutputFormat(text = '') {
     const normalized = String(text || '').toLowerCase();
     if (!normalized) {
@@ -557,8 +598,10 @@ module.exports = {
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
     hasExplicitMermaidArtifactIntent,
+    hasExplicitMermaidFileIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
+    shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     formatSshToolResult,
     getPreferredRemoteToolId,

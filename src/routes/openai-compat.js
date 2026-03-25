@@ -8,9 +8,9 @@ const {
     buildInstructionsWithArtifacts,
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
-    hasExplicitMermaidArtifactIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
+    shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -160,12 +160,6 @@ function resolveConversationTaskType(payload = {}, session = null) {
     return candidates.some((value) => isNotesSurfaceValue(value)) ? 'notes' : 'chat';
 }
 
-function shouldSuppressNotesMermaidArtifact(taskType, text = '', outputFormat = null) {
-    return taskType === 'notes'
-        && String(outputFormat || '').trim().toLowerCase() === 'mermaid'
-        && !hasExplicitMermaidArtifactIntent(text);
-}
-
 function shouldInjectRecentMessages(inputMessages = []) {
     if (!Array.isArray(inputMessages)) {
         return true;
@@ -298,7 +292,12 @@ router.post('/chat/completions', async (req, res, next) => {
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(lastUserText)
             || inferOutputFormatFromTranscript(messages, session);
-        if (shouldSuppressNotesMermaidArtifact(taskType, lastUserText, effectiveOutputFormat)) {
+        if (shouldSuppressImplicitMermaidArtifact({
+            taskType,
+            text: lastUserText,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(output_format),
+        })) {
             effectiveOutputFormat = null;
         }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
@@ -680,7 +679,12 @@ router.post('/responses', async (req, res, next) => {
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(userInput)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
-        if (shouldSuppressNotesMermaidArtifact(taskType, userInput, effectiveOutputFormat)) {
+        if (shouldSuppressImplicitMermaidArtifact({
+            taskType,
+            text: userInput,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(output_format),
+        })) {
             effectiveOutputFormat = null;
         }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
