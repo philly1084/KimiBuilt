@@ -352,6 +352,33 @@ function buildRemoteWebsiteSourceInspectionCommand() {
     return "hostname && uname -m && (test -f /root/website.html && sed -n '1,220p' /root/website.html || test -f /root/index.html && sed -n '1,220p' /root/index.html || find /root /srv /var/www -maxdepth 3 -type f \\( -name 'index.html' -o -name '*.html' \\) 2>/dev/null | head -n 20) && (kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page' | head -n 20 || true)";
 }
 
+function normalizeShellCommand(command = '') {
+    return String(command || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isGenericRemoteBaselineCommand(command = '') {
+    return normalizeShellCommand(command) === normalizeShellCommand(buildUbuntuMasterRemoteCommand());
+}
+
+function hasRemoteWebsiteInspectionSignal(output = '') {
+    const normalized = String(output || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        '<!doctype html',
+        '<html',
+        'index.html',
+        'website.html',
+        '/var/www/',
+        '/srv/',
+        'configmap/',
+    ].some((fragment) => normalized.includes(fragment));
+}
+
 function getLastRemoteToolEvent(toolEvents = []) {
     for (let index = (Array.isArray(toolEvents) ? toolEvents.length : 0) - 1; index >= 0; index -= 1) {
         const event = toolEvents[index];
@@ -499,6 +526,26 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', executionProfil
         lastRemoteEvent?.result?.data?.stdout || '',
         lastRemoteEvent?.result?.data?.stderr || '',
     ].join('\n');
+
+    if (hasRemoteWebsiteUpdateIntent(objective) && !hasExplicitLocalArtifactReference(objective)) {
+        const lastCommand = String(lastArgs.command || '').trim();
+        const lastRemoteOutput = [
+            lastRemoteEvent?.result?.data?.stdout || '',
+            lastRemoteEvent?.result?.data?.stderr || '',
+        ].join('\n');
+        const alreadyInspectingRemoteSource = normalizeShellCommand(lastCommand) === normalizeShellCommand(buildRemoteWebsiteSourceInspectionCommand())
+            || hasRemoteWebsiteInspectionSignal(lastRemoteOutput);
+
+        if (!alreadyInspectingRemoteSource && isGenericRemoteBaselineCommand(lastCommand)) {
+            return [{
+                tool: remoteToolId,
+                reason: 'The generic server baseline completed. Inspect the deployed website source or ConfigMap next so the page can be updated remotely.',
+                params: {
+                    command: buildRemoteWebsiteSourceInspectionCommand(),
+                },
+            }];
+        }
+    }
 
     const initFailure = parseKubernetesInitContainerFailure(combinedOutput);
     if (initFailure) {
@@ -1147,19 +1194,23 @@ class ConversationOrchestrator extends EventEmitter {
                     }
                 }
 
+                nextPlan = filterRepeatedPlanSteps(nextPlan, executedStepSignatures, executedStepSignatureCounts);
+
                 if (nextPlan.length === 0 && autonomyApproved) {
-                    nextPlan = buildRemoteFollowupPlanFromToolEvents({
-                        objective,
-                        executionProfile: resolvedProfile,
-                        toolPolicy,
-                        toolEvents,
-                    });
+                    nextPlan = filterRepeatedPlanSteps(
+                        buildRemoteFollowupPlanFromToolEvents({
+                            objective,
+                            executionProfile: resolvedProfile,
+                            toolPolicy,
+                            toolEvents,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
                     if (nextPlan.length > 0 && runtimeMode === 'plain') {
                         runtimeMode = 'guided-tools';
                     }
                 }
-
-                nextPlan = filterRepeatedPlanSteps(nextPlan, executedStepSignatures, executedStepSignatureCounts);
 
                 if (autonomyApproved && nextPlan.length > 0) {
                     const remainingToolBudget = Math.max(0, maxAutonomousToolCalls - toolEvents.length);

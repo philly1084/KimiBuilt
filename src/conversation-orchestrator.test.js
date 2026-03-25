@@ -780,6 +780,106 @@ describe('ConversationOrchestrator', () => {
         expect(result.response.metadata.toolEvents).toHaveLength(3);
     });
 
+    test('continues remote website updates when the planner repeats the generic baseline command', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const baselineCommand = "hostname && uname -m && (test -f /etc/os-release && sed -n '1,3p' /etc/os-release || true) && uptime";
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Inspected the deployed website source and kept the remote update moving.', 'resp_remote_website_followup')),
+            complete: jest.fn()
+                .mockResolvedValueOnce('I should inspect the server first.')
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Repeat the generic server inspection first',
+                        params: {
+                            command: baselineCommand,
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '10.0.0.5:22',
+                        stdout: 'host-a\naarch64\nNAME="Ubuntu"\n 12:00 up 1 day',
+                        stderr: '',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '10.0.0.5:22',
+                        stdout: '/root/website.html',
+                        stderr: '',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote-website-followup', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-remote-website-followup', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Update the website gallery on the cluster to use bikini/swimwear images and restart the workload.',
+            sessionId: 'session-remote-website-followup',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(toolManager.executeTool.mock.calls[0][1].command).toBe(baselineCommand);
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain("test -f /root/website.html");
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain("find /root /srv /var/www -maxdepth 3 -type f");
+        expect(result.response.metadata.executionTrace.find((entry) => entry.name === 'Plan round 2')).toMatchObject({
+            details: {
+                stepCount: 1,
+                steps: [
+                    expect.objectContaining({
+                        tool: 'remote-command',
+                    }),
+                ],
+            },
+        });
+    });
+
     test('follows a crashing init container describe step with kubectl logs instead of handing off the next tool call', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
