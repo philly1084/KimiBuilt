@@ -822,9 +822,36 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('web-fetch');
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-read');
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-search');
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-write');
+    });
+
+    test('does not auto-select web-fetch for remote website replacement prompts with internal artifact links', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '77.42.44.98',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Use https://api/artifacts/3ee64601-2cb4-43e1-b56b-973bc2856419/download to replace the website on the cluster and restart the workload.',
+            { executionProfile: 'remote-build' },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Use https://api/artifacts/3ee64601-2cb4-43e1-b56b-973bc2856419/download to replace the website on the cluster and restart the workload.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('web-fetch');
     });
 
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {

@@ -591,8 +591,7 @@ function hasExplicitLocalArtifactReference(prompt = '') {
     }
 
     const normalized = source.toLowerCase();
-    return /\b(artifact|attach|attached|upload|uploaded|workspace|repo|repository|local file|local html|local artifact|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
-        || /\/api\/artifacts\//i.test(source)
+    return /\b(attached artifact|uploaded artifact|local artifact|local file|local html|workspace|repo|repository|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
         || /[a-z]:\\[^"'`\s]+/i.test(source)
         || /\b[a-z0-9._-]+-[a-z0-9]{6}\.(html|htm|css|js)\b/i.test(source);
 }
@@ -608,6 +607,18 @@ function hasRemoteWebsiteUpdateIntent(prompt = '') {
     const hasWriteIntent = /\b(write|replace|overwrite|update|edit|change|deploy|redeploy|restart|publish|push|apply|rollout|create|generate|make)\b/.test(normalized);
 
     return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
+}
+
+function hasInternalArtifactReference(prompt = '') {
+    const source = String(prompt || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    return /(?:^|[\s(])\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
+        || /(?:^|[\s(])api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
+        || /https?:\/\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
+        || /https?:\/\/[^/\s]+\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source);
 }
 
 function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
@@ -945,7 +956,9 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
     const explicitLocalArtifact = hasExplicitLocalArtifactReference(prompt);
     const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
+    const internalArtifactReference = hasInternalArtifactReference(prompt);
     const shouldPreferRemoteWebsiteSource = Boolean(remoteToolId && remoteWebsiteUpdateIntent && !explicitLocalArtifact);
+    const shouldSuppressWebFetchForRemoteWebsite = shouldPreferRemoteWebsiteSource && internalArtifactReference;
 
     if (hasWebResearchIntent) {
         selectedIds.add('web-search');
@@ -957,7 +970,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     }
 
     if (hasUrl) {
-        if (hasExplicitScrapeIntent) {
+        if (shouldSuppressWebFetchForRemoteWebsite) {
+            // Keep website replacement flows on the remote SSH path instead of fetching
+            // backend-local artifact links as if they were public internet URLs.
+        } else if (hasExplicitScrapeIntent) {
             selectedIds.add('web-scrape');
         } else {
             selectedIds.add('web-fetch');
@@ -1180,6 +1196,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- For Kubernetes troubleshooting, if `kubectl describe` or pod status output shows CrashLoopBackOff, an init container failure, or Exit Code > 0, follow it with `kubectl logs` for the failing container or init container instead of handing that next command back to the user.');
         guidance.push('- For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or local path.');
         guidance.push('- If the user asks for a fresh replacement page, generate the full HTML and write it remotely instead of blocking on a missing local artifact.');
+        guidance.push('- Internal artifact references like `/api/artifacts/...` are backend-local links. Do not invent `https://api/...` from them.');
         const sshConfig = settingsController.getEffectiveSshConfig();
 
         if (hasUsableSshDefaults()) {

@@ -318,8 +318,7 @@ function hasExplicitLocalArtifactReference(text = '') {
     }
 
     const normalized = source.toLowerCase();
-    return /\b(artifact|attach|attached|upload|uploaded|workspace|repo|repository|local file|local html|local artifact|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
-        || /\/api\/artifacts\//i.test(source)
+    return /\b(attached artifact|uploaded artifact|local artifact|local file|local html|workspace|repo|repository|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
         || /[a-z]:\\[^"'`\s]+/i.test(source)
         || /\b[a-z0-9._-]+-[a-z0-9]{6}\.(html|htm|css|js)\b/i.test(source);
 }
@@ -335,6 +334,18 @@ function hasRemoteWebsiteUpdateIntent(text = '') {
     const hasWriteIntent = /\b(write|replace|overwrite|update|edit|change|deploy|redeploy|restart|publish|push|apply|rollout|create|generate|make)\b/.test(normalized);
 
     return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
+}
+
+function hasInternalArtifactReference(text = '') {
+    const source = String(text || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    return /(?:^|[\s(])\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
+        || /(?:^|[\s(])api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
+        || /https?:\/\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
+        || /https?:\/\/[^/\s]+\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source);
 }
 
 function buildRemoteWebsiteSourceInspectionCommand() {
@@ -1458,6 +1469,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(`${objective || ''}\n${instructions || ''}`);
         const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
+        const hasInternalArtifactUrl = hasInternalArtifactReference(`${objective || ''}\n${instructions || ''}`);
         const shouldPreferRemoteWebsiteSource = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && remoteWebsiteUpdateIntent
             && !hasExplicitLocalArtifacts;
@@ -1468,9 +1480,14 @@ class ConversationOrchestrator extends EventEmitter {
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
             [
                 'web-search',
-                'web-fetch',
                 'tool-doc-read',
             ].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
+
+            if (allowedToolIds.includes('web-fetch')
+                && (!shouldPreferRemoteWebsiteSource
+                    || (!hasInternalArtifactUrl && (hasUrl || hasExplicitWebResearchIntent)))) {
+                candidates.add('web-fetch');
+            }
 
             if (!shouldPreferRemoteWebsiteSource) {
                 ['file-read', 'file-search'].forEach((toolId) => allowedToolIds.includes(toolId) && candidates.add(toolId));
@@ -1861,6 +1878,7 @@ class ConversationOrchestrator extends EventEmitter {
                     'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',
                     'When the user asks to replace the page with a new file, you may generate the full replacement HTML yourself and write it remotely with `remote-command`.',
                     'If a local HTML artifact or local file read fails, pivot to the remote file, ConfigMap, or deployed content as the source of truth instead of stopping.',
+                    'Internal artifact links like `/api/artifacts/...` are backend-local references, not public hosts. Do not turn them into `https://api/...`.',
                 ]
                 : []),
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE

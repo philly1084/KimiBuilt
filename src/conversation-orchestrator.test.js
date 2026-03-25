@@ -1109,6 +1109,46 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('web-fetch');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-read');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-search');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-write');
+    });
+
+    test('keeps remote website replacement on remote-command when project memory includes internal artifact downloads', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'file-write', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Use the replacement artifact to replace the existing website on the cluster and restart the workload.',
+            instructions: 'Generated artifacts:\n- website.html (html) -> /api/artifacts/3ee64601-2cb4-43e1-b56b-973bc2856419/download',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('web-fetch');
         expect(toolPolicy.candidateToolIds).not.toContain('file-read');
         expect(toolPolicy.candidateToolIds).not.toContain('file-search');
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
