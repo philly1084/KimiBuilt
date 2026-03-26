@@ -995,6 +995,220 @@ describe('ConversationOrchestrator', () => {
         expect(result.response.metadata.executionTrace.map((entry) => entry.name)).toContain('Recoverable remote failure after round 1');
     });
 
+    test('prefers deterministic remote workload inspection after svc or ingress is treated as a deployment name', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Re-inspected the cluster resources with the corrected Kubernetes command.', 'resp_remote_workload_inspection')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Inspect the website deployment before replacing the live page.',
+                        params: {
+                            command: 'kubectl get deployment svc ingress -A',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Retry the same website deployment inspection.',
+                        params: {
+                            command: 'kubectl get deployment svc ingress -A',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    toolId: 'remote-command',
+                    error: 'Error from server (NotFound): deployments.apps "svc" not found\nError from server (NotFound): deployments.apps "ingress" not found',
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: 'default   deployment.apps/website\ndefault   service/website\ndefault   ingress.networking.k8s.io/website',
+                        stderr: '',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote-workload-inspection', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-remote-workload-inspection', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'Replace the live website HTML on the cluster and verify the workload before changing it.',
+            sessionId: 'session-remote-workload-inspection',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            1,
+            'remote-command',
+            expect.objectContaining({
+                command: 'kubectl get deployment svc ingress -A',
+            }),
+            expect.any(Object),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            2,
+            'remote-command',
+            expect.objectContaining({
+                command: expect.stringContaining('kubectl get deployment,svc,ingress -A'),
+            }),
+            expect.any(Object),
+        );
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain('kubectl get configmap -A');
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain('kubectl get pods -A -o wide');
+    });
+
+    test('prefers body verification after a title-only remote website verification failure', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Verified the deployed page by checking mounted HTML and the public response body.', 'resp_remote_body_verification')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Verify the pod and public titles for the deployed website.',
+                        params: {
+                            command: 'echo "--- pod title ---"; echo; echo "--- public title ---"',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Retry the same title-based verification.',
+                        params: {
+                            command: 'echo "--- pod title ---"; echo; echo "--- public title ---"',
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    toolId: 'remote-command',
+                    error: '--- pod title ---\n\n--- public title ---',
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: '--- pod file: /usr/share/nginx/html/index.html ---\n512\n<!DOCTYPE html><html><body><main>Bikini storefront</main></body></html>\n--- public response ---\nHTTP/2 200\n<!DOCTYPE html><html><body><main>Bikini storefront</main></body></html>',
+                        stderr: '',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote-body-verification', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-remote-body-verification', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'Verify the deployed website HTML on the pod and the public host after the rollout.',
+            sessionId: 'session-remote-body-verification',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            1,
+            'remote-command',
+            expect.objectContaining({
+                command: 'echo "--- pod title ---"; echo; echo "--- public title ---"',
+            }),
+            expect.any(Object),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            2,
+            'remote-command',
+            expect.objectContaining({
+                command: expect.stringContaining('--- public response ---'),
+            }),
+            expect.any(Object),
+        );
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain('kubectl exec -n "$ns" "$pod"');
+        expect(toolManager.executeTool.mock.calls[1][1].command).toContain('sed -n "1,40p"');
+    });
+
     test('follows a crashing init container describe step with kubectl logs instead of handing off the next tool call', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

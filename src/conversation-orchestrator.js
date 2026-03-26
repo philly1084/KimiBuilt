@@ -367,6 +367,39 @@ function buildRemoteWebsiteSourceInspectionCommand() {
     return "hostname && uname -m && (test -f /root/website.html && sed -n '1,220p' /root/website.html || test -f /root/index.html && sed -n '1,220p' /root/index.html || find /root /srv /var/www -maxdepth 3 -type f \\( -name 'index.html' -o -name '*.html' \\) 2>/dev/null | head -n 20) && (kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page' | head -n 20 || true)";
 }
 
+function buildRemoteWebsiteWorkloadInspectionCommand() {
+    return [
+        'hostname && uname -m',
+        "(kubectl get deployment,svc,ingress -A 2>/dev/null | grep -Ei 'website|web|site|html|ingress' | head -n 40 || true)",
+        "(kubectl get configmap -A 2>/dev/null | grep -Ei 'website|web|site|html|page' | head -n 40 || true)",
+        "(kubectl get pods -A -o wide 2>/dev/null | grep -Ei 'website|web|site|html|nginx' | head -n 40 || true)",
+    ].join(' && ');
+}
+
+function buildRemoteWebsiteBodyVerificationCommand() {
+    return [
+        'set -e',
+        'ns=$(kubectl get deployment,svc,ingress -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk \'$2 ~ /website|web|site|ingress/ { print $1; exit }\')',
+        'if [ -z "$ns" ]; then ns=default; fi',
+        'pod=$(kubectl get pods -n "$ns" -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | grep -Ei \'website|web|site|nginx\' | head -n 1 || true)',
+        'if [ -n "$pod" ]; then kubectl exec -n "$ns" "$pod" -- sh -lc \'for f in /usr/share/nginx/html/index.html /usr/share/nginx/html/*.html /usr/share/nginx/html/*; do if [ -f "$f" ]; then echo "--- pod file: $f ---"; wc -c "$f"; sed -n "1,40p" "$f"; break; fi; done\'; fi',
+        'host=$(kubectl get ingress -A -o jsonpath=\'{range .items[*]}{.spec.rules[0].host}{"\\n"}{end}\' 2>/dev/null | grep -v \'^$\' | head -n 1 || true)',
+        'if [ -n "$host" ]; then echo "--- public response ---"; curl -ksS -D - --max-time 20 "https://$host" | sed -n "1,40p" || true; fi',
+    ].join('\n');
+}
+
+function isMissingLocalHtmlArtifactEvent(event = null) {
+    const toolId = canonicalizeRemoteToolId(event?.toolCall?.function?.name || event?.result?.toolId || '');
+    const error = String(event?.result?.error || '').trim();
+    const args = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+    const path = String(args?.path || '').trim();
+
+    return toolId === 'file-read'
+        && event?.result?.success === false
+        && /\b(enoent|no such file or directory)\b/i.test(error)
+        && (!path || /\.(html?|css|js)$/i.test(path));
+}
+
 function normalizeShellCommand(command = '') {
     return String(command || '')
         .replace(/\s+/g, ' ')
@@ -403,6 +436,59 @@ function isInternalArtifactRemoteFetchFailure(error = '') {
     return /could not resolve host:\s*api/i.test(normalized)
         || /failed to connect to (?:localhost|127\.0\.0\.1) port 3000/i.test(normalized)
         || /connection refused/i.test(normalized) && /\b(?:localhost|127\.0\.0\.1)\b/.test(normalized);
+}
+
+function isWebsiteResourceTypeAsDeploymentFailure(error = '') {
+    const normalized = String(error || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /deployments\.apps\s+"svc"\s+not found/i.test(normalized)
+        || /deployments\.apps\s+"ingress"\s+not found/i.test(normalized);
+}
+
+function isWebsiteTitleOnlyVerificationFailure(error = '') {
+    const normalized = String(error || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return normalized.includes('--- pod title ---')
+        || normalized.includes('--- public title ---');
+}
+
+function shouldPreferRemoteFollowupPlan(toolEvents = []) {
+    const latestEvent = Array.isArray(toolEvents) && toolEvents.length > 0
+        ? toolEvents[toolEvents.length - 1]
+        : null;
+    if (!latestEvent) {
+        return false;
+    }
+
+    if (isMissingLocalHtmlArtifactEvent(latestEvent)) {
+        return true;
+    }
+
+    const toolId = canonicalizeRemoteToolId(latestEvent?.toolCall?.function?.name || latestEvent?.result?.toolId || '');
+    if (toolId === 'web-fetch' && latestEvent?.result?.success === true) {
+        const args = parseToolCallArguments(latestEvent?.toolCall?.function?.arguments || '{}');
+        const internalArtifactUrl = extractInternalArtifactUrl(args?.url || '');
+        const body = typeof latestEvent?.result?.data?.body === 'string'
+            ? latestEvent.result.data.body.trim()
+            : '';
+
+        return Boolean(internalArtifactUrl && body);
+    }
+
+    if (!isRemoteCommandToolId(toolId) || latestEvent?.result?.success !== false) {
+        return false;
+    }
+
+    const error = latestEvent?.result?.error || '';
+    return isInternalArtifactRemoteFetchFailure(error)
+        || isWebsiteResourceTypeAsDeploymentFailure(error)
+        || isWebsiteTitleOnlyVerificationFailure(error);
 }
 
 function getLastRemoteToolEvent(toolEvents = []) {
@@ -592,22 +678,7 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
     if (hasRemoteWebsiteUpdateIntent(objective) && !hasExplicitLocalArtifactReference(objective)) {
         const missingLocalHtmlArtifact = [...(Array.isArray(toolEvents) ? toolEvents : [])]
             .reverse()
-            .find((event) => {
-                const toolId = canonicalizeRemoteToolId(event?.toolCall?.function?.name || event?.result?.toolId || '');
-                const error = String(event?.result?.error || '').trim();
-                let args = {};
-                try {
-                    args = JSON.parse(event?.toolCall?.function?.arguments || '{}');
-                } catch (_error) {
-                    args = {};
-                }
-                const path = String(args?.path || '').trim();
-
-                return toolId === 'file-read'
-                    && event?.result?.success === false
-                    && /\b(enoent|no such file or directory)\b/i.test(error)
-                    && (!path || /\.(html?|css|js)$/i.test(path));
-            });
+            .find((event) => isMissingLocalHtmlArtifactEvent(event));
 
         if (missingLocalHtmlArtifact) {
             return [{
@@ -629,6 +700,28 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
                 reason: 'The remote server cannot reach the app-local artifact endpoint. Fetch the artifact content locally in this runtime before sending it to the remote target.',
                 params: {
                     url: internalArtifactUrl,
+                },
+            }];
+        }
+
+        if (lastRemoteEvent?.result?.success === false
+            && isWebsiteResourceTypeAsDeploymentFailure(lastRemoteEvent?.result?.error || '')) {
+            return [{
+                tool: remoteToolId,
+                reason: 'The previous command treated service or ingress resource types as deployment names. Re-inspect deployments, services, ingresses, pods, and ConfigMaps separately before changing the live website again.',
+                params: {
+                    command: buildRemoteWebsiteWorkloadInspectionCommand(),
+                },
+            }];
+        }
+
+        if (lastRemoteEvent?.result?.success === false
+            && isWebsiteTitleOnlyVerificationFailure(lastRemoteEvent?.result?.error || '')) {
+            return [{
+                tool: remoteToolId,
+                reason: 'The previous verification relied on page titles, which may be empty. Verify the mounted HTML body and public response content directly instead.',
+                params: {
+                    command: buildRemoteWebsiteBodyVerificationCommand(),
                 },
             }];
         }
@@ -1345,8 +1438,8 @@ class ConversationOrchestrator extends EventEmitter {
 
                 nextPlan = filterRepeatedPlanSteps(nextPlan, executedStepSignatures, executedStepSignatureCounts);
 
-                if (nextPlan.length === 0 && autonomyApproved) {
-                    nextPlan = filterRepeatedPlanSteps(
+                if (autonomyApproved) {
+                    const guidedRemotePlan = filterRepeatedPlanSteps(
                         buildRemoteFollowupPlanFromToolEvents({
                             objective,
                             instructions,
@@ -1357,7 +1450,10 @@ class ConversationOrchestrator extends EventEmitter {
                         executedStepSignatures,
                         executedStepSignatureCounts,
                     );
-                    if (nextPlan.length > 0 && runtimeMode === 'plain') {
+
+                    if (guidedRemotePlan.length > 0
+                        && (nextPlan.length === 0 || shouldPreferRemoteFollowupPlan(toolEvents))) {
+                        nextPlan = guidedRemotePlan;
                         runtimeMode = 'guided-tools';
                     }
                 }
@@ -2081,6 +2177,8 @@ class ConversationOrchestrator extends EventEmitter {
                     'When the user asks to replace the page with a new file, you may generate the full replacement HTML yourself and write it remotely with `remote-command`.',
                     'If a local HTML artifact or local file read fails, pivot to the remote file, ConfigMap, or deployed content as the source of truth instead of stopping.',
                     'Internal artifact links like `/api/artifacts/...` are backend-local references, not public hosts. Do not turn them into `https://api/...`.',
+                    'Do not treat `svc` or `ingress` as deployment names. Inspect deployments, services, ingresses, pods, and ConfigMaps separately.',
+                    'When verifying the deployed site, do not rely on the HTML `<title>` alone. Compare body content, mounted file content, response snippets, or content length when titles may be empty.',
                     ...(hasInternalArtifactReference(`${objective || ''}\n${instructions || ''}`)
                         ? [
                             'If the runtime instructions or project memory include an internal artifact link and you need its contents, use local `web-fetch` from this runtime first, then send the fetched content to the remote target with `remote-command`.',
