@@ -168,6 +168,96 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('Deployment is healthy.');
     });
 
+    test('pins remote-build remote-command steps to the trusted SSH target when the planner invents a bogus host', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '162.55.163.199',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('The remote apply step ran on the configured server.', 'resp_remote_pinned_host')),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'remote-command',
+                        reason: 'Apply the fetched HTML to the live ConfigMap.',
+                        params: {
+                            host: 'web-fetch.body',
+                            command: 'kubectl apply -f /tmp/website-html.yaml',
+                        },
+                    },
+                ],
+            })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'remote-command',
+                data: {
+                    stdout: 'configmap/website-html configured',
+                    stderr: '',
+                    host: '162.55.163.199:22',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({
+                id: 'session-remote-pinned-host',
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '162.55.163.199',
+                        username: 'root',
+                        port: 22,
+                    },
+                },
+            }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'Replace the deployed HTML on the remote server and restart the website workload.',
+            sessionId: 'session-remote-pinned-host',
+            executionProfile: 'remote-build',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'remote-command',
+            expect.objectContaining({
+                host: '162.55.163.199',
+                username: 'root',
+                port: 22,
+                command: 'kubectl apply -f /tmp/website-html.yaml',
+            }),
+            expect.any(Object),
+        );
+    });
+
     test('repairs invalid final responses that deny remote tools after successful remote execution', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

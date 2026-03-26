@@ -1,6 +1,7 @@
 const { artifactService } = require('./artifacts/artifact-service');
 const { normalizeFormat } = require('./artifacts/constants');
 const { buildSessionInstructions } = require('./session-instructions');
+const settingsController = require('./routes/admin/settings.controller');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -298,6 +299,44 @@ function extractRequestedSshCommand(text = '') {
     return null;
 }
 
+function getConfiguredSshTarget() {
+    const sshConfig = settingsController.getEffectiveSshConfig();
+    if (!sshConfig?.enabled || !sshConfig?.host) {
+        return null;
+    }
+
+    return {
+        host: String(sshConfig.host || '').trim(),
+        username: String(sshConfig.username || '').trim() || null,
+        port: Number(sshConfig.port) || 22,
+    };
+}
+
+function isSuspiciousSshTargetHost(host = '') {
+    const normalized = String(host || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (/[\s{}"'`$\\/]/.test(normalized) || /^https?:\/\//.test(normalized)) {
+        return true;
+    }
+
+    return /^(?:web-fetch|web-search|web-scrape|file-read|file-search|file-write|remote-command|ssh-execute|docker-exec|tool-doc-read|code-sandbox)(?:\.[a-z0-9_-]+)+$/i.test(normalized)
+        || /^(?:result|results|data|response|output|tool)(?:\.[a-z0-9_-]+)+$/i.test(normalized);
+}
+
+function isSshHostnameResolutionFailure(error = '') {
+    const normalized = String(error || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /could not resolve hostname/i.test(normalized)
+        || /name or service not known/i.test(normalized)
+        || /temporary failure in name resolution/i.test(normalized);
+}
+
 function hasRecentRemoteWorkingState(session = null) {
     const remoteWorkingState = session?.metadata?.remoteWorkingState;
     if (!remoteWorkingState || typeof remoteWorkingState !== 'object') {
@@ -434,8 +473,14 @@ function resolveSshRequestContext(text = '', session = null) {
     const prompt = String(text || '').trim();
     const explicitIntent = promptHasExplicitSshIntent(prompt);
     const explicitTarget = extractExplicitSshTarget(prompt);
+    const configuredTarget = getConfiguredSshTarget();
     const sessionTarget = session?.metadata?.lastSshTarget || null;
-    const target = explicitTarget || sessionTarget;
+    const target = explicitTarget
+        || (sessionTarget?.host && !isSuspiciousSshTargetHost(sessionTarget.host)
+            ? sessionTarget
+            : null)
+        || configuredTarget
+        || sessionTarget;
     const stickySsh = isRemoteCommandToolId(session?.metadata?.lastToolIntent);
     const continuation = !explicitIntent
         && stickySsh
@@ -489,6 +534,7 @@ function formatSshToolResult(result = {}, fallbackTarget = null) {
 
 function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
+    let fallbackMetadata = null;
 
     for (let index = events.length - 1; index >= 0; index -= 1) {
         const event = events[index];
@@ -505,7 +551,14 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
         }
         const hostField = String(event?.result?.data?.host || '').trim();
         const hostMatch = hostField.match(/^(?<host>[^:]+)(?::(?<port>\d+))?$/);
-        const host = args.host || hostMatch?.groups?.host || null;
+        const hostFromResult = hostMatch?.groups?.host && !isSuspiciousSshTargetHost(hostMatch.groups.host)
+            ? hostMatch.groups.host
+            : null;
+        const hostFromArgs = args.host && !isSuspiciousSshTargetHost(args.host)
+            ? String(args.host).trim()
+            : null;
+        const resolutionFailure = event?.result?.success === false && isSshHostnameResolutionFailure(event?.result?.error || '');
+        const host = hostFromResult || (!resolutionFailure ? hostFromArgs : null);
         const port = args.port || (hostMatch?.groups?.port ? Number(hostMatch.groups.port) : null);
         const username = args.username || null;
         const remoteWorkingState = buildRemoteWorkingStateFromEvent(event, args, {
@@ -515,10 +568,11 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
         });
 
         if (!host) {
-            return {
+            fallbackMetadata = fallbackMetadata || {
                 lastToolIntent: toolName,
                 remoteWorkingState,
             };
+            continue;
         }
 
         return {
@@ -532,7 +586,7 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
         };
     }
 
-    return null;
+    return fallbackMetadata;
 }
 
 function inferOutputFormatFromSession(text = '', session = null) {
@@ -623,6 +677,7 @@ module.exports = {
     getPreferredRemoteToolId,
     canonicalizeRemoteToolId,
     isRemoteCommandToolId,
+    isSuspiciousSshTargetHost,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,

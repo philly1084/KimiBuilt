@@ -8,6 +8,7 @@ const {
     extractSshSessionMetadataFromToolEvents,
     canonicalizeRemoteToolId,
     isRemoteCommandToolId,
+    isSuspiciousSshTargetHost,
 } = require('./ai-route-utils');
 const {
     buildProjectMemoryUpdate,
@@ -1982,14 +1983,23 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         const sshContext = resolveSshRequestContext(objective, session);
-        if (sshContext.target?.host && !normalizedStep.params.host) {
-            normalizedStep.params.host = sshContext.target.host;
+        const trustedTarget = sshContext.target?.host ? sshContext.target : null;
+        const plannedHost = typeof normalizedStep.params.host === 'string'
+            ? normalizedStep.params.host.trim()
+            : '';
+        const shouldPinRemoteTarget = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && trustedTarget?.host;
+        const shouldRepairSuspiciousHost = trustedTarget?.host
+            && plannedHost
+            && isSuspiciousSshTargetHost(plannedHost);
+
+        if ((shouldPinRemoteTarget || !plannedHost || shouldRepairSuspiciousHost) && trustedTarget?.host) {
+            normalizedStep.params.host = trustedTarget.host;
         }
-        if (sshContext.target?.username && !normalizedStep.params.username) {
-            normalizedStep.params.username = sshContext.target.username;
+        if ((shouldPinRemoteTarget || !normalizedStep.params.username || shouldRepairSuspiciousHost) && trustedTarget?.username) {
+            normalizedStep.params.username = trustedTarget.username;
         }
-        if (sshContext.target?.port && !normalizedStep.params.port) {
-            normalizedStep.params.port = sshContext.target.port;
+        if ((shouldPinRemoteTarget || !normalizedStep.params.port || shouldRepairSuspiciousHost) && trustedTarget?.port) {
+            normalizedStep.params.port = trustedTarget.port;
         }
 
         const existingCommand = typeof normalizedStep.params.command === 'string'

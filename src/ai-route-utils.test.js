@@ -5,10 +5,23 @@ jest.mock('./artifacts/artifact-service', () => ({
     },
 }));
 
+jest.mock('./routes/admin/settings.controller', () => ({
+    getEffectiveSshConfig: jest.fn(() => ({
+        enabled: false,
+        host: '',
+        port: 22,
+        username: '',
+        password: '',
+        privateKeyPath: '',
+    })),
+}));
+
 const { artifactService } = require('./artifacts/artifact-service');
+const settingsController = require('./routes/admin/settings.controller');
 const {
     buildArtifactCompletionMessage,
     generateOutputArtifactFromPrompt,
+    extractSshSessionMetadataFromToolEvents,
     hasExplicitMermaidFileIntent,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
@@ -21,6 +34,14 @@ const {
 describe('ai-route-utils', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        });
     });
 
     test('buildArtifactCompletionMessage formats friendly labels', () => {
@@ -239,5 +260,102 @@ describe('ai-route-utils', () => {
         expect(sshContext.shouldTreatAsSsh).toBe(true);
         expect(sshContext.effectivePrompt).toContain('SSH into root@test.demoserver2.buzz');
         expect(sshContext.command).toBeNull();
+    });
+
+    test('resolveSshRequestContext prefers configured SSH defaults over a suspicious sticky host', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '162.55.163.199',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const sshContext = resolveSshRequestContext(
+            'go ahead',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: 'web-fetch.body',
+                        username: '',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        target: {
+                            host: 'web-fetch.body',
+                            username: '',
+                            port: 22,
+                        },
+                        lastCommand: 'kubectl get deployment website',
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.target).toEqual({
+            host: '162.55.163.199',
+            username: 'root',
+            port: 22,
+        });
+        expect(sshContext.effectivePrompt).toContain('SSH into root@162.55.163.199');
+    });
+
+    test('extractSshSessionMetadataFromToolEvents keeps the last good host after a hostname-resolution failure on a bogus host', () => {
+        const metadata = extractSshSessionMetadataFromToolEvents([
+            {
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                        arguments: JSON.stringify({
+                            host: '162.55.163.199',
+                            username: 'root',
+                            port: 22,
+                            command: 'hostname',
+                        }),
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        host: '162.55.163.199:22',
+                        stdout: 'ubuntu-32gb-fsn1-2',
+                        stderr: '',
+                    },
+                },
+            },
+            {
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                        arguments: JSON.stringify({
+                            host: 'web-fetch.body',
+                            username: 'root',
+                            port: 22,
+                            command: 'kubectl rollout restart deployment/website',
+                        }),
+                    },
+                },
+                result: {
+                    success: false,
+                    toolId: 'remote-command',
+                    error: 'ssh: Could not resolve hostname web-fetch.body: Name or service not known',
+                    data: {},
+                },
+            },
+        ]);
+
+        expect(metadata).toMatchObject({
+            lastToolIntent: 'remote-command',
+            lastSshTarget: {
+                host: '162.55.163.199',
+                username: 'root',
+                port: 22,
+            },
+        });
     });
 });

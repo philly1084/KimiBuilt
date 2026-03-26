@@ -12,7 +12,7 @@ const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { inferExecutionProfile } = require('../runtime-execution');
-const { canonicalizeRemoteToolId, isRemoteCommandToolId } = require('../ai-route-utils');
+const { canonicalizeRemoteToolId, isRemoteCommandToolId, isSuspiciousSshTargetHost } = require('../ai-route-utils');
 const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
@@ -298,12 +298,15 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
     return;
   }
 
+  const host = String(params.host || '').trim();
+  const safeHost = host && !isSuspiciousSshTargetHost(host) ? host : '';
+
   await sessionStore.update(sessionId, {
     metadata: {
       lastToolIntent: canonicalizeRemoteToolId(toolId),
-      ...(params.host ? {
+      ...(safeHost ? {
         lastSshTarget: {
-          host: params.host,
+          host: safeHost,
           username: params.username || '',
           port: params.port || 22,
         },
