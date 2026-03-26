@@ -3780,6 +3780,182 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return /\b(export|generate|create|make|save|download|convert|render|produce|link)\b/.test(normalized);
     }
 
+    function isExplicitMermaidDownloadIntent(question = '') {
+        const normalized = String(question || '').toLowerCase();
+        if (!normalized) return false;
+
+        return /\b(download|export|save|share|link|artifact|mmd)\b/.test(normalized);
+    }
+
+    function pageHasMermaidBlocks(context = null) {
+        return Array.isArray(context?.blocks) && context.blocks.some((block) => block?.type === 'mermaid');
+    }
+
+    function shouldPreferInlineMermaidBlock(question = '', context = null, requestedArtifactFormat = null) {
+        if (requestedArtifactFormat !== 'mermaid') {
+            return false;
+        }
+
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        const diagramEditIntent = [
+            /\b(fill out|complete|finish|update|edit|fix|improve|expand|revise|polish|populate)\b[\s\S]{0,40}\b(mermaid|diagram)\b/,
+            /\b(mermaid|diagram)\b[\s\S]{0,40}\b(fill out|complete|finish|update|edit|fix|improve|expand|revise|polish|populate)\b/,
+        ].some((pattern) => pattern.test(normalized));
+
+        return !isExplicitMermaidDownloadIntent(question)
+            && (
+                pageHasMermaidBlocks(context)
+                || isExplicitPageEditIntent(question)
+                || diagramEditIntent
+            );
+    }
+
+    function flattenPageBlocks(blocks = [], result = []) {
+        (Array.isArray(blocks) ? blocks : []).forEach((block) => {
+            if (!block || typeof block !== 'object') {
+                return;
+            }
+
+            result.push(block);
+            if (Array.isArray(block.children) && block.children.length > 0) {
+                flattenPageBlocks(block.children, result);
+            }
+        });
+
+        return result;
+    }
+
+    function findPreferredMermaidTargetBlock(page = null) {
+        const allBlocks = flattenPageBlocks(page?.blocks || []);
+        const mermaidBlocks = allBlocks.filter((block) => block?.type === 'mermaid');
+        if (mermaidBlocks.length === 0) {
+            return null;
+        }
+
+        const emptyMermaidBlock = mermaidBlocks.find((block) => {
+            const source = typeof block?.content === 'object'
+                ? block.content.text
+                : block?.content;
+            return !normalizeMermaidSourceText(source).trim();
+        });
+        if (emptyMermaidBlock) {
+            return emptyMermaidBlock;
+        }
+
+        return mermaidBlocks.length === 1 ? mermaidBlocks[0] : null;
+    }
+
+    async function loadMermaidSourceFromArtifact(artifact = {}) {
+        const previewSource = normalizeMermaidSourceText(artifact?.preview?.content || '');
+        if (looksLikeMermaidSource(previewSource)) {
+            return previewSource;
+        }
+
+        const rawDownloadUrl = artifact?.downloadUrl
+            ? new URL(artifact.downloadUrl, window.location.origin)
+            : null;
+        if (!rawDownloadUrl) {
+            return '';
+        }
+
+        rawDownloadUrl.searchParams.set('inline', '1');
+
+        try {
+            const response = await fetch(rawDownloadUrl.toString(), {
+                headers: {
+                    Accept: 'text/plain, text/vnd.mermaid, */*'
+                },
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+                return '';
+            }
+
+            const source = normalizeMermaidSourceText(await response.text());
+            return looksLikeMermaidSource(source) ? source : '';
+        } catch (error) {
+            console.warn('Failed to load Mermaid artifact source:', error);
+            return '';
+        }
+    }
+
+    async function applyGeneratedMermaidArtifactToPage(artifacts = [], options = {}) {
+        const {
+            question = '',
+            explicitPageEditIntent = false
+        } = options;
+
+        if (!window.Blocks?.createBlock || !window.Editor?.getCurrentPage) {
+            return { appliedCount: 0, blockCount: 0, reusedExisting: false };
+        }
+
+        const page = window.Editor.getCurrentPage();
+        if (!page) {
+            return { appliedCount: 0, blockCount: 0, reusedExisting: false };
+        }
+
+        const existingTopLevelBlocks = Array.isArray(page.blocks) ? page.blocks : [];
+        const shouldApplyToPage = explicitPageEditIntent
+            || pageHasMermaidBlocks({ blocks: flattenPageBlocks(existingTopLevelBlocks, []) })
+            || (existingTopLevelBlocks.length === 1 && isEmptyStarterBlock(existingTopLevelBlocks[0]));
+
+        if (!shouldApplyToPage) {
+            return { appliedCount: 0, blockCount: 0, reusedExisting: false };
+        }
+
+        const mermaidSources = [];
+        for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+            const format = String(artifact?.format || '').trim().toLowerCase();
+            if (format && !['mermaid', 'mmd'].includes(format)) {
+                continue;
+            }
+
+            const source = await loadMermaidSourceFromArtifact(artifact);
+            if (source) {
+                mermaidSources.push(source);
+            }
+        }
+
+        if (mermaidSources.length === 0) {
+            return { appliedCount: 0, blockCount: 0, reusedExisting: false };
+        }
+
+        const mermaidBlocks = mermaidSources.map((source) => window.Blocks.createBlock('mermaid', {
+            text: source,
+            diagramType: detectMermaidDiagramType(source),
+            _showEditor: false
+        }));
+
+        const preferredTarget = mermaidBlocks.length === 1
+            ? findPreferredMermaidTargetBlock(page)
+            : null;
+
+        let inserted = [];
+        if (preferredTarget) {
+            inserted = window.Editor.replaceBlockWithBlocks?.(preferredTarget.id, mermaidBlocks) || [];
+        } else if (existingTopLevelBlocks.length === 1 && isEmptyStarterBlock(existingTopLevelBlocks[0])) {
+            inserted = window.Editor.replaceBlockWithBlocks?.(existingTopLevelBlocks[0].id, mermaidBlocks) || [];
+        } else {
+            const lastBlockId = flattenPageBlocks(existingTopLevelBlocks, []).slice(-1)[0]?.id || null;
+            inserted = window.Editor.insertBlocksAfter?.(lastBlockId, mermaidBlocks) || [];
+        }
+
+        if (inserted.length > 0) {
+            window.Editor.savePage?.();
+        }
+
+        return {
+            appliedCount: inserted.length,
+            blockCount: inserted.length,
+            reusedExisting: Boolean(preferredTarget && inserted.length > 0)
+        };
+    }
+
     function appendArtifactBookmark(artifact, format) {
         const downloadUrl = artifact?.downloadUrl
             ? new URL(artifact.downloadUrl, window.location.origin).toString()
@@ -4023,9 +4199,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const { onChunk, onStreamComplete, onComplete, onError, hiddenAssistantMessage = false } = options;
         const apiClient = getAPIClient();
         syncAPIClientSession(apiClient, context);
-        const requestedArtifactFormat = isArtifactGenerationIntent(question)
+        const explicitPageEditIntent = isExplicitPageEditIntent(question);
+        const inferredArtifactFormat = isArtifactGenerationIntent(question)
             ? inferRequestedArtifactFormat(question)
             : null;
+        const requestedArtifactFormat = shouldPreferInlineMermaidBlock(question, context, inferredArtifactFormat)
+            ? null
+            : inferredArtifactFormat;
         const requestOptions = requestedArtifactFormat
             ? { outputFormat: requestedArtifactFormat }
             : {};
@@ -4051,7 +4231,6 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                 attemptedModels.push(model);
                 const useMultiPassDraft = shouldUseMultiPassNotesDraft(question, context, requestOptions);
-                const explicitPageEditIntent = isExplicitPageEditIntent(question);
                 const effectiveQuestion = explicitPageEditIntent
                     ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Do not reply with chat prose alone.`
                     : question;
@@ -4197,29 +4376,51 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     }
 
                     const blindArtifactSelectionResult = appendBlindArtifactSelectionBlocks(generatedToolEvents);
+                    const mermaidArtifactApplyResult = requestedArtifactFormat === 'mermaid'
+                        ? await applyGeneratedMermaidArtifactToPage(generatedArtifacts, {
+                            question,
+                            explicitPageEditIntent
+                        })
+                        : { appliedCount: 0, blockCount: 0, reusedExisting: false };
 
-                    if (generatedArtifacts.length > 0 && requestedArtifactFormat) {
+                    const shouldAppendArtifactLinks = generatedArtifacts.length > 0
+                        && requestedArtifactFormat
+                        && !(
+                            requestedArtifactFormat === 'mermaid'
+                            && mermaidArtifactApplyResult.appliedCount > 0
+                            && !isExplicitMermaidDownloadIntent(question)
+                        );
+
+                    if (shouldAppendArtifactLinks) {
                         generatedArtifacts.forEach((artifact) => appendArtifactBookmark(artifact, requestedArtifactFormat));
                     }
 
-                    const artifactLinkNotice = generatedArtifacts.length > 0 && requestedArtifactFormat
+                    const artifactLinkNotice = shouldAppendArtifactLinks
                         ? `\n\nDownload link added at the bottom of the page for the generated ${requestedArtifactFormat.toUpperCase()} export.`
+                        : '';
+                    const mermaidArtifactNotice = mermaidArtifactApplyResult.appliedCount > 0
+                        ? `\n\nUpdated ${mermaidArtifactApplyResult.blockCount} Mermaid block${mermaidArtifactApplyResult.blockCount === 1 ? '' : 's'} on the page from the generated diagram.`
                         : '';
                     const blindArtifactNotice = blindArtifactSelectionResult.selectionCount > 0
                         ? `\n\nAdded ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
                         : '';
                     const baseVisibleResponse = preparedResponse.displayText || responseText || '';
-                    const visibleResponse = `${baseVisibleResponse}${artifactLinkNotice}${blindArtifactNotice}`.trim()
-                        || (blindArtifactSelectionResult.selectionCount > 0
-                            ? `Added ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
+                    const fallbackVisibleResponse = blindArtifactSelectionResult.selectionCount > 0
+                        ? `Added ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
+                        : (mermaidArtifactApplyResult.appliedCount > 0
+                            ? `Updated ${mermaidArtifactApplyResult.blockCount} Mermaid block${mermaidArtifactApplyResult.blockCount === 1 ? '' : 's'} on the page.`
                             : '');
+                    const visibleResponse = `${baseVisibleResponse}${artifactLinkNotice}${mermaidArtifactNotice}${blindArtifactNotice}`.trim()
+                        || fallbackVisibleResponse;
                     const assistantMessage = hiddenAssistantMessage
                         ? null
                         : addMessage('assistant', visibleResponse, {
                             model,
                             tokensUsed: estimateTokens(question + visibleResponse),
                             source: 'api',
-                            appliedCount: (preparedResponse.appliedCount || 0) + (blindArtifactSelectionResult.appliedCount || 0)
+                            appliedCount: (preparedResponse.appliedCount || 0)
+                                + (mermaidArtifactApplyResult.appliedCount || 0)
+                                + (blindArtifactSelectionResult.appliedCount || 0)
                         });
 
                     if (model !== state.selectedModel && !toolSensitiveRequest) {
