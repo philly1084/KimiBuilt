@@ -300,7 +300,7 @@ router.post('/chat/completions', async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
-        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, lastUserText);
         const artifactPrompt = buildArtifactPromptFromTranscript(messages, lastUserText);
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -687,7 +687,7 @@ router.post('/responses', async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
-        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, lastUserText);
         const artifactPrompt = buildArtifactPromptFromTranscript(normalizedInputMessages, userInput);
         runtimeTask = startRuntimeTask({
             sessionId,

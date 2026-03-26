@@ -4,6 +4,7 @@
 
 const { ToolBase } = require('../../ToolBase');
 const settingsController = require('../../../../routes/admin/settings.controller');
+const { artifactService } = require('../../../../artifacts/artifact-service');
 
 class WebFetchTool extends ToolBase {
   constructor() {
@@ -106,6 +107,35 @@ class WebFetchTool extends ToolBase {
     } = params;
 
     const normalizedUrl = this.normalizeUrl(url);
+    const internalArtifactRequest = this.parseInternalArtifactDownload(normalizedUrl);
+
+    if (internalArtifactRequest) {
+      const startTime = Date.now();
+      const artifact = await artifactService.getArtifact(internalArtifactRequest.artifactId, { includeContent: true });
+      if (!artifact) {
+        throw new Error(`Artifact not found for ${normalizedUrl}`);
+      }
+
+      const result = {
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'content-type': artifact.mimeType || 'application/octet-stream',
+        },
+        body: this.serializeArtifactBody(artifact.contentBuffer, artifact.mimeType),
+        url: normalizedUrl,
+        duration: Date.now() - startTime,
+        cached: false,
+      };
+
+      tracker.recordNetworkCall(normalizedUrl, method, {
+        status: 200,
+        internalArtifact: true,
+        contentType: artifact.mimeType || 'application/octet-stream',
+      });
+
+      return result;
+    }
 
     // Check cache first
     const cacheKey = this.getCacheKey({ ...params, url: normalizedUrl });
@@ -183,6 +213,38 @@ class WebFetchTool extends ToolBase {
     }
 
     throw lastError || new Error(`Failed to fetch ${url} after ${retries} attempts`);
+  }
+
+  parseInternalArtifactDownload(url) {
+    try {
+      const parsed = new URL(String(url || ''));
+      const match = parsed.pathname.match(/^\/api\/artifacts\/([a-f0-9-]+)\/download$/i);
+      return match?.[1] ? { artifactId: match[1] } : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  serializeArtifactBody(contentBuffer, mimeType = '') {
+    const buffer = Buffer.isBuffer(contentBuffer)
+      ? contentBuffer
+      : Buffer.from(contentBuffer || '');
+
+    if (this.isTextLikeMimeType(mimeType)) {
+      return buffer.toString('utf8');
+    }
+
+    return buffer.toString('base64');
+  }
+
+  isTextLikeMimeType(mimeType = '') {
+    const normalized = String(mimeType || '').trim().toLowerCase();
+    return normalized.startsWith('text/')
+      || normalized.includes('json')
+      || normalized.includes('xml')
+      || normalized.includes('javascript')
+      || normalized.includes('html')
+      || normalized.includes('svg');
   }
 
   async fetchWithTimeout(url, options, timeout) {

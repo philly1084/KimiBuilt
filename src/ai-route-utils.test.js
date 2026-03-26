@@ -145,12 +145,20 @@ describe('ai-route-utils', () => {
         })).toBe('mermaid');
     });
 
-    test('resolveArtifactContextIds falls back to the last generated artifact', () => {
+    test('resolveArtifactContextIds falls back to the last generated artifact on continuation turns', () => {
         expect(resolveArtifactContextIds({
             metadata: {
                 lastGeneratedArtifactId: 'artifact-1',
             },
-        }, [])).toEqual(['artifact-1']);
+        }, [], 'another pass, keep refining that html file')).toEqual(['artifact-1']);
+    });
+
+    test('resolveArtifactContextIds does not attach the last generated artifact on unrelated turns', () => {
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        }, [], 'deploy the site online and verify the public route')).toEqual([]);
     });
 
     test('getPreferredRemoteToolId prefers remote-command when both SSH tools exist', () => {

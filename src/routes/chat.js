@@ -114,7 +114,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
-        const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);
         runtimeTask = startRuntimeTask({
             sessionId,
             input: message,

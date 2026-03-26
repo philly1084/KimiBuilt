@@ -156,7 +156,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     })) {
         effectiveOutputFormat = null;
     }
-    const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds);
+    const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
         input: message,

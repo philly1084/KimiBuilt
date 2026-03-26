@@ -9,7 +9,7 @@ async function buildInstructionsWithArtifacts(session, baseInstructions = '', ar
     try {
         artifactContext = artifactIds && artifactIds.length > 0
             ? await artifactService.buildPromptContext(session.id, artifactIds)
-            : await artifactService.buildPromptContext(session.id, []);
+            : '';
     } catch (error) {
         console.error('[Artifacts] Failed to build prompt context:', error.message);
     }
@@ -215,6 +215,20 @@ function isArtifactContinuationPrompt(text = '') {
     ];
 
     return continuationPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function hasImplicitArtifactFollowupReference(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (isArtifactContinuationPrompt(normalized)) {
+        return true;
+    }
+
+    return /\b(last|latest|generated|previous|prior|same|that|this|current)\b[\s\S]{0,40}\b(artifact|file|document|html|page|markup|pdf|docx|spreadsheet|workbook|diagram|mermaid|export|download)\b/i.test(normalized)
+        || /\b(artifact|generated html|generated page|generated file|download link|download url|export file|html artifact|pdf artifact|docx artifact|spreadsheet artifact)\b/i.test(normalized);
 }
 
 function promptHasExplicitSshIntent(text = '') {
@@ -541,13 +555,15 @@ function inferOutputFormatFromSession(text = '', session = null) {
     return isArtifactContinuationPrompt(text) ? lastOutputFormat : null;
 }
 
-function resolveArtifactContextIds(session = null, artifactIds = []) {
+function resolveArtifactContextIds(session = null, artifactIds = [], text = '') {
     if (Array.isArray(artifactIds) && artifactIds.length > 0) {
         return artifactIds;
     }
 
     const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId;
-    return lastGeneratedArtifactId ? [lastGeneratedArtifactId] : [];
+    return lastGeneratedArtifactId && hasImplicitArtifactFollowupReference(text)
+        ? [lastGeneratedArtifactId]
+        : [];
 }
 
 async function generateOutputArtifactFromPrompt({

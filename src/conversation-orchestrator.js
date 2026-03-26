@@ -319,8 +319,7 @@ function hasExplicitLocalArtifactReference(text = '') {
 
     const normalized = source.toLowerCase();
     return /\b(attached artifact|uploaded artifact|local artifact|local file|local html|workspace|repo|repository|on the drive|from the drive|on disk|from disk|readable path|file path)\b/.test(normalized)
-        || /[a-z]:\\[^"'`\s]+/i.test(source)
-        || /\b[a-z0-9._-]+-[a-z0-9]{6}\.(html|htm|css|js)\b/i.test(source);
+        || /[a-z]:\\[^"'`\s]+/i.test(source);
 }
 
 function hasRemoteWebsiteUpdateIntent(text = '') {
@@ -330,7 +329,7 @@ function hasRemoteWebsiteUpdateIntent(text = '') {
     }
 
     const hasWebsiteTarget = /\b(website|web site|webpage|web page|landing page|homepage|home page|site|html|index\.html|page)\b/.test(normalized);
-    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|kubectl|pod|deployment|workload|rollout|restart|redeploy|configmap|container|ingress)\b/.test(normalized);
+    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|kubectl|pod|deployment|deployed|workload|rollout|restart|redeploy|configmap|container|ingress|live|public|production|hosted|online)\b/.test(normalized);
     const hasWriteIntent = /\b(write|replace|overwrite|update|edit|change|deploy|redeploy|restart|publish|push|apply|rollout|create|generate|make)\b/.test(normalized);
 
     return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
@@ -1518,7 +1517,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSchemaIntent = hasSchemaDesignIntent(prompt);
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
-        const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(`${objective || ''}\n${instructions || ''}`);
+        const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(objective);
         const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
         const hasInternalArtifactUrl = hasInternalArtifactReference(`${objective || ''}\n${instructions || ''}`);
         const shouldPreferRemoteWebsiteSource = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
