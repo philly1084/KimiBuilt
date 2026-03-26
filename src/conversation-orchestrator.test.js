@@ -880,6 +880,121 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('switches from remote artifact curl failures to local web-fetch and remote apply for website updates', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const artifactUrl = '/api/artifacts/3ee64601-2cb4-43e1-b56b-973bc2856419/download';
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Transferred the generated landing page content through the local runtime and applied it remotely.', 'resp_remote_artifact_transfer')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [{
+                        tool: 'remote-command',
+                        reason: 'Replace the placeholder `website-html` ConfigMap content with the generated landing page artifact that the live pod is still missing.',
+                        params: {
+                            command: `curl -fsSL https://api${artifactUrl}`,
+                        },
+                    }],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: false,
+                    toolId: 'remote-command',
+                    error: 'curl: (6) Could not resolve host: api',
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'web-fetch',
+                    data: {
+                        status: 200,
+                        body: '<!DOCTYPE html><html><body><main>Transferred landing page</main></body></html>',
+                        url: `http://localhost:3000${artifactUrl}`,
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: 'website-html\nindex.html',
+                        stderr: '',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-remote-artifact-transfer', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-remote-artifact-transfer', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Replace the deployed HTML with the generated landing page and publish it online.',
+            sessionId: 'session-remote-artifact-transfer',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            instructions: `Generated artifacts:\n- website.html (html) -> ${artifactUrl}`,
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(3);
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            1,
+            'remote-command',
+            expect.objectContaining({
+                command: expect.stringContaining(`https://api${artifactUrl}`),
+            }),
+            expect.any(Object),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            2,
+            'web-fetch',
+            { url: artifactUrl },
+            expect.any(Object),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            3,
+            'remote-command',
+            expect.objectContaining({
+                command: expect.stringContaining('Transferred landing page'),
+            }),
+            expect.any(Object),
+        );
+        expect(result.response.metadata.executionTrace.map((entry) => entry.name)).toContain('Recoverable remote failure after round 1');
+    });
+
     test('follows a crashing init container describe step with kubectl logs instead of handing off the next tool call', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -1215,7 +1330,7 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
     });
 
-    test('keeps remote website replacement on remote-command when project memory includes internal artifact downloads', () => {
+    test('keeps remote website replacement on remote-command and exposes local web-fetch when project memory includes internal artifact downloads', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -1248,7 +1363,7 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
-        expect(toolPolicy.candidateToolIds).not.toContain('web-fetch');
+        expect(toolPolicy.candidateToolIds).toContain('web-fetch');
         expect(toolPolicy.candidateToolIds).not.toContain('file-read');
         expect(toolPolicy.candidateToolIds).not.toContain('file-search');
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
@@ -1287,7 +1402,7 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
-        expect(toolPolicy.candidateToolIds).not.toContain('web-fetch');
+        expect(toolPolicy.candidateToolIds).toContain('web-fetch');
         expect(toolPolicy.candidateToolIds).not.toContain('file-read');
         expect(toolPolicy.candidateToolIds).not.toContain('file-search');
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
