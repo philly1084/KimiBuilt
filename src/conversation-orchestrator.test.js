@@ -1748,6 +1748,37 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('notes synthesis instructions keep repaired answers on the page instead of drifting into workspace writes', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+        });
+
+        const instructions = orchestrator.buildRuntimeInstructions({
+            baseInstructions: 'Base continuity',
+            executionProfile: 'notes',
+            allowedToolIds: ['web-search'],
+            toolEvents: [{
+                toolCall: { function: { name: 'web-search' } },
+                reason: 'Research cats',
+                result: { success: true, data: { results: [{ title: 'Cat', url: 'https://example.com' }] } },
+            }],
+            toolPolicy: {
+                allowedToolIds: ['web-search'],
+                hasReachableSshTarget: false,
+            },
+        });
+
+        expect(instructions).toContain('Lilly-style block-based notes document');
+        expect(instructions).toContain('Prefer returning `notes-actions` or page-ready notes content');
+        expect(instructions).toContain('Do not mention `/app`');
+    });
+
     test('falls back to web-search planning when planner output is not valid json', async () => {
         const llmClient = {
             createResponse: jest.fn(),

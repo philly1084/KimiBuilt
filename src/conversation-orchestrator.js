@@ -227,6 +227,17 @@ function hasAutonomousRemoteApproval(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function buildNotesSynthesisInstructions() {
+    return [
+        'You are editing a Lilly-style block-based notes document.',
+        'In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, repo file, or server page.',
+        'If the user is asking to add, place, insert, rewrite, reorganize, or polish content on the page, answer as a notes-page edit, not as a workspace/file task.',
+        'Prefer returning `notes-actions` or page-ready notes content over raw standalone HTML, local file paths, workspace write steps, or filesystem commentary.',
+        'Do not mention `/app`, local command execution, file-write, sandbox limits, or workspace access unless a verified tool result is directly about that and the user explicitly asked about it.',
+        'Unless the user explicitly asked to export, download, save, or create a file/link, do not turn the answer into a standalone artifact or HTML file.',
+    ].join('\n\n');
+}
+
 function hasAutonomyRevocation(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -2759,6 +2770,13 @@ class ConversationOrchestrator extends EventEmitter {
             'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
             'If a tool failed, state the exact tool failure plainly.',
             `Task type: ${taskType}`,
+            ...(taskType === NOTES_EXECUTION_PROFILE
+                ? [
+                    'This is a notes-surface request.',
+                    'If the user is editing the page, return `notes-actions` or page-ready notes content, not raw standalone HTML or workspace/file instructions.',
+                    'Do not mention local workspace writes, `/app`, or shell failures in the repaired answer.',
+                ]
+                : []),
             '',
             'User request:',
             objective || '(empty)',
@@ -2851,6 +2869,13 @@ class ConversationOrchestrator extends EventEmitter {
             'Use the verified tool results below to answer the user.',
             'If a tool failed, state the exact failure plainly.',
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
+            ...(taskType === NOTES_EXECUTION_PROFILE
+                ? [
+                    'This is a notes-surface request.',
+                    'If the user is editing the page, return `notes-actions` or page-ready notes content, not raw standalone HTML or workspace/file instructions.',
+                    'Do not mention local workspace writes, `/app`, shell startup problems, or generic sandbox limitations unless a verified tool result is directly about that.',
+                ]
+                : []),
             ...(autonomyApproved && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                 ? [
                     'The user has already approved continuing through obvious remote-build steps.',
@@ -2906,6 +2931,10 @@ class ConversationOrchestrator extends EventEmitter {
             String(baseInstructions || '').trim(),
             `Execution profile: ${executionProfile}.`,
         ];
+
+        if (executionProfile === NOTES_EXECUTION_PROFILE) {
+            parts.push(buildNotesSynthesisInstructions());
+        }
 
         if (allowedToolIds.length > 0) {
             parts.push(`Runtime-available tools for this request: ${allowedToolIds.join(', ')}.`);

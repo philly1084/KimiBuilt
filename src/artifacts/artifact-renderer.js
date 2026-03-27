@@ -7,6 +7,7 @@ const { pathToFileURL } = require('url');
 const { createZip } = require('../utils/zip');
 const { createFriendlyFilenameBase, createUniqueFilename, escapeHtml, escapeXml, normalizeWhitespace, slugifyFilename, stripHtml } = require('../utils/text');
 const { FORMAT_EXTENSIONS, FORMAT_MIME_TYPES, normalizeFormat } = require('./constants');
+const { artifactStore } = require('./artifact-store');
 const { config } = require('../config');
 
 const execFileAsync = promisify(execFile);
@@ -258,6 +259,52 @@ function injectArtifactBaseForPdf(html = '') {
     }
 
     return `${baseTag}\n${source}`;
+}
+
+function extractInternalArtifactIdFromUrl(url = '') {
+    const normalized = String(url || '').trim();
+    const match = normalized.match(/^(?:https?:\/\/[^/]+)?\/api\/artifacts\/([^/?#]+)\/download\b/i);
+    return match?.[1] ? match[1].trim() : null;
+}
+
+async function inlineInternalArtifactImagesForPdf(html = '') {
+    const source = String(html || '');
+    const imgSrcPattern = /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/ig;
+    const matches = [...source.matchAll(imgSrcPattern)];
+    if (matches.length === 0) {
+        return source;
+    }
+
+    const replacements = new Map();
+    for (const match of matches) {
+        const originalUrl = match?.[2] || '';
+        const artifactId = extractInternalArtifactIdFromUrl(originalUrl);
+        if (!artifactId || replacements.has(originalUrl)) {
+            continue;
+        }
+
+        try {
+            const artifact = await artifactStore.get(artifactId, { includeContent: true });
+            if (!artifact?.contentBuffer || !String(artifact.mimeType || '').startsWith('image/')) {
+                continue;
+            }
+
+            replacements.set(
+                originalUrl,
+                `data:${artifact.mimeType};base64,${artifact.contentBuffer.toString('base64')}`,
+            );
+        } catch (error) {
+            console.warn('[Artifacts] Failed to inline internal artifact image for PDF:', error.message);
+        }
+    }
+
+    if (replacements.size === 0) {
+        return source;
+    }
+
+    return source.replace(imgSrcPattern, (fullMatch, prefix, url, suffix) => {
+        return `${prefix}${replacements.get(url) || url}${suffix}`;
+    });
 }
 
 function buildPdfBufferFromText(text, title = 'Document') {
@@ -564,7 +611,8 @@ async function renderPdfViaBrowser(html, title) {
     const pdfPath = path.join(tempDir, `${baseName}.pdf`);
 
     try {
-        const pdfHtml = injectArtifactBaseForPdf(html);
+        const resolvedHtml = await inlineInternalArtifactImagesForPdf(html);
+        const pdfHtml = injectArtifactBaseForPdf(resolvedHtml);
         await fs.writeFile(htmlPath, pdfHtml, 'utf8');
         await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, pdfHtml), {
             timeout: config.artifacts.pdfTimeoutMs,
@@ -665,6 +713,7 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
 module.exports = {
     ensureHtmlDocument,
     extractCompositeDocumentParts,
+    inlineInternalArtifactImagesForPdf,
     normalizeMermaidSource,
     renderArtifact,
 };

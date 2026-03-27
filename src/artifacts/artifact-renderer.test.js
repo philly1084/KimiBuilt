@@ -1,4 +1,20 @@
-const { normalizeMermaidSource, ensureHtmlDocument, extractCompositeDocumentParts } = require('./artifact-renderer');
+jest.mock('./artifact-store', () => ({
+    artifactStore: {
+        get: jest.fn(),
+    },
+}));
+
+const { artifactStore } = require('./artifact-store');
+const {
+    normalizeMermaidSource,
+    ensureHtmlDocument,
+    extractCompositeDocumentParts,
+    inlineInternalArtifactImagesForPdf,
+} = require('./artifact-renderer');
+
+beforeEach(() => {
+    jest.clearAllMocks();
+});
 
 describe('normalizeMermaidSource', () => {
     test('splits collapsed flowchart statements onto separate lines', () => {
@@ -54,5 +70,30 @@ describe('normalizeMermaidSource', () => {
         expect(html).toContain('class="mermaid"');
         expect(html).toContain('Dog Life Stages Assessment');
         expect(html).toContain('cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js');
+    });
+
+    test('inlines internal artifact image urls for PDF rendering', async () => {
+        artifactStore.get.mockResolvedValue({
+            id: 'image-artifact-1',
+            mimeType: 'image/png',
+            contentBuffer: Buffer.from('png-bytes'),
+        });
+
+        const html = await inlineInternalArtifactImagesForPdf(
+            '<html><body><img src="/api/artifacts/image-artifact-1/download?inline=1" alt="Generated image"></body></html>',
+        );
+
+        expect(artifactStore.get).toHaveBeenCalledWith('image-artifact-1', { includeContent: true });
+        expect(html).toContain('src="data:image/png;base64,');
+        expect(html).not.toContain('/api/artifacts/image-artifact-1/download?inline=1');
+    });
+
+    test('keeps external image urls unchanged during PDF rendering', async () => {
+        const html = await inlineInternalArtifactImagesForPdf(
+            '<html><body><img src="https://images.example.com/cat.png" alt="External image"></body></html>',
+        );
+
+        expect(artifactStore.get).not.toHaveBeenCalled();
+        expect(html).toContain('https://images.example.com/cat.png');
     });
 });
