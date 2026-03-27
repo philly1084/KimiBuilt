@@ -3770,6 +3770,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return null;
     }
 
+    function hasExplicitArtifactDeliveryIntent(question = '') {
+        const normalized = String(question || '').toLowerCase();
+        if (!normalized) return false;
+
+        return /\b(export|download|save|artifact|file|link|share|attachment)\b/.test(normalized);
+    }
+
     function isArtifactGenerationIntent(question) {
         const normalized = String(question || '').toLowerCase();
         if (!normalized) return false;
@@ -4203,7 +4210,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const inferredArtifactFormat = isArtifactGenerationIntent(question)
             ? inferRequestedArtifactFormat(question)
             : null;
-        const requestedArtifactFormat = shouldPreferInlineMermaidBlock(question, context, inferredArtifactFormat)
+        const requestedArtifactFormat = (
+            shouldPreferInlineMermaidBlock(question, context, inferredArtifactFormat)
+            || (explicitPageEditIntent && inferredArtifactFormat && !hasExplicitArtifactDeliveryIntent(question))
+        )
             ? null
             : inferredArtifactFormat;
         const requestOptions = requestedArtifactFormat

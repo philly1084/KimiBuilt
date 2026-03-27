@@ -41,6 +41,7 @@ jest.mock('../ai-route-utils', () => ({
         toolEvents: [],
         imagePrompt: null,
     })),
+    shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
     resolveSshRequestContext: jest.fn(),
     extractSshSessionMetadataFromToolEvents: jest.fn(() => null),
@@ -72,6 +73,7 @@ const {
     maybePrepareImagesForArtifactPrompt,
     maybeGenerateOutputArtifact,
     resolveSshRequestContext,
+    shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
 } = require('../ai-route-utils');
 
@@ -206,6 +208,55 @@ describe('/api/chat route', () => {
         expect(shouldSuppressImplicitMermaidArtifact).toHaveBeenCalledWith(expect.objectContaining({
             taskType: 'notes',
             text: 'Create a Mermaid diagram for the auth flow inside this page',
+            outputFormatProvided: false,
+        }));
+    });
+
+    test('suppresses direct PDF artifact generation for notes page-edit requests', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Put this hypercar collection on the page as a polished brochure PDF.',
+        });
+        require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('pdf');
+        shouldSuppressNotesSurfaceArtifact.mockReturnValue(true);
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-notes-pdf-1',
+                model: 'gemini-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Returned through normal runtime' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Put this hypercar collection on the page as a polished brochure PDF.',
+                stream: false,
+                metadata: { taskType: 'notes', clientSurface: 'notes' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Returned through normal runtime');
+        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
+        expect(executeConversationRuntime).toHaveBeenCalled();
+        expect(shouldSuppressNotesSurfaceArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            taskType: 'notes',
+            text: 'Put this hypercar collection on the page as a polished brochure PDF.',
+            outputFormat: 'pdf',
             outputFormatProvided: false,
         }));
     });

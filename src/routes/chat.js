@@ -10,6 +10,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     maybePrepareImagesForArtifactPrompt,
+    shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -85,13 +86,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         } = req.body;
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
+        const requestedTaskType = resolveConversationTaskType(requestMetadata);
 
         let session;
         if (!sessionId) {
-            session = await sessionStore.create({ mode: 'chat' });
+            session = await sessionStore.create({ mode: requestedTaskType });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: 'chat' });
+            session = await sessionStore.getOrCreate(sessionId, { mode: requestedTaskType });
         }
 
         if (!session) {
@@ -108,6 +110,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             || inferRequestedOutputFormat(message)
             || inferOutputFormatFromSession(message, session);
         if (shouldSuppressImplicitMermaidArtifact({
+            taskType,
+            text: message,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(outputFormat),
+        })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldSuppressNotesSurfaceArtifact({
             taskType,
             text: message,
             outputFormat: effectiveOutputFormat,
@@ -140,7 +150,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             const generationArtifacts = await generateOutputArtifactFromPrompt({
                 sessionId,
                 session,
-                mode: 'chat',
+                mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: message,
                 artifactIds: preparedImages.artifactIds,
@@ -166,6 +176,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 metadata: {
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generationArtifacts.artifact.id,
+                    taskType,
+                    clientSurface: taskType,
                 },
             });
             memoryService.rememberResponse(sessionId, generationArtifacts.assistantMessage);
@@ -246,7 +258,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 executionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
-                taskType: 'chat',
+                taskType,
                 metadata: requestMetadata,
             });
             const response = execution.response;
@@ -276,7 +288,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
-                        mode: 'chat',
+                        mode: taskType,
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
                         prompt: message,
@@ -324,7 +336,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
-            taskType: 'chat',
+            taskType,
             metadata: requestMetadata,
         });
         const response = execution.response;
@@ -350,7 +362,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
-            mode: 'chat',
+            mode: taskType,
             outputFormat: effectiveOutputFormat,
             content: outputText,
             prompt: message,

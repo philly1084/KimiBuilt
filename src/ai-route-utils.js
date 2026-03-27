@@ -145,6 +145,46 @@ function isNotesSurfaceTaskType(taskType = '') {
     ].includes(normalized);
 }
 
+function hasExplicitArtifactDeliveryIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(export|download|save|artifact|file|link|share|attachment)\b/i.test(normalized);
+}
+
+function hasExplicitNotesPageEditIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
+        /\b(edit|update|rewrite|reformat|reorganize|restyle|clean up|fix)\b[\s\S]{0,40}\b(page|note|document|doc)\b/,
+        /\b(current page|this page|the page|this note|the note)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function shouldSuppressNotesSurfaceArtifact({
+    taskType = '',
+    text = '',
+    outputFormat = null,
+    outputFormatProvided = false,
+} = {}) {
+    const normalizedFormat = normalizeFormat(outputFormat);
+    if (!normalizedFormat || !isNotesSurfaceTaskType(taskType)) {
+        return false;
+    }
+
+    if (normalizedFormat === 'mermaid' && !outputFormatProvided) {
+        return !hasExplicitMermaidFileIntent(text);
+    }
+
+    return hasExplicitNotesPageEditIntent(text) && !hasExplicitArtifactDeliveryIntent(text);
+}
+
 function shouldSuppressImplicitMermaidArtifact({
     taskType = '',
     text = '',
@@ -809,11 +849,14 @@ module.exports = {
     buildArtifactCompletionMessage,
     hasExplicitMermaidArtifactIntent,
     hasExplicitMermaidFileIntent,
+    hasExplicitNotesPageEditIntent,
     hasExplicitImageGenerationIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     buildImagePromptFromArtifactRequest,
+    hasExplicitArtifactDeliveryIntent,
     shouldPreGenerateImagesForArtifactRequest,
+    shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     formatSshToolResult,

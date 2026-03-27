@@ -8,6 +8,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     maybePrepareImagesForArtifactPrompt,
+    shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -157,6 +158,14 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     })) {
         effectiveOutputFormat = null;
     }
+    if (shouldSuppressNotesSurfaceArtifact({
+        taskType,
+        text: message,
+        outputFormat: effectiveOutputFormat,
+        outputFormatProvided: Boolean(outputFormat),
+    })) {
+        effectiveOutputFormat = null;
+    }
     const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
@@ -184,7 +193,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId: session.id,
                 session,
-                mode: 'chat',
+                mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: message,
                 artifactIds: preparedImages.artifactIds,
@@ -203,6 +212,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 metadata: {
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generation.artifact.id,
+                    taskType,
+                    clientSurface: taskType,
                 },
             });
             memoryService.rememberResponse(session.id, generation.assistantMessage);
@@ -262,7 +273,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
-            taskType: 'chat',
+            taskType,
         });
         const response = execution.response;
 
@@ -290,7 +301,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 const artifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,
                     session,
-                    mode: 'chat',
+                    mode: taskType,
                     outputFormat: effectiveOutputFormat,
                     content: fullText,
                     prompt: message,

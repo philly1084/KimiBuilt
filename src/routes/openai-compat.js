@@ -11,6 +11,7 @@ const {
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     maybePrepareImagesForArtifactPrompt,
+    shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -295,6 +296,14 @@ router.post('/chat/completions', async (req, res, next) => {
             || inferRequestedOutputFormat(lastUserText)
             || inferOutputFormatFromTranscript(messages, session);
         if (shouldSuppressImplicitMermaidArtifact({
+            taskType,
+            text: lastUserText,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(output_format),
+        })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldSuppressNotesSurfaceArtifact({
             taskType,
             text: lastUserText,
             outputFormat: effectiveOutputFormat,
@@ -705,6 +714,14 @@ router.post('/responses', async (req, res, next) => {
             || inferRequestedOutputFormat(userInput)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
         if (shouldSuppressImplicitMermaidArtifact({
+            taskType,
+            text: userInput,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(output_format),
+        })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldSuppressNotesSurfaceArtifact({
             taskType,
             text: userInput,
             outputFormat: effectiveOutputFormat,

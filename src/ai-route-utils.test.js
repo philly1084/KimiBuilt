@@ -23,8 +23,10 @@ const {
     buildArtifactCompletionMessage,
     generateOutputArtifactFromPrompt,
     extractSshSessionMetadataFromToolEvents,
+    hasExplicitArtifactDeliveryIntent,
     hasExplicitImageGenerationIntent,
     hasExplicitMermaidFileIntent,
+    hasExplicitNotesPageEditIntent,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
     maybePrepareImagesForArtifactPrompt,
@@ -32,6 +34,7 @@ const {
     resolveSshRequestContext,
     resolveArtifactContextIds,
     shouldPreGenerateImagesForArtifactRequest,
+    shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
 } = require('./ai-route-utils');
 
@@ -131,6 +134,12 @@ describe('ai-route-utils', () => {
         expect(hasExplicitMermaidFileIntent('Share a .mmd artifact for this flow')).toBe(true);
     });
 
+    test('distinguishes notes page edits from explicit artifact delivery requests', () => {
+        expect(hasExplicitNotesPageEditIntent('Put this on the page as a polished hypercar brochure.')).toBe(true);
+        expect(hasExplicitArtifactDeliveryIntent('Export a PDF file and add the download link to the page.')).toBe(true);
+        expect(hasExplicitArtifactDeliveryIntent('Put this on the page as a polished hypercar brochure.')).toBe(false);
+    });
+
     test('detects explicit image generation intent without confusing follow-up image references', () => {
         expect(hasExplicitImageGenerationIntent('Make a hypercar image and put it in a PDF brochure.')).toBe(true);
         expect(hasExplicitImageGenerationIntent('Make a PDF with those images from earlier.')).toBe(false);
@@ -172,6 +181,22 @@ describe('ai-route-utils', () => {
             taskType: 'notes',
             text: 'Create a Mermaid diagram for the auth flow',
             outputFormat: 'mermaid',
+            outputFormatProvided: true,
+        })).toBe(false);
+    });
+
+    test('shouldSuppressNotesSurfaceArtifact keeps notes page edits inline unless file delivery was explicit', () => {
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Put this hypercar collection on the page as a polished brochure PDF.',
+            outputFormat: 'pdf',
+            outputFormatProvided: true,
+        })).toBe(true);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Export this as a PDF file and add the download link to the page.',
+            outputFormat: 'pdf',
             outputFormatProvided: true,
         })).toBe(false);
     });
