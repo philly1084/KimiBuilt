@@ -174,6 +174,15 @@ describe('ai-route-utils', () => {
         }, [], 'another pass, keep refining that html file')).toEqual(['artifact-1']);
     });
 
+    test('resolveArtifactContextIds prefers the last generated image artifacts for image follow-ups', () => {
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastGeneratedArtifactId: 'artifact-1',
+                lastGeneratedImageArtifactIds: ['image-1', 'image-2'],
+            },
+        }, [], 'make a pdf with those images from earlier')).toEqual(['image-1', 'image-2']);
+    });
+
     test('resolveArtifactContextIds does not attach the last generated artifact on unrelated turns', () => {
         expect(resolveArtifactContextIds({
             metadata: {

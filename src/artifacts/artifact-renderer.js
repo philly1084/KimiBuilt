@@ -233,6 +233,33 @@ ${content}
 </html>`;
 }
 
+function getInternalArtifactBaseUrl() {
+    const configured = String(process.env.API_BASE_URL || '').trim();
+    if (configured) {
+        try {
+            return new URL(configured).toString().replace(/\/+$/, '');
+        } catch (_error) {
+            // Fall through to the runtime-local url if API_BASE_URL is invalid.
+        }
+    }
+
+    return `http://127.0.0.1:${config.port || 3000}`;
+}
+
+function injectArtifactBaseForPdf(html = '') {
+    const source = String(html || '');
+    if (!/\/api\/artifacts\/.+\/download\b/i.test(source) || /<base\b/i.test(source)) {
+        return source;
+    }
+
+    const baseTag = `<base href="${escapeXml(`${getInternalArtifactBaseUrl()}/`)}">`;
+    if (/<head[^>]*>/i.test(source)) {
+        return source.replace(/<head([^>]*)>/i, `<head$1>\n${baseTag}`);
+    }
+
+    return `${baseTag}\n${source}`;
+}
+
 function buildPdfBufferFromText(text, title = 'Document') {
     const lines = normalizeWhitespace(text || '').split('\n');
     const safeLines = lines.length > 0 ? lines : [''];
@@ -537,8 +564,9 @@ async function renderPdfViaBrowser(html, title) {
     const pdfPath = path.join(tempDir, `${baseName}.pdf`);
 
     try {
-        await fs.writeFile(htmlPath, html, 'utf8');
-        await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, html), {
+        const pdfHtml = injectArtifactBaseForPdf(html);
+        await fs.writeFile(htmlPath, pdfHtml, 'utf8');
+        await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, pdfHtml), {
             timeout: config.artifacts.pdfTimeoutMs,
             windowsHide: true,
         });

@@ -232,6 +232,17 @@ function hasImplicitArtifactFollowupReference(text = '') {
         || /\b(artifact|generated html|generated page|generated file|download link|download url|export file|html artifact|pdf artifact|docx artifact|spreadsheet artifact)\b/i.test(normalized);
 }
 
+function hasImplicitImageArtifactFollowupReference(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(last|latest|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+        || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
+        || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
+}
+
 function promptHasExplicitSshIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -612,6 +623,13 @@ function inferOutputFormatFromSession(text = '', session = null) {
 function resolveArtifactContextIds(session = null, artifactIds = [], text = '') {
     if (Array.isArray(artifactIds) && artifactIds.length > 0) {
         return artifactIds;
+    }
+
+    const lastGeneratedImageArtifactIds = Array.isArray(session?.metadata?.lastGeneratedImageArtifactIds)
+        ? session.metadata.lastGeneratedImageArtifactIds.filter((entry) => typeof entry === 'string' && entry.trim())
+        : [];
+    if (lastGeneratedImageArtifactIds.length > 0 && hasImplicitImageArtifactFollowupReference(text)) {
+        return lastGeneratedImageArtifactIds;
     }
 
     const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId;

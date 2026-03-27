@@ -19,6 +19,7 @@ const {
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
+const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
@@ -1006,12 +1007,23 @@ router.post('/images/generations', async (req, res, next) => {
             style,
             n: Math.min(n, 10),
         });
+        const persistedImages = await persistGeneratedImages({
+            sessionId,
+            sourceMode: 'image',
+            prompt,
+            model: response?.model || model || null,
+            images: response?.data || [],
+        });
+        const normalizedResponse = {
+            ...response,
+            data: persistedImages.images,
+        };
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
         await updateSessionProjectMemory(sessionId, {
             userText: prompt,
-            assistantText: `Generated ${Array.isArray(response?.data) ? response.data.length : n} image result(s).`,
-            artifacts: [],
+            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : n} image result(s).`,
+            artifacts: persistedImages.artifacts,
             toolEvents: [{
                 toolCall: {
                     function: {
@@ -1021,7 +1033,7 @@ router.post('/images/generations', async (req, res, next) => {
                 result: {
                     success: true,
                     toolId: 'image-generate',
-                    data: response,
+                    data: normalizedResponse,
                     error: null,
                 },
                 reason: 'Image generation request',
@@ -1030,8 +1042,9 @@ router.post('/images/generations', async (req, res, next) => {
         setSessionHeaders(res, sessionId);
 
         res.json({
-            ...response,
+            ...normalizedResponse,
             session_id: sessionId,
+            artifacts: persistedImages.artifacts,
         });
     } catch (err) {
         next(err);

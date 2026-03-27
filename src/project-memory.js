@@ -118,6 +118,45 @@ function buildArtifactRefs(artifacts = [], capturedAt = new Date().toISOString()
         .filter(Boolean);
 }
 
+function extractArtifactsFromValue(value, depth = 0) {
+    if (depth > 4 || value == null) {
+        return [];
+    }
+
+    if (Array.isArray(value)) {
+        return value.flatMap((entry) => extractArtifactsFromValue(entry, depth + 1));
+    }
+
+    if (typeof value !== 'object') {
+        return [];
+    }
+
+    const artifactLikeDownloadUrl = normalizeUrl(
+        value.downloadUrl
+        || value.download_url
+        || value.inlinePath
+        || value.inline_path
+        || '',
+    );
+    const looksLikeArtifact = artifactLikeDownloadUrl
+        && /\/api\/artifacts\/.+\/download\b/i.test(artifactLikeDownloadUrl)
+        && typeof value.id === 'string'
+        && value.id.trim();
+    const nested = Object.values(value).flatMap((entry) => extractArtifactsFromValue(entry, depth + 1));
+
+    if (!looksLikeArtifact) {
+        return nested;
+    }
+
+    return [{
+        id: value.id.trim(),
+        filename: value.filename || '',
+        format: value.format || value.extension || '',
+        downloadUrl: artifactLikeDownloadUrl,
+        metadata: value.metadata || {},
+    }, ...nested];
+}
+
 function buildTaskRef({ userText = '', assistantText = '', toolEvents = [], artifacts = [], recordedAt = new Date().toISOString() }) {
     const normalizedToolEvents = Array.isArray(toolEvents) ? toolEvents : [];
     const toolIds = Array.from(new Set(normalizedToolEvents
@@ -146,6 +185,9 @@ function buildTaskRef({ userText = '', assistantText = '', toolEvents = [], arti
 
 function buildProjectMemoryUpdate({ userText = '', assistantText = '', toolEvents = [], artifacts = [] }) {
     const capturedAt = new Date().toISOString();
+    const derivedArtifacts = (Array.isArray(toolEvents) ? toolEvents : [])
+        .flatMap((event) => extractArtifactsFromValue(event?.result?.data));
+    const combinedArtifacts = [...(Array.isArray(artifacts) ? artifacts : []), ...derivedArtifacts];
     const urlRefs = [
         ...buildUrlRefs(extractUrlsFromText(userText), 'user', { capturedAt, title: sanitizeText(userText, 120) }),
         ...buildUrlRefs(extractUrlsFromText(assistantText), 'assistant', { capturedAt, title: sanitizeText(assistantText, 120) }),
@@ -165,7 +207,7 @@ function buildProjectMemoryUpdate({ userText = '', assistantText = '', toolEvent
         ));
     }
 
-    for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+    for (const artifact of combinedArtifacts) {
         const downloadUrl = normalizeUrl(artifact?.downloadUrl || '');
         if (downloadUrl) {
             urlRefs.push(...buildUrlRefs([downloadUrl], 'artifact', {
@@ -175,11 +217,11 @@ function buildProjectMemoryUpdate({ userText = '', assistantText = '', toolEvent
         }
     }
 
-    const task = buildTaskRef({ userText, assistantText, toolEvents, artifacts, recordedAt: capturedAt });
+    const task = buildTaskRef({ userText, assistantText, toolEvents, artifacts: combinedArtifacts, recordedAt: capturedAt });
 
     return {
         urls: urlRefs,
-        artifacts: buildArtifactRefs(artifacts, capturedAt),
+        artifacts: buildArtifactRefs(combinedArtifacts, capturedAt),
         tasks: task ? [task] : [],
         lastUpdated: capturedAt,
     };

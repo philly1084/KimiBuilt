@@ -22,6 +22,14 @@ describe('project-memory', () => {
                         data: [
                             { url: 'https://images.example.com/hero.png' },
                         ],
+                        artifacts: [
+                            {
+                                id: 'artifact-2',
+                                filename: 'generated-image-01.png',
+                                format: 'png',
+                                downloadUrl: '/api/artifacts/artifact-2/download',
+                            },
+                        ],
                     },
                 },
                 reason: 'Generate hero image',
@@ -40,8 +48,10 @@ describe('project-memory', () => {
         expect(update.urls.map((entry) => entry.url)).toEqual(expect.arrayContaining([
             'https://example.com/spec',
             'https://images.example.com/hero.png',
+            '/api/artifacts/artifact-2/download',
         ]));
-        expect(update.artifacts).toHaveLength(1);
+        expect(update.artifacts).toHaveLength(2);
+        expect(update.artifacts.map((entry) => entry.id)).toEqual(expect.arrayContaining(['artifact-1', 'artifact-2']));
         expect(update.tasks[0].summary).toMatch(/Created the file/i);
     });
 

@@ -168,6 +168,39 @@ function isExternalImageReferenceUrl(url = '') {
     return /^https?:\/\//.test(normalized) && !/\/api\/artifacts\/.+\/download\b/.test(normalized);
 }
 
+function isInternalArtifactImageReferenceUrl(url = '') {
+    const normalized = String(url || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /^\/api\/artifacts\/.+\/download\b/.test(normalized)
+        || /^https?:\/\/[^/]+\/api\/artifacts\/.+\/download\b/.test(normalized);
+}
+
+function isRenderableImageReferenceUrl(url = '', { allowInternal = false } = {}) {
+    if (allowInternal && isInternalArtifactImageReferenceUrl(url)) {
+        return true;
+    }
+
+    return isExternalImageReferenceUrl(url);
+}
+
+function buildArtifactInlinePath(artifactId = '') {
+    return `/api/artifacts/${artifactId}/download?inline=1`;
+}
+
+function refersToPriorImages(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(last|latest|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+        || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
+        || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
+}
+
 function extractImageReferencesFromSession(session = null) {
     const entries = Array.isArray(session?.metadata?.projectMemory?.urls)
         ? session.metadata.projectMemory.urls
@@ -189,6 +222,37 @@ function extractImageReferencesFromSession(session = null) {
     });
 
     return Array.from(unique.values()).slice(-8);
+}
+
+function extractImageReferencesFromArtifacts(artifacts = []) {
+    const unique = new Map();
+
+    (Array.isArray(artifacts) ? artifacts : []).forEach((artifact) => {
+        const artifactId = String(artifact?.id || '').trim();
+        const mimeType = String(artifact?.mimeType || '').trim().toLowerCase();
+        const extension = String(artifact?.extension || artifact?.format || '').trim().toLowerCase();
+        if (!artifactId || (!mimeType.startsWith('image/') && !['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension))) {
+            return;
+        }
+
+        const url = buildArtifactInlinePath(artifactId);
+        unique.set(url, {
+            url,
+            title: String(
+                artifact?.metadata?.altText
+                || artifact?.metadata?.title
+                || artifact?.metadata?.revisedPrompt
+                || artifact?.filename
+                || 'Generated image'
+            ).trim(),
+            source: 'artifact',
+            toolId: String(artifact?.metadata?.generatedBy || 'image-generate').trim(),
+            internal: true,
+            artifactId,
+        });
+    });
+
+    return Array.from(unique.values()).slice(0, 8);
 }
 
 function buildDocumentImageInstructions() {
@@ -247,7 +311,8 @@ function renderSectionContentHtml(content = '') {
 
 function buildImageFigureHtml(imageReference, fallbackAlt = 'Document image') {
     const url = normalizeImageReferenceUrl(imageReference?.url || '');
-    if (!url || !isExternalImageReferenceUrl(url)) {
+    const allowInternal = imageReference?.internal === true || isInternalArtifactImageReferenceUrl(url);
+    if (!url || !isRenderableImageReferenceUrl(url, { allowInternal })) {
         return '';
     }
 
@@ -267,7 +332,9 @@ function pickImageReference(imageReferences = [], index = 0) {
     const normalized = Array.isArray(imageReferences)
         ? imageReferences.filter((entry) => {
             const url = normalizeImageReferenceUrl(entry?.url || '');
-            return url && isExternalImageReferenceUrl(url);
+            return url && isRenderableImageReferenceUrl(url, {
+                allowInternal: entry?.internal === true || isInternalArtifactImageReferenceUrl(url),
+            });
         })
         : [];
 
@@ -791,7 +858,7 @@ class ArtifactService {
             'Preserve the section order and cover all requested content.',
             'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
             'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
-            'When verified external image URLs are available, make the design image-rich with a hero image, repeated section visuals, image cards, and gallery treatments across the document.',
+            'When verified image URLs are available, make the design image-rich with a hero image, repeated section visuals, image cards, and gallery treatments across the document.',
             'Do not output a layout plan, source register instructions, build checklist, editorial note, or any meta-document that describes how a future document should be assembled.',
             'The output must be the finished document itself, not instructions for building it.',
             buildDocumentImageInstructions(),
@@ -819,9 +886,25 @@ class ArtifactService {
 
     async resolveImageReferences(session = null, prompt = '', options = {}) {
         const desiredCount = Math.max(1, Number(options.desiredCount || DEFAULT_DOCUMENT_IMAGE_TARGET) || DEFAULT_DOCUMENT_IMAGE_TARGET);
+        const selectedArtifacts = Array.isArray(options.selectedArtifacts) ? options.selectedArtifacts : [];
+        const selectedArtifactRefs = extractImageReferencesFromArtifacts(selectedArtifacts);
         const sessionRefs = extractImageReferencesFromSession(session);
-        let combinedRefs = sessionRefs.slice(0, desiredCount);
+        const unique = new Map();
+        [...selectedArtifactRefs, ...sessionRefs].forEach((entry) => {
+            const allowInternal = entry?.internal === true || isInternalArtifactImageReferenceUrl(entry?.url || '');
+            if (!entry?.url || !isRenderableImageReferenceUrl(entry.url, { allowInternal }) || unique.has(entry.url)) {
+                return;
+            }
+            unique.set(entry.url, entry);
+        });
+
+        let combinedRefs = Array.from(unique.values()).slice(0, desiredCount);
         const preferVisualDefaults = options.preferVisualDefaults === true;
+        const explicitPriorImageReference = refersToPriorImages(prompt);
+
+        if (selectedArtifactRefs.length > 0 || explicitPriorImageReference) {
+            return combinedRefs;
+        }
 
         if (!isUnsplashConfigured() || (!preferVisualDefaults && !shouldFetchUnsplashReferences(prompt))) {
             return combinedRefs;
@@ -843,7 +926,6 @@ class ArtifactService {
                 }))
                 .filter((entry) => entry.url && isExternalImageReferenceUrl(entry.url));
 
-            const unique = new Map();
             [...combinedRefs, ...unsplashRefs].forEach((entry) => {
                 if (!entry?.url || !isExternalImageReferenceUrl(entry.url) || unique.has(entry.url)) {
                     return;
@@ -1004,9 +1086,13 @@ class ArtifactService {
         }
 
         const promptContext = await this.buildPromptContext(sessionId, artifactIds);
+        const selectedArtifacts = postgres.enabled && artifactIds.length > 0
+            ? (await Promise.all(artifactIds.slice(0, 8).map((artifactId) => artifactStore.get(artifactId)))).filter(Boolean)
+            : [];
         const imageReferences = await this.resolveImageReferences(session, prompt, {
             desiredCount: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat) ? DEFAULT_DOCUMENT_IMAGE_TARGET : 3,
             preferVisualDefaults: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat),
+            selectedArtifacts,
         });
         const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');

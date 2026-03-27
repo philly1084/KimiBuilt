@@ -8,6 +8,7 @@ const { getAgentBus } = require('../agents/AgentBus');
 const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
+const { persistGeneratedImages } = require('../../generated-image-artifacts');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -502,7 +503,7 @@ class ToolManager {
         category: 'system',
         description: 'Generate one or more images from a prompt and return hosted image URLs',
         backend: {
-          handler: async (params) => {
+          handler: async (params, context = {}) => {
             const response = await generateImage({
               prompt: params.prompt,
               model: params.model || null,
@@ -511,11 +512,21 @@ class ToolManager {
               style: params.style || 'vivid',
               n: Math.min(Math.max(params.n || 1, 1), 4),
             });
+            const persistedImages = await persistGeneratedImages({
+              sessionId: context?.sessionId || '',
+              sourceMode: 'chat',
+              prompt: params.prompt,
+              model: response.model || params.model || null,
+              images: response.data || [],
+            });
 
-            const images = (response.data || []).map((image, index) => ({
+            const images = (persistedImages.images || []).map((image, index) => ({
               url: image.url,
               b64_json: image.b64_json,
               revisedPrompt: image.revised_prompt,
+              artifactId: image.artifactId || null,
+              downloadUrl: image.downloadUrl || null,
+              inlinePath: image.inlinePath || null,
               alt: params.alt || `${params.prompt} ${index + 1}`.trim(),
             }));
 
@@ -524,6 +535,7 @@ class ToolManager {
               prompt: params.prompt,
               model: response.model,
               images,
+              artifacts: persistedImages.artifacts || [],
               markdownImages: images
                 .filter((image) => image.url)
                 .map((image) => `![${image.alt}](${image.url})`),

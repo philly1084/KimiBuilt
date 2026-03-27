@@ -72,6 +72,8 @@ describe('ArtifactService', () => {
             metadata: {},
             vectorizedAt: null,
         });
+        artifactStore.listBySession.mockResolvedValue([]);
+        artifactStore.get.mockResolvedValue(null);
         renderArtifact.mockResolvedValue({
             filename: 'out.html',
             format: 'html',
@@ -386,6 +388,72 @@ describe('ArtifactService', () => {
         }));
         expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
             content: expect.not.stringContaining('/api/artifacts/internal-image/download'),
+        }));
+    });
+
+    test('reuses selected image artifacts instead of falling back to Unsplash on prior-image follow-ups', async () => {
+        isConfigured.mockReturnValue(true);
+        artifactStore.get.mockResolvedValue({
+            id: 'image-artifact-1',
+            sessionId: 'session-1',
+            filename: 'generated-image-01.png',
+            extension: 'png',
+            mimeType: 'image/png',
+            metadata: {
+                generatedBy: 'image-generate',
+                title: 'Verified generated beach image',
+            },
+        });
+
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Beach PDF',
+                        sections: [
+                            { heading: 'Overview', purpose: 'Summarize the image set', keyPoints: ['Visual theme'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Beach PDF',
+                        sections: [
+                            { heading: 'Overview', content: 'Overview content', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>Beach PDF</h1><img src="/api/artifacts/image-artifact-1/download?inline=1" alt="Verified generated beach image"></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-1', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Make a PDF with those images from earlier.',
+            format: 'pdf',
+            artifactIds: ['image-artifact-1'],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(searchImages).not.toHaveBeenCalled();
+        const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
+        expect(instructions).toContain('/api/artifacts/image-artifact-1/download?inline=1');
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('/api/artifacts/image-artifact-1/download?inline=1'),
         }));
     });
 

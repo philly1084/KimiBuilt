@@ -4,6 +4,7 @@ const { sessionStore } = require('../session-store');
 const { generateImage, listImageModels } = require('../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
+const { persistGeneratedImages } = require('../generated-image-artifacts');
 
 const router = Router();
 
@@ -74,17 +75,29 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             style,
             n: Math.min(n, 10),
         });
+        const persistedImages = await persistGeneratedImages({
+            sessionId,
+            sourceMode: 'image',
+            prompt,
+            model: response?.model || model || null,
+            images: response?.data || [],
+        });
+        const normalizedResponse = {
+            ...response,
+            data: persistedImages.images,
+        };
 
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
         await updateSessionProjectMemory(sessionId, {
             userText: prompt,
-            assistantText: `Generated ${Array.isArray(response?.data) ? response.data.length : n} image result(s).`,
+            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : n} image result(s).`,
+            artifacts: persistedImages.artifacts,
             toolEvents: [{
                 toolCall: { function: { name: 'image-generate' } },
                 result: {
                     success: true,
                     toolId: 'image-generate',
-                    data: response,
+                    data: normalizedResponse,
                     error: null,
                 },
                 reason: 'Image generation request',
@@ -93,12 +106,13 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
 
         res.json({
             sessionId,
-            created: response.created,
-            data: response.data,
-            model: response.model,
-            size: response.size,
-            quality: response.quality,
-            style: response.style,
+            created: normalizedResponse.created,
+            data: normalizedResponse.data,
+            artifacts: persistedImages.artifacts,
+            model: normalizedResponse.model,
+            size: normalizedResponse.size,
+            quality: normalizedResponse.quality,
+            style: normalizedResponse.style,
         });
     } catch (err) {
         console.error('[Images] Error:', err.message);
