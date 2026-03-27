@@ -4,6 +4,8 @@ const { config } = require('./config');
 const { extractResponseText } = require('./artifacts/artifact-service');
 const settingsController = require('./routes/admin/settings.controller');
 const {
+    buildImagePromptFromArtifactRequest,
+    hasExplicitImageGenerationIntent,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     canonicalizeRemoteToolId,
@@ -2275,6 +2277,16 @@ class ConversationOrchestrator extends EventEmitter {
             };
         }
 
+        if (toolPolicy.candidateToolIds.includes('image-generate') && hasExplicitImageGenerationIntent(objective)) {
+            return {
+                tool: 'image-generate',
+                reason: 'Explicit image-generation request should start by materializing reusable image artifacts.',
+                params: {
+                    prompt: buildImagePromptFromArtifactRequest(objective),
+                },
+            };
+        }
+
         if (!remoteToolId) {
             return null;
         }
@@ -2423,6 +2435,16 @@ class ConversationOrchestrator extends EventEmitter {
                     },
                 }];
             }
+        }
+
+        if (toolPolicy.candidateToolIds.includes('image-generate') && hasExplicitImageGenerationIntent(prompt)) {
+            return [{
+                tool: 'image-generate',
+                reason: 'Deterministic fallback for explicit image-generation intent.',
+                params: {
+                    prompt: buildImagePromptFromArtifactRequest(prompt),
+                },
+            }];
         }
 
         if (remoteToolId

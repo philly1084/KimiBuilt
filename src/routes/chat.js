@@ -9,6 +9,7 @@ const {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
+    maybePrepareImagesForArtifactPrompt,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -125,6 +126,34 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         });
 
         if (effectiveOutputFormat) {
+            const toolManager = await ensureRuntimeToolManager(req.app);
+            const preparedImages = await maybePrepareImagesForArtifactPrompt({
+                toolManager,
+                sessionId,
+                route: '/api/chat',
+                transport: 'http',
+                taskType,
+                text: message,
+                outputFormat: effectiveOutputFormat,
+                artifactIds: effectiveArtifactIds,
+            });
+            const generationArtifacts = await generateOutputArtifactFromPrompt({
+                sessionId,
+                session,
+                mode: 'chat',
+                outputFormat: effectiveOutputFormat,
+                prompt: message,
+                artifactIds: preparedImages.artifactIds,
+                model,
+            });
+            const responseArtifacts = [
+                ...preparedImages.artifacts,
+                ...generationArtifacts.artifacts,
+            ].filter((artifact, index, array) => {
+                const artifactId = artifact?.id || '';
+                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
+            });
+
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -132,50 +161,45 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 res.setHeader('X-Session-Id', sessionId);
             }
 
-            const generation = await generateOutputArtifactFromPrompt({
-                sessionId,
-                session,
-                mode: 'chat',
-                outputFormat: effectiveOutputFormat,
-                prompt: message,
-                artifactIds: effectiveArtifactIds,
-                model,
-            });
-
-            await sessionStore.recordResponse(sessionId, generation.responseId);
+            await sessionStore.recordResponse(sessionId, generationArtifacts.responseId);
             await sessionStore.update(sessionId, {
                 metadata: {
                     lastOutputFormat: effectiveOutputFormat,
-                    lastGeneratedArtifactId: generation.artifact.id,
+                    lastGeneratedArtifactId: generationArtifacts.artifact.id,
                 },
             });
-            memoryService.rememberResponse(sessionId, generation.assistantMessage);
+            memoryService.rememberResponse(sessionId, generationArtifacts.assistantMessage);
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
-                { role: 'assistant', content: generation.assistantMessage },
+                { role: 'assistant', content: generationArtifacts.assistantMessage },
             ]);
             await updateSessionProjectMemory(sessionId, {
                 userText: message,
-                assistantText: generation.assistantMessage,
-                artifacts: generation.artifacts,
+                assistantText: generationArtifacts.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
             });
 
             completeRuntimeTask(runtimeTask?.id, {
-                responseId: generation.responseId,
-                output: generation.assistantMessage,
+                responseId: generationArtifacts.responseId,
+                output: generationArtifacts.assistantMessage,
                 model: model || session?.metadata?.model || null,
                 duration: Date.now() - startedAt,
-                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+                metadata: {
+                    outputFormat: effectiveOutputFormat,
+                    artifactDirect: true,
+                    toolEvents: preparedImages.toolEvents,
+                },
             });
 
             if (stream) {
-                res.write(`data: ${JSON.stringify({ type: 'delta', content: generation.assistantMessage })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'delta', content: generationArtifacts.assistantMessage })}\n\n`);
                 res.write(`data: ${JSON.stringify({
                     type: 'done',
                     sessionId,
-                    responseId: generation.responseId,
-                    artifacts: generation.artifacts,
-                    toolEvents: [],
+                    responseId: generationArtifacts.responseId,
+                    artifacts: responseArtifacts,
+                    toolEvents: preparedImages.toolEvents,
                 })}\n\n`);
                 res.end();
                 return;
@@ -183,10 +207,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
             res.json({
                 sessionId,
-                responseId: generation.responseId,
-                message: generation.assistantMessage,
-                artifacts: generation.artifacts,
-                toolEvents: [],
+                responseId: generationArtifacts.responseId,
+                message: generationArtifacts.assistantMessage,
+                artifacts: responseArtifacts,
+                toolEvents: preparedImages.toolEvents,
             });
             return;
         }

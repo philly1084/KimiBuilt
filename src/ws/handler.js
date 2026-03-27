@@ -7,6 +7,7 @@ const {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
+    maybePrepareImagesForArtifactPrompt,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -170,14 +171,31 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
 
         if (effectiveOutputFormat) {
+            const preparedImages = await maybePrepareImagesForArtifactPrompt({
+                toolManager: runtimeToolManager,
+                sessionId: session.id,
+                route: '/ws',
+                transport: 'ws',
+                taskType,
+                text: message,
+                outputFormat: effectiveOutputFormat,
+                artifactIds: effectiveArtifactIds,
+            });
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId: session.id,
                 session,
                 mode: 'chat',
                 outputFormat: effectiveOutputFormat,
                 prompt: message,
-                artifactIds: effectiveArtifactIds,
+                artifactIds: preparedImages.artifactIds,
                 model,
+            });
+            const responseArtifacts = [
+                ...preparedImages.artifacts,
+                ...generation.artifacts,
+            ].filter((artifact, index, array) => {
+                const artifactId = artifact?.id || '';
+                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
             });
 
             await sessionStore.recordResponse(session.id, generation.responseId);
@@ -195,7 +213,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             await updateSessionProjectMemory(session.id, {
                 userText: message,
                 assistantText: generation.assistantMessage,
-                artifacts: generation.artifacts,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
             });
 
             completeRuntimeTask(runtimeTask?.id, {
@@ -203,7 +222,11 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 output: generation.assistantMessage,
                 model: model || null,
                 duration: Date.now() - startedAt,
-                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+                metadata: {
+                    outputFormat: effectiveOutputFormat,
+                    artifactDirect: true,
+                    toolEvents: preparedImages.toolEvents,
+                },
             });
 
             ws.send(JSON.stringify({ type: 'delta', content: generation.assistantMessage }));
@@ -211,7 +234,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 type: 'done',
                 sessionId: session.id,
                 responseId: generation.responseId,
-                artifacts: generation.artifacts,
+                artifacts: responseArtifacts,
+                toolEvents: preparedImages.toolEvents,
             }));
             return;
         }

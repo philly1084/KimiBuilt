@@ -2,6 +2,11 @@ const OpenAI = require('openai');
 const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
 const { PROMOTED_LOCAL_TOOL_IDS } = require('./tool-execution-profiles');
+const {
+    buildImagePromptFromArtifactRequest,
+    inferRequestedOutputFormat,
+    shouldPreGenerateImagesForArtifactRequest,
+} = require('./ai-route-utils');
 
 let chatClient = null;
 
@@ -759,6 +764,11 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const directoryPath = availableToolIds.has('file-mkdir')
         ? extractRequestedDirectoryPath(prompt)
         : null;
+    const inferredOutputFormat = inferRequestedOutputFormat(prompt);
+    const imagePrompt = availableToolIds.has('image-generate')
+        && shouldPreGenerateImagesForArtifactRequest({ text: prompt, outputFormat: inferredOutputFormat })
+        ? buildImagePromptFromArtifactRequest(prompt)
+        : null;
     const sshCommand = remoteToolId
         ? extractRequestedSshCommand(prompt)
         : null;
@@ -793,6 +803,15 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
             params: {
                 path: directoryPath,
                 recursive: true,
+            },
+        });
+    }
+
+    if (imagePrompt) {
+        actions.push({
+            toolId: 'image-generate',
+            params: {
+                prompt: imagePrompt,
             },
         });
     }

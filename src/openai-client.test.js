@@ -435,6 +435,24 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
     });
 
+    test('builds deterministic image-generation preflight actions for mixed image-and-pdf requests', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'image-generate' },
+            ],
+            'Make a hypercar image and put it in a PDF brochure.',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'image-generate',
+                params: {
+                    prompt: 'Make a hypercar image',
+                },
+            },
+        ]);
+    });
+
     test('prefers remote-command for deterministic ssh preflight when both SSH tools are available', () => {
         const actions = __testUtils.buildDeterministicPreflightActions(
             [

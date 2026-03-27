@@ -10,6 +10,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
+    maybePrepareImagesForArtifactPrompt,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -313,6 +314,17 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         if (effectiveOutputFormat) {
             setSessionHeaders(res, sessionId);
+            const toolManager = await ensureRuntimeToolManager(req.app);
+            const preparedImages = await maybePrepareImagesForArtifactPrompt({
+                toolManager,
+                sessionId,
+                route: '/v1/chat/completions',
+                transport: 'http',
+                taskType,
+                text: artifactPrompt,
+                outputFormat: effectiveOutputFormat,
+                artifactIds: effectiveArtifactIds,
+            });
 
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
@@ -326,8 +338,15 @@ router.post('/chat/completions', async (req, res, next) => {
                 mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: artifactPrompt,
-                artifactIds: effectiveArtifactIds,
+                artifactIds: preparedImages.artifactIds,
                 model,
+            });
+            const responseArtifacts = [
+                ...preparedImages.artifacts,
+                ...generation.artifacts,
+            ].filter((artifact, index, array) => {
+                const artifactId = artifact?.id || '';
+                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
             });
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
@@ -347,7 +366,8 @@ router.post('/chat/completions', async (req, res, next) => {
             await updateSessionProjectMemory(sessionId, {
                 userText: lastUserText,
                 assistantText: generation.assistantMessage,
-                artifacts: generation.artifacts,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
             });
 
             completeRuntimeTask(runtimeTask?.id, {
@@ -355,7 +375,11 @@ router.post('/chat/completions', async (req, res, next) => {
                 output: generation.assistantMessage,
                 model: model || null,
                 duration: Date.now() - startedAt,
-                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+                metadata: {
+                    outputFormat: effectiveOutputFormat,
+                    artifactDirect: true,
+                    toolEvents: preparedImages.toolEvents,
+                },
             });
 
             if (stream) {
@@ -373,9 +397,9 @@ router.post('/chat/completions', async (req, res, next) => {
                     model: model || 'gpt-4o',
                     choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
                     session_id: sessionId,
-                    artifacts: generation.artifacts,
-                    tool_events: [],
-                    toolEvents: [],
+                    artifacts: responseArtifacts,
+                    tool_events: preparedImages.toolEvents,
+                    toolEvents: preparedImages.toolEvents,
                 })}\n\n`);
                 res.write('data: [DONE]\n\n');
                 res.end();
@@ -392,7 +416,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     message: {
                         role: 'assistant',
                         content: generation.assistantMessage,
-                        artifacts: generation.artifacts,
+                        artifacts: responseArtifacts,
                     },
                     finish_reason: 'stop',
                 }],
@@ -402,9 +426,9 @@ router.post('/chat/completions', async (req, res, next) => {
                     total_tokens: -1,
                 },
                 session_id: sessionId,
-                artifacts: generation.artifacts,
-                tool_events: [],
-                toolEvents: [],
+                artifacts: responseArtifacts,
+                tool_events: preparedImages.toolEvents,
+                toolEvents: preparedImages.toolEvents,
             });
             return;
         }
@@ -688,7 +712,7 @@ router.post('/responses', async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
-        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, lastUserText);
+        const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, userInput);
         const artifactPrompt = buildArtifactPromptFromTranscript(normalizedInputMessages, userInput);
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -700,6 +724,17 @@ router.post('/responses', async (req, res, next) => {
         });
         if (effectiveOutputFormat) {
             setSessionHeaders(res, sessionId);
+            const toolManager = await ensureRuntimeToolManager(req.app);
+            const preparedImages = await maybePrepareImagesForArtifactPrompt({
+                toolManager,
+                sessionId,
+                route: '/v1/responses',
+                transport: 'http',
+                taskType,
+                text: artifactPrompt,
+                outputFormat: effectiveOutputFormat,
+                artifactIds: effectiveArtifactIds,
+            });
 
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
@@ -713,8 +748,15 @@ router.post('/responses', async (req, res, next) => {
                 mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: artifactPrompt,
-                artifactIds: effectiveArtifactIds,
+                artifactIds: preparedImages.artifactIds,
                 model,
+            });
+            const responseArtifacts = [
+                ...preparedImages.artifacts,
+                ...generation.artifacts,
+            ].filter((artifact, index, array) => {
+                const artifactId = artifact?.id || '';
+                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
             });
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
@@ -734,7 +776,8 @@ router.post('/responses', async (req, res, next) => {
             await updateSessionProjectMemory(sessionId, {
                 userText: userInput,
                 assistantText: generation.assistantMessage,
-                artifacts: generation.artifacts,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
             });
 
             const syntheticResponse = {
@@ -754,7 +797,11 @@ router.post('/responses', async (req, res, next) => {
                 output: generation.assistantMessage,
                 model: model || null,
                 duration: Date.now() - startedAt,
-                metadata: { outputFormat: effectiveOutputFormat, artifactDirect: true },
+                metadata: {
+                    outputFormat: effectiveOutputFormat,
+                    artifactDirect: true,
+                    toolEvents: preparedImages.toolEvents,
+                },
             });
 
             if (stream) {
@@ -763,7 +810,9 @@ router.post('/responses', async (req, res, next) => {
                     type: 'response.completed',
                     response: syntheticResponse,
                     session_id: sessionId,
-                    artifacts: generation.artifacts,
+                    artifacts: responseArtifacts,
+                    tool_events: preparedImages.toolEvents,
+                    toolEvents: preparedImages.toolEvents,
                 })}\n\n`);
                 res.end();
                 return;
@@ -772,7 +821,9 @@ router.post('/responses', async (req, res, next) => {
             res.json({
                 ...syntheticResponse,
                 session_id: sessionId,
-                artifacts: generation.artifacts,
+                artifacts: responseArtifacts,
+                tool_events: preparedImages.toolEvents,
+                toolEvents: preparedImages.toolEvents,
             });
             return;
         }

@@ -19,15 +19,19 @@ jest.mock('./routes/admin/settings.controller', () => ({
 const { artifactService } = require('./artifacts/artifact-service');
 const settingsController = require('./routes/admin/settings.controller');
 const {
+    buildImagePromptFromArtifactRequest,
     buildArtifactCompletionMessage,
     generateOutputArtifactFromPrompt,
     extractSshSessionMetadataFromToolEvents,
+    hasExplicitImageGenerationIntent,
     hasExplicitMermaidFileIntent,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
+    maybePrepareImagesForArtifactPrompt,
     getPreferredRemoteToolId,
     resolveSshRequestContext,
     resolveArtifactContextIds,
+    shouldPreGenerateImagesForArtifactRequest,
     shouldSuppressImplicitMermaidArtifact,
 } = require('./ai-route-utils');
 
@@ -127,6 +131,28 @@ describe('ai-route-utils', () => {
         expect(hasExplicitMermaidFileIntent('Share a .mmd artifact for this flow')).toBe(true);
     });
 
+    test('detects explicit image generation intent without confusing follow-up image references', () => {
+        expect(hasExplicitImageGenerationIntent('Make a hypercar image and put it in a PDF brochure.')).toBe(true);
+        expect(hasExplicitImageGenerationIntent('Make a PDF with those images from earlier.')).toBe(false);
+    });
+
+    test('extracts an image-only prompt from mixed image-plus-artifact requests', () => {
+        expect(buildImagePromptFromArtifactRequest('Make a hypercar image and put it in a PDF brochure.'))
+            .toBe('Make a hypercar image');
+    });
+
+    test('only pre-generates images for explicit image-plus-document requests', () => {
+        expect(shouldPreGenerateImagesForArtifactRequest({
+            text: 'Make a hypercar image and put it in a PDF brochure.',
+            outputFormat: 'pdf',
+        })).toBe(true);
+
+        expect(shouldPreGenerateImagesForArtifactRequest({
+            text: 'Make a PDF with those images from earlier.',
+            outputFormat: 'pdf',
+        })).toBe(false);
+    });
+
     test('shouldSuppressImplicitMermaidArtifact keeps Mermaid inline for notes unless export was explicit', () => {
         expect(shouldSuppressImplicitMermaidArtifact({
             taskType: 'notes',
@@ -189,6 +215,41 @@ describe('ai-route-utils', () => {
                 lastGeneratedArtifactId: 'artifact-1',
             },
         }, [], 'deploy the site online and verify the public route')).toEqual([]);
+    });
+
+    test('maybePrepareImagesForArtifactPrompt executes image generation and merges artifact ids', async () => {
+        const toolManager = {
+            getTool: jest.fn(() => ({ id: 'image-generate' })),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'image-generate',
+                data: {
+                    artifacts: [{ id: 'image-1', filename: 'hypercar-01.png' }],
+                },
+            }),
+        };
+
+        await expect(maybePrepareImagesForArtifactPrompt({
+            toolManager,
+            sessionId: 'session-1',
+            route: '/api/chat',
+            transport: 'http',
+            taskType: 'chat',
+            text: 'Make a hypercar image and put it in a PDF brochure.',
+            outputFormat: 'pdf',
+            artifactIds: ['existing-1'],
+        })).resolves.toEqual({
+            artifactIds: ['existing-1', 'image-1'],
+            artifacts: [{ id: 'image-1', filename: 'hypercar-01.png' }],
+            imagePrompt: 'Make a hypercar image',
+            toolEvents: [expect.objectContaining({
+                reason: 'Generate image artifacts before creating the pdf artifact.',
+                result: expect.objectContaining({
+                    success: true,
+                    toolId: 'image-generate',
+                }),
+            })],
+        });
     });
 
     test('getPreferredRemoteToolId prefers remote-command when both SSH tools exist', () => {

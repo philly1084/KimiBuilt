@@ -1714,6 +1714,40 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('forces a direct image-generation action for explicit image creation requests', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'image-generate'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Make a hypercar image and put it in a PDF brochure.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective: 'Make a hypercar image and put it in a PDF brochure.',
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'image-generate',
+            reason: 'Explicit image-generation request should start by materializing reusable image artifacts.',
+            params: {
+                prompt: 'Make a hypercar image',
+            },
+        });
+    });
+
     test('falls back to web-search planning when planner output is not valid json', async () => {
         const llmClient = {
             createResponse: jest.fn(),

@@ -243,6 +243,53 @@ function hasImplicitImageArtifactFollowupReference(text = '') {
         || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
 }
 
+function hasExplicitImageGenerationIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (hasImplicitImageArtifactFollowupReference(normalized)
+        && !/\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b/i.test(normalized)) {
+        return false;
+    }
+
+    return /\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|illustration|illustrations|render|renders|artwork|cover image|cover art|poster)\b/i.test(normalized)
+        || /\b(text[-\s]?to[-\s]?image|image generation)\b/i.test(normalized)
+        || /\b(image|photo|picture|illustration|render|artwork|poster)\b[\s\S]{0,20}\b(of|showing|depicting|featuring)\b/i.test(normalized);
+}
+
+function shouldPreGenerateImagesForArtifactRequest({
+    text = '',
+    outputFormat = null,
+} = {}) {
+    const normalizedFormat = normalizeFormat(outputFormat);
+    if (!['pdf', 'docx', 'html'].includes(normalizedFormat)) {
+        return false;
+    }
+
+    return hasExplicitImageGenerationIntent(text);
+}
+
+function buildImagePromptFromArtifactRequest(text = '') {
+    const prompt = String(text || '').trim();
+    if (!prompt) {
+        return '';
+    }
+
+    let cleaned = prompt
+        .replace(/\b(?:and then|then|and)?\s*(?:put|place|embed|include|insert|compile|turn|convert)\b[\s\S]*$/i, '')
+        .replace(/\b(?:for|into|in|as)\s+(?:an?\s+)?(?:pdf|docx|html|document|page|file|artifact|brochure|booklet|report|brief)\b[\s\S]*$/i, '')
+        .replace(/\b(?:make|create|generate|build|produce|prepare)\b[\s\S]{0,20}\b(?:a|an)\s+(?:pdf|docx|html|document|page|file|artifact)\b[\s\S]*$/i, '')
+        .trim();
+
+    if (!cleaned || cleaned.length < 12) {
+        cleaned = prompt;
+    }
+
+    return cleaned;
+}
+
 function promptHasExplicitSshIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -638,6 +685,81 @@ function resolveArtifactContextIds(session = null, artifactIds = [], text = '') 
         : [];
 }
 
+async function maybePrepareImagesForArtifactPrompt({
+    toolManager = null,
+    sessionId = '',
+    route = '',
+    transport = 'http',
+    taskType = 'chat',
+    text = '',
+    outputFormat = null,
+    artifactIds = [],
+} = {}) {
+    const resolvedArtifactIds = Array.isArray(artifactIds) ? artifactIds.filter(Boolean) : [];
+    if (!shouldPreGenerateImagesForArtifactRequest({ text, outputFormat })) {
+        return {
+            artifactIds: resolvedArtifactIds,
+            artifacts: [],
+            toolEvents: [],
+            imagePrompt: null,
+        };
+    }
+
+    if (!toolManager?.executeTool || !toolManager?.getTool?.('image-generate')) {
+        const error = new Error('Image generation is required for this request, but the image-generate tool is not available.');
+        error.statusCode = 503;
+        throw error;
+    }
+
+    const imagePrompt = buildImagePromptFromArtifactRequest(text);
+    const toolResult = await toolManager.executeTool(
+        'image-generate',
+        { prompt: imagePrompt },
+        {
+            sessionId,
+            route,
+            transport,
+            taskType,
+        },
+    );
+
+    if (!toolResult?.success) {
+        const error = new Error(toolResult?.error || 'Image generation failed before artifact creation.');
+        error.statusCode = 502;
+        throw error;
+    }
+
+    const generatedArtifacts = Array.isArray(toolResult?.data?.artifacts)
+        ? toolResult.data.artifacts.filter((artifact) => artifact?.id)
+        : [];
+    if (generatedArtifacts.length === 0) {
+        const error = new Error('Image generation completed, but no image artifacts were persisted for the follow-up document.');
+        error.statusCode = 502;
+        throw error;
+    }
+
+    const mergedArtifactIds = [
+        ...resolvedArtifactIds,
+        ...generatedArtifacts.map((artifact) => artifact.id),
+    ].filter((value, index, array) => array.indexOf(value) === index);
+
+    return {
+        artifactIds: mergedArtifactIds,
+        artifacts: generatedArtifacts,
+        imagePrompt,
+        toolEvents: [{
+            toolCall: {
+                function: {
+                    name: 'image-generate',
+                    arguments: JSON.stringify({ prompt: imagePrompt }),
+                },
+            },
+            result: toolResult,
+            reason: `Generate image artifacts before creating the ${normalizeFormat(outputFormat) || 'requested'} artifact.`,
+        }],
+    };
+}
+
 async function generateOutputArtifactFromPrompt({
     sessionId,
     session = null,
@@ -687,8 +809,11 @@ module.exports = {
     buildArtifactCompletionMessage,
     hasExplicitMermaidArtifactIntent,
     hasExplicitMermaidFileIntent,
+    hasExplicitImageGenerationIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
+    buildImagePromptFromArtifactRequest,
+    shouldPreGenerateImagesForArtifactRequest,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
     formatSshToolResult,
@@ -699,5 +824,6 @@ module.exports = {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    maybePrepareImagesForArtifactPrompt,
 };
 

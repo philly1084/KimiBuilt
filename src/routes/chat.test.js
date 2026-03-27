@@ -35,6 +35,12 @@ jest.mock('../ai-route-utils', () => ({
     maybeGenerateOutputArtifact: jest.fn(),
     generateOutputArtifactFromPrompt: jest.fn(),
     inferRequestedOutputFormat: jest.fn(() => null),
+    maybePrepareImagesForArtifactPrompt: jest.fn(async ({ artifactIds = [] } = {}) => ({
+        artifactIds,
+        artifacts: [],
+        toolEvents: [],
+        imagePrompt: null,
+    })),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
     resolveSshRequestContext: jest.fn(),
     extractSshSessionMetadataFromToolEvents: jest.fn(() => null),
@@ -63,6 +69,7 @@ const { executeConversationRuntime } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
     generateOutputArtifactFromPrompt,
+    maybePrepareImagesForArtifactPrompt,
     maybeGenerateOutputArtifact,
     resolveSshRequestContext,
     shouldSuppressImplicitMermaidArtifact,
@@ -201,5 +208,57 @@ describe('/api/chat route', () => {
             text: 'Create a Mermaid diagram for the auth flow inside this page',
             outputFormatProvided: false,
         }));
+    });
+
+    test('pre-generates image artifacts before direct PDF creation for mixed requests', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(() => ({ id: 'image-generate' })),
+            executeTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Make a hypercar image and put it in a PDF brochure.',
+        });
+        require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('pdf');
+        maybePrepareImagesForArtifactPrompt.mockResolvedValue({
+            artifactIds: ['image-artifact-1'],
+            artifacts: [{ id: 'image-artifact-1', filename: 'hypercar-01.png' }],
+            toolEvents: [{ toolCall: { function: { name: 'image-generate' } } }],
+            imagePrompt: 'Make a hypercar image',
+        });
+        generateOutputArtifactFromPrompt.mockResolvedValue({
+            responseId: 'resp-pdf-1',
+            artifact: { id: 'pdf-artifact-1', filename: 'hypercars.pdf' },
+            artifacts: [{ id: 'pdf-artifact-1', filename: 'hypercars.pdf' }],
+            assistantMessage: 'Created the PDF artifact (hypercars.pdf).',
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Make a hypercar image and put it in a PDF brochure.',
+                stream: false,
+            });
+
+        expect(response.status).toBe(200);
+        expect(maybePrepareImagesForArtifactPrompt).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            text: 'Make a hypercar image and put it in a PDF brochure.',
+            outputFormat: 'pdf',
+            artifactIds: [],
+        }));
+        expect(generateOutputArtifactFromPrompt).toHaveBeenCalledWith(expect.objectContaining({
+            artifactIds: ['image-artifact-1'],
+            outputFormat: 'pdf',
+        }));
+        expect(response.body.artifacts).toEqual([
+            { id: 'image-artifact-1', filename: 'hypercar-01.png' },
+            { id: 'pdf-artifact-1', filename: 'hypercars.pdf' },
+        ]);
+        expect(response.body.toolEvents).toEqual([{ toolCall: { function: { name: 'image-generate' } } }]);
     });
 });
