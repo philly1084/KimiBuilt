@@ -63,6 +63,73 @@ function deriveImageAltText(urlString = '', fallback = 'image') {
   }
 }
 
+function normalizeInlineFileContent(value) {
+  if (value == null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (Array.isArray(value) || typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_error) {
+      return String(value);
+    }
+  }
+
+  return String(value);
+}
+
+function normalizeFileWriteParams(params = {}) {
+  const normalized = params && typeof params === 'object'
+    ? { ...params }
+    : {};
+  const pathCandidates = [
+    normalized.path,
+    normalized.filePath,
+    normalized.filepath,
+    normalized.filename,
+    normalized.targetPath,
+    normalized.destination,
+  ];
+  const resolvedPath = pathCandidates.find((value) => typeof value === 'string' && value.trim());
+  if (resolvedPath) {
+    normalized.path = resolvedPath.trim();
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, 'content')) {
+    const contentCandidates = [
+      normalized.contents,
+      normalized.text,
+      normalized.body,
+      normalized.data,
+      normalized.html,
+      normalized.source,
+      normalized.code,
+      normalized.markdown,
+      normalized.fileContent,
+    ];
+    const resolvedContent = contentCandidates
+      .map((value) => normalizeInlineFileContent(value))
+      .find((value) => typeof value === 'string');
+
+    if (typeof resolvedContent === 'string') {
+      normalized.content = resolvedContent;
+    }
+  } else {
+    normalized.content = normalizeInlineFileContent(normalized.content);
+  }
+
+  return normalized;
+}
+
 class ToolManager {
   constructor() {
     this.registry = getUnifiedRegistry();
@@ -240,15 +307,32 @@ class ToolManager {
         id: 'file-write',
         name: 'File Writer',
         category: 'system',
-        description: 'Write content to files',
+        description: 'Write a full content string to a local runtime file. Requires both path and content in the same call.',
         backend: {
           handler: async (params) => {
             const path = require('path');
             const fs = require('fs').promises;
-            const targetPath = path.resolve(params.path);
+            const normalized = normalizeFileWriteParams(params);
+
+            if (typeof normalized.path !== 'string' || !normalized.path.trim()) {
+              throw new Error('file-write requires a non-empty `path` string.');
+            }
+
+            if (!Object.prototype.hasOwnProperty.call(normalized, 'content')) {
+              throw new Error('file-write requires a `content` string. Provide the full file body in `content`; a path alone is not enough.');
+            }
+
+            if (typeof normalized.content !== 'string') {
+              throw new Error('file-write `content` must be a string.');
+            }
+
+            const targetPath = path.resolve(normalized.path);
             await fs.mkdir(path.dirname(targetPath), { recursive: true });
-            await fs.writeFile(targetPath, params.content);
-            return { path: targetPath, bytesWritten: params.content.length };
+            await fs.writeFile(targetPath, normalized.content, normalized.encoding || 'utf8');
+            return {
+              path: targetPath,
+              bytesWritten: Buffer.byteLength(normalized.content, normalized.encoding || 'utf8'),
+            };
           },
           sideEffects: ['write'],
           timeout: 10000
@@ -257,8 +341,18 @@ class ToolManager {
           type: 'object',
           required: ['path', 'content'],
           properties: {
-            path: { type: 'string' },
-            content: { type: 'string' }
+            path: {
+              type: 'string',
+              description: 'Local file path in this runtime. For remote hosts or container-only paths, use remote-command or docker-exec instead.'
+            },
+            content: {
+              type: 'string',
+              description: 'Full file contents to write in this same call.'
+            },
+            encoding: {
+              type: 'string',
+              default: 'utf8'
+            }
           }
         }
       },
@@ -660,14 +754,18 @@ class ToolManager {
       throw new Error(`Tool ${id} is disabled`);
     }
 
+    const normalizedParams = id === 'file-write'
+      ? normalizeFileWriteParams(params)
+      : params;
+
     // Execute either a ToolBase instance or a registry definition.
     let result;
     if (typeof tool.execute === 'function') {
-      result = await tool.execute(params, context);
+      result = await tool.execute(normalizedParams, context);
     } else if (typeof tool.backend?.handler === 'function') {
       const startedAt = Date.now();
       try {
-        const data = await tool.backend.handler(params, context);
+        const data = await tool.backend.handler(normalizedParams, context);
         result = {
           success: true,
           data,
@@ -691,7 +789,7 @@ class ToolManager {
     // Record stats
     this.registry.recordInvocation(id, result, {
       ...context,
-      params,
+      params: normalizedParams,
     });
     
     return result;

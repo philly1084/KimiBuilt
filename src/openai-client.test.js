@@ -341,12 +341,15 @@ describe('openai-client automatic tool orchestration helpers', () => {
     test('filesystem tool guidance forbids invented availability excuses', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
             { id: 'file-read' },
+            { id: 'file-write' },
             { id: 'file-mkdir' },
         ]);
 
         expect(guidance).toContain('source of truth for tool availability');
         expect(guidance).toContain('tool definitions are attached');
         expect(guidance).toContain('file-mkdir');
+        expect(guidance).toContain('full file body as `content`');
+        expect(guidance).toContain('container-only paths');
     });
 
     test('extracts explicit web research queries for deterministic preflight', () => {

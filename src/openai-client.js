@@ -1173,7 +1173,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-write')) {
-        guidance.push('- Use `file-write` to create or update files when the user asks for filesystem changes.');
+        guidance.push('- Use `file-write` to create or update local runtime files when the user asks for filesystem changes.');
+        guidance.push('- Every `file-write` call must include both a `path` and the full file body as `content` in the same call. Do not call `file-write` with only a path.');
+        guidance.push('- For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead of `file-write`.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-mkdir')) {

@@ -8,6 +8,8 @@ function buildContinuityInstructions(extra = '') {
         'For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying.',
         'If runtime tools are attached or listed as available, treat them as available for this request and use them when relevant instead of claiming they are unavailable.',
         'Use verified tool results as the source of truth over guesses.',
+        'When calling file-write, always include both a path and the full file contents in the same call. Do not try to write a file from a path alone.',
+        'Use file-write only for local runtime files. For remote hosts, deployed servers, or container-only paths, prefer remote-command or docker-exec.',
         'When calling remote-command, always include a non-empty command parameter. Host, username, and port may be omitted only when the runtime already has a default SSH target.',
         'For remote server or remote-build work, assume an Ubuntu/Linux target unless tool results prove otherwise. A safe reconnect baseline is: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
         'For remote troubleshooting, keep ownership of the original ask: continue through routine diagnostics, fixes, and verification instead of turning each intermediate issue into a new user task.',

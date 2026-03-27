@@ -85,6 +85,94 @@ describe('ConversationOrchestrator', () => {
         expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-1', 'Plain answer');
     });
 
+    test('recovers missing file-write content from recent assistant html when the planner omits it', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Saved the HTML file.', 'resp_file_write')),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'file-write',
+                        reason: 'Write the previously prepared Cuba/beaches HTML into a file in /app, since the user asked to go ahead with the HTML file.',
+                        params: {
+                            path: '/app/cuba-beaches.html',
+                        },
+                    },
+                ],
+            })),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'file-write'
+                    ? { id: toolId, description: 'Write a file' }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'file-write',
+                data: {
+                    path: '/app/cuba-beaches.html',
+                    bytesWritten: 84,
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({
+                id: 'session-file-write',
+                metadata: {},
+            }),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                {
+                    role: 'assistant',
+                    content: [
+                        'Here is the full HTML:',
+                        '```html',
+                        '<!DOCTYPE html>',
+                        '<html>',
+                        '<body>',
+                        '<h1>Cuba Beaches</h1>',
+                        '<p>Warm water and bright sand.</p>',
+                        '</body>',
+                        '</html>',
+                        '```',
+                    ].join('\n'),
+                },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Go ahead and save that Cuba beaches HTML file to /app/cuba-beaches.html.',
+            sessionId: 'session-file-write',
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'file-write',
+            expect.objectContaining({
+                path: '/app/cuba-beaches.html',
+                content: expect.stringContaining('<h1>Cuba Beaches</h1>'),
+            }),
+            expect.objectContaining({
+                executionProfile: 'default',
+                sessionId: 'session-file-write',
+            }),
+        );
+        expect(result.output).toBe('Saved the HTML file.');
+    });
+
     test('plans and executes remote-build tool steps explicitly', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

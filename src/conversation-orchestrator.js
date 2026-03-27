@@ -259,6 +259,207 @@ function extractInternalArtifactUrl(text = '') {
     return match[0].replace(/[),.;!?]+$/g, '');
 }
 
+function normalizeInlineFileContent(value) {
+    if (value == null) {
+        return undefined;
+    }
+
+    if (typeof value === 'string') {
+        return value;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+
+    if (Array.isArray(value) || typeof value === 'object') {
+        try {
+            return JSON.stringify(value, null, 2);
+        } catch (_error) {
+            return String(value);
+        }
+    }
+
+    return String(value);
+}
+
+function extractFencedCodeBlocks(text = '') {
+    const source = String(text || '');
+    const blocks = [];
+    const pattern = /```([a-z0-9_-]*)\s*\n([\s\S]*?)```/gi;
+    let match = pattern.exec(source);
+
+    while (match) {
+        blocks.push({
+            language: String(match[1] || '').trim().toLowerCase(),
+            content: String(match[2] || '').trim(),
+        });
+        match = pattern.exec(source);
+    }
+
+    return blocks;
+}
+
+function looksLikeStandaloneHtml(text = '') {
+    return /<!doctype html>|<html\b|<body\b|<main\b|<article\b|<section\b|<header\b|<figure\b|<img\b|<h1\b/i.test(String(text || ''));
+}
+
+function inferFileWriteHint({ path = '', objective = '', reason = '' } = {}) {
+    const extension = require('path').extname(String(path || '').trim().toLowerCase());
+    const context = `${path}\n${objective}\n${reason}`.toLowerCase();
+
+    const byExtension = {
+        '.html': { kind: 'html', fenceLabels: ['html'] },
+        '.htm': { kind: 'html', fenceLabels: ['html'] },
+        '.json': { kind: 'json', fenceLabels: ['json'] },
+        '.md': { kind: 'markdown', fenceLabels: ['md', 'markdown'] },
+        '.markdown': { kind: 'markdown', fenceLabels: ['md', 'markdown'] },
+        '.js': { kind: 'javascript', fenceLabels: ['js', 'javascript'] },
+        '.mjs': { kind: 'javascript', fenceLabels: ['js', 'javascript'] },
+        '.cjs': { kind: 'javascript', fenceLabels: ['js', 'javascript'] },
+        '.ts': { kind: 'typescript', fenceLabels: ['ts', 'typescript'] },
+        '.tsx': { kind: 'typescript', fenceLabels: ['tsx', 'typescript'] },
+        '.css': { kind: 'css', fenceLabels: ['css'] },
+        '.xml': { kind: 'xml', fenceLabels: ['xml'] },
+        '.py': { kind: 'python', fenceLabels: ['py', 'python'] },
+        '.sh': { kind: 'shell', fenceLabels: ['sh', 'bash', 'shell'] },
+    };
+
+    if (byExtension[extension]) {
+        return byExtension[extension];
+    }
+
+    if (/\bhtml\b/.test(context)) {
+        return { kind: 'html', fenceLabels: ['html'] };
+    }
+
+    if (/\bjson\b/.test(context)) {
+        return { kind: 'json', fenceLabels: ['json'] };
+    }
+
+    return {
+        kind: null,
+        fenceLabels: [],
+    };
+}
+
+function inferFileWriteContentFromRecentMessages({
+    path = '',
+    objective = '',
+    reason = '',
+    recentMessages = [],
+} = {}) {
+    const hint = inferFileWriteHint({ path, objective, reason });
+    const preferredLabels = new Set(hint.fenceLabels);
+
+    for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+        const message = recentMessages[index];
+        const messageText = normalizeMessageText(message?.content || '').trim();
+        if (!messageText) {
+            continue;
+        }
+
+        const blocks = extractFencedCodeBlocks(messageText).filter((block) => block.content);
+        if (hint.kind === 'html') {
+            const htmlBlock = blocks.find((block) => preferredLabels.has(block.language) || looksLikeStandaloneHtml(block.content));
+            if (htmlBlock) {
+                return htmlBlock.content;
+            }
+
+            if (looksLikeStandaloneHtml(messageText)) {
+                return messageText;
+            }
+            continue;
+        }
+
+        if (hint.kind === 'json') {
+            const jsonBlock = blocks.find((block) => preferredLabels.has(block.language) || /^[\[{]/.test(block.content.trim()));
+            if (jsonBlock) {
+                return jsonBlock.content;
+            }
+
+            if (/^[\[{]/.test(messageText)) {
+                return messageText;
+            }
+            continue;
+        }
+
+        if (preferredLabels.size > 0) {
+            const labeledBlock = blocks.find((block) => preferredLabels.has(block.language));
+            if (labeledBlock) {
+                return labeledBlock.content;
+            }
+            continue;
+        }
+
+        if (blocks.length === 1) {
+            return blocks[0].content;
+        }
+    }
+
+    return undefined;
+}
+
+function normalizeFileWritePlanParams(step = {}, { objective = '', recentMessages = [] } = {}) {
+    const rawParams = step?.params && typeof step.params === 'object'
+        ? { ...step.params }
+        : {};
+    const pathCandidates = [
+        rawParams.path,
+        rawParams.filePath,
+        rawParams.filepath,
+        rawParams.filename,
+        rawParams.targetPath,
+        rawParams.destination,
+        step?.path,
+        step?.filePath,
+        step?.filename,
+        step?.targetPath,
+    ];
+    const resolvedPath = pathCandidates.find((value) => typeof value === 'string' && value.trim());
+    if (resolvedPath) {
+        rawParams.path = resolvedPath.trim();
+    }
+
+    const directContent = [
+        rawParams.content,
+        rawParams.contents,
+        rawParams.text,
+        rawParams.body,
+        rawParams.data,
+        rawParams.html,
+        rawParams.source,
+        rawParams.code,
+        rawParams.markdown,
+        rawParams.fileContent,
+        step?.content,
+        step?.text,
+        step?.body,
+        step?.data,
+        step?.html,
+        step?.code,
+    ]
+        .map((value) => normalizeInlineFileContent(value))
+        .find((value) => typeof value === 'string');
+
+    if (typeof directContent === 'string') {
+        rawParams.content = directContent;
+        return rawParams;
+    }
+
+    const inferredContent = inferFileWriteContentFromRecentMessages({
+        path: rawParams.path || '',
+        objective,
+        reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
+        recentMessages,
+    });
+    if (typeof inferredContent === 'string') {
+        rawParams.content = inferredContent;
+    }
+
+    return rawParams;
+}
+
 function buildUbuntuMasterRemoteCommand() {
     return "hostname && uname -m && (test -f /etc/os-release && sed -n '1,3p' /etc/os-release || true) && uptime";
 }
@@ -1495,6 +1696,7 @@ class ConversationOrchestrator extends EventEmitter {
                     toolContext,
                     objective,
                     session,
+                    recentMessages: resolvedRecentMessages,
                 });
 
                 toolEvents.push(...roundToolEvents);
@@ -1606,6 +1808,7 @@ class ConversationOrchestrator extends EventEmitter {
                         toolContext,
                         objective,
                         session,
+                        recentMessages: resolvedRecentMessages,
                     });
                     toolEvents.push(...recoveryToolEvents);
                     recordExecutedStepSignatures(recoveryToolEvents, executedStepSignatures, executedStepSignatureCounts);
@@ -1971,12 +2174,20 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE } = {}) {
+    normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, recentMessages = [] } = {}) {
         const normalizedStep = {
             tool: canonicalizeRemoteToolId(typeof step?.tool === 'string' ? step.tool.trim() : ''),
             reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
             params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
         };
+
+        if (normalizedStep.tool === 'file-write') {
+            normalizedStep.params = normalizeFileWritePlanParams(step, {
+                objective,
+                recentMessages,
+            });
+            return normalizedStep;
+        }
 
         if (!isRemoteCommandToolId(normalizedStep.tool)) {
             return normalizedStep;
@@ -2181,6 +2392,9 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
+            'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
+            '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
+            'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
             ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasRemoteWebsiteUpdateIntent(planningPrompt)
                 ? [
                     'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',
@@ -2238,6 +2452,7 @@ class ConversationOrchestrator extends EventEmitter {
                 objective,
                 session,
                 executionProfile,
+                recentMessages,
             }))
             .filter((step) => step.tool && toolPolicy.candidateToolIds.includes(step.tool));
 
@@ -2261,6 +2476,7 @@ class ConversationOrchestrator extends EventEmitter {
         toolContext = {},
         objective = '',
         session = null,
+        recentMessages = [],
     }) {
         const toolEvents = [];
         if (!toolManager) {
@@ -2272,6 +2488,7 @@ class ConversationOrchestrator extends EventEmitter {
                 objective,
                 session,
                 executionProfile,
+                recentMessages,
             });
             const toolCall = {
                 id: `tool_call_${index + 1}`,
