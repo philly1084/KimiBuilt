@@ -275,6 +275,7 @@ describe('/api/chat route', () => {
             artifacts: [{ id: 'image-artifact-1', filename: 'hypercar-01.png' }],
             toolEvents: [{ toolCall: { function: { name: 'image-generate' } } }],
             imagePrompt: 'Make a hypercar image',
+            resetPreviousResponse: true,
         });
         generateOutputArtifactFromPrompt.mockResolvedValue({
             responseId: 'resp-pdf-1',
@@ -305,6 +306,9 @@ describe('/api/chat route', () => {
         expect(generateOutputArtifactFromPrompt).toHaveBeenCalledWith(expect.objectContaining({
             artifactIds: ['image-artifact-1'],
             outputFormat: 'pdf',
+            session: expect.objectContaining({
+                previousResponseId: null,
+            }),
         }));
         expect(response.body.artifacts).toEqual([
             { id: 'image-artifact-1', filename: 'hypercar-01.png' },

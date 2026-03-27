@@ -234,6 +234,15 @@ describe('ai-route-utils', () => {
         }, [], 'make a pdf with those images from earlier')).toEqual(['image-1', 'image-2']);
     });
 
+    test('resolveArtifactContextIds does not carry old artifacts into explicit new-image requests', () => {
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastGeneratedArtifactId: 'artifact-1',
+                lastGeneratedImageArtifactIds: ['image-1', 'image-2'],
+            },
+        }, [], 'Generate more hypercar images and then make a document with it.')).toEqual([]);
+    });
+
     test('resolveArtifactContextIds does not attach the last generated artifact on unrelated turns', () => {
         expect(resolveArtifactContextIds({
             metadata: {
@@ -267,6 +276,7 @@ describe('ai-route-utils', () => {
             artifactIds: ['existing-1', 'image-1'],
             artifacts: [{ id: 'image-1', filename: 'hypercar-01.png' }],
             imagePrompt: 'Make a hypercar image',
+            resetPreviousResponse: true,
             toolEvents: [expect.objectContaining({
                 reason: 'Generate image artifacts before creating the pdf artifact.',
                 result: expect.objectContaining({

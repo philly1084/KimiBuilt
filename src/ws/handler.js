@@ -190,9 +190,12 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 outputFormat: effectiveOutputFormat,
                 artifactIds: effectiveArtifactIds,
             });
+            const artifactGenerationSession = preparedImages.resetPreviousResponse
+                ? { ...session, previousResponseId: null }
+                : session;
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId: session.id,
-                session,
+                session: artifactGenerationSession,
                 mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: message,

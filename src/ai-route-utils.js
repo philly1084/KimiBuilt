@@ -712,6 +712,10 @@ function resolveArtifactContextIds(session = null, artifactIds = [], text = '') 
         return artifactIds;
     }
 
+    if (hasExplicitImageGenerationIntent(text)) {
+        return [];
+    }
+
     const lastGeneratedImageArtifactIds = Array.isArray(session?.metadata?.lastGeneratedImageArtifactIds)
         ? session.metadata.lastGeneratedImageArtifactIds.filter((entry) => typeof entry === 'string' && entry.trim())
         : [];
@@ -742,6 +746,7 @@ async function maybePrepareImagesForArtifactPrompt({
             artifacts: [],
             toolEvents: [],
             imagePrompt: null,
+            resetPreviousResponse: false,
         };
     }
 
@@ -787,6 +792,7 @@ async function maybePrepareImagesForArtifactPrompt({
         artifactIds: mergedArtifactIds,
         artifacts: generatedArtifacts,
         imagePrompt,
+        resetPreviousResponse: true,
         toolEvents: [{
             toolCall: {
                 function: {

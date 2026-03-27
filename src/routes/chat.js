@@ -147,9 +147,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 outputFormat: effectiveOutputFormat,
                 artifactIds: effectiveArtifactIds,
             });
+            const artifactGenerationSession = preparedImages.resetPreviousResponse
+                ? { ...session, previousResponseId: null }
+                : session;
             const generationArtifacts = await generateOutputArtifactFromPrompt({
                 sessionId,
-                session,
+                session: artifactGenerationSession,
                 mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: message,

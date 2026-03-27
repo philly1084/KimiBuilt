@@ -334,6 +334,9 @@ router.post('/chat/completions', async (req, res, next) => {
                 outputFormat: effectiveOutputFormat,
                 artifactIds: effectiveArtifactIds,
             });
+            const artifactGenerationSession = preparedImages.resetPreviousResponse
+                ? { ...session, previousResponseId: null }
+                : session;
 
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
@@ -343,7 +346,7 @@ router.post('/chat/completions', async (req, res, next) => {
 
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId,
-                session,
+                session: artifactGenerationSession,
                 mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: artifactPrompt,
@@ -752,6 +755,9 @@ router.post('/responses', async (req, res, next) => {
                 outputFormat: effectiveOutputFormat,
                 artifactIds: effectiveArtifactIds,
             });
+            const artifactGenerationSession = preparedImages.resetPreviousResponse
+                ? { ...session, previousResponseId: null }
+                : session;
 
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
@@ -761,7 +767,7 @@ router.post('/responses', async (req, res, next) => {
 
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId,
-                session,
+                session: artifactGenerationSession,
                 mode: taskType,
                 outputFormat: effectiveOutputFormat,
                 prompt: artifactPrompt,
