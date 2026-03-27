@@ -1226,12 +1226,7 @@ GUIDELINES:
     }
 
     function buildFallbackNotesActionsFromText(sourceText = '') {
-        const importedPage = window.ImportExport?.importFromMarkdown?.(sourceText);
-        const importedBlocks = Array.isArray(importedPage?.blocks)
-            ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))
-            : [];
-        const richTextBlocks = buildBlocksFromRichText(sourceText);
-        const blocks = selectPreferredFallbackBlocks(importedBlocks, richTextBlocks);
+        const { importedPage, blocks } = extractPreferredBlocksFromSourceText(sourceText);
 
         if (!blocks.length) {
             return null;
@@ -1271,6 +1266,19 @@ GUIDELINES:
         }
 
         return actions;
+    }
+
+    function extractPreferredBlocksFromSourceText(sourceText = '') {
+        const importedPage = window.ImportExport?.importFromMarkdown?.(sourceText);
+        const importedBlocks = Array.isArray(importedPage?.blocks)
+            ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))
+            : [];
+        const richTextBlocks = buildBlocksFromRichText(sourceText);
+
+        return {
+            importedPage,
+            blocks: selectPreferredFallbackBlocks(importedBlocks, richTextBlocks)
+        };
     }
 
     function buildFallbackPageEditResponse(question = '', responseText = '') {
@@ -1700,24 +1708,108 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return block;
     }
 
+    function buildBlocksFromLegacyActionContent(rawAction = {}) {
+        if (Array.isArray(rawAction.blocks) && rawAction.blocks.length > 0) {
+            return rawAction.blocks;
+        }
+
+        if (rawAction.block && typeof rawAction.block === 'object') {
+            return [rawAction.block];
+        }
+
+        const textSource = [
+            rawAction.content,
+            rawAction.markdown,
+            rawAction.text,
+            rawAction.body,
+            rawAction.result
+        ].find((value) => typeof value === 'string' && value.trim());
+
+        if (!textSource) {
+            return [];
+        }
+
+        return extractPreferredBlocksFromSourceText(textSource).blocks;
+    }
+
+    function normalizeLegacyNotesAction(rawAction) {
+        if (!rawAction || typeof rawAction !== 'object') {
+            return null;
+        }
+
+        const op = String(rawAction.op || rawAction.action || rawAction.operation || '').trim().toLowerCase();
+        const normalizedAction = {
+            ...rawAction,
+            op: rawAction.op || rawAction.action || rawAction.operation || ''
+        };
+
+        switch (op) {
+            case 'replace-content':
+            case 'replace_content': {
+                const blocks = buildBlocksFromLegacyActionContent(rawAction);
+                if (!blocks.length) {
+                    return null;
+                }
+
+                return {
+                    ...normalizedAction,
+                    op: 'rebuild_page',
+                    blocks
+                };
+            }
+            case 'append-content':
+            case 'append_content': {
+                const blocks = buildBlocksFromLegacyActionContent(rawAction);
+                if (!blocks.length) {
+                    return null;
+                }
+
+                return {
+                    ...normalizedAction,
+                    op: 'append_to_page',
+                    blocks
+                };
+            }
+            case 'prepend-content':
+            case 'prepend_content': {
+                const blocks = buildBlocksFromLegacyActionContent(rawAction);
+                if (!blocks.length) {
+                    return null;
+                }
+
+                return {
+                    ...normalizedAction,
+                    op: 'prepend_to_page',
+                    blocks
+                };
+            }
+            default:
+                return normalizedAction.op ? normalizedAction : null;
+        }
+    }
+
     function getNotesPayloadActions(payload) {
         if (!payload || typeof payload !== 'object') {
             return null;
         }
 
-        if (Array.isArray(payload.actions)) {
-            return payload.actions;
+        const actions = Array.isArray(payload.actions)
+            ? payload.actions
+            : (Array.isArray(payload.operations)
+                ? payload.operations
+                : (Array.isArray(payload.edits)
+                    ? payload.edits
+                    : (Array.isArray(payload['notes-actions'])
+                        ? payload['notes-actions']
+                        : null)));
+
+        if (!Array.isArray(actions)) {
+            return null;
         }
 
-        if (Array.isArray(payload.operations)) {
-            return payload.operations;
-        }
-
-        if (Array.isArray(payload.edits)) {
-            return payload.edits;
-        }
-
-        return null;
+        return actions
+            .map((action) => normalizeLegacyNotesAction(action))
+            .filter(Boolean);
     }
 
     function getNotesPayloadReply(payload) {
@@ -1728,6 +1820,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return String(
             payload.assistant_reply
             || payload.assistantReply
+            || payload.assistantMessage
             || payload.reply
             || payload.message
             || ''
@@ -1739,6 +1832,19 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
         try {
             const payload = JSON.parse(normalizeStructuredPayloadText(payloadText));
+            if (Array.isArray(payload)) {
+                const normalizedActions = payload
+                    .map((action) => normalizeLegacyNotesAction(action))
+                    .filter(Boolean);
+                if (normalizedActions.length > 0) {
+                    return {
+                        displayText: '',
+                        actions: normalizedActions
+                    };
+                }
+                return null;
+            }
+
             const actions = getNotesPayloadActions(payload);
             if (payload && typeof payload === 'object' && Array.isArray(actions)) {
                 return {
@@ -1941,8 +2047,47 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return false;
         }
 
-        return typeof value.type === 'string' &&
-            Object.prototype.hasOwnProperty.call(value, 'content');
+        const type = canonicalizeBlockType(value.type || '');
+        if (!type) {
+            return false;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(value, 'content')) {
+            return true;
+        }
+
+        switch (type) {
+            case 'divider':
+                return true;
+            case 'image':
+                return Boolean(value.url || value.caption || value.text);
+            case 'ai_image':
+                return Boolean(
+                    value.prompt ||
+                    value.text ||
+                    value.imageUrl ||
+                    value.url ||
+                    value.imageAssetId ||
+                    (Array.isArray(value.unsplashResults) && value.unsplashResults.length > 0) ||
+                    (Array.isArray(value.artifactResults) && value.artifactResults.length > 0)
+                );
+            case 'bookmark':
+                return Boolean(value.url || value.title || value.description || value.text);
+            case 'database':
+                return Array.isArray(value.columns) || Array.isArray(value.rows);
+            case 'callout':
+                return Boolean(value.text || value.icon);
+            case 'code':
+                return Boolean(value.text || value.language);
+            case 'math':
+                return Boolean(value.text || value.latex);
+            case 'mermaid':
+                return Boolean(value.text || value.diagramType);
+            case 'ai':
+                return Boolean(value.prompt || value.result || value.text);
+            default:
+                return Boolean(value.text);
+        }
     }
 
     function detectMermaidDiagramType(text) {
@@ -2169,9 +2314,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             /```json/i.test(value) ||
             /"assistant_reply"\s*:/i.test(value) ||
             /"assistantReply"\s*:/i.test(value) ||
+            /"notes-actions"\s*:/i.test(value) ||
             /"(?:actions|operations|edits)"\s*:/i.test(value) ||
-            (/"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i.test(value) &&
-                /"content"\s*:/i.test(value)) ||
+            /"action"\s*:\s*"(?:replace-content|append-content|prepend-content)"/i.test(value) ||
+            /"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i.test(value) ||
             startsWithMermaidResponse(value);
     }
 
@@ -2186,7 +2332,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return genericContent.displayText;
         }
 
-        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"assistantReply"\s*:|"(?:actions|operations|edits)"\s*:|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
+        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"assistantReply"\s*:|"notes-actions"\s*:|"(?:actions|operations|edits)"\s*:|"action"\s*:\s*"(?:replace-content|append-content|prepend-content)"|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
         }
