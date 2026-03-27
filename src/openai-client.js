@@ -2,11 +2,6 @@ const OpenAI = require('openai');
 const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
 const { PROMOTED_LOCAL_TOOL_IDS } = require('./tool-execution-profiles');
-const {
-    buildImagePromptFromArtifactRequest,
-    inferRequestedOutputFormat,
-    shouldPreGenerateImagesForArtifactRequest,
-} = require('./ai-route-utils');
 
 let chatClient = null;
 
@@ -746,6 +741,131 @@ function extractRequestedDirectoryPath(prompt = '') {
     return null;
 }
 
+function hasExplicitArtifactGenerationIntentForPreflight(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(export|download|save|convert|turn\b[\s\S]{0,20}\binto|turn\b[\s\S]{0,20}\bas|format\b[\s\S]{0,20}\bas)\b/i.test(normalized)
+        || /\b(create|make|generate|build|produce|render|prepare|draft)\b[\s\S]{0,60}\b(file|artifact|document|page|report|brief|pdf|html|docx|xml|spreadsheet|excel|workbook|mermaid|diagram|flowchart|sequence diagram|erd|class diagram|state diagram)\b/i.test(normalized)
+        || /\b(as|into|in)\s+(?:an?\s+)?(?:pdf|html|docx|xml|spreadsheet|excel workbook|workbook|mermaid|mmd)\b/i.test(normalized)
+        || /\b(pdf|html|docx|xml|spreadsheet|excel|workbook)\s+(?:file|document|artifact|export)\b/i.test(normalized);
+}
+
+function hasExplicitMermaidArtifactIntentForPreflight(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (/\b(mermaid|\.mmd\b)\b/i.test(normalized)) {
+        return hasExplicitArtifactGenerationIntentForPreflight(normalized)
+            || /\b(mermaid|mmd)\s+(?:file|artifact|diagram|chart|export)\b/i.test(normalized);
+    }
+
+    return /\b(create|make|generate|build|produce|render|export|draw)\b[\s\S]{0,60}\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\b/i.test(normalized)
+        || /\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\s+(?:file|artifact|export)\b/i.test(normalized);
+}
+
+function inferRequestedOutputFormatForPreflight(text = '') {
+    const normalized = String(text || '').toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    const hasArtifactIntent = hasExplicitArtifactGenerationIntentForPreflight(normalized);
+
+    if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
+        || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
+        return 'power-query';
+    }
+
+    if ((/\b(xlsx|spreadsheet|excel|workbook)\b/.test(normalized) && hasArtifactIntent)
+        || /\b(excel|spreadsheet|workbook)\s+(?:file|artifact|export)\b/.test(normalized)) {
+        return 'xlsx';
+    }
+
+    if (/\bpdf\b/.test(normalized) && hasArtifactIntent) {
+        return 'pdf';
+    }
+
+    if (/\b(docx|word document)\b/.test(normalized) && hasArtifactIntent) {
+        return 'docx';
+    }
+
+    if (/\bxml\b/.test(normalized) && hasArtifactIntent) {
+        return 'xml';
+    }
+
+    if (hasExplicitMermaidArtifactIntentForPreflight(normalized)) {
+        return 'mermaid';
+    }
+
+    if (/\bhtml\b/.test(normalized) && hasArtifactIntent) {
+        return 'html';
+    }
+
+    return null;
+}
+
+function hasImplicitImageArtifactFollowupReferenceForPreflight(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(last|latest|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+        || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
+        || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
+}
+
+function hasExplicitImageGenerationIntentForPreflight(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (hasImplicitImageArtifactFollowupReferenceForPreflight(normalized)
+        && !/\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b/i.test(normalized)) {
+        return false;
+    }
+
+    return /\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|illustration|illustrations|render|renders|artwork|cover image|cover art|poster)\b/i.test(normalized)
+        || /\b(text[-\s]?to[-\s]?image|image generation)\b/i.test(normalized)
+        || /\b(image|photo|picture|illustration|render|artwork|poster)\b[\s\S]{0,20}\b(of|showing|depicting|featuring)\b/i.test(normalized);
+}
+
+function shouldPreGenerateImagesForArtifactRequestForPreflight({
+    text = '',
+    outputFormat = null,
+} = {}) {
+    if (!['pdf', 'docx', 'html'].includes(String(outputFormat || '').trim().toLowerCase())) {
+        return false;
+    }
+
+    return hasExplicitImageGenerationIntentForPreflight(text);
+}
+
+function buildImagePromptFromArtifactRequestForPreflight(text = '') {
+    const prompt = String(text || '').trim();
+    if (!prompt) {
+        return '';
+    }
+
+    let cleaned = prompt
+        .replace(/\b(?:and then|then|and)?\s*(?:put|place|embed|include|insert|compile|turn|convert)\b[\s\S]*$/i, '')
+        .replace(/\b(?:for|into|in|as)\s+(?:an?\s+)?(?:pdf|docx|html|document|page|file|artifact|brochure|booklet|report|brief)\b[\s\S]*$/i, '')
+        .replace(/\b(?:make|create|generate|build|produce|prepare)\b[\s\S]{0,20}\b(?:a|an)\s+(?:pdf|docx|html|document|page|file|artifact)\b[\s\S]*$/i, '')
+        .trim();
+
+    if (!cleaned || cleaned.length < 12) {
+        cleaned = prompt;
+    }
+
+    return cleaned;
+}
+
 function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
     const remoteToolId = availableToolIds.has('remote-command')
@@ -764,10 +884,10 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const directoryPath = availableToolIds.has('file-mkdir')
         ? extractRequestedDirectoryPath(prompt)
         : null;
-    const inferredOutputFormat = inferRequestedOutputFormat(prompt);
+    const inferredOutputFormat = inferRequestedOutputFormatForPreflight(prompt);
     const imagePrompt = availableToolIds.has('image-generate')
-        && shouldPreGenerateImagesForArtifactRequest({ text: prompt, outputFormat: inferredOutputFormat })
-        ? buildImagePromptFromArtifactRequest(prompt)
+        && shouldPreGenerateImagesForArtifactRequestForPreflight({ text: prompt, outputFormat: inferredOutputFormat })
+        ? buildImagePromptFromArtifactRequestForPreflight(prompt)
         : null;
     const sshCommand = remoteToolId
         ? extractRequestedSshCommand(prompt)
