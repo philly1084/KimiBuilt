@@ -99,4 +99,97 @@ describe('DashboardController', () => {
       }),
     });
   });
+
+  test('prefers explicit tool and model trace timing over synthesized fallback entries', () => {
+    const controller = new DashboardController(null);
+    const task = controller.recordRuntimeTaskStart({
+      sessionId: 'session-2',
+      input: 'Debug the deployment timeline.',
+      model: 'gpt-test',
+      mode: 'chat',
+      transport: 'http',
+      metadata: {},
+    });
+
+    controller.recordRuntimeTaskComplete(task.id, {
+      responseId: 'resp-2',
+      output: 'Completed the trace review.',
+      model: 'gpt-test',
+      duration: 2200,
+      metadata: {
+        executionTrace: [
+          {
+            type: 'setup',
+            name: 'Conversation setup',
+            status: 'completed',
+            startTime: '2026-03-22T12:00:00.000Z',
+            endTime: '2026-03-22T12:00:20.000Z',
+            details: {},
+          },
+          {
+            type: 'planning',
+            name: 'Plan round 1',
+            status: 'completed',
+            startTime: '2026-03-22T12:00:20.000Z',
+            endTime: '2026-03-22T12:00:20.100Z',
+            details: {},
+          },
+          {
+            type: 'tool_call',
+            name: 'Tool call (ssh-execute)',
+            status: 'completed',
+            startTime: '2026-03-22T12:00:20.100Z',
+            endTime: '2026-03-22T12:00:21.100Z',
+            details: {
+              reason: 'Inspect the remote host',
+              paramKeys: ['command'],
+            },
+          },
+          {
+            type: 'execution',
+            name: 'Execution round 1',
+            status: 'completed',
+            startTime: '2026-03-22T12:00:21.100Z',
+            endTime: '2026-03-22T12:00:21.150Z',
+            details: {},
+          },
+          {
+            type: 'model_call',
+            name: 'Model response (gpt-test)',
+            status: 'completed',
+            startTime: '2026-03-22T12:00:21.150Z',
+            endTime: '2026-03-22T12:00:22.000Z',
+            details: {
+              responseId: 'resp-2',
+            },
+          },
+        ],
+        toolEvents: [
+          {
+            toolCall: {
+              function: {
+                name: 'ssh-execute',
+                arguments: JSON.stringify({ command: 'hostname && uptime' }),
+              },
+            },
+            result: {
+              success: true,
+              duration: 1000,
+              startedAt: '2026-03-22T12:00:20.100Z',
+              endedAt: '2026-03-22T12:00:21.100Z',
+            },
+            reason: 'Inspect the remote host',
+          },
+        ],
+      },
+    });
+
+    const trace = tracesController.addTrace.mock.calls[0][0];
+    const timelineNames = trace.timeline.map((entry) => entry.name);
+
+    expect(timelineNames.filter((name) => name === 'Tool call (ssh-execute)')).toHaveLength(1);
+    expect(timelineNames.filter((name) => name === 'Model response (gpt-test)')).toHaveLength(1);
+    expect(timelineNames.indexOf('Tool call (ssh-execute)')).toBeLessThan(timelineNames.indexOf('Execution round 1'));
+    expect(timelineNames.indexOf('Execution round 1')).toBeLessThan(timelineNames.indexOf('Model response (gpt-test)'));
+  });
 });

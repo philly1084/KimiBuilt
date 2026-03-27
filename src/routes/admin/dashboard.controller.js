@@ -60,14 +60,23 @@ class DashboardController {
       || 'unknown-tool';
     const duration = Number(event?.result?.duration || event?.duration || 0);
     const success = event?.result?.success !== false && event?.success !== false;
-    const timestamp = event?.result?.timestamp || event?.timestamp || new Date().toISOString();
+    const endTime = event?.result?.endedAt
+      || event?.result?.timestamp
+      || event?.endedAt
+      || event?.timestamp
+      || new Date().toISOString();
+    const startTime = event?.result?.startedAt
+      || event?.startedAt
+      || new Date(new Date(endTime).getTime() - Math.max(0, duration)).toISOString();
 
     return {
       toolId,
       success,
       duration,
       reason: event?.reason || '',
-      timestamp,
+      timestamp: endTime,
+      startTime,
+      endTime,
       error: event?.result?.error || event?.error || null,
       paramKeys: Object.keys(rawArgs).sort(),
       dataPreview: typeof event?.result?.data === 'string'
@@ -115,9 +124,53 @@ class DashboardController {
   buildTimeline(task, toolUsage, metadata = {}, { completed = true, responseId = null, output = '', duration = 0, error = '' } = {}) {
     const endTime = completed ? task.completedAt : task.failedAt;
     const executionTrace = this.extractExecutionTrace(metadata, task.createdAt, endTime);
+    const hasExplicitToolCalls = executionTrace.some((step) => step.type === 'tool_call');
+    const hasExplicitModelCall = executionTrace.some((step) => step.type === 'model_call');
+    const fallbackToolSteps = hasExplicitToolCalls
+      ? []
+      : toolUsage.toolEvents.map((event) => ({
+        type: 'tool_call',
+        name: `Tool call (${event.toolId})`,
+        startTime: event.startTime || task.createdAt,
+        endTime: event.endTime || event.timestamp || endTime,
+        duration: Number(event.duration || 0),
+        status: event.success ? 'completed' : 'error',
+        details: {
+          reason: event.reason,
+          paramKeys: event.paramKeys,
+          error: event.error,
+        },
+      }));
+    const fallbackModelStep = hasExplicitModelCall
+      ? []
+      : [
+        completed
+          ? {
+            type: 'model_call',
+            name: `Model response (${task.model})`,
+            startTime: new Date(new Date(endTime).getTime() - Math.max(0, Number(duration || 0))).toISOString(),
+            endTime,
+            duration: Number(duration || 0),
+            status: 'completed',
+            details: {
+              responseId,
+              outputPreview: String(output || '').slice(0, 200),
+            },
+          }
+          : {
+            type: 'model_call',
+            name: `Model request failed (${task.model})`,
+            startTime: new Date(new Date(endTime).getTime() - Math.max(0, Number(duration || 0))).toISOString(),
+            endTime,
+            duration: Number(duration || 0),
+            status: 'error',
+            details: {
+              error,
+            },
+          },
+      ];
     const timeline = [
       {
-        step: 1,
         type: 'request',
         name: `${task.mode} request received`,
         startTime: task.createdAt,
@@ -130,49 +183,28 @@ class DashboardController {
         },
       },
       ...executionTrace,
-      ...toolUsage.toolEvents.map((event) => ({
-        type: 'tool_call',
-        name: `Tool call (${event.toolId})`,
-        startTime: task.createdAt,
-        endTime,
-        duration: Number(event.duration || 0),
-        status: event.success ? 'completed' : 'error',
-        details: {
-          reason: event.reason,
-          paramKeys: event.paramKeys,
-          error: event.error,
-        },
-      })),
-      completed
-        ? {
-          type: 'model_call',
-          name: `Model response (${task.model})`,
-          startTime: task.createdAt,
-          endTime,
-          duration: Number(duration || 0),
-          status: 'completed',
-          details: {
-            responseId,
-            outputPreview: String(output || '').slice(0, 200),
-          },
-        }
-        : {
-          type: 'model_call',
-          name: `Model request failed (${task.model})`,
-          startTime: task.createdAt,
-          endTime,
-          duration: Number(duration || 0),
-          status: 'error',
-          details: {
-            error,
-          },
-        },
+      ...fallbackToolSteps,
+      ...fallbackModelStep,
     ].filter(Boolean);
 
-    return timeline.map((entry, index) => ({
-      step: index + 1,
-      ...entry,
-    }));
+    const orderedTimeline = timeline
+      .map((entry, index) => ({ ...entry, __index: index }))
+      .sort((left, right) => {
+        const leftTime = new Date(left.startTime || task.createdAt).getTime();
+        const rightTime = new Date(right.startTime || task.createdAt).getTime();
+        if (leftTime === rightTime) {
+          return left.__index - right.__index;
+        }
+        return leftTime - rightTime;
+      });
+
+    return orderedTimeline.map((entry, index) => {
+      const { __index, ...rest } = entry;
+      return {
+        step: index + 1,
+        ...rest,
+      };
+    });
   }
 
   buildToolUsageSummary() {

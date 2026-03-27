@@ -3,6 +3,7 @@ jest.mock('./routes/admin/settings.controller', () => ({
 }));
 
 const settingsController = require('./routes/admin/settings.controller');
+const config = require('./config');
 const {
     ConversationOrchestrator,
 } = require('./conversation-orchestrator');
@@ -741,6 +742,123 @@ describe('ConversationOrchestrator', () => {
             'Plan round 4',
             'Execution round 4',
         ]));
+    });
+
+    test('stops autonomous remote-build work within a round when the time budget is exhausted', async () => {
+        const originalMaxMs = config.runtime.remoteBuildMaxAutonomousMs;
+        const nowSpy = jest.spyOn(Date, 'now');
+        let currentNow = 1760000000000;
+        nowSpy.mockImplementation(() => currentNow);
+        config.runtime.remoteBuildMaxAutonomousMs = 1000;
+
+        try {
+            settingsController.getEffectiveSshConfig.mockReturnValue({
+                enabled: true,
+                host: '10.0.0.5',
+                port: 22,
+                username: 'ubuntu',
+                password: 'secret',
+                privateKeyPath: '',
+            });
+
+            const llmClient = {
+                createResponse: jest.fn().mockImplementation(async () => {
+                    currentNow += 50;
+                    return buildResponse('Stopped after the budget ran out during the round.', 'resp_budget_stop');
+                }),
+                complete: jest.fn().mockImplementation(async () => {
+                    currentNow += 100;
+                    return JSON.stringify({
+                        steps: [
+                            {
+                                tool: 'remote-command',
+                                reason: 'Inspect the ingress first',
+                                params: {
+                                    command: 'kubectl get ingress -A',
+                                },
+                            },
+                            {
+                                tool: 'remote-command',
+                                reason: 'Reload nginx after the ingress check',
+                                params: {
+                                    command: 'sudo nginx -s reload',
+                                },
+                            },
+                        ],
+                    });
+                }),
+            };
+
+            const toolManager = {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+                executeTool: jest.fn().mockImplementation(async () => {
+                    currentNow += 1200;
+                    return {
+                        success: true,
+                        toolId: 'remote-command',
+                        duration: 1200,
+                        data: {
+                            stdout: 'ok',
+                            stderr: '',
+                            host: '10.0.0.5:22',
+                        },
+                    };
+                }),
+            };
+            const sessionStore = {
+                get: jest.fn().mockResolvedValue({ id: 'session-budget-stop', metadata: {} }),
+                getOrCreate: jest.fn().mockResolvedValue({ id: 'session-budget-stop', metadata: {} }),
+                getRecentMessages: jest.fn().mockResolvedValue([]),
+                recordResponse: jest.fn().mockResolvedValue(undefined),
+                appendMessages: jest.fn().mockResolvedValue(undefined),
+                update: jest.fn().mockResolvedValue(undefined),
+            };
+            const memoryService = {
+                process: jest.fn().mockResolvedValue([]),
+                rememberResponse: jest.fn(),
+            };
+
+            const orchestrator = new ConversationOrchestrator({
+                llmClient,
+                toolManager,
+                sessionStore,
+                memoryService,
+            });
+
+            const result = await orchestrator.executeConversation({
+                input: 'Use remote-build to keep going through the routine server checks.',
+                sessionId: 'session-budget-stop',
+                executionProfile: 'remote-build',
+                stream: false,
+                metadata: {
+                    remoteBuildAutonomyApproved: true,
+                },
+            });
+
+            expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+            expect(result.response.metadata.executionTrace.find((entry) => entry.name === 'Execution round 1')).toMatchObject({
+                details: expect.objectContaining({
+                    plannedToolCalls: 2,
+                    toolCalls: 1,
+                    skippedPlannedSteps: 1,
+                    budgetExceeded: true,
+                }),
+            });
+            expect(result.response.metadata.executionTrace.find((entry) => entry.name === 'Autonomous execution time budget reached')).toMatchObject({
+                details: expect.objectContaining({
+                    phase: 'during-round',
+                    maxDurationMs: 1000,
+                }),
+            });
+        } finally {
+            config.runtime.remoteBuildMaxAutonomousMs = originalMaxMs;
+            nowSpy.mockRestore();
+        }
     });
 
     test('continues autonomous remote-build work after a recoverable remote-command failure', async () => {

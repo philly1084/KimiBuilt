@@ -1268,6 +1268,19 @@ function summarizeToolEventsForPlanner(toolEvents = []) {
         }));
 }
 
+function toIsoTimestamp(value, fallback = null) {
+    if (!value) {
+        return fallback;
+    }
+
+    const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    if (Number.isNaN(timestamp)) {
+        return fallback;
+    }
+
+    return new Date(timestamp).toISOString();
+}
+
 function createExecutionTraceEntry({
     type = 'info',
     name = 'Runtime step',
@@ -1288,6 +1301,28 @@ function createExecutionTraceEntry({
         duration: Math.max(0, new Date(endTime).getTime() - new Date(startTime).getTime()),
         details,
     };
+}
+
+function appendModelResponseTrace(executionTrace = [], response = null, {
+    startedAt = null,
+    phase = 'final-response',
+} = {}) {
+    if (!Array.isArray(executionTrace) || !response) {
+        return;
+    }
+
+    const endedAt = new Date().toISOString();
+    executionTrace.push(createExecutionTraceEntry({
+        type: 'model_call',
+        name: `Model response (${response.model || 'unknown'})`,
+        startedAt,
+        endedAt,
+        details: {
+            phase,
+            responseId: response.id || null,
+            outputPreview: truncateText(extractResponseText(response), 200),
+        },
+    }));
 }
 
 function getRemoteBuildAutonomyBudget() {
@@ -1344,14 +1379,22 @@ function sanitizeValue(value, depth = 0) {
     );
 }
 
-function normalizeToolResult(result, fallbackToolId) {
+function normalizeToolResult(result, fallbackToolId, timing = {}) {
+    const endTime = toIsoTimestamp(timing?.endedAt || result?.endedAt || result?.timestamp, new Date().toISOString());
+    const explicitStartTime = toIsoTimestamp(timing?.startedAt || result?.startedAt, null);
+    const fallbackStartTime = explicitStartTime
+        || toIsoTimestamp(new Date(new Date(endTime).getTime() - Math.max(0, Number(result?.duration || 0))), endTime);
+    const durationFromTimestamps = Math.max(0, new Date(endTime).getTime() - new Date(fallbackStartTime).getTime());
+
     return {
         success: result?.success !== false,
         toolId: result?.toolId || fallbackToolId,
-        duration: result?.duration || 0,
+        duration: Number(result?.duration || durationFromTimestamps || 0),
         data: sanitizeValue(result?.data),
         error: result?.error || null,
-        timestamp: result?.timestamp || new Date().toISOString(),
+        timestamp: endTime,
+        startedAt: fallbackStartTime,
+        endedAt: endTime,
     };
 }
 
@@ -1481,9 +1524,11 @@ class ConversationOrchestrator extends EventEmitter {
         memoryInput = '',
     } = {}) {
         const startedAt = Date.now();
+        const setupStartedAt = new Date().toISOString();
         const resolvedProfile = normalizeExecutionProfile(executionProfile);
         const objective = extractObjective(input, memoryInput);
         const runtimeToolManager = toolManager || this.toolManager;
+        let executionTrace = [];
         const session = this.sessionStore?.getOrCreate
             ? await this.sessionStore.getOrCreate(sessionId, { mode: taskType })
             : (this.sessionStore?.get ? await this.sessionStore.get(sessionId) : null);
@@ -1522,7 +1567,12 @@ class ConversationOrchestrator extends EventEmitter {
         let toolEvents = [];
         let plan = [];
         let runtimeMode = 'plain';
-        let executionTrace = [];
+        const traceModelResponse = (response, phase = 'final-response', startedAtOverride = null) => {
+            appendModelResponseTrace(executionTrace, response, {
+                phase,
+                startedAt: startedAtOverride,
+            });
+        };
         const requestedAutonomyApproval = Boolean(
             metadata?.remoteBuildAutonomyApproved
             || metadata?.remote_build_autonomy_approved
@@ -1549,6 +1599,19 @@ class ConversationOrchestrator extends EventEmitter {
         const autonomyDeadline = autonomyApproved ? startedAt + autonomyBudget.maxDurationMs : startedAt;
 
         try {
+            executionTrace.push(createExecutionTraceEntry({
+                type: 'setup',
+                name: 'Conversation setup',
+                startedAt: setupStartedAt,
+                endedAt: new Date().toISOString(),
+                details: {
+                    executionProfile: resolvedProfile,
+                    contextMessages: resolvedContextMessages.length,
+                    recentMessages: resolvedRecentMessages.length,
+                    toolCandidates: toolPolicy.candidateToolIds.length,
+                },
+            }));
+
             if (resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'approval',
@@ -1576,6 +1639,7 @@ class ConversationOrchestrator extends EventEmitter {
                         name: 'Autonomous execution time budget reached',
                         details: {
                             round,
+                            phase: 'before-round',
                             maxRounds: maxAutonomousRounds,
                             toolCalls: toolEvents.length,
                             maxToolCalls: maxAutonomousToolCalls,
@@ -1685,10 +1749,31 @@ class ConversationOrchestrator extends EventEmitter {
                     break;
                 }
 
+                if (autonomyApproved && Date.now() >= autonomyDeadline) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'budget',
+                        name: 'Autonomous execution time budget reached',
+                        details: {
+                            round,
+                            phase: 'after-planning',
+                            pendingPlanSteps: nextPlan.length,
+                            maxRounds: maxAutonomousRounds,
+                            toolCalls: toolEvents.length,
+                            maxToolCalls: maxAutonomousToolCalls,
+                            elapsedMs: Date.now() - startedAt,
+                            maxDurationMs: autonomyBudget.maxDurationMs,
+                        },
+                    }));
+                    break;
+                }
+
                 plan.push(...nextPlan);
                 const executionStartedAt = new Date().toISOString();
 
-                const roundToolEvents = await this.executePlan({
+                const {
+                    toolEvents: roundToolEvents,
+                    budgetExceeded,
+                } = await this.executePlan({
                     plan: nextPlan,
                     toolManager: runtimeToolManager,
                     sessionId,
@@ -1697,6 +1782,9 @@ class ConversationOrchestrator extends EventEmitter {
                     objective,
                     session,
                     recentMessages: resolvedRecentMessages,
+                    autonomyDeadline: autonomyApproved ? autonomyDeadline : null,
+                    executionTrace,
+                    round,
                 });
 
                 toolEvents.push(...roundToolEvents);
@@ -1713,8 +1801,11 @@ class ConversationOrchestrator extends EventEmitter {
                     status: roundFailed ? 'error' : 'completed',
                     details: {
                         round,
+                        plannedToolCalls: nextPlan.length,
                         toolCalls: roundToolEvents.length,
+                        skippedPlannedSteps: Math.max(0, nextPlan.length - roundToolEvents.length),
                         failed: roundFailed,
+                        budgetExceeded,
                         blockingFailure: blockingRoundFailure,
                         tools: roundToolEvents.map((event) => ({
                             tool: event?.toolCall?.function?.name || '',
@@ -1730,6 +1821,24 @@ class ConversationOrchestrator extends EventEmitter {
                         })),
                     },
                 }));
+
+                if (autonomyApproved && budgetExceeded) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'budget',
+                        name: 'Autonomous execution time budget reached',
+                        details: {
+                            round,
+                            phase: 'during-round',
+                            maxRounds: maxAutonomousRounds,
+                            toolCalls: toolEvents.length,
+                            maxToolCalls: maxAutonomousToolCalls,
+                            elapsedMs: Date.now() - startedAt,
+                            maxDurationMs: autonomyBudget.maxDurationMs,
+                            skippedPlannedSteps: Math.max(0, nextPlan.length - roundToolEvents.length),
+                        },
+                    }));
+                    break;
+                }
 
                 if (autonomyApproved && roundFailed && !blockingRoundFailure) {
                     executionTrace.push(createExecutionTraceEntry({
@@ -1750,6 +1859,7 @@ class ConversationOrchestrator extends EventEmitter {
                 }
             }
 
+            const finalResponseStartedAt = new Date().toISOString();
             finalResponse = await this.buildFinalResponse({
                 input,
                 objective,
@@ -1765,6 +1875,7 @@ class ConversationOrchestrator extends EventEmitter {
                 autonomyApproved,
                 executionTrace,
             });
+            traceModelResponse(finalResponse, toolEvents.length > 0 ? 'tool-synthesis' : 'direct-response', finalResponseStartedAt);
 
             output = extractResponseText(finalResponse);
             if (canRecoverFromInvalidRuntimeResponse({ output, toolEvents, toolPolicy })) {
@@ -1800,7 +1911,9 @@ class ConversationOrchestrator extends EventEmitter {
                     }));
 
                     const recoveryExecutionStartedAt = new Date().toISOString();
-                    const recoveryToolEvents = await this.executePlan({
+                    const {
+                        toolEvents: recoveryToolEvents,
+                    } = await this.executePlan({
                         plan: filteredRecoveryPlan,
                         toolManager: runtimeToolManager,
                         sessionId,
@@ -1809,6 +1922,7 @@ class ConversationOrchestrator extends EventEmitter {
                         objective,
                         session,
                         recentMessages: resolvedRecentMessages,
+                        executionTrace,
                     });
                     toolEvents.push(...recoveryToolEvents);
                     recordExecutedStepSignatures(recoveryToolEvents, executedStepSignatures, executedStepSignatureCounts);
@@ -1828,6 +1942,7 @@ class ConversationOrchestrator extends EventEmitter {
                         },
                     }));
 
+                    const recoveredResponseStartedAt = new Date().toISOString();
                     finalResponse = await this.buildFinalResponse({
                         input,
                         objective,
@@ -1843,6 +1958,7 @@ class ConversationOrchestrator extends EventEmitter {
                         autonomyApproved,
                         executionTrace,
                     });
+                    traceModelResponse(finalResponse, 'recovery-synthesis', recoveredResponseStartedAt);
                     output = extractResponseText(finalResponse);
                 }
             }
@@ -1867,6 +1983,7 @@ class ConversationOrchestrator extends EventEmitter {
                     autonomyApproved,
                     executionTrace,
                 });
+                traceModelResponse(finalResponse, 'repair', repairStartedAt);
                 output = extractResponseText(finalResponse);
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'repair',
@@ -2477,13 +2594,25 @@ class ConversationOrchestrator extends EventEmitter {
         objective = '',
         session = null,
         recentMessages = [],
+        autonomyDeadline = null,
+        executionTrace = [],
+        round = null,
     }) {
         const toolEvents = [];
+        let budgetExceeded = false;
         if (!toolManager) {
-            return toolEvents;
+            return {
+                toolEvents,
+                budgetExceeded,
+            };
         }
 
         for (let index = 0; index < plan.length; index += 1) {
+            if (Number.isFinite(autonomyDeadline) && Date.now() >= autonomyDeadline) {
+                budgetExceeded = true;
+                break;
+            }
+
             const step = this.normalizePlannedStep(plan[index], {
                 objective,
                 session,
@@ -2498,6 +2627,7 @@ class ConversationOrchestrator extends EventEmitter {
                     arguments: JSON.stringify(step.params || {}),
                 },
             };
+            const toolStartedAt = new Date().toISOString();
 
             try {
                 const result = await toolManager.executeTool(step.tool, step.params || {}, {
@@ -2510,31 +2640,71 @@ class ConversationOrchestrator extends EventEmitter {
                     timestamp: new Date().toISOString(),
                     ...toolContext,
                 });
+                const toolEndedAt = new Date().toISOString();
+                const normalizedResult = normalizeToolResult(result, step.tool, {
+                    startedAt: toolStartedAt,
+                    endedAt: toolEndedAt,
+                });
 
                 toolEvents.push({
                     toolCall,
-                    result: normalizeToolResult(result, step.tool),
+                    result: normalizedResult,
                     reason: step.reason,
                 });
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'tool_call',
+                    name: `Tool call (${step.tool})`,
+                    startedAt: normalizedResult.startedAt,
+                    endedAt: normalizedResult.endedAt,
+                    status: normalizedResult.success ? 'completed' : 'error',
+                    details: {
+                        round,
+                        reason: step.reason,
+                        paramKeys: Object.keys(step.params || {}).sort(),
+                        error: normalizedResult.error || null,
+                    },
+                }));
+                budgetExceeded = budgetExceeded || (Number.isFinite(autonomyDeadline) && Date.now() >= autonomyDeadline);
 
-                if (result?.success === false) {
+                if (result?.success === false || budgetExceeded) {
                     break;
                 }
             } catch (error) {
+                const toolEndedAt = new Date().toISOString();
+                const normalizedResult = normalizeToolResult({
+                    success: false,
+                    toolId: step.tool,
+                    error: error.message,
+                    startedAt: toolStartedAt,
+                    endedAt: toolEndedAt,
+                }, step.tool);
                 toolEvents.push({
                     toolCall,
-                    result: normalizeToolResult({
-                        success: false,
-                        toolId: step.tool,
-                        error: error.message,
-                    }, step.tool),
+                    result: normalizedResult,
                     reason: step.reason,
                 });
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'tool_call',
+                    name: `Tool call (${step.tool})`,
+                    startedAt: normalizedResult.startedAt,
+                    endedAt: normalizedResult.endedAt,
+                    status: 'error',
+                    details: {
+                        round,
+                        reason: step.reason,
+                        paramKeys: Object.keys(step.params || {}).sort(),
+                        error: normalizedResult.error || null,
+                    },
+                }));
+                budgetExceeded = budgetExceeded || (Number.isFinite(autonomyDeadline) && Date.now() >= autonomyDeadline);
                 break;
             }
         }
 
-        return toolEvents;
+        return {
+            toolEvents,
+            budgetExceeded,
+        };
     }
 
     async repairInvalidFinalResponse({
