@@ -140,6 +140,12 @@ function inferExecutionProfile(payload = {}) {
             || '',
         ).trim().toLowerCase(),
     );
+    const stickyRemoteTarget = Boolean(
+        payload?.session?.metadata?.lastSshTarget?.host
+        || payload?.session?.metadata?.remoteWorkingState?.target?.host
+        || payload?.metadata?.lastSshTarget?.host,
+    );
+    const stickyRemoteContext = stickyRemoteIntent || stickyRemoteTarget;
     const pageEditIntent = normalized
         ? [
             /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
@@ -168,16 +174,29 @@ function inferExecutionProfile(payload = {}) {
         /^(continue|proceed|next|go ahead|do it|do that|finish|use remote-build|use the remote build)\b/,
         /\b(next step|next steps|keep going|from this page|from there|on the server|against the server)\b/,
     ].some((pattern) => pattern.test(normalized));
+    const stickyRemoteWorkIntent = stickyRemoteContext && [
+        /^(continue|proceed|next|go ahead|do it|do that|finish|retry|try again|rerun|re-run|resume|keep going|keep working)\b/,
+        /\b(replace|update|deploy|publish|push|upload|install|restart|reload|rollout|fix|repair|override|swap|remove|copy)\b[\s\S]{0,50}\b(site|website|app|application|game|frontend|ingress|deployment|service|pod|html|index\.html|homepage|landing)\b/,
+        /\b(put|get|bring|take)\b[\s\S]{0,30}\b(live|online|running|deployed|serving)\b/,
+        /\b(remote command into|ssh into|connect to)\b[\s\S]{0,30}\b(server|host|machine)\b/,
+        /\b(on|to|for)\b[\s\S]{0,20}\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/,
+        /\b(current html|index\.html|site html|website html)\b/,
+        /\b(game|website|site|app)\b[\s\S]{0,30}\b(live|online|deployment|ingress|domain|dns|tls)\b/,
+    ].some((pattern) => pattern.test(normalized));
 
     if (requestedNotesProfile) {
         if (pageEditIntent) {
             return NOTES_EXECUTION_PROFILE;
         }
 
-        return (remoteBuildIntent || remoteContinuationIntent) ? REMOTE_BUILD_EXECUTION_PROFILE : NOTES_EXECUTION_PROFILE;
+        return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent)
+            ? REMOTE_BUILD_EXECUTION_PROFILE
+            : NOTES_EXECUTION_PROFILE;
     }
 
-    return remoteBuildIntent ? REMOTE_BUILD_EXECUTION_PROFILE : DEFAULT_EXECUTION_PROFILE;
+    return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent)
+        ? REMOTE_BUILD_EXECUTION_PROFILE
+        : DEFAULT_EXECUTION_PROFILE;
 }
 
 async function executeConversationRuntime(app, params = {}) {

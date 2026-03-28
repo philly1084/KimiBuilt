@@ -579,6 +579,23 @@ select:focus-visible,
     color: var(--text-primary);
 }
 
+.remote-autonomy-btn {
+    border: 1px solid var(--border);
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.remote-autonomy-btn:hover {
+    border-color: var(--accent);
+    background-color: var(--bg-hover);
+}
+
+.remote-autonomy-btn.is-active {
+    border-color: rgba(34, 197, 94, 0.45);
+    background-color: rgba(34, 197, 94, 0.14);
+    color: var(--success);
+}
+
 .model-selector-btn {
     display: flex;
     align-items: center;

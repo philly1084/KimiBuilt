@@ -188,4 +188,32 @@ describe('runtime-execution', () => {
             ],
         })).toBe('default');
     });
+
+    test('keeps sticky remote sessions in remote-build mode for deployment-style follow-ups without explicit ssh keywords', () => {
+        expect(inferExecutionProfile({
+            input: 'replace the current html with the tic tac toe game and get it live on game.demoserver2.buzz',
+            session: {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '162.55.163.199',
+                    },
+                },
+            },
+        })).toBe('remote-build');
+    });
+
+    test('does not force generic local content creation into remote-build just because a remote session exists', () => {
+        expect(inferExecutionProfile({
+            input: 'Make me a page about dolphins.',
+            session: {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '162.55.163.199',
+                    },
+                },
+            },
+        })).toBe('default');
+    });
 });

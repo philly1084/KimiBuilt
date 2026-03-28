@@ -10,7 +10,18 @@
         : `${window.location.protocol}//${window.location.host}`;
     const V1_BASE = `${API_BASE}/v1`;
     const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
-    const WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED = false;
+    const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
+
+    function isRemoteBuildAutonomyApproved() {
+        try {
+            const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
+                ?? window.localStorage?.getItem?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
+                ?? '';
+            return ['1', 'true', 'yes', 'on'].includes(String(stored || '').trim().toLowerCase());
+        } catch (_error) {
+            return false;
+        }
+    }
 
     const state = {
         artifacts: [],
@@ -603,7 +614,7 @@
                     clientSurface: 'web-chat',
                 },
             };
-            if (WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED) {
+            if (isRemoteBuildAutonomyApproved()) {
                 params.metadata.remoteBuildAutonomyApproved = true;
             }
             if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {

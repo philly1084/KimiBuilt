@@ -15,7 +15,7 @@ const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 const WEB_CHAT_TASK_TYPE = 'chat';
 const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
-const WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED = false;
+const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -26,6 +26,17 @@ const RETRY_CONFIG = {
 };
 
 const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+
+function isRemoteBuildAutonomyApproved() {
+    try {
+        const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
+            ?? window.localStorage?.getItem?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
+            ?? '';
+        return ['1', 'true', 'yes', 'on'].includes(String(stored || '').trim().toLowerCase());
+    } catch (_error) {
+        return false;
+    }
+}
 
 class OpenAIAPIClient extends EventTarget {
     constructor() {
@@ -252,7 +263,7 @@ class OpenAIAPIClient extends EventTarget {
             },
         };
 
-        if (WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED) {
+        if (isRemoteBuildAutonomyApproved()) {
             params.metadata.remoteBuildAutonomyApproved = true;
         }
 
@@ -551,7 +562,7 @@ class OpenAIAPIClient extends EventTarget {
             },
         };
 
-        if (WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED) {
+        if (isRemoteBuildAutonomyApproved()) {
             params.metadata.remoteBuildAutonomyApproved = true;
         }
 

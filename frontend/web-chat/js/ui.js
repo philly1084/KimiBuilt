@@ -25,10 +25,13 @@ class UIHelpers {
         this.availableImageModels = [];
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         const savedReasoningEffort = window.sessionManager?.safeStorageGet?.('kimibuilt_reasoning_effort');
+        const savedRemoteAutonomy = window.sessionManager?.safeStorageGet?.('kimibuilt_remote_build_autonomy');
         this.currentModel = savedModel || 'gpt-4o';
         this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
+        this.remoteBuildAutonomyApproved = ['1', 'true', 'yes', 'on'].includes(String(savedRemoteAutonomy || '').trim().toLowerCase());
         this.updateModelUI();
         this.updateReasoningUI();
+        this.updateRemoteBuildAutonomyUI();
         
         // Track last focused element for focus management
         this.lastFocusedElement = null;
@@ -1678,6 +1681,10 @@ class UIHelpers {
         return this.normalizeReasoningEffort(this.currentReasoningEffort);
     }
 
+    isRemoteBuildAutonomyApproved() {
+        return this.remoteBuildAutonomyApproved === true;
+    }
+
     setCurrentReasoningEffort(value) {
         this.currentReasoningEffort = this.normalizeReasoningEffort(value);
         if (this.currentReasoningEffort) {
@@ -1689,6 +1696,37 @@ class UIHelpers {
         window.dispatchEvent(new CustomEvent('reasoningChanged', {
             detail: { reasoningEffort: this.currentReasoningEffort || null }
         }));
+    }
+
+    updateRemoteBuildAutonomyUI() {
+        const button = document.getElementById('remote-autonomy-btn');
+        if (!button) {
+            return;
+        }
+
+        const enabled = this.isRemoteBuildAutonomyApproved();
+        button.classList.toggle('is-active', enabled);
+        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        button.title = enabled
+            ? 'Remote server autonomy: On'
+            : 'Remote server autonomy: Off';
+    }
+
+    setRemoteBuildAutonomyApproved(value) {
+        this.remoteBuildAutonomyApproved = value === true;
+        if (this.remoteBuildAutonomyApproved) {
+            window.sessionManager?.safeStorageSet?.('kimibuilt_remote_build_autonomy', 'true');
+        } else {
+            window.sessionManager?.safeStorageRemove?.('kimibuilt_remote_build_autonomy');
+        }
+        this.updateRemoteBuildAutonomyUI();
+        window.dispatchEvent(new CustomEvent('remoteBuildAutonomyChanged', {
+            detail: { approved: this.remoteBuildAutonomyApproved }
+        }));
+    }
+
+    toggleRemoteBuildAutonomy() {
+        this.setRemoteBuildAutonomyApproved(!this.isRemoteBuildAutonomyApproved());
     }
 
     getCurrentModel() {
@@ -3261,6 +3299,13 @@ class UIHelpers {
         if (reasoningSelect) {
             reasoningSelect.addEventListener('change', (e) => {
                 this.setCurrentReasoningEffort(e.target.value);
+            });
+        }
+
+        const remoteAutonomyBtn = document.getElementById('remote-autonomy-btn');
+        if (remoteAutonomyBtn) {
+            remoteAutonomyBtn.addEventListener('click', () => {
+                this.toggleRemoteBuildAutonomy();
             });
         }
 
