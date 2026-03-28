@@ -462,6 +462,43 @@ GUIDELINES:
         ].some((pattern) => pattern.test(normalized));
     }
 
+    function hasNonPageRuntimeIntent(question = '', requestOptions = {}) {
+        if (requestOptions?.outputFormat) {
+            return true;
+        }
+
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return /\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|container|ingress|traefik|dns|tls|acme|cert|debug|troubleshoot|logs|research|search the web|browse|scrape|tool call|tool use)\b/.test(normalized);
+    }
+
+    function isImplicitPageBuildIntent(question = '', context = null, requestOptions = {}) {
+        if (hasNonPageRuntimeIntent(question, requestOptions)) {
+            return false;
+        }
+
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        const pageWritingVerb = /\b(create|make|build|draft|write|expand|fill out|flesh out|continue|finish|polish|rewrite|turn|convert|organize|restructure|rework|improve|work on)\b/.test(normalized);
+        const pageTarget = /\b(page|notes|note|document|doc|brief|report|spec|plan|guide|proposal|outline|section|content)\b/.test(normalized);
+        const contextSurface = (context?.blockCount || 0) > 0 || (context?.outline?.length || 0) > 0;
+        const asksForFullerContent = /\b(more detail|more details|fill it out|flesh it out|expand it|make it better|make it fuller|build it out|finish the page|work on the page)\b/.test(normalized);
+
+        return (pageWritingVerb && (pageTarget || contextSurface)) || asksForFullerContent;
+    }
+
+    function shouldForcePageEditActions(question = '', context = null, requestOptions = {}) {
+        return isExplicitPageEditIntent(question)
+            || isImplicitPageBuildIntent(question, context, requestOptions)
+            || shouldUseMultiPassNotesDraft(question, context, requestOptions);
+    }
+
     function looksLikeShortAcknowledgement(text = '') {
         const normalized = String(text || '').replace(/\s+/g, ' ').trim();
         if (!normalized) {
@@ -1225,7 +1262,19 @@ GUIDELINES:
         });
     }
 
-    function buildFallbackNotesActionsFromText(sourceText = '') {
+    function shouldPreferRebuildFallback(question = '', context = null, blocks = [], sourceText = '') {
+        const normalized = String(question || '').trim().toLowerCase();
+        const existingBlockCount = Number(context?.blockCount || 0);
+        const generatedBlockCount = Array.isArray(blocks) ? blocks.length : 0;
+        const substantialText = String(sourceText || '').trim().length > 500;
+        const structuralRequest = /\b(create|make|build|draft|write|expand|fill out|flesh out|turn|convert|organize|restructure|report|brief|spec|plan|guide|proposal|page)\b/.test(normalized);
+
+        return pageHasOnlyPlaceholderContent()
+            || (generatedBlockCount >= 4 && (existingBlockCount <= 3 || structuralRequest))
+            || (substantialText && existingBlockCount <= 2);
+    }
+
+    function buildFallbackNotesActionsFromText(question = '', sourceText = '', context = null) {
         const { importedPage, blocks } = extractPreferredBlocksFromSourceText(sourceText);
 
         if (!blocks.length) {
@@ -1244,7 +1293,18 @@ GUIDELINES:
             });
         }
 
-        if (pageHasOnlyPlaceholderContent()) {
+        if (shouldPreferRebuildFallback(question, context, blocks, sourceText)) {
+            const rebuildAction = {
+                op: 'rebuild_page',
+                blocks
+            };
+
+            if (importedTitle) {
+                rebuildAction.title = importedTitle;
+            }
+
+            actions.push(rebuildAction);
+        } else if (pageHasOnlyPlaceholderContent()) {
             const firstBlockId = getPageRootBlocks()[0]?.id || null;
             if (firstBlockId) {
                 actions.push({
@@ -1281,12 +1341,12 @@ GUIDELINES:
         };
     }
 
-    function buildFallbackPageEditResponse(question = '', responseText = '') {
+    function buildFallbackPageEditResponse(question = '', responseText = '', context = null) {
         const directResponse = unwrapGenericResponseContent(responseText);
         const preferredSource = directResponse && !looksLikeShortAcknowledgement(directResponse)
             ? directResponse
             : getLastSubstantialAssistantMessage(directResponse);
-        const actions = buildFallbackNotesActionsFromText(preferredSource);
+        const actions = buildFallbackNotesActionsFromText(question, preferredSource, context);
 
         if (!actions || actions.length === 0) {
             return null;
@@ -1298,6 +1358,74 @@ GUIDELINES:
                 : 'Added that to the page.',
             appliedCount: applyNotesActions(actions).appliedCount
         };
+    }
+
+    async function repairNotesPageEditResponse({
+        apiClient,
+        model,
+        systemPrompt,
+        question,
+        previousResponse,
+        requestOptions = {},
+    }) {
+        const repairPrompt = `${systemPrompt}
+
+Repair pass: the previous assistant reply did not apply changes to the current notes page.
+Return only a valid JSON notes-actions payload.
+Do not return plain chat prose outside the JSON payload.
+If the request is for a substantial page, brief, report, plan, or rewrite, prefer rebuild_page or replace_block over a tiny append.`;
+
+        const repairResponse = await apiClient.chat([
+            { role: 'system', content: repairPrompt },
+            {
+                role: 'user',
+                content: `Original request:\n${question}\n\nPrevious failed reply:\n${previousResponse || '(empty)'}\n\nReturn notes-actions that directly update the current notes page.`
+            }
+        ], model, requestOptions);
+
+        if (repairResponse?.error) {
+            throw new Error(repairResponse.content || 'Notes repair pass failed');
+        }
+
+        return repairResponse?.content || '';
+    }
+
+    function summarizeAppliedNotesActions(actions = [], appliedCount = 0) {
+        const normalizedActions = Array.isArray(actions) ? actions : [];
+        if (normalizedActions.length === 0 || appliedCount <= 0) {
+            return '';
+        }
+
+        const insertedBlockCount = normalizedActions.reduce((total, action) => {
+            if (Array.isArray(action?.blocks)) {
+                return total + action.blocks.length;
+            }
+            return total + (action?.content ? 1 : 0);
+        }, 0);
+
+        if (normalizedActions.some((action) => action?.op === 'rebuild_page' || action?.op === 'replace_page')) {
+            return insertedBlockCount > 0
+                ? `Rebuilt the page with ${insertedBlockCount} block${insertedBlockCount === 1 ? '' : 's'}.`
+                : 'Rebuilt the page structure.';
+        }
+
+        if (normalizedActions.some((action) => action?.op === 'replace_block')) {
+            return insertedBlockCount > 0
+                ? `Reworked the page with ${insertedBlockCount} updated block${insertedBlockCount === 1 ? '' : 's'}.`
+                : `Updated ${appliedCount} page change${appliedCount === 1 ? '' : 's'}.`;
+        }
+
+        if (normalizedActions.some((action) => ['append_to_page', 'prepend_to_page', 'insert_after', 'insert_before'].includes(action?.op))) {
+            return insertedBlockCount > 0
+                ? `Added ${insertedBlockCount} new block${insertedBlockCount === 1 ? '' : 's'} to the page.`
+                : `Added content to the page in ${appliedCount} step${appliedCount === 1 ? '' : 's'}.`;
+        }
+
+        if (normalizedActions.some((action) => action?.op === 'update_block')) {
+            return `Updated ${appliedCount} block${appliedCount === 1 ? '' : 's'} on the page.`;
+        }
+
+        return `Applied ${appliedCount} page change${appliedCount === 1 ? '' : 's'}.`;
     }
 
     function normalizeHiddenDraftResult(text = '', fallback = null) {
@@ -2715,12 +2843,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             }
         }
 
-        const fallbackReply = applied.appliedCount > 0
-            ? `Applied ${applied.appliedCount} page change${applied.appliedCount === 1 ? '' : 's'}.`
-            : '';
+        const fallbackReply = summarizeAppliedNotesActions(parsed.actions, applied.appliedCount);
+        const shouldUseFallbackReply = !parsed.displayText || looksLikeShortAcknowledgement(parsed.displayText);
 
         return {
-            displayText: parsed.displayText || fallbackReply || (parsed.parseFailed
+            displayText: (shouldUseFallbackReply ? fallbackReply : parsed.displayText) || (parsed.parseFailed
                 ? 'I prepared page updates, but the response could not be applied automatically. Please try again.'
                 : ''),
             appliedCount: applied.appliedCount
@@ -4436,7 +4563,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                 attemptedModels.push(model);
                 const useMultiPassDraft = shouldUseMultiPassNotesDraft(question, context, requestOptions);
-                const effectiveQuestion = explicitPageEditIntent
+                const forcePageEditActions = shouldForcePageEditActions(question, context, requestOptions);
+                const effectiveQuestion = forcePageEditActions
                     ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Do not reply with chat prose alone.`
                     : question;
                 let messages = [
@@ -4573,10 +4701,35 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         };
                     }
 
-                    if (explicitPageEditIntent && preparedResponse.appliedCount === 0) {
-                        const fallbackPageEdit = buildFallbackPageEditResponse(question, responseText);
+                    if (forcePageEditActions && preparedResponse.appliedCount === 0) {
+                        const fallbackPageEdit = buildFallbackPageEditResponse(question, responseText, context);
                         if (fallbackPageEdit?.appliedCount > 0) {
                             preparedResponse = fallbackPageEdit;
+                        } else {
+                            try {
+                                const repairedResponseText = await repairNotesPageEditResponse({
+                                    apiClient,
+                                    model,
+                                    systemPrompt,
+                                    question: effectiveQuestion,
+                                    previousResponse: responseText,
+                                    requestOptions,
+                                });
+
+                                if (repairedResponseText && repairedResponseText !== responseText) {
+                                    responseText = repairedResponseText;
+                                    preparedResponse = prepareAssistantResponse(repairedResponseText);
+                                }
+
+                                if (preparedResponse.appliedCount === 0) {
+                                    const repairedFallbackPageEdit = buildFallbackPageEditResponse(question, responseText, context);
+                                    if (repairedFallbackPageEdit?.appliedCount > 0) {
+                                        preparedResponse = repairedFallbackPageEdit;
+                                    }
+                                }
+                            } catch (repairError) {
+                                console.warn('Notes page-edit repair pass failed:', repairError);
+                            }
                         }
                     }
 
