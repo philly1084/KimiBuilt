@@ -997,6 +997,125 @@ describe('ConversationOrchestrator', () => {
         }
     });
 
+    test('extends the autonomous round budget when remote-build work is still productive', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const originalRounds = config.config.runtime.remoteBuildMaxAutonomousRounds;
+        const originalToolCalls = config.config.runtime.remoteBuildMaxAutonomousToolCalls;
+        const originalMaxMs = config.config.runtime.remoteBuildMaxAutonomousMs;
+        const originalExtensionUses = config.config.runtime.remoteBuildBudgetExtensionMaxUses;
+        const originalExtensionRounds = config.config.runtime.remoteBuildBudgetExtensionRounds;
+        const originalExtensionToolCalls = config.config.runtime.remoteBuildBudgetExtensionToolCalls;
+        const originalExtensionMs = config.config.runtime.remoteBuildBudgetExtensionMs;
+
+        config.config.runtime.remoteBuildMaxAutonomousRounds = 2;
+        config.config.runtime.remoteBuildMaxAutonomousToolCalls = 4;
+        config.config.runtime.remoteBuildMaxAutonomousMs = 120000;
+        config.config.runtime.remoteBuildBudgetExtensionMaxUses = 1;
+        config.config.runtime.remoteBuildBudgetExtensionRounds = 2;
+        config.config.runtime.remoteBuildBudgetExtensionToolCalls = 4;
+        config.config.runtime.remoteBuildBudgetExtensionMs = 60000;
+
+        try {
+            const llmClient = {
+                createResponse: jest.fn().mockResolvedValue(buildResponse('Remote work completed after the adaptive round extension.', 'resp_round_extension')),
+                complete: jest.fn()
+                    .mockResolvedValueOnce(JSON.stringify({
+                        steps: [{ tool: 'remote-command', reason: 'Round 1', params: { command: 'echo round-1' } }],
+                    }))
+                    .mockResolvedValueOnce(JSON.stringify({
+                        steps: [{ tool: 'remote-command', reason: 'Round 2', params: { command: 'echo round-2' } }],
+                    }))
+                    .mockResolvedValueOnce(JSON.stringify({
+                        steps: [{ tool: 'remote-command', reason: 'Round 3', params: { command: 'echo round-3' } }],
+                    }))
+                    .mockResolvedValueOnce(JSON.stringify({
+                        steps: [{ tool: 'remote-command', reason: 'Round 4', params: { command: 'echo round-4' } }],
+                    }))
+                    .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+            };
+
+            const toolManager = {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+                executeTool: jest.fn()
+                    .mockResolvedValueOnce({
+                        success: true,
+                        toolId: 'remote-command',
+                        data: { stdout: 'round-1', stderr: '', host: '10.0.0.5:22' },
+                    })
+                    .mockResolvedValueOnce({
+                        success: true,
+                        toolId: 'remote-command',
+                        data: { stdout: 'round-2', stderr: '', host: '10.0.0.5:22' },
+                    })
+                    .mockResolvedValueOnce({
+                        success: true,
+                        toolId: 'remote-command',
+                        data: { stdout: 'round-3', stderr: '', host: '10.0.0.5:22' },
+                    })
+                    .mockResolvedValueOnce({
+                        success: true,
+                        toolId: 'remote-command',
+                        data: { stdout: 'round-4', stderr: '', host: '10.0.0.5:22' },
+                    }),
+            };
+            const sessionStore = {
+                get: jest.fn().mockResolvedValue({ id: 'session-round-extension', metadata: {} }),
+                getOrCreate: jest.fn().mockResolvedValue({ id: 'session-round-extension', metadata: {} }),
+                getRecentMessages: jest.fn().mockResolvedValue([]),
+                recordResponse: jest.fn().mockResolvedValue(undefined),
+                appendMessages: jest.fn().mockResolvedValue(undefined),
+                update: jest.fn().mockResolvedValue(undefined),
+            };
+            const memoryService = {
+                process: jest.fn().mockResolvedValue([]),
+                rememberResponse: jest.fn(),
+            };
+
+            const orchestrator = new ConversationOrchestrator({
+                llmClient,
+                toolManager,
+                sessionStore,
+                memoryService,
+            });
+
+            const result = await orchestrator.executeConversation({
+                input: 'Keep going on the server until the build work is complete.',
+                sessionId: 'session-round-extension',
+                executionProfile: 'remote-build',
+                stream: false,
+            });
+
+            expect(toolManager.executeTool).toHaveBeenCalledTimes(4);
+            expect(result.response.metadata.executionTrace.find((entry) => entry.name === 'Autonomous execution budget extended')).toMatchObject({
+                details: expect.objectContaining({
+                    reason: 'round-limit',
+                    addedRounds: 2,
+                }),
+            });
+        } finally {
+            config.config.runtime.remoteBuildMaxAutonomousRounds = originalRounds;
+            config.config.runtime.remoteBuildMaxAutonomousToolCalls = originalToolCalls;
+            config.config.runtime.remoteBuildMaxAutonomousMs = originalMaxMs;
+            config.config.runtime.remoteBuildBudgetExtensionMaxUses = originalExtensionUses;
+            config.config.runtime.remoteBuildBudgetExtensionRounds = originalExtensionRounds;
+            config.config.runtime.remoteBuildBudgetExtensionToolCalls = originalExtensionToolCalls;
+            config.config.runtime.remoteBuildBudgetExtensionMs = originalExtensionMs;
+        }
+    });
+
     test('continues autonomous remote-build work after a recoverable remote-command failure', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

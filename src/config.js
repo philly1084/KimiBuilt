@@ -115,6 +115,22 @@ const config = {
             1000,
             parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_MS, 10) || 120000,
         ),
+        remoteBuildBudgetExtensionMaxUses: Math.max(
+            0,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_MAX_USES, 10) || 2,
+        ),
+        remoteBuildBudgetExtensionRounds: Math.max(
+            0,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_ROUNDS, 10) || 4,
+        ),
+        remoteBuildBudgetExtensionToolCalls: Math.max(
+            0,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_TOOL_CALLS, 10) || 12,
+        ),
+        remoteBuildBudgetExtensionMs: Math.max(
+            0,
+            parseInt(process.env.REMOTE_BUILD_BUDGET_EXTENSION_MS, 10) || 60000,
+        ),
     },
 };
 

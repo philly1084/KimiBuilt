@@ -1451,6 +1451,115 @@ function getRemoteBuildAutonomyBudget() {
     };
 }
 
+function getRemoteBuildAutonomyExtensionBudget() {
+    return {
+        maxUses: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionMaxUses) || 0),
+        rounds: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionRounds) || 0),
+        toolCalls: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionToolCalls) || 0),
+        durationMs: Math.max(0, Number(config.runtime?.remoteBuildBudgetExtensionMs) || 0),
+    };
+}
+
+function countUniqueExecutedStepSignatures(toolEvents = []) {
+    const signatures = new Set();
+
+    for (const event of Array.isArray(toolEvents) ? toolEvents : []) {
+        const signature = extractExecutedStepSignature(event);
+        if (signature) {
+            signatures.add(signature);
+        }
+    }
+
+    return signatures.size;
+}
+
+function summarizeAutonomyProgress(toolEvents = [], failureSummary = null) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const summary = failureSummary || summarizeRoundFailures(events);
+    const successfulToolCalls = events.filter((event) => event?.result?.success !== false).length;
+    const failedToolCalls = events.length - successfulToolCalls;
+    const uniqueStepSignatures = countUniqueExecutedStepSignatures(events);
+
+    return {
+        toolCalls: events.length,
+        successfulToolCalls,
+        failedToolCalls,
+        uniqueStepSignatures,
+        blockingFailures: summary?.blockingFailures?.length || 0,
+        recoverableFailures: summary?.recoverableFailures?.length || 0,
+        productive: events.length > 0
+            && successfulToolCalls > 0
+            && uniqueStepSignatures > 0
+            && (summary?.blockingFailures?.length || 0) === 0,
+    };
+}
+
+function maybeExtendAutonomyBudget({
+    autonomyApproved = false,
+    reason = 'progress',
+    startedAt = Date.now(),
+    round = 0,
+    toolEvents = [],
+    lastProgress = null,
+    budgetState = {},
+    extensionBudget = {},
+    executionTrace = [],
+} = {}) {
+    if (!autonomyApproved) {
+        return false;
+    }
+
+    if ((budgetState.extensionsUsed || 0) >= (extensionBudget.maxUses || 0)) {
+        return false;
+    }
+
+    if ((extensionBudget.rounds || 0) <= 0
+        && (extensionBudget.toolCalls || 0) <= 0
+        && (extensionBudget.durationMs || 0) <= 0) {
+        return false;
+    }
+
+    if (!lastProgress?.productive) {
+        return false;
+    }
+
+    budgetState.extensionsUsed = (budgetState.extensionsUsed || 0) + 1;
+    budgetState.maxRounds += extensionBudget.rounds || 0;
+    budgetState.maxToolCalls += extensionBudget.toolCalls || 0;
+    budgetState.autonomyDeadline += extensionBudget.durationMs || 0;
+
+    executionTrace.push(createExecutionTraceEntry({
+        type: 'budget',
+        name: 'Autonomous execution budget extended',
+        details: {
+            reason,
+            round,
+            toolCalls: toolEvents.length,
+            elapsedMs: Date.now() - startedAt,
+            extensionsUsed: budgetState.extensionsUsed,
+            maxExtensions: extensionBudget.maxUses || 0,
+            addedRounds: extensionBudget.rounds || 0,
+            addedToolCalls: extensionBudget.toolCalls || 0,
+            addedDurationMs: extensionBudget.durationMs || 0,
+            lastProgress: {
+                toolCalls: lastProgress.toolCalls || 0,
+                successfulToolCalls: lastProgress.successfulToolCalls || 0,
+                failedToolCalls: lastProgress.failedToolCalls || 0,
+                uniqueStepSignatures: lastProgress.uniqueStepSignatures || 0,
+                blockingFailures: lastProgress.blockingFailures || 0,
+                recoverableFailures: lastProgress.recoverableFailures || 0,
+            },
+            updatedBudget: {
+                maxRounds: budgetState.maxRounds,
+                maxToolCalls: budgetState.maxToolCalls,
+                maxDurationMs: Math.max(0, budgetState.autonomyDeadline - startedAt),
+            },
+        },
+    }));
+
+    return true;
+}
+
 function getPreferredRemoteToolId(toolPolicy = {}) {
     const availableToolIds = Array.isArray(toolPolicy?.candidateToolIds) && toolPolicy.candidateToolIds.length > 0
         ? toolPolicy.candidateToolIds
@@ -1777,10 +1886,14 @@ class ConversationOrchestrator extends EventEmitter {
                 || Boolean(config.runtime.remoteBuildAutonomyDefault)
             );
         const autonomyBudget = getRemoteBuildAutonomyBudget();
+        const autonomyExtensionBudget = getRemoteBuildAutonomyExtensionBudget();
         const allowsDeterministicResearchFollowup = !autonomyApproved && hasExplicitWebResearchIntentText(objective);
-        const maxAutonomousRounds = autonomyApproved ? autonomyBudget.maxRounds : (allowsDeterministicResearchFollowup ? 2 : 1);
-        const maxAutonomousToolCalls = autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS;
-        const autonomyDeadline = autonomyApproved ? startedAt + autonomyBudget.maxDurationMs : startedAt;
+        const budgetState = {
+            maxRounds: autonomyApproved ? autonomyBudget.maxRounds : (allowsDeterministicResearchFollowup ? 2 : 1),
+            maxToolCalls: autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS,
+            autonomyDeadline: autonomyApproved ? startedAt + autonomyBudget.maxDurationMs : startedAt,
+            extensionsUsed: 0,
+        };
 
         try {
             executionTrace.push(createExecutionTraceEntry({
@@ -1805,9 +1918,10 @@ class ConversationOrchestrator extends EventEmitter {
                     details: {
                         approved: autonomyApproved,
                         source: autonomyApprovalSource || 'none',
-                        maxAutonomousRounds,
-                        maxAutonomousToolCalls,
+                        maxAutonomousRounds: budgetState.maxRounds,
+                        maxAutonomousToolCalls: budgetState.maxToolCalls,
                         maxAutonomousDurationMs: autonomyApproved ? autonomyBudget.maxDurationMs : 0,
+                        maxAutonomousExtensions: autonomyExtensionBudget.maxUses || 0,
                     },
                 }));
             }
@@ -1815,36 +1929,105 @@ class ConversationOrchestrator extends EventEmitter {
             const executedStepSignatures = [];
             const executedStepSignatureCounts = new Map();
             let round = 0;
+            let lastAutonomyProgress = null;
 
-            while (round < maxAutonomousRounds) {
-                if (autonomyApproved && Date.now() >= autonomyDeadline) {
+            while (true) {
+                if (round >= budgetState.maxRounds) {
+                    const extended = maybeExtendAutonomyBudget({
+                        autonomyApproved,
+                        reason: 'round-limit',
+                        startedAt,
+                        round,
+                        toolEvents,
+                        lastProgress: lastAutonomyProgress,
+                        budgetState,
+                        extensionBudget: autonomyExtensionBudget,
+                        executionTrace,
+                    });
+
+                    if (!extended) {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'budget',
+                            name: 'Autonomous execution round budget reached',
+                            details: {
+                                round,
+                                maxRounds: budgetState.maxRounds,
+                                toolCalls: toolEvents.length,
+                                maxToolCalls: budgetState.maxToolCalls,
+                                elapsedMs: Date.now() - startedAt,
+                                maxDurationMs: autonomyApproved ? Math.max(0, budgetState.autonomyDeadline - startedAt) : 0,
+                                extensionsUsed: budgetState.extensionsUsed,
+                                maxExtensions: autonomyExtensionBudget.maxUses || 0,
+                            },
+                        }));
+                        break;
+                    }
+                }
+
+                if (autonomyApproved && Date.now() >= budgetState.autonomyDeadline) {
+                    const extended = maybeExtendAutonomyBudget({
+                        autonomyApproved,
+                        reason: 'time-limit-before-round',
+                        startedAt,
+                        round,
+                        toolEvents,
+                        lastProgress: lastAutonomyProgress,
+                        budgetState,
+                        extensionBudget: autonomyExtensionBudget,
+                        executionTrace,
+                    });
+
+                    if (extended) {
+                        continue;
+                    }
+
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'budget',
                         name: 'Autonomous execution time budget reached',
                         details: {
                             round,
                             phase: 'before-round',
-                            maxRounds: maxAutonomousRounds,
+                            maxRounds: budgetState.maxRounds,
                             toolCalls: toolEvents.length,
-                            maxToolCalls: maxAutonomousToolCalls,
+                            maxToolCalls: budgetState.maxToolCalls,
                             elapsedMs: Date.now() - startedAt,
-                            maxDurationMs: autonomyBudget.maxDurationMs,
+                            maxDurationMs: Math.max(0, budgetState.autonomyDeadline - startedAt),
+                            extensionsUsed: budgetState.extensionsUsed,
+                            maxExtensions: autonomyExtensionBudget.maxUses || 0,
                         },
                     }));
                     break;
                 }
 
-                if (toolEvents.length >= maxAutonomousToolCalls) {
+                if (toolEvents.length >= budgetState.maxToolCalls) {
+                    const extended = maybeExtendAutonomyBudget({
+                        autonomyApproved,
+                        reason: 'tool-limit',
+                        startedAt,
+                        round,
+                        toolEvents,
+                        lastProgress: lastAutonomyProgress,
+                        budgetState,
+                        extensionBudget: autonomyExtensionBudget,
+                        executionTrace,
+                    });
+
+                    if (extended) {
+                        continue;
+                    }
+
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'budget',
                         name: 'Autonomous execution tool budget reached',
                         details: {
                             round,
-                            maxRounds: maxAutonomousRounds,
+                            maxRounds: budgetState.maxRounds,
                             toolCalls: toolEvents.length,
-                            maxToolCalls: maxAutonomousToolCalls,
+                            maxToolCalls: budgetState.maxToolCalls,
                             elapsedMs: Date.now() - startedAt,
-                            maxDurationMs: autonomyApproved ? autonomyBudget.maxDurationMs : 0,
+                            maxDurationMs: autonomyApproved ? Math.max(0, budgetState.autonomyDeadline - startedAt) : 0,
+                            extensionsUsed: budgetState.extensionsUsed,
+                            maxExtensions: autonomyExtensionBudget.maxUses || 0,
                         },
                     }));
                     break;
@@ -1927,7 +2110,7 @@ class ConversationOrchestrator extends EventEmitter {
                 }
 
                 if (autonomyApproved && nextPlan.length > 0) {
-                    const remainingToolBudget = Math.max(0, maxAutonomousToolCalls - toolEvents.length);
+                    const remainingToolBudget = Math.max(0, budgetState.maxToolCalls - toolEvents.length);
                     nextPlan = nextPlan.slice(0, remainingToolBudget);
                 }
 
@@ -1951,7 +2134,24 @@ class ConversationOrchestrator extends EventEmitter {
                     break;
                 }
 
-                if (autonomyApproved && Date.now() >= autonomyDeadline) {
+                if (autonomyApproved && Date.now() >= budgetState.autonomyDeadline) {
+                    const extended = maybeExtendAutonomyBudget({
+                        autonomyApproved,
+                        reason: 'time-limit-after-planning',
+                        startedAt,
+                        round,
+                        toolEvents,
+                        lastProgress: lastAutonomyProgress,
+                        budgetState,
+                        extensionBudget: autonomyExtensionBudget,
+                        executionTrace,
+                    });
+
+                    if (extended) {
+                        round -= 1;
+                        continue;
+                    }
+
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'budget',
                         name: 'Autonomous execution time budget reached',
@@ -1959,11 +2159,13 @@ class ConversationOrchestrator extends EventEmitter {
                             round,
                             phase: 'after-planning',
                             pendingPlanSteps: nextPlan.length,
-                            maxRounds: maxAutonomousRounds,
+                            maxRounds: budgetState.maxRounds,
                             toolCalls: toolEvents.length,
-                            maxToolCalls: maxAutonomousToolCalls,
+                            maxToolCalls: budgetState.maxToolCalls,
                             elapsedMs: Date.now() - startedAt,
-                            maxDurationMs: autonomyBudget.maxDurationMs,
+                            maxDurationMs: Math.max(0, budgetState.autonomyDeadline - startedAt),
+                            extensionsUsed: budgetState.extensionsUsed,
+                            maxExtensions: autonomyExtensionBudget.maxUses || 0,
                         },
                     }));
                     break;
@@ -1984,7 +2186,7 @@ class ConversationOrchestrator extends EventEmitter {
                     objective,
                     session,
                     recentMessages: resolvedRecentMessages,
-                    autonomyDeadline: autonomyApproved ? autonomyDeadline : null,
+                    autonomyDeadline: autonomyApproved ? budgetState.autonomyDeadline : null,
                     executionTrace,
                     round,
                 });
@@ -1995,6 +2197,7 @@ class ConversationOrchestrator extends EventEmitter {
                 const roundFailureSummary = summarizeRoundFailures(roundToolEvents, resolvedProfile);
                 const roundFailed = roundFailureSummary.anyFailed;
                 const blockingRoundFailure = roundFailureSummary.blockingFailures.length > 0;
+                lastAutonomyProgress = summarizeAutonomyProgress(roundToolEvents, roundFailureSummary);
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'execution',
                     name: `Execution round ${round}`,
@@ -2025,18 +2228,36 @@ class ConversationOrchestrator extends EventEmitter {
                 }));
 
                 if (autonomyApproved && budgetExceeded) {
+                    const extended = maybeExtendAutonomyBudget({
+                        autonomyApproved,
+                        reason: 'time-limit-during-round',
+                        startedAt,
+                        round,
+                        toolEvents,
+                        lastProgress: lastAutonomyProgress,
+                        budgetState,
+                        extensionBudget: autonomyExtensionBudget,
+                        executionTrace,
+                    });
+
+                    if (extended) {
+                        continue;
+                    }
+
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'budget',
                         name: 'Autonomous execution time budget reached',
                         details: {
                             round,
                             phase: 'during-round',
-                            maxRounds: maxAutonomousRounds,
+                            maxRounds: budgetState.maxRounds,
                             toolCalls: toolEvents.length,
-                            maxToolCalls: maxAutonomousToolCalls,
+                            maxToolCalls: budgetState.maxToolCalls,
                             elapsedMs: Date.now() - startedAt,
-                            maxDurationMs: autonomyBudget.maxDurationMs,
+                            maxDurationMs: Math.max(0, budgetState.autonomyDeadline - startedAt),
                             skippedPlannedSteps: Math.max(0, nextPlan.length - roundToolEvents.length),
+                            extensionsUsed: budgetState.extensionsUsed,
+                            maxExtensions: autonomyExtensionBudget.maxUses || 0,
                         },
                     }));
                     break;
