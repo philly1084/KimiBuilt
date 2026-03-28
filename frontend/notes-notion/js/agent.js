@@ -2909,6 +2909,16 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             normalized.includes('workspace can execute anything locally') ||
             normalized.includes('launch a remote check from /app') ||
             normalized.includes('can\'t inspect config or launch a remote check from /app') ||
+            normalized.includes('what i can do from this session') ||
+            normalized.includes('what i cannot do in this session') ||
+            normalized.includes('runtime exposes a writable file tool') ||
+            normalized.includes('github/canva connector tools') ||
+            normalized.includes('create a new local git repo in /app') ||
+            normalized.includes('i cannot create a new repo from this exact turn') ||
+            normalized.includes('run git init, builds, or normal shell commands') ||
+            normalized.includes('modify the local filesystem') ||
+            normalized.includes('the exact blocker is the runtime sandbox') ||
+            normalized.includes('kernel does not allow non-privileged user namespaces') ||
             normalized.startsWith('<!doctype html') ||
             normalized.startsWith('<html');
     }
