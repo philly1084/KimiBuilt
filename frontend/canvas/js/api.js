@@ -35,13 +35,21 @@ class CanvasAPI {
         return `${this.baseURL}${path}`;
     }
 
-    async sendCanvasRequest({ message, sessionId, canvasType = 'code', existingContent }) {
+    async sendCanvasRequest({ message, sessionId, canvasType = 'code', existingContent, model, reasoningEffort }) {
         const payload = {
             message,
             sessionId: sessionId || this.sessionId,
             canvasType,
             existingContent,
         };
+
+        if (model) {
+            payload.model = model;
+        }
+
+        if (reasoningEffort) {
+            payload.reasoning_effort = reasoningEffort;
+        }
 
         try {
             const response = await fetch(this._getURL('/api/canvas'), {
@@ -139,7 +147,7 @@ class CanvasAPI {
         }
     }
 
-    sendWebSocketMessage({ message, sessionId, canvasType = 'code', existingContent }) {
+    sendWebSocketMessage({ message, sessionId, canvasType = 'code', existingContent, model, reasoningEffort }) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.error('WebSocket is not connected');
             return false;
@@ -152,6 +160,8 @@ class CanvasAPI {
                 message,
                 canvasType,
                 existingContent,
+                ...(model ? { model } : {}),
+                ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
             },
         };
 
@@ -228,16 +238,23 @@ class CanvasAPI {
 
     async streamCanvasRequest(params, onChunk, onComplete, onError) {
         try {
+            const payload = {
+                ...params,
+                sessionId: params.sessionId || this.sessionId,
+            };
+
+            if (payload.reasoningEffort && !payload.reasoning_effort) {
+                payload.reasoning_effort = payload.reasoningEffort;
+                delete payload.reasoningEffort;
+            }
+
             const response = await fetch(this._getURL('/api/canvas/stream'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'text/event-stream',
                 },
-                body: JSON.stringify({
-                    ...params,
-                    sessionId: params.sessionId || this.sessionId,
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {

@@ -24,8 +24,11 @@ class UIHelpers {
         this.availableModels = [];
         this.availableImageModels = [];
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
+        const savedReasoningEffort = window.sessionManager?.safeStorageGet?.('kimibuilt_reasoning_effort');
         this.currentModel = savedModel || 'gpt-4o';
+        this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
         this.updateModelUI();
+        this.updateReasoningUI();
         
         // Track last focused element for focus management
         this.lastFocusedElement = null;
@@ -247,6 +250,28 @@ class UIHelpers {
             }
             return fallback;
         };
+
+        const deriveLinkLabel = (href, title, text) => {
+            const normalizedText = normalizeMarkedText(text).trim();
+            const plainText = normalizedText.replace(/<[^>]*>/g, '').trim();
+            if (plainText && plainText.toLowerCase() !== 'undefined') {
+                return text;
+            }
+
+            const normalizedTitle = normalizeMarkedText(title).trim();
+            if (normalizedTitle && normalizedTitle.toLowerCase() !== 'undefined') {
+                return this.escapeHtml(normalizedTitle);
+            }
+
+            try {
+                const url = new URL(String(href || ''), window.location.origin);
+                const host = url.hostname.replace(/^www\./i, '');
+                const path = url.pathname && url.pathname !== '/' ? url.pathname : '';
+                return this.escapeHtml(`${host}${path}`);
+            } catch (_error) {
+                return this.escapeHtml(normalizedText || normalizedTitle || String(href || 'link'));
+            }
+        };
         
         renderer.code = (code, language) => {
             const normalizedCode = normalizeMarkedText(code);
@@ -323,7 +348,7 @@ class UIHelpers {
 
         renderer.link = (href, title, text) => {
             const titleAttr = title ? ` title="${this.escapeHtmlAttr(title)}"` : '';
-            return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer nofollow">${text}</a>`;
+            return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer nofollow">${deriveLinkLabel(href, title, text)}</a>`;
         };
 
         renderer.checkbox = (checked) => {
@@ -1591,6 +1616,54 @@ class UIHelpers {
         
         if (label) label.textContent = displayName;
         if (inputLabel) inputLabel.textContent = displayName;
+    }
+
+    normalizeReasoningEffort(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        return ['low', 'medium', 'high', 'xhigh'].includes(normalized) ? normalized : '';
+    }
+
+    getReasoningDisplayLabel(value = this.currentReasoningEffort) {
+        const normalized = this.normalizeReasoningEffort(value);
+        const labels = {
+            '': 'Reasoning: Default',
+            low: 'Reasoning: Low',
+            medium: 'Reasoning: Medium',
+            high: 'Reasoning: High',
+            xhigh: 'Reasoning: XHigh',
+        };
+        return labels[normalized] || labels[''];
+    }
+
+    updateReasoningUI() {
+        const select = document.getElementById('reasoning-effort-select');
+        const inputLabel = document.getElementById('input-reasoning-label');
+        const normalized = this.normalizeReasoningEffort(this.currentReasoningEffort);
+        const displayLabel = this.getReasoningDisplayLabel(normalized);
+
+        if (select) {
+            select.value = normalized;
+        }
+        if (inputLabel) {
+            inputLabel.textContent = displayLabel;
+        }
+    }
+
+    getCurrentReasoningEffort() {
+        return this.normalizeReasoningEffort(this.currentReasoningEffort);
+    }
+
+    setCurrentReasoningEffort(value) {
+        this.currentReasoningEffort = this.normalizeReasoningEffort(value);
+        if (this.currentReasoningEffort) {
+            window.sessionManager?.safeStorageSet?.('kimibuilt_reasoning_effort', this.currentReasoningEffort);
+        } else {
+            window.sessionManager?.safeStorageRemove?.('kimibuilt_reasoning_effort');
+        }
+        this.updateReasoningUI();
+        window.dispatchEvent(new CustomEvent('reasoningChanged', {
+            detail: { reasoningEffort: this.currentReasoningEffort || null }
+        }));
     }
 
     getCurrentModel() {
@@ -3156,6 +3229,13 @@ class UIHelpers {
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
                 this.performSearch(e.target.value);
+            });
+        }
+
+        const reasoningSelect = document.getElementById('reasoning-effort-select');
+        if (reasoningSelect) {
+            reasoningSelect.addEventListener('change', (e) => {
+                this.setCurrentReasoningEffort(e.target.value);
             });
         }
 

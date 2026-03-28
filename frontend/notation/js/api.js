@@ -27,7 +27,8 @@ const NotationAPI = {
         wsUrl: resolveNotationWsUrl(resolveNotationBaseUrl()),
         timeout: 30000,
         retries: 3,
-        retryDelay: 1000
+        retryDelay: 1000,
+        reasoningEffort: ''
     },
 
     // State
@@ -69,6 +70,15 @@ const NotationAPI = {
         return this;
     },
 
+    setReasoningEffort(reasoningEffort) {
+        const normalized = String(reasoningEffort || '').trim().toLowerCase();
+        this.config.reasoningEffort = ['low', 'medium', 'high', 'xhigh'].includes(normalized) ? normalized : '';
+    },
+
+    getReasoningEffort() {
+        return this.config.reasoningEffort || '';
+    },
+
     /**
      * Send notation for processing via HTTP
      * @param {Object} data - Request data
@@ -85,6 +95,11 @@ const NotationAPI = {
             context: data.context || '',
             helperMode: data.helperMode || 'expand'
         };
+
+        const reasoningEffort = String(data.reasoningEffort || this.config.reasoningEffort || '').trim().toLowerCase();
+        if (['low', 'medium', 'high', 'xhigh'].includes(reasoningEffort)) {
+            payload.reasoning_effort = reasoningEffort;
+        }
 
         try {
             this._notifyStatus('processing');
@@ -130,6 +145,11 @@ const NotationAPI = {
                 context: data.context || ''
             }
         };
+
+        const reasoningEffort = String(data.reasoningEffort || this.config.reasoningEffort || '').trim().toLowerCase();
+        if (['low', 'medium', 'high', 'xhigh'].includes(reasoningEffort)) {
+            message.payload.reasoning_effort = reasoningEffort;
+        }
 
         try {
             this.ws.send(JSON.stringify(message));

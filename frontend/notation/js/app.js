@@ -13,6 +13,7 @@
         sidebarOpen: false,
         currentTemplateCategory: 'all',
         resizeToast: null,
+        reasoningEffort: '',
 
         // DOM Element references
         elements: {},
@@ -44,6 +45,7 @@
                 keyboardShortcutsBtn: document.getElementById('keyboardShortcutsBtn'),
                 connectionStatus: document.getElementById('connectionStatus'),
                 modeBtns: document.querySelectorAll('.mode-btn'),
+                reasoningEffortSelect: document.getElementById('reasoningEffortSelect'),
 
                 // Sidebar
                 sidebar: document.getElementById('sidebar'),
@@ -148,6 +150,7 @@
 
             // Initialize API with callbacks
             if (window.NotationAPI) {
+                this.reasoningEffort = this._loadReasoningEffort();
                 NotationAPI.init({}, {
                     onConnect: () => this._updateConnectionStatus('connected'),
                     onDisconnect: () => this._updateConnectionStatus('disconnected'),
@@ -156,6 +159,11 @@
                     onStatusChange: (status) => this._handleStatusChange(status),
                     onReconnecting: (attempt) => this._handleReconnecting(attempt)
                 });
+                NotationAPI.setReasoningEffort(this.reasoningEffort);
+            }
+
+            if (this.elements.reasoningEffortSelect) {
+                this.elements.reasoningEffortSelect.value = this.reasoningEffort;
             }
         },
 
@@ -183,6 +191,16 @@
 
             // Theme toggle
             this.elements.themeToggle.addEventListener('click', () => this._toggleTheme());
+
+            if (this.elements.reasoningEffortSelect) {
+                this.elements.reasoningEffortSelect.addEventListener('change', (e) => {
+                    this.reasoningEffort = this._normalizeReasoningEffort(e.target.value);
+                    localStorage.setItem('notation-helper-reasoning-effort', this.reasoningEffort);
+                    if (window.NotationAPI) {
+                        NotationAPI.setReasoningEffort(this.reasoningEffort);
+                    }
+                });
+            }
 
             // Keyboard shortcuts modal
             if (this.elements.keyboardShortcutsBtn) {
@@ -371,6 +389,15 @@
 
             // Save preference
             localStorage.setItem('notation-helper-theme', newTheme);
+        },
+
+        _normalizeReasoningEffort(value) {
+            const normalized = String(value || '').trim().toLowerCase();
+            return ['low', 'medium', 'high', 'xhigh'].includes(normalized) ? normalized : '';
+        },
+
+        _loadReasoningEffort() {
+            return this._normalizeReasoningEffort(localStorage.getItem('notation-helper-reasoning-effort'));
         },
 
         /**
@@ -637,7 +664,8 @@
                 const wsSuccess = window.NotationAPI && NotationAPI.processWS({
                     notation,
                     helperMode: this.currentMode,
-                    context
+                    context,
+                    reasoningEffort: this.reasoningEffort
                 });
 
                 // Fallback to HTTP if WebSocket fails or isn't connected
@@ -645,7 +673,8 @@
                     const response = await NotationAPI.process({
                         notation,
                         helperMode: this.currentMode,
-                        context
+                        context,
+                        reasoningEffort: this.reasoningEffort
                     });
                     this._handleResponse({ content: response });
                 }

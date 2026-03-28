@@ -22,7 +22,9 @@ class CanvasApp {
             isPreviewMode: false,
             isSplitView: false,
             aiResponse: null,
-            lastSaved: null
+            lastSaved: null,
+            selectedModel: 'gpt-4o',
+            reasoningEffort: '',
         };
 
         // Auto-save timer
@@ -284,6 +286,9 @@ class CanvasApp {
                     <option value="o3-mini">o3-mini</option>
                 `;
             }
+
+            modelSelect.value = this.state.selectedModel || modelSelect.value || 'gpt-4o';
+            this.state.selectedModel = modelSelect.value;
         } catch (err) {
             console.log('Failed to load models, using defaults');
             modelSelect.innerHTML = `
@@ -291,6 +296,8 @@ class CanvasApp {
                 <option value="gpt-4o-mini">GPT-4o Mini</option>
                 <option value="o3-mini">o3-mini</option>
             `;
+            modelSelect.value = this.state.selectedModel || modelSelect.value || 'gpt-4o';
+            this.state.selectedModel = modelSelect.value;
         }
     }
     
@@ -376,6 +383,15 @@ class CanvasApp {
             modelSelect.addEventListener('change', (e) => {
                 this.state.selectedModel = e.target.value;
                 console.log('Model changed to:', e.target.value);
+                this.saveToLocalStorage();
+            });
+        }
+
+        const reasoningSelect = document.getElementById('reasoning-effort-select');
+        if (reasoningSelect) {
+            reasoningSelect.addEventListener('change', (e) => {
+                this.state.reasoningEffort = String(e.target.value || '').trim().toLowerCase();
+                this.saveToLocalStorage();
             });
         }
 
@@ -715,7 +731,9 @@ class CanvasApp {
         const prompt = document.getElementById('prompt-input').value.trim();
         const context = document.getElementById('context-input').value.trim();
         const modelSelect = document.getElementById('model-select');
+        const reasoningSelect = document.getElementById('reasoning-effort-select');
         const selectedModel = modelSelect ? modelSelect.value : this.state.selectedModel;
+        const reasoningEffort = reasoningSelect ? reasoningSelect.value : this.state.reasoningEffort;
 
         if (!prompt) {
             this.showToast('Please enter a prompt', 'warning');
@@ -730,7 +748,8 @@ class CanvasApp {
                 sessionId: this.state.sessionId,
                 canvasType: this.state.canvasType,
                 existingContent: context || this.editor.getValue(),
-                model: selectedModel
+                model: selectedModel,
+                reasoningEffort,
             });
 
             this.handleAIResponse(response);
@@ -1070,6 +1089,8 @@ class CanvasApp {
             canvasType: this.state.canvasType,
             content: this.editor.getValue(),
             metadata: this.state.metadata,
+            selectedModel: this.state.selectedModel || '',
+            reasoningEffort: this.state.reasoningEffort || '',
             timestamp: Date.now()
         };
 
@@ -1100,6 +1121,10 @@ class CanvasApp {
                 this.state.canvasType = data.canvasType || 'code';
                 this.state.content = data.content || '';
                 this.state.metadata = data.metadata || {};
+                this.state.selectedModel = data.selectedModel || this.state.selectedModel || 'gpt-4o';
+                this.state.reasoningEffort = ['low', 'medium', 'high', 'xhigh'].includes(data.reasoningEffort)
+                    ? data.reasoningEffort
+                    : '';
 
                 // Restore API session
                 if (data.sessionId) {
@@ -1131,6 +1156,16 @@ class CanvasApp {
         document.querySelectorAll('.type-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.type === this.state.canvasType);
         });
+
+        const modelSelect = document.getElementById('model-select');
+        if (modelSelect && this.state.selectedModel) {
+            modelSelect.value = this.state.selectedModel;
+        }
+
+        const reasoningSelect = document.getElementById('reasoning-effort-select');
+        if (reasoningSelect) {
+            reasoningSelect.value = this.state.reasoningEffort || '';
+        }
 
         // Update session ID
         if (this.state.sessionId) {

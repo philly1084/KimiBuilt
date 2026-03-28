@@ -231,6 +231,43 @@ body {
     gap: var(--spacing-sm);
 }
 
+.reasoning-selector {
+    display: flex;
+    align-items: center;
+}
+
+.reasoning-select {
+    appearance: none;
+    min-width: 156px;
+    padding: var(--spacing-sm) 2rem var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237d8590' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+}
+
+.reasoning-select:hover {
+    border-color: var(--color-accent);
+}
+
+.reasoning-select:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.reasoning-select option {
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+}
+
 .icon-btn {
     width: 44px;
     height: 44px;
@@ -1663,6 +1700,12 @@ body {
     .logo span {
         display: none;
     }
+
+    .reasoning-select {
+        min-width: 118px;
+        padding: var(--spacing-sm) 1.75rem var(--spacing-sm) 0.75rem;
+        font-size: 0.8125rem;
+    }
     
     .mode-btn span {
         display: none;
@@ -1732,6 +1775,10 @@ body {
 }
 
 @media (max-width: 480px) {
+    .reasoning-selector {
+        display: none;
+    }
+
     .toolbar-right {
         flex-direction: column;
     }

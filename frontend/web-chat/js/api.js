@@ -240,7 +240,7 @@ class OpenAIAPIClient extends EventTarget {
      * @param {AbortSignal} signal - Optional abort signal for cancellation
      * @returns {AsyncGenerator} - Yields delta content
      */
-    async *streamChat(messages, model = 'gpt-4o', signal = null) {
+    async *streamChat(messages, model = 'gpt-4o', signal = null, reasoningEffort = '') {
         const params = {
             model,
             messages,
@@ -252,6 +252,10 @@ class OpenAIAPIClient extends EventTarget {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
             },
         };
+
+        if (reasoningEffort) {
+            params.reasoning_effort = reasoningEffort;
+        }
         
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
             params.session_id = this.currentSessionId;
