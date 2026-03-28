@@ -251,11 +251,29 @@ class UIHelpers {
             return fallback;
         };
 
+        const normalizeMarkedLinkArgs = (href, title, text) => {
+            if (href && typeof href === 'object' && !Array.isArray(href)) {
+                return {
+                    href: typeof href.href === 'string' ? href.href : '',
+                    title: typeof href.title === 'string' ? href.title : title,
+                    text: typeof href.text === 'string'
+                        ? href.text
+                        : (typeof href.raw === 'string' ? href.raw : text),
+                };
+            }
+
+            return {
+                href: typeof href === 'string' ? href : '',
+                title,
+                text,
+            };
+        };
+
         const deriveLinkLabel = (href, title, text) => {
             const normalizedText = normalizeMarkedText(text).trim();
             const plainText = normalizedText.replace(/<[^>]*>/g, '').trim();
             if (plainText && plainText.toLowerCase() !== 'undefined') {
-                return text;
+                return this.escapeHtml(normalizedText);
             }
 
             const normalizedTitle = normalizeMarkedText(title).trim();
@@ -347,8 +365,15 @@ class UIHelpers {
         };
 
         renderer.link = (href, title, text) => {
-            const titleAttr = title ? ` title="${this.escapeHtmlAttr(title)}"` : '';
-            return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer nofollow">${deriveLinkLabel(href, title, text)}</a>`;
+            const normalizedLink = normalizeMarkedLinkArgs(href, title, text);
+            const safeHref = this.escapeHtmlAttr(normalizedLink.href || '#');
+            const normalizedTitle = normalizeMarkedText(normalizedLink.title).trim();
+            const titleAttr = normalizedTitle ? ` title="${this.escapeHtmlAttr(normalizedTitle)}"` : '';
+            return `<a href="${safeHref}"${titleAttr} target="_blank" rel="noopener noreferrer nofollow">${deriveLinkLabel(
+                normalizedLink.href,
+                normalizedLink.title,
+                normalizedLink.text,
+            )}</a>`;
         };
 
         renderer.checkbox = (checked) => {
