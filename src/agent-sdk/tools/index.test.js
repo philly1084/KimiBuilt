@@ -4,6 +4,14 @@ const os = require('os');
 const path = require('path');
 
 describe('ToolManager image tools', () => {
+  test('registers restricted git and k3s deploy tools', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    expect(toolManager.getTool('git-safe')).toBeTruthy();
+    expect(toolManager.getTool('k3s-deploy')).toBeTruthy();
+  });
+
   test('normalizes markdown-wrapped image URLs before validation', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

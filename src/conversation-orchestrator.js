@@ -2377,6 +2377,14 @@ class ConversationOrchestrator extends EventEmitter {
             if (/\b(create|make|mkdir)\b[\s\S]{0,40}\b(folder|directory)\b/.test(prompt) && allowedToolIds.includes('file-mkdir')) {
                 candidates.add('file-mkdir');
             }
+            if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
+                && allowedToolIds.includes('git-safe')) {
+                candidates.add('git-safe');
+            }
+            if (/\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
+                && allowedToolIds.includes('k3s-deploy')) {
+                candidates.add('k3s-deploy');
+            }
             if (/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/.test(prompt) && allowedToolIds.includes('tool-doc-read')) {
                 candidates.add('tool-doc-read');
             }
@@ -3127,6 +3135,10 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `security-scan` for code audits, secret detection, and vulnerability checks when code is available in the request.');
         }
 
+        if (allowedToolIds.includes('git-safe')) {
+            parts.push('Use `git-safe` for restricted local repository save flows: status, add, commit, push, and save-and-push.');
+        }
+
         if (allowedToolIds.includes('web-scrape')) {
             parts.push('Use `web-scrape` for structured extraction from URLs. Prefer `browser: true` for JS-heavy pages or certificate/TLS problems.');
             parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');
@@ -3153,6 +3165,10 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`Do not claim the SSH tool is unavailable. Try ${remoteToolId} for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.`);
             parts.push(`When calling ${remoteToolId}, always include a concrete command string.`);
             parts.push('When constructing remote commands, assume Ubuntu/Linux defaults first and avoid depending on nonstandard utilities unless you have verified they exist.');
+        }
+
+        if (allowedToolIds.includes('k3s-deploy')) {
+            parts.push('Use `k3s-deploy` for standard remote deployment flows over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
         }
 
         return parts.filter(Boolean).join('\n\n');

@@ -22,6 +22,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'file-write',
     'file-search',
     'file-mkdir',
+    'git-safe',
     'tool-doc-read',
     ...PROMOTED_LOCAL_TOOL_IDS,
 ]);
@@ -32,11 +33,13 @@ const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
     ]),
     [NOTES_EXECUTION_PROFILE]: Object.freeze([
         'remote-command',
+        'k3s-deploy',
         'docker-exec',
         ...BASE_SHARED_TOOL_IDS,
     ]),
     [REMOTE_BUILD_EXECUTION_PROFILE]: Object.freeze([
         'remote-command',
+        'k3s-deploy',
         'docker-exec',
         ...BASE_SHARED_TOOL_IDS,
         'code-sandbox',

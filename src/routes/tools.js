@@ -81,6 +81,27 @@ function buildToolRuntime(toolId) {
     };
   }
 
+  if (toolId === 'k3s-deploy') {
+    const ssh = settingsController.getEffectiveSshConfig();
+    return {
+      configured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
+      source: ssh.source || 'dashboard',
+      defaultTarget: ssh.host ? `${ssh.username || 'unknown'}@${ssh.host}:${ssh.port || 22}` : null,
+      defaultRepositoryUrl: config.deploy.defaultRepositoryUrl || '',
+      defaultTargetDirectory: config.deploy.defaultTargetDirectory || '',
+      defaultNamespace: config.deploy.defaultNamespace || '',
+      defaultDeployment: config.deploy.defaultDeployment || '',
+    };
+  }
+
+  if (toolId === 'git-safe') {
+    return {
+      configured: true,
+      provider: 'local',
+      defaultRepositoryPath: config.deploy.defaultRepositoryPath || '',
+    };
+  }
+
   if (toolId === 'docker-exec') {
     return {
       configured: Boolean(process.env.DOCKER_HOST),
@@ -132,6 +153,7 @@ function buildToolRuntime(toolId) {
     'file-write',
     'file-search',
     'file-mkdir',
+    'git-safe',
     'tool-doc-read',
     'security-scan',
     'architecture-design',
@@ -155,6 +177,10 @@ function isToolVisibleByRuntime(toolId, runtime = null, support = null) {
   }
 
   if (['docker-exec', 'code-sandbox'].includes(toolId)) {
+    return Boolean(support?.runtime?.ready || runtime?.configured);
+  }
+
+  if (toolId === 'k3s-deploy') {
     return Boolean(support?.runtime?.ready || runtime?.configured);
   }
 

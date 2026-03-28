@@ -11,6 +11,7 @@ describe('tool execution profiles', () => {
         const toolIds = getAllowedToolIdsForProfile(DEFAULT_EXECUTION_PROFILE);
 
         expect(toolIds).toEqual(expect.arrayContaining([
+            'git-safe',
             'security-scan',
             'architecture-design',
             'uml-generate',
@@ -25,6 +26,7 @@ describe('tool execution profiles', () => {
 
         expect(toolIds).toEqual(expect.arrayContaining([
             'remote-command',
+            'k3s-deploy',
             'architecture-design',
             'schema-generate',
         ]));
@@ -34,6 +36,7 @@ describe('tool execution profiles', () => {
     test('remote-build profile adds code-sandbox without exposing code-execute', () => {
         const toolIds = getAllowedToolIdsForProfile(REMOTE_BUILD_EXECUTION_PROFILE);
 
+        expect(toolIds).toContain('k3s-deploy');
         expect(toolIds).toContain('code-sandbox');
         expect(toolIds).not.toContain('code-execute');
         expect(HIDDEN_FRONTEND_TOOL_IDS).toContain('code-execute');

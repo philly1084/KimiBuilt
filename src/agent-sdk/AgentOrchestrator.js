@@ -18,6 +18,7 @@ const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 const REMOTE_BUILD_TOOL_ALLOWLIST = new Set([
   'ssh-execute',
   'remote-command',
+  'k3s-deploy',
   'docker-exec',
   'web-search',
   'web-fetch',
@@ -26,6 +27,7 @@ const REMOTE_BUILD_TOOL_ALLOWLIST = new Set([
   'file-write',
   'file-search',
   'file-mkdir',
+  'git-safe',
   'code-sandbox',
   'tool-doc-read',
 ]);
@@ -754,7 +756,7 @@ class AgentOrchestrator {
         return false;
       }
 
-      if (toolId === 'ssh-execute' || toolId === 'remote-command') {
+      if (toolId === 'ssh-execute' || toolId === 'remote-command' || toolId === 'k3s-deploy') {
         return hasRemoteOpsIntent && hasUsableSshDefaults;
       }
 

@@ -134,6 +134,21 @@ function createToolManager() {
                 },
             },
         }],
+        ['git-safe', {
+            id: 'git-safe',
+            name: 'Git Save And Push',
+            description: 'Restricted local git operations',
+            inputSchema: {
+                type: 'object',
+                required: ['action'],
+                properties: {
+                    action: { type: 'string' },
+                    repositoryPath: { type: 'string' },
+                    message: { type: 'string' },
+                    paths: { type: 'array' },
+                },
+            },
+        }],
         ['security-scan', {
             id: 'security-scan',
             name: 'Security Scan',
@@ -236,6 +251,21 @@ function createToolManager() {
                 },
             },
         }],
+        ['k3s-deploy', {
+            id: 'k3s-deploy',
+            name: 'K3s Deploy',
+            description: 'Restricted k3s deployment flow over SSH',
+            inputSchema: {
+                type: 'object',
+                required: ['action'],
+                properties: {
+                    action: { type: 'string' },
+                    repositoryUrl: { type: 'string' },
+                    targetDirectory: { type: 'string' },
+                    manifestsPath: { type: 'string' },
+                },
+            },
+        }],
     ]);
 
     const skills = new Map([
@@ -249,6 +279,7 @@ function createToolManager() {
         ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'] }],
         ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'] }],
         ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'] }],
+        ['git-safe', { enabled: true, triggerPatterns: ['git push', 'commit to github', 'save and push'] }],
         ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'] }],
         ['architecture-design', { enabled: true, triggerPatterns: ['design architecture', 'system design'] }],
         ['uml-generate', { enabled: true, triggerPatterns: ['generate uml', 'class diagram'] }],
@@ -257,6 +288,7 @@ function createToolManager() {
         ['migration-create', { enabled: true, triggerPatterns: ['create migration', 'schema migration'] }],
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'] }],
         ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'] }],
+        ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'] }],
     ]);
 
     return {
@@ -270,6 +302,19 @@ function createToolManager() {
                         stdout: 'host\nup 10 days',
                         stderr: '',
                         host: `${params.host || 'default-host'}:${params.port || 22}`,
+                    },
+                };
+            }
+
+            if (id === 'k3s-deploy') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        action: params.action,
+                        stdout: 'deployment.apps/backend configured',
+                        stderr: '',
+                        host: 'default-host:22',
                     },
                 };
             }
@@ -488,6 +533,34 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toEqual(['web-search', 'file-mkdir']);
+    });
+
+    test('selects git-safe and k3s-deploy for explicit repo and cluster operations', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Commit the latest files to GitHub and deploy the updated image to k3s.',
+            { executionProfile: 'remote-build' },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Commit the latest files to GitHub and deploy the updated image to k3s.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(expect.arrayContaining([
+            'git-safe',
+            'k3s-deploy',
+        ]));
     });
 
     test('deterministic research preflight fetches top pages and stores distilled notes', async () => {

@@ -18,6 +18,8 @@ const { registerSandboxTools } = require('./categories/sandbox');
 // SSH tools
 const { SSHExecuteTool } = require('./categories/ssh/SSHExecuteTool');
 const { DockerExecTool } = require('./categories/ssh/DockerExecTool');
+const { K3sDeployTool } = require('./categories/ssh/K3sDeployTool');
+const { GitLocalTool } = require('./categories/system/GitLocalTool');
 
 function normalizeCandidateUrl(value = '') {
   let candidate = String(value || '').trim();
@@ -204,7 +206,8 @@ class ToolManager {
           name: 'Remote Command',
           description: 'Execute remote server commands over SSH',
         }),
-        new DockerExecTool()
+        new DockerExecTool(),
+        new K3sDeployTool(),
       ];
 
       tools.forEach(tool => {
@@ -675,6 +678,10 @@ class ToolManager {
       },
     ];
 
+    const systemToolInstances = [
+      new GitLocalTool(),
+    ];
+
     // Register all system tools
     [...fileTools, ...codeTools, ...docsTools, ...mediaTools].forEach(def => {
       this.registry.register({
@@ -689,6 +696,22 @@ class ToolManager {
           icon: 'settings'
         }
       });
+    });
+
+    systemToolInstances.forEach((tool) => {
+      const definition = this.createToolDefinition(tool, {
+        frontend: {
+          exposeToFrontend: true,
+          icon: tool.id === 'git-safe' ? 'git-branch' : 'settings',
+        },
+        skill: {
+          triggerPatterns: [tool.name.toLowerCase(), tool.id.replace(/-/g, ' ')],
+          requiresConfirmation: tool.id !== 'git-safe',
+        },
+      });
+
+      this.registry.register(definition);
+      this.loadedTools.set(tool.id, tool);
     });
 
     console.log('[ToolManager] System tools registered');
@@ -723,7 +746,8 @@ class ToolManager {
     const patterns = {
       'ssh-execute': ['ssh', 'remote command', 'execute on server', 'run on host'],
       'remote-command': ['remote command', 'run remotely', 'execute remotely', 'ssh'],
-      'docker-exec': ['docker', 'container', 'run in container', 'docker exec']
+      'docker-exec': ['docker', 'container', 'run in container', 'docker exec'],
+      'k3s-deploy': ['k3s deploy', 'deploy to k3s', 'kubectl apply', 'rollout status', 'set image'],
     };
     return patterns[toolId] || [toolId];
   }

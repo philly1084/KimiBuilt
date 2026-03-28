@@ -62,8 +62,10 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-write',
     'file-search',
     'file-mkdir',
+    'git-safe',
     'ssh-execute',
     'remote-command',
+    'k3s-deploy',
     'docker-exec',
     'code-sandbox',
     'security-scan',
@@ -626,11 +628,36 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         || options?.toolContext?.executionProfile,
     );
 
+    if (toolId === 'k3s-deploy') {
+        return hasUsableSshDefaults()
+            && (executionProfile === 'remote-build' || /\b(k3s|kubernetes|kubectl|deployment|rollout|manifest|helm)\b/i.test(prompt));
+    }
+
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         return promptHasExplicitSshIntent(prompt)
             || (executionProfile === 'remote-build' && hasUsableSshDefaults());
     }
     return true;
+}
+
+function hasExplicitGitIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/i.test(text)
+        || /\b(status|diff|branch|stage|add|commit|push)\b[\s\S]{0,40}\bgit\b/i.test(text);
+}
+
+function hasExplicitK3sDeployIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/i.test(text)
+        || /\b(k3s|k8s|kubernetes|kubectl)\b[\s\S]{0,60}\b(deploy|rollout|apply|set image|manifest|deployment|sync)\b/i.test(text);
 }
 
 function hasExplicitWebResearchIntent(prompt = '') {
@@ -1331,6 +1358,14 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
         selectedIds.add(remoteToolId);
     }
 
+    if (hasExplicitK3sDeployIntent(prompt)) {
+        selectedIds.add('k3s-deploy');
+    }
+
+    if (hasExplicitGitIntent(prompt)) {
+        selectedIds.add('git-safe');
+    }
+
     if (/\b(docker|container)\b/i.test(normalizedPrompt)) {
         selectedIds.add('docker-exec');
     }
@@ -1394,6 +1429,14 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
 
     if (promptHasExplicitSshIntent(prompt)) {
         return remoteToolId;
+    }
+
+    if (hasExplicitK3sDeployIntent(prompt) && availableToolIds.has('k3s-deploy')) {
+        return 'k3s-deploy';
+    }
+
+    if (hasExplicitGitIntent(prompt) && availableToolIds.has('git-safe')) {
+        return 'git-safe';
     }
 
     if (hasExplicitWebResearchIntent(prompt)) {
@@ -1503,6 +1546,11 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `file-mkdir` to create folders or directories when the user asks for them.');
     }
 
+    if (automaticTools.some((entry) => entry.id === 'git-safe')) {
+        guidance.push('- Use `git-safe` for local repository save flows: inspect git status, stage files, commit, and push.');
+        guidance.push('- Prefer `save-and-push` when the user clearly wants the latest local changes committed and pushed to GitHub.');
+    }
+
     const remoteGuidanceToolId = automaticTools.some((entry) => entry.id === 'remote-command')
         ? 'remote-command'
         : (automaticTools.some((entry) => entry.id === 'ssh-execute') ? 'ssh-execute' : null);
@@ -1530,6 +1578,11 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'docker-exec')) {
         guidance.push('- Use `docker-exec` for commands that must run inside an existing Docker container.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'k3s-deploy')) {
+        guidance.push('- Use `k3s-deploy` for restricted deployment work over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
+        guidance.push('- Prefer `k3s-deploy` over raw SSH when the task is a standard k3s deploy/update flow.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {

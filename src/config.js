@@ -89,6 +89,17 @@ const config = {
         ),
     },
 
+    deploy: {
+        defaultRepositoryPath: process.env.DEFAULT_GIT_REPOSITORY_PATH || process.cwd(),
+        defaultRepositoryUrl: process.env.KIMIBUILT_DEPLOY_REPO_URL || '',
+        defaultTargetDirectory: process.env.KIMIBUILT_DEPLOY_TARGET_DIR || '',
+        defaultManifestsPath: process.env.KIMIBUILT_DEPLOY_MANIFESTS_PATH || 'k8s',
+        defaultNamespace: process.env.KIMIBUILT_DEPLOY_NAMESPACE || 'kimibuilt',
+        defaultDeployment: process.env.KIMIBUILT_DEPLOY_DEPLOYMENT || 'backend',
+        defaultContainer: process.env.KIMIBUILT_DEPLOY_CONTAINER || 'backend',
+        defaultBranch: process.env.KIMIBUILT_DEPLOY_BRANCH || 'master',
+    },
+
     runtime: {
         remoteBuildMaxAutonomousRounds: Math.max(
             1,

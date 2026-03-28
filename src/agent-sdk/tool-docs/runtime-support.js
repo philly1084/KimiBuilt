@@ -76,14 +76,16 @@ function probeCommand(command, args = [], options = {}) {
 }
 
 async function buildRuntimeSnapshot() {
-    const [dockerProbe, sshProbe] = await Promise.all([
+    const [dockerProbe, sshProbe, gitProbe] = await Promise.all([
         probeCommand('docker', ['info'], { timeout: 8000 }),
         probeCommand('ssh', ['-V'], { timeout: 5000 }),
+        probeCommand('git', ['--version'], { timeout: 5000 }),
     ]);
 
     const sshConfig = settingsController.getEffectiveSshConfig();
     const sshNotes = [];
     const dockerNotes = [];
+    const gitNotes = [];
 
     if (!sshProbe.ok) {
         appendNote(sshNotes, `SSH client is unavailable in the backend runtime: ${sshProbe.message || 'unknown error'}`);
@@ -121,11 +123,23 @@ async function buildRuntimeSnapshot() {
 
     const dockerReady = dockerProbe.ok;
 
+    if (!gitProbe.ok) {
+        appendNote(gitNotes, `Git CLI is unavailable in the backend runtime: ${gitProbe.message || 'unknown error'}`);
+    } else {
+        appendNote(gitNotes, 'Git CLI is available in the backend runtime.');
+    }
+
+    const gitReady = gitProbe.ok;
+
     return {
         checkedAt: new Date().toISOString(),
         docker: {
             ready: dockerReady,
             notes: dockerNotes,
+        },
+        git: {
+            ready: gitReady,
+            notes: gitNotes,
         },
         ssh: {
             ready: sshReady,
@@ -163,6 +177,22 @@ async function getRuntimeSupport(toolId) {
             status: snapshot.ssh.ready ? 'stable' : 'requires_setup',
             notes: snapshot.ssh.notes,
             runtime: snapshot.ssh,
+        };
+    }
+
+    if (toolId === 'k3s-deploy') {
+        return {
+            status: snapshot.ssh.ready ? 'stable' : 'requires_setup',
+            notes: snapshot.ssh.notes,
+            runtime: snapshot.ssh,
+        };
+    }
+
+    if (toolId === 'git-safe') {
+        return {
+            status: snapshot.git.ready ? 'stable' : 'requires_setup',
+            notes: snapshot.git.notes,
+            runtime: snapshot.git,
         };
     }
 
