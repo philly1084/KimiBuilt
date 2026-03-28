@@ -5,19 +5,28 @@ const { artifactService } = require('../artifacts/artifact-service');
 
 const router = Router();
 
+function getRequestOwnerId(req) {
+    return String(req.user?.username || '').trim() || null;
+}
+
 router.post('/', async (req, res, next) => {
     try {
         const { metadata } = req.body || {};
-        const session = await sessionStore.create(metadata);
+        const session = await sessionStore.create({
+            ...(metadata || {}),
+            ownerId: getRequestOwnerId(req),
+        });
         res.status(201).json(session);
     } catch (err) {
         next(err);
     }
 });
 
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
     try {
-        const sessions = await sessionStore.list();
+        const sessions = await sessionStore.list({
+            ownerId: getRequestOwnerId(req),
+        });
         res.json({ sessions, count: sessions.length });
     } catch (err) {
         next(err);
@@ -26,7 +35,7 @@ router.get('/', async (_req, res, next) => {
 
 router.get('/:id/artifacts', async (req, res, next) => {
     try {
-        const session = await sessionStore.get(req.params.id);
+        const session = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -38,9 +47,28 @@ router.get('/:id/artifacts', async (req, res, next) => {
     }
 });
 
+router.get('/:id/messages', async (req, res, next) => {
+    try {
+        const limit = Number(req.query?.limit || 100);
+        const session = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
+
+        const messages = await sessionStore.listMessages(
+            req.params.id,
+            Number.isFinite(limit) ? Math.max(1, Math.min(limit, 500)) : 100,
+            getRequestOwnerId(req),
+        );
+        res.json({ sessionId: req.params.id, messages, count: messages.length });
+    } catch (err) {
+        next(err);
+    }
+});
+
 router.get('/:id', async (req, res, next) => {
     try {
-        const session = await sessionStore.get(req.params.id);
+        const session = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -53,12 +81,12 @@ router.get('/:id', async (req, res, next) => {
 router.patch('/:id', async (req, res, next) => {
     try {
         const { metadata } = req.body || {};
-        const session = await sessionStore.update(req.params.id, { metadata: metadata || {} });
-
-        if (!session) {
+        const existing = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));
+        if (!existing) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
+        const session = await sessionStore.update(req.params.id, { metadata: metadata || {} });
         res.json(session);
     } catch (err) {
         next(err);
@@ -68,7 +96,7 @@ router.patch('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
     try {
         const { id } = req.params;
-        const session = await sessionStore.get(id);
+        const session = await sessionStore.getOwned(id, getRequestOwnerId(req));
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }

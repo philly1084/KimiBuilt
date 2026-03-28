@@ -176,9 +176,11 @@ class ChatApp {
         });
         
         sessionManager.addEventListener('sessionSwitched', (e) => {
-            this.renderMessages(e.detail.messages);
-            this.updateSessionInfo();
-            uiHelpers.closeSidebar();
+            this.loadSessionMessages(e.detail.sessionId)
+                .finally(() => {
+                    this.updateSessionInfo();
+                    uiHelpers.closeSidebar();
+                });
         });
         
         sessionManager.addEventListener('sessionDeleted', (e) => {
@@ -334,7 +336,7 @@ class ChatApp {
             
             // If we have a current session, load its messages
             if (sessionManager.currentSessionId) {
-                this.loadSessionMessages(sessionManager.currentSessionId);
+                await this.loadSessionMessages(sessionManager.currentSessionId);
             }
             
             this.updateSessionInfo();
@@ -357,8 +359,8 @@ class ChatApp {
         }
     }
 
-    loadSessionMessages(sessionId) {
-        const messages = sessionManager.getMessages(sessionId);
+    async loadSessionMessages(sessionId) {
+        const messages = await sessionManager.loadSessionMessagesFromBackend(sessionId);
         this.renderMessages(messages);
     }
 

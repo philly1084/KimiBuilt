@@ -24,12 +24,18 @@ const { buildContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
 
-async function updateSessionProjectMemory(sessionId, updates = {}) {
+function getRequestOwnerId(req) {
+    return String(req.user?.username || '').trim() || null;
+}
+
+async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
         return null;
     }
 
-    const session = await sessionStore.get(sessionId);
+    const session = ownerId
+        ? await sessionStore.getOwned(sessionId, ownerId)
+        : await sessionStore.get(sessionId);
     if (!session) {
         return null;
     }
@@ -93,17 +99,18 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
         const requestedTaskType = resolveConversationTaskType(requestMetadata);
+        const ownerId = getRequestOwnerId(req);
 
         let session;
         if (!sessionId) {
-            session = await sessionStore.create({ mode: requestedTaskType });
+            session = await sessionStore.create({ mode: requestedTaskType, ownerId });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: requestedTaskType });
+            session = await sessionStore.getOrCreateOwned(sessionId, { mode: requestedTaskType }, ownerId);
         }
 
         if (!session) {
-            session = await sessionStore.get(sessionId);
+            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
@@ -190,7 +197,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     clientSurface: taskType,
                 },
             });
-            memoryService.rememberResponse(sessionId, generationArtifacts.assistantMessage);
+            memoryService.rememberResponse(sessionId, generationArtifacts.assistantMessage, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: generationArtifacts.assistantMessage },
@@ -200,7 +207,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 assistantText: generationArtifacts.assistantMessage,
                 toolEvents: preparedImages.toolEvents,
                 artifacts: responseArtifacts,
-            });
+            }, ownerId);
 
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generationArtifacts.responseId,
@@ -266,12 +273,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     route: '/api/chat',
                     transport: 'http',
                     memoryService,
+                    ownerId,
                 },
                 executionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
                 metadata: requestMetadata,
+                ownerId,
             });
             const response = execution.response;
 
@@ -287,7 +296,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
-                        memoryService.rememberResponse(sessionId, fullText);
+                        memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
                         await sessionStore.appendMessages(sessionId, [
                             { role: 'user', content: message },
                             { role: 'assistant', content: fullText },
@@ -315,7 +324,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         assistantText: fullText,
                         toolEvents,
                         artifacts,
-                    });
+                    }, ownerId);
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,
                         output: fullText,
@@ -347,12 +356,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 route: '/api/chat',
                 transport: 'http',
                 memoryService,
+                ownerId,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
             metadata: requestMetadata,
+            ownerId,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -364,7 +375,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText);
+            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },
@@ -392,7 +403,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             assistantText: outputText,
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
-        });
+        }, ownerId);
 
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,

@@ -6,6 +6,24 @@ const { validate } = require('../middleware/validate');
 
 const router = Router();
 
+function getRequestOwnerId(req) {
+    return String(req.user?.username || '').trim() || null;
+}
+
+async function getOwnedArtifact(req, artifactId, options = {}) {
+    const artifact = await artifactService.getArtifact(artifactId, options);
+    if (!artifact) {
+        return null;
+    }
+
+    const session = await sessionStore.getOwned(artifact.sessionId, getRequestOwnerId(req));
+    if (!session) {
+        return null;
+    }
+
+    return artifact;
+}
+
 const generationSchema = {
     sessionId: { required: true, type: 'string' },
     mode: { required: true, type: 'string' },
@@ -30,7 +48,10 @@ router.post('/upload', async (req, res, next) => {
             return res.status(400).json({ error: { message: 'sessionId is required' } });
         }
 
-        await sessionStore.getOrCreate(sessionId, { mode });
+        const session = await sessionStore.getOrCreateOwned(sessionId, { mode }, getRequestOwnerId(req));
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
         const artifact = await artifactService.uploadArtifact({
             sessionId,
             mode,
@@ -59,7 +80,10 @@ router.post('/generate', validate(generationSchema), async (req, res, next) => {
             parentArtifactId = null,
         } = req.body;
 
-        const session = await sessionStore.getOrCreate(sessionId, { mode });
+        const session = await sessionStore.getOrCreateOwned(sessionId, { mode }, getRequestOwnerId(req));
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
         const result = await artifactService.generateArtifact({
             session,
             sessionId,
@@ -89,7 +113,7 @@ router.post('/generate', validate(generationSchema), async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
     try {
-        const artifact = await artifactService.getArtifact(req.params.id);
+        const artifact = await getOwnedArtifact(req, req.params.id);
         if (!artifact) {
             return res.status(404).json({ error: { message: 'Artifact not found' } });
         }
@@ -101,7 +125,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.get('/:id/download', async (req, res, next) => {
     try {
-        const artifact = await artifactService.getArtifact(req.params.id, { includeContent: true });
+        const artifact = await getOwnedArtifact(req, req.params.id, { includeContent: true });
         if (!artifact) {
             return res.status(404).json({ error: { message: 'Artifact not found' } });
         }
@@ -120,6 +144,11 @@ router.get('/:id/download', async (req, res, next) => {
 
 router.delete('/:id', async (req, res, next) => {
     try {
+        const artifact = await getOwnedArtifact(req, req.params.id);
+        if (!artifact) {
+            return res.status(404).json({ error: { message: 'Artifact not found' } });
+        }
+
         const deleted = await artifactService.deleteArtifact(req.params.id);
         if (!deleted) {
             return res.status(404).json({ error: { message: 'Artifact not found' } });

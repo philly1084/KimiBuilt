@@ -145,6 +145,37 @@ class SessionManager extends EventTarget {
         return this.sessions;
     }
 
+    async loadSessionMessagesFromBackend(sessionId, options = {}) {
+        if (!sessionId || this.isLocalSession(sessionId)) {
+            return this.getMessages(sessionId);
+        }
+
+        const limit = Number.isFinite(Number(options.limit)) ? Number(options.limit) : 200;
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions/${sessionId}/messages?limit=${encodeURIComponent(limit)}`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            const messages = Array.isArray(data.messages)
+                ? data.messages.map((message) => ({
+                    ...message,
+                    id: message.id || this.generateLocalId(),
+                    timestamp: message.timestamp || new Date().toISOString(),
+                }))
+                : [];
+
+            this.sessionMessages.set(sessionId, messages);
+            this.saveToStorage();
+            return messages;
+        } catch (error) {
+            console.warn('Failed to load backend session messages:', error);
+            return this.getMessages(sessionId);
+        }
+    }
+
     async pruneBlankSessions() {
         const sessionsToRemove = this.sessions.filter((session) => this.isBlankSession(session));
 

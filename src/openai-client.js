@@ -1083,6 +1083,7 @@ async function maybeStoreResearchMemoryNote({ toolContext = {}, query = '', cand
         sourceUrl: String(candidate?.url || result?.data?.url || '').trim(),
         sourceTitle: String(candidate?.title || result?.data?.title || '').trim(),
         query,
+        ...(toolContext.ownerId ? { ownerId: toolContext.ownerId } : {}),
     });
 }
 

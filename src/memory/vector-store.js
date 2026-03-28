@@ -87,15 +87,21 @@ class VectorStore {
         const query = queryOrCollection;
         const {
             sessionId = null,
+            ownerId = null,
             topK = config.memory.recallTopK,
             scoreThreshold = config.memory.recallScoreThreshold,
         } = options;
         await this.ensureCollection(this.collection);
         const vector = await embedder.embed(query);
 
-        const filter = sessionId
-            ? { must: [{ key: 'sessionId', match: { value: sessionId } }] }
-            : undefined;
+        const must = [];
+        if (sessionId) {
+            must.push({ key: 'sessionId', match: { value: sessionId } });
+        } else if (ownerId) {
+            must.push({ key: 'ownerId', match: { value: ownerId } });
+        }
+
+        const filter = must.length > 0 ? { must } : undefined;
 
         const results = await this.client.search(this.collection, {
             vector,

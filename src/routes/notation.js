@@ -8,6 +8,10 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 
 const router = Router();
 
+function getRequestOwnerId(req) {
+    return String(req.user?.username || '').trim() || null;
+}
+
 const notationSchema = {
     notation: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
@@ -41,17 +45,18 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
+        const ownerId = getRequestOwnerId(req);
 
         let session;
         if (!sessionId) {
-            session = await sessionStore.create({ mode: 'notation', helperMode });
+            session = await sessionStore.create({ mode: 'notation', helperMode, ownerId });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: 'notation', helperMode });
+            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'notation', helperMode }, ownerId);
         }
 
         if (!session) {
-            session = await sessionStore.get(sessionId);
+            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
@@ -83,6 +88,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
+            ownerId,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -94,7 +100,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText);
+            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: notation },
                 { role: 'assistant', content: outputText },

@@ -29,8 +29,8 @@ class MemoryService {
      * @param {string} [role='user'] - Role (user or assistant)
      * @returns {Promise<string>} Point ID
      */
-    async remember(sessionId, message, role = 'user') {
-        return this.store.store(sessionId, message, { role });
+    async remember(sessionId, message, role = 'user', metadata = {}) {
+        return this.store.store(sessionId, message, { role, ...metadata });
     }
 
     /**
@@ -59,7 +59,7 @@ class MemoryService {
         };
     }
 
-    async recall(query, { sessionId = null, topK, scoreThreshold, profile = DEFAULT_RECALL_PROFILE } = {}) {
+    async recall(query, { sessionId = null, ownerId = null, topK, scoreThreshold, profile = DEFAULT_RECALL_PROFILE } = {}) {
         const recallOptions = this.getRecallOptions({
             profile,
             topK,
@@ -67,6 +67,7 @@ class MemoryService {
         });
         const results = await this.store.search(query, {
             sessionId,
+            ownerId,
             topK: recallOptions.topK,
             scoreThreshold: recallOptions.scoreThreshold,
         });
@@ -97,15 +98,17 @@ class MemoryService {
      * @returns {Promise<string[]>} Context messages to inject
      */
     async process(sessionId, message, options = {}) {
+        const ownerId = String(options?.ownerId || '').trim() || null;
         // Store the user message (fire and forget — don't block on it)
-        this.remember(sessionId, message, 'user').catch((err) => {
+        this.remember(sessionId, message, 'user', ownerId ? { ownerId } : {}).catch((err) => {
             console.error('[Memory] Failed to store message:', err.message);
         });
 
         // Recall relevant context
         try {
             const context = await this.recall(message, {
-                sessionId,
+                sessionId: ownerId ? null : sessionId,
+                ownerId,
                 ...options,
             });
             return context;
@@ -120,9 +123,9 @@ class MemoryService {
      * @param {string} sessionId
      * @param {string} response
      */
-    async rememberResponse(sessionId, response) {
+    async rememberResponse(sessionId, response, metadata = {}) {
         try {
-            await this.remember(sessionId, response, 'assistant');
+            await this.remember(sessionId, response, 'assistant', metadata);
         } catch (err) {
             console.error('[Memory] Failed to store response:', err.message);
         }

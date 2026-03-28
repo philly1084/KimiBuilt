@@ -28,12 +28,14 @@ const adminEvents = new EventEmitter();
 // Store admin dashboard connections
 const adminConnections = new Set();
 
-async function updateSessionProjectMemory(sessionId, updates = {}) {
+async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
         return null;
     }
 
-    const session = await sessionStore.get(sessionId);
+    const session = ownerId
+        ? await sessionStore.getOwned(sessionId, ownerId)
+        : await sessionStore.get(sessionId);
     if (!session) {
         return null;
     }
@@ -86,18 +88,19 @@ function setupWebSocket(wss, app = null) {
                 const msg = JSON.parse(raw.toString());
                 const { type, payload } = msg;
                 let { sessionId } = msg;
+                const ownerId = String(ws.user?.username || '').trim() || null;
 
                 let session;
                 if (!sessionId) {
-                    session = await sessionStore.create({ mode: type, transport: 'ws' });
+                    session = await sessionStore.create({ mode: type, transport: 'ws', ownerId });
                     sessionId = session.id;
                     ws.send(JSON.stringify({ type: 'session_created', sessionId }));
                 } else {
-                    session = await sessionStore.getOrCreate(sessionId, { mode: type, transport: 'ws' });
+                    session = await sessionStore.getOrCreateOwned(sessionId, { mode: type, transport: 'ws' }, ownerId);
                 }
 
                 if (!session) {
-                    session = await sessionStore.get(sessionId);
+                    session = await sessionStore.getOwned(sessionId, ownerId);
                 }
                 if (!session) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
@@ -106,13 +109,13 @@ function setupWebSocket(wss, app = null) {
 
                 switch (type) {
                     case 'chat':
-                        await handleChat(ws, session, payload, app?.locals?.toolManager || null);
+                        await handleChat(ws, session, payload, app?.locals?.toolManager || null, ownerId);
                         break;
                     case 'canvas':
-                        await handleCanvas(ws, session, payload);
+                        await handleCanvas(ws, session, payload, ownerId);
                         break;
                     case 'notation':
-                        await handleNotation(ws, session, payload);
+                        await handleNotation(ws, session, payload, ownerId);
                         break;
                     case 'admin_subscribe':
                         handleAdminSubscribe(ws);
@@ -135,7 +138,7 @@ function setupWebSocket(wss, app = null) {
     });
 }
 
-async function handleChat(ws, session, payload = {}, toolManager = null) {
+async function handleChat(ws, session, payload = {}, toolManager = null, ownerId = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
     const { message, model = null, artifactIds = [], outputFormat = null, executionProfile = null } = payload;
@@ -222,7 +225,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                     clientSurface: taskType,
                 },
             });
-            memoryService.rememberResponse(session.id, generation.assistantMessage);
+            memoryService.rememberResponse(session.id, generation.assistantMessage, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: generation.assistantMessage },
@@ -232,7 +235,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 assistantText: generation.assistantMessage,
                 toolEvents: preparedImages.toolEvents,
                 artifacts: responseArtifacts,
-            });
+            }, ownerId);
 
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
@@ -276,11 +279,14 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 sessionId: session.id,
                 route: '/ws',
                 transport: 'ws',
+                memoryService,
+                ownerId,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            ownerId,
         });
         const response = execution.response;
 
@@ -295,7 +301,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             if (event.type === 'response.completed') {
                 if (!execution.handledPersistence) {
                     await sessionStore.recordResponse(session.id, event.response.id);
-                    memoryService.rememberResponse(session.id, fullText);
+                    memoryService.rememberResponse(session.id, fullText, ownerId ? { ownerId } : {});
                     await sessionStore.appendMessages(session.id, [
                         { role: 'user', content: message },
                         { role: 'assistant', content: fullText },
@@ -323,7 +329,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                     assistantText: fullText,
                     toolEvents: event.response?.metadata?.toolEvents || [],
                     artifacts,
-                });
+                }, ownerId);
                 completeRuntimeTask(runtimeTask?.id, {
                     responseId: event.response.id,
                     output: fullText,
@@ -349,7 +355,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     }
 }
 
-async function handleCanvas(ws, session, payload = {}) {
+async function handleCanvas(ws, session, payload = {}, ownerId = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
     const {
@@ -396,6 +402,7 @@ async function handleCanvas(ws, session, payload = {}) {
             executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
+            ownerId,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -407,7 +414,7 @@ async function handleCanvas(ws, session, payload = {}) {
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(session.id, outputText);
+            memoryService.rememberResponse(session.id, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },
@@ -457,7 +464,7 @@ async function handleCanvas(ws, session, payload = {}) {
     }
 }
 
-async function handleNotation(ws, session, payload = {}) {
+async function handleNotation(ws, session, payload = {}, ownerId = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
     const {
@@ -504,6 +511,7 @@ async function handleNotation(ws, session, payload = {}) {
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
+            ownerId,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -515,7 +523,7 @@ async function handleNotation(ws, session, payload = {}) {
             .map((item) => item.content.map((content) => content.text).join(''))
             .join('\n');
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(session.id, outputText);
+            memoryService.rememberResponse(session.id, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: notation },
                 { role: 'assistant', content: outputText },

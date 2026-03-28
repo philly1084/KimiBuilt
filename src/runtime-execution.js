@@ -203,6 +203,7 @@ async function executeConversationRuntime(app, params = {}) {
             ? []
             : await memoryService.process(params.sessionId, recallInput, {
                 profile: inferRecallProfile(recallInput),
+                ownerId: params.ownerId || null,
             })
     );
     const recentMessages = params.recentMessages || (

@@ -1690,6 +1690,7 @@ class ConversationOrchestrator extends EventEmitter {
         loadContextMessages = true,
         loadRecentMessages = true,
         sessionId = 'default',
+        ownerId = null,
         taskType = 'chat',
         metadata = {},
         executionProfile = DEFAULT_EXECUTION_PROFILE,
@@ -1701,14 +1702,19 @@ class ConversationOrchestrator extends EventEmitter {
         const objective = extractObjective(input, memoryInput);
         const runtimeToolManager = toolManager || this.toolManager;
         let executionTrace = [];
-        const session = this.sessionStore?.getOrCreate
-            ? await this.sessionStore.getOrCreate(sessionId, { mode: taskType })
-            : (this.sessionStore?.get ? await this.sessionStore.get(sessionId) : null);
+        const session = ownerId && this.sessionStore?.getOrCreateOwned
+            ? await this.sessionStore.getOrCreateOwned(sessionId, { mode: taskType }, ownerId)
+            : this.sessionStore?.getOrCreate
+                ? await this.sessionStore.getOrCreate(sessionId, { mode: taskType })
+                : ownerId && this.sessionStore?.getOwned
+                    ? await this.sessionStore.getOwned(sessionId, ownerId)
+                    : (this.sessionStore?.get ? await this.sessionStore.get(sessionId) : null);
         const resolvedContextMessages = contextMessages.length > 0
             ? contextMessages
             : loadContextMessages !== false && this.memoryService?.process
                 ? await this.memoryService.process(sessionId, memoryInput || objective, {
                     profile: inferRecallProfileFromText(memoryInput || objective),
+                    ownerId,
                 })
                 : [];
         const resolvedRecentMessages = recentMessages.length > 0
@@ -2195,6 +2201,7 @@ class ConversationOrchestrator extends EventEmitter {
 
             await this.persistConversationState({
                 sessionId,
+                ownerId,
                 userText: objective,
                 assistantText: output,
                 responseId: finalResponse.id,
@@ -3223,6 +3230,7 @@ class ConversationOrchestrator extends EventEmitter {
 
     async persistConversationState({
         sessionId,
+        ownerId = null,
         userText,
         assistantText,
         responseId,
@@ -3235,7 +3243,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (this.memoryService?.rememberResponse) {
-            this.memoryService.rememberResponse(sessionId, assistantText);
+            this.memoryService.rememberResponse(sessionId, assistantText, ownerId ? { ownerId } : {});
         }
 
         if (this.memoryService?.rememberResearchNote) {
@@ -3243,7 +3251,11 @@ class ConversationOrchestrator extends EventEmitter {
                 objective: userText,
                 toolEvents,
             });
-            await Promise.all(researchNotes.map((note) => this.memoryService.rememberResearchNote(sessionId, note)));
+            await Promise.all(researchNotes.map((note) => this.memoryService.rememberResearchNote(
+                sessionId,
+                note,
+                ownerId ? { ownerId } : {},
+            )));
         }
 
         if (this.sessionStore?.appendMessages) {
@@ -3255,9 +3267,11 @@ class ConversationOrchestrator extends EventEmitter {
 
         const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);
         if (this.sessionStore?.update) {
-            const currentSession = this.sessionStore?.get
-                ? await this.sessionStore.get(sessionId)
-                : null;
+            const currentSession = ownerId && this.sessionStore?.getOwned
+                ? await this.sessionStore.getOwned(sessionId, ownerId)
+                : this.sessionStore?.get
+                    ? await this.sessionStore.get(sessionId)
+                    : null;
             const projectMemory = mergeProjectMemory(
                 currentSession?.metadata?.projectMemory || {},
                 buildProjectMemoryUpdate({

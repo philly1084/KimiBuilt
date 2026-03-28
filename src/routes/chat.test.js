@@ -7,7 +7,9 @@ jest.mock('../middleware/validate', () => ({
 
 jest.mock('../session-store', () => ({
     sessionStore: {
-        getOrCreate: jest.fn(),
+        create: jest.fn(),
+        getOrCreateOwned: jest.fn(),
+        getOwned: jest.fn(),
         get: jest.fn(),
         update: jest.fn(),
         recordResponse: jest.fn(),
@@ -90,7 +92,8 @@ describe('/api/chat route', () => {
             previousResponseId: null,
             metadata: {},
         };
-        sessionStore.getOrCreate.mockResolvedValue(session);
+        sessionStore.getOrCreateOwned.mockResolvedValue(session);
+        sessionStore.getOwned.mockResolvedValue(session);
         sessionStore.get.mockResolvedValue(session);
         sessionStore.update.mockResolvedValue(session);
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');

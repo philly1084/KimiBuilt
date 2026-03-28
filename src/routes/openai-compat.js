@@ -27,6 +27,10 @@ const { buildContinuityInstructions: buildBaseContinuityInstructions } = require
 
 const router = Router();
 
+function getRequestOwnerId(req) {
+    return String(req.user?.username || '').trim() || null;
+}
+
 function normalizeMessageText(content = '') {
     if (typeof content === 'string') {
         return content;
@@ -189,12 +193,14 @@ function isChatCapableModel(modelId = '') {
     return looksLikeChatModel && !imageOnly && !audioOnly;
 }
 
-async function updateSessionProjectMemory(sessionId, updates = {}) {
+async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
         return null;
     }
 
-    const session = await sessionStore.get(sessionId);
+    const session = ownerId
+        ? await sessionStore.getOwned(sessionId, ownerId)
+        : await sessionStore.get(sessionId);
     if (!session) {
         return null;
     }
@@ -246,6 +252,7 @@ router.post('/chat/completions', async (req, res, next) => {
         } = req.body;
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
+        const ownerId = getRequestOwnerId(req);
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({
@@ -260,14 +267,14 @@ router.post('/chat/completions', async (req, res, next) => {
         let session;
         const requestedTaskType = resolveConversationTaskType(req.body);
         if (!sessionId) {
-            session = await sessionStore.create({ mode: requestedTaskType });
+            session = await sessionStore.create({ mode: requestedTaskType, ownerId });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: requestedTaskType });
+            session = await sessionStore.getOrCreateOwned(sessionId, { mode: requestedTaskType }, ownerId);
         }
 
         if (!session) {
-            session = await sessionStore.get(sessionId);
+            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({
@@ -374,7 +381,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     clientSurface: taskType,
                 },
             });
-            memoryService.rememberResponse(sessionId, generation.assistantMessage);
+            memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: lastUserText },
                 { role: 'assistant', content: generation.assistantMessage },
@@ -384,7 +391,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 assistantText: generation.assistantMessage,
                 toolEvents: preparedImages.toolEvents,
                 artifacts: responseArtifacts,
-            });
+            }, ownerId);
 
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
@@ -487,12 +494,14 @@ router.post('/chat/completions', async (req, res, next) => {
                     route: '/v1/chat/completions',
                     transport: 'http',
                     memoryService,
+                    ownerId,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
                 metadata: requestMetadata,
+                ownerId,
             });
             const response = execution.response;
 
@@ -516,7 +525,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
-                        memoryService.rememberResponse(sessionId, fullText);
+                        memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
                         await sessionStore.appendMessages(sessionId, [
                             { role: 'user', content: lastUserText },
                             { role: 'assistant', content: fullText },
@@ -544,7 +553,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         assistantText: fullText,
                         toolEvents,
                         artifacts,
-                    });
+                    }, ownerId);
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,
                         output: fullText,
@@ -590,12 +599,14 @@ router.post('/chat/completions', async (req, res, next) => {
                 route: '/v1/chat/completions',
                 transport: 'http',
                 memoryService,
+                ownerId,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
             metadata: requestMetadata,
+            ownerId,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -603,7 +614,7 @@ router.post('/chat/completions', async (req, res, next) => {
         }
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText);
+            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: lastUserText },
                 { role: 'assistant', content: outputText },
@@ -631,7 +642,7 @@ router.post('/chat/completions', async (req, res, next) => {
             assistantText: outputText,
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
-        });
+        }, ownerId);
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,
@@ -692,19 +703,20 @@ router.post('/responses', async (req, res, next) => {
         } = req.body;
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
+        const ownerId = getRequestOwnerId(req);
 
         let sessionId = resolveSessionId(req);
         let session;
         const requestedTaskType = resolveConversationTaskType(req.body);
         if (!sessionId) {
-            session = await sessionStore.create({ mode: requestedTaskType });
+            session = await sessionStore.create({ mode: requestedTaskType, ownerId });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: requestedTaskType });
+            session = await sessionStore.getOrCreateOwned(sessionId, { mode: requestedTaskType }, ownerId);
         }
 
         if (!session) {
-            session = await sessionStore.get(sessionId);
+            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({
@@ -805,7 +817,7 @@ router.post('/responses', async (req, res, next) => {
                     clientSurface: taskType,
                 },
             });
-            memoryService.rememberResponse(sessionId, generation.assistantMessage);
+            memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: userInput },
                 { role: 'assistant', content: generation.assistantMessage },
@@ -815,7 +827,7 @@ router.post('/responses', async (req, res, next) => {
                 assistantText: generation.assistantMessage,
                 toolEvents: preparedImages.toolEvents,
                 artifacts: responseArtifacts,
-            });
+            }, ownerId);
 
             const syntheticResponse = {
                 id: generation.responseId,
@@ -914,12 +926,14 @@ router.post('/responses', async (req, res, next) => {
                     route: '/v1/responses',
                     transport: 'http',
                     memoryService,
+                    ownerId,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
                 metadata: requestMetadata,
+                ownerId,
             });
             const response = execution.response;
 
@@ -933,7 +947,7 @@ router.post('/responses', async (req, res, next) => {
                 if (event.type === 'response.completed') {
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
-                        memoryService.rememberResponse(sessionId, fullText);
+                        memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
                         await sessionStore.appendMessages(sessionId, [
                             { role: 'user', content: userInput },
                             { role: 'assistant', content: fullText },
@@ -961,7 +975,7 @@ router.post('/responses', async (req, res, next) => {
                         assistantText: fullText,
                         toolEvents: event.response?.metadata?.toolEvents || [],
                         artifacts,
-                    });
+                    }, ownerId);
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,
                         output: fullText,
@@ -996,12 +1010,14 @@ router.post('/responses', async (req, res, next) => {
                 route: '/v1/responses',
                 transport: 'http',
                 memoryService,
+                ownerId,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
             metadata: requestMetadata,
+            ownerId,
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -1009,7 +1025,7 @@ router.post('/responses', async (req, res, next) => {
         }
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText);
+            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: userInput },
                 { role: 'assistant', content: outputText },
@@ -1037,7 +1053,7 @@ router.post('/responses', async (req, res, next) => {
             assistantText: outputText,
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
-        });
+        }, ownerId);
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,
@@ -1074,16 +1090,17 @@ router.post('/images/generations', async (req, res, next) => {
         } = req.body;
 
         let sessionId = resolveSessionId(req);
+        const ownerId = getRequestOwnerId(req);
         let session;
         if (!sessionId) {
-            session = await sessionStore.create({ mode: 'image' });
+            session = await sessionStore.create({ mode: 'image', ownerId });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: 'image' });
+            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'image' }, ownerId);
         }
 
         if (!session) {
-            session = await sessionStore.get(sessionId);
+            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({
@@ -1133,7 +1150,7 @@ router.post('/images/generations', async (req, res, next) => {
                 },
                 reason: 'Image generation request',
             }],
-        });
+        }, ownerId);
         setSessionHeaders(res, sessionId);
 
         res.json({

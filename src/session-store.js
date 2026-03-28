@@ -83,6 +83,35 @@ class SessionStore {
         return normalized;
     }
 
+    normalizeOwnerId(ownerId = null) {
+        const normalized = String(ownerId || '').trim();
+        return normalized || null;
+    }
+
+    getSessionOwnerId(sessionOrMetadata = null) {
+        const metadata = sessionOrMetadata?.metadata || sessionOrMetadata || {};
+        const ownerId = this.normalizeOwnerId(
+            metadata?.ownerId
+            || metadata?.userId
+            || metadata?.username,
+        );
+
+        return ownerId;
+    }
+
+    buildOwnedMetadata(metadata = {}, ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return this.normalizeMetadata(metadata);
+        }
+
+        return this.normalizeMetadata({
+            ...metadata,
+            ownerId: normalizedOwnerId,
+            ownerType: metadata?.ownerType || 'user',
+        });
+    }
+
     toSession(row) {
         if (!row) return null;
 
@@ -173,6 +202,50 @@ class SessionStore {
         }
 
         return this.create(metadata, id);
+    }
+
+    async claimOwnershipIfNeeded(id, ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return this.get(id);
+        }
+
+        const session = await this.get(id);
+        if (!session) {
+            return null;
+        }
+
+        const existingOwnerId = this.getSessionOwnerId(session);
+        if (existingOwnerId && existingOwnerId !== normalizedOwnerId) {
+            return null;
+        }
+
+        if (existingOwnerId === normalizedOwnerId) {
+            return session;
+        }
+
+        return this.update(id, {
+            metadata: this.buildOwnedMetadata(session.metadata || {}, normalizedOwnerId),
+        });
+    }
+
+    async getOwned(id, ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return this.get(id);
+        }
+
+        return this.claimOwnershipIfNeeded(id, normalizedOwnerId);
+    }
+
+    async getOrCreateOwned(id, metadata = {}, ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        const existing = await this.getOwned(id, normalizedOwnerId);
+        if (existing) {
+            return existing;
+        }
+
+        return this.create(this.buildOwnedMetadata(metadata, normalizedOwnerId), id);
     }
 
     async update(id, updates = {}) {
@@ -369,17 +442,48 @@ class SessionStore {
         return result.rowCount > 0;
     }
 
-    async list() {
+    async list(options = {}) {
         await this.initialize();
+        const ownerId = this.normalizeOwnerId(options?.ownerId);
 
         if (!this.usePostgres) {
-            return Array.from(this.sessions.values()).sort((a, b) => {
-                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-            });
+            return Array.from(this.sessions.values())
+                .filter((session) => {
+                    if (!ownerId) {
+                        return true;
+                    }
+
+                    const sessionOwnerId = this.getSessionOwnerId(session);
+                    return !sessionOwnerId || sessionOwnerId === ownerId;
+                })
+                .sort((a, b) => {
+                    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+                });
         }
 
-        const result = await postgres.query('SELECT * FROM sessions ORDER BY updated_at DESC');
+        const result = ownerId
+            ? await postgres.query(
+                `
+                    SELECT *
+                    FROM sessions
+                    WHERE COALESCE(metadata->>'ownerId', '') = ''
+                       OR metadata->>'ownerId' = $1
+                    ORDER BY updated_at DESC
+                `,
+                [ownerId],
+            )
+            : await postgres.query('SELECT * FROM sessions ORDER BY updated_at DESC');
+
         return result.rows.map((row) => this.toSession(row));
+    }
+
+    async listMessages(id, limit = MAX_RECENT_MESSAGES, ownerId = null) {
+        const session = await this.getOwned(id, ownerId);
+        if (!session) {
+            return [];
+        }
+
+        return this.getRecentMessages(session, limit);
     }
 
     async healthCheck() {

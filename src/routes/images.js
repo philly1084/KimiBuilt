@@ -8,12 +8,18 @@ const { persistGeneratedImages } = require('../generated-image-artifacts');
 
 const router = Router();
 
-async function updateSessionProjectMemory(sessionId, updates = {}) {
+function getRequestOwnerId(req) {
+    return String(req.user?.username || '').trim() || null;
+}
+
+async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
         return null;
     }
 
-    const session = await sessionStore.get(sessionId);
+    const session = ownerId
+        ? await sessionStore.getOwned(sessionId, ownerId)
+        : await sessionStore.get(sessionId);
     if (!session) {
         return null;
     }
@@ -49,17 +55,18 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             n = 1,
         } = req.body;
         let { sessionId } = req.body;
+        const ownerId = getRequestOwnerId(req);
 
         let session;
         if (!sessionId) {
-            session = await sessionStore.create({ mode: 'image' });
+            session = await sessionStore.create({ mode: 'image', ownerId });
             sessionId = session.id;
         } else {
-            session = await sessionStore.getOrCreate(sessionId, { mode: 'image' });
+            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'image' }, ownerId);
         }
 
         if (!session) {
-            session = await sessionStore.get(sessionId);
+            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
@@ -102,7 +109,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
                 },
                 reason: 'Image generation request',
             }],
-        });
+        }, ownerId);
 
         res.json({
             sessionId,

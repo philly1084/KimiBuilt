@@ -23,6 +23,10 @@ const {
 
 const registry = getUnifiedRegistry();
 
+function getRequestOwnerId(req) {
+  return String(req.user?.username || '').trim() || null;
+}
+
 async function ensureToolManagerInitialized() {
   const toolManager = getToolManager();
   await toolManager.initialize();
@@ -270,8 +274,9 @@ function hasStickyRemoteSession(session = null) {
 
 async function resolveToolExecutionProfile(req, requestedSessionId = null) {
   const normalizedSessionId = typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '';
+  const ownerId = getRequestOwnerId(req);
   const session = normalizedSessionId && !normalizedSessionId.startsWith('local_')
-    ? await sessionStore.get(normalizedSessionId)
+    ? (ownerId ? await sessionStore.getOwned(normalizedSessionId, ownerId) : await sessionStore.get(normalizedSessionId))
     : null;
   const taskType = looksLikeNotesSurface(
     req.query?.taskType
@@ -307,15 +312,17 @@ async function resolveToolExecutionProfile(req, requestedSessionId = null) {
   };
 }
 
-async function resolveToolSessionId(requestedSessionId = null) {
+async function resolveToolSessionId(requestedSessionId = null, ownerId = null) {
   const normalized = typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '';
 
   if (normalized && !normalized.startsWith('local_')) {
-    const session = await sessionStore.getOrCreate(normalized, { mode: 'chat' });
+    const session = ownerId
+      ? await sessionStore.getOrCreateOwned(normalized, { mode: 'chat' }, ownerId)
+      : await sessionStore.getOrCreate(normalized, { mode: 'chat' });
     return session?.id || normalized;
   }
 
-  const session = await sessionStore.create({ mode: 'chat' });
+  const session = await sessionStore.create(ownerId ? { mode: 'chat', ownerId } : { mode: 'chat' });
   return session.id;
 }
 
@@ -528,7 +535,7 @@ router.post('/invoke', async (req, res) => {
     }
     
     const toolManager = await ensureToolManagerInitialized();
-    const resolvedSessionId = await resolveToolSessionId(sessionId);
+    const resolvedSessionId = await resolveToolSessionId(sessionId, getRequestOwnerId(req));
     
     const result = await toolManager.executeTool(
       toolId,
@@ -554,7 +561,7 @@ router.post('/invoke/:id', async (req, res) => {
     const params = req.body;
     
     const toolManager = await ensureToolManagerInitialized();
-    const resolvedSessionId = await resolveToolSessionId(req.body.sessionId);
+    const resolvedSessionId = await resolveToolSessionId(req.body.sessionId, getRequestOwnerId(req));
     
     const result = await toolManager.executeTool(
       id,

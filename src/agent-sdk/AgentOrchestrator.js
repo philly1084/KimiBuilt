@@ -387,6 +387,7 @@ class AgentOrchestrator {
     loadContextMessages = true,
     loadRecentMessages = true,
     sessionId = 'default',
+    ownerId = null,
     taskType = 'chat',
     metadata = {},
     useAgentExecutor = false,
@@ -397,7 +398,7 @@ class AgentOrchestrator {
     const resolvedContextMessages = contextMessages.length > 0
       ? contextMessages
       : loadContextMessages !== false
-        ? await this.loadContextMessages(sessionId, objective)
+        ? await this.loadContextMessages(sessionId, objective, ownerId)
         : [];
     const resolvedRecentMessages = recentMessages.length > 0
       ? recentMessages
@@ -458,6 +459,7 @@ class AgentOrchestrator {
             stream,
             model,
             sessionId,
+            ownerId,
             taskType,
             metadata,
             workingMemory,
@@ -479,6 +481,7 @@ class AgentOrchestrator {
         toolManager,
         toolContext: {
           sessionId,
+          ownerId,
           executionProfile,
           ...toolContext,
         },
@@ -495,6 +498,7 @@ class AgentOrchestrator {
               task,
               workingMemory,
               sessionId,
+              ownerId,
               model,
               userText: objective,
               metadata: {
@@ -510,6 +514,7 @@ class AgentOrchestrator {
         const duration = this.finalizeRuntimeTask(task, workingMemory, output);
         await this.persistConversationState({
           sessionId,
+          ownerId,
           userText: objective,
           assistantText: output,
           responseId: response?.id || null,
@@ -577,6 +582,7 @@ class AgentOrchestrator {
     stream = false,
     model = null,
     sessionId,
+    ownerId = null,
     taskType,
     metadata = {},
     workingMemory,
@@ -655,6 +661,7 @@ class AgentOrchestrator {
           task,
           workingMemory,
           sessionId,
+          ownerId,
           model,
           userText: this.getConversationObjective(input),
           metadata: {
@@ -669,6 +676,7 @@ class AgentOrchestrator {
     const duration = this.finalizeRuntimeTask(task, workingMemory, output);
     await this.persistConversationState({
       sessionId,
+      ownerId,
       userText: this.getConversationObjective(input),
       assistantText: output,
       responseId: response.id,
@@ -967,14 +975,15 @@ class AgentOrchestrator {
     return '';
   }
 
-  async loadContextMessages(sessionId, objective) {
+  async loadContextMessages(sessionId, objective, ownerId = null) {
     if (!objective || !this.memoryService?.recall) {
       return [];
     }
 
     try {
       return await this.memoryService.recall(objective, {
-        sessionId,
+        sessionId: ownerId ? null : sessionId,
+        ownerId,
         profile: inferRecallProfileFromObjective(objective),
       });
     } catch (error) {
@@ -1045,6 +1054,7 @@ class AgentOrchestrator {
     task,
     workingMemory,
     sessionId,
+    ownerId = null,
     model,
     userText = '',
     metadata = {},
@@ -1065,6 +1075,7 @@ class AgentOrchestrator {
             const duration = orchestrator.finalizeRuntimeTask(task, workingMemory, fullText);
             await orchestrator.persistConversationState({
               sessionId,
+              ownerId,
               userText,
               assistantText: fullText,
               responseId: event.response?.id || null,
@@ -1298,6 +1309,7 @@ class AgentOrchestrator {
 
   async persistConversationState({
     sessionId,
+    ownerId = null,
     userText,
     assistantText,
     responseId,
@@ -1347,7 +1359,7 @@ class AgentOrchestrator {
 
     if (this.memoryService?.remember && userText) {
       try {
-        await this.memoryService.remember(sessionId, userText, 'user');
+        await this.memoryService.remember(sessionId, userText, 'user', ownerId ? { ownerId } : {});
       } catch (error) {
         console.error('[AgentOrchestrator] Failed to persist user memory:', error.message);
       }
@@ -1355,7 +1367,7 @@ class AgentOrchestrator {
 
     if (this.memoryService?.rememberResponse && assistantText) {
       try {
-        await this.memoryService.rememberResponse(sessionId, assistantText);
+        await this.memoryService.rememberResponse(sessionId, assistantText, ownerId ? { ownerId } : {});
       } catch (error) {
         console.error('[AgentOrchestrator] Failed to persist assistant memory:', error.message);
       }
@@ -1372,6 +1384,7 @@ class AgentOrchestrator {
               result: toolEvent?.result || {},
             }),
             'tool',
+            ownerId ? { ownerId } : {},
           );
         } catch (error) {
           console.error(`[AgentOrchestrator] Failed to persist tool memory for '${toolName}':`, error.message);
