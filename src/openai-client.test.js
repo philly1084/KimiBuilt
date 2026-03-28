@@ -790,6 +790,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('local workspace repository as the source of truth');
         expect(guidance).toContain('missing project checkout on the remote host');
         expect(guidance).toContain('Keep `remote-command` available for one-off server configuration and troubleshooting');
+        expect(guidance).toContain('Do not infer an arbitrary live website path such as `/var/www/...` as the target');
+        expect(guidance).toContain('Never run `git init`, create a new remote host repository');
     });
 
     test('detects ssh as a required tool for explicit ssh prompts', () => {

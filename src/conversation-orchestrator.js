@@ -609,7 +609,21 @@ function hasInternalArtifactReference(text = '') {
 }
 
 function buildRemoteWebsiteSourceInspectionCommand() {
-    return "hostname && uname -m && (test -f /root/website.html && sed -n '1,220p' /root/website.html || test -f /root/index.html && sed -n '1,220p' /root/index.html || find /root /srv /var/www -maxdepth 3 -type f \\( -name 'index.html' -o -name '*.html' \\) 2>/dev/null | head -n 20) && (kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page' | head -n 20 || true)";
+    const configuredTargetDirectory = String(config.deploy.defaultTargetDirectory || '').trim().replace(/\\/g, '/');
+    const targetDirectory = configuredTargetDirectory || '/opt/kimibuilt';
+
+    return [
+        'set -e',
+        'hostname && uname -m',
+        `echo "--- configured target directory: ${targetDirectory} ---"`,
+        `if [ -d ${shellQuote(targetDirectory)} ]; then`,
+        `  find ${shellQuote(targetDirectory)} -maxdepth 3 -type f \\( -name 'index.html' -o -name '*.html' -o -name '*.yaml' -o -name '*.yml' \\) 2>/dev/null | head -n 40`,
+        `  if [ -d ${shellQuote(`${targetDirectory}/.git`)} ]; then cd -- ${shellQuote(targetDirectory)} && git status --short --branch; fi`,
+        'else',
+        `  echo "configured target directory not found: ${targetDirectory}"`,
+        'fi',
+        "(kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page|nginx|frontend' | head -n 20 || true)",
+    ].join(' && ');
 }
 
 function buildRemoteWebsiteWorkloadInspectionCommand() {
@@ -2720,6 +2734,8 @@ class ConversationOrchestrator extends EventEmitter {
                     'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',
                     'When the user asks to replace the page with a new file, you may generate the full replacement HTML yourself and write it remotely with `remote-command`.',
                     'If a local HTML artifact or local file read fails, pivot to the remote file, ConfigMap, or deployed content as the source of truth instead of stopping.',
+                    'Do not infer an arbitrary live website path such as `/var/www/...` as the target. Prefer the configured deploy target directory, cluster ConfigMaps, or a path the user explicitly named.',
+                    'Never run `git init`, create a new remote host repository, or choose a remote Git origin unless the user explicitly asked for that server-local Git workflow.',
                     'Internal artifact links like `/api/artifacts/...` are backend-local references, not public hosts. Do not turn them into `https://api/...`.',
                     'Do not treat `svc` or `ingress` as deployment names. Inspect deployments, services, ingresses, pods, and ConfigMaps separately.',
                     'When verifying the deployed site, do not rely on the HTML `<title>` alone. Compare body content, mounted file content, response snippets, or content length when titles may be empty.',
@@ -3172,6 +3188,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `k3s-deploy` for standard remote deployment flows over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
             parts.push('Do not treat a missing project checkout on the remote host as a blocker for deployment work. `sync-repo` or `sync-and-apply` can clone the configured GitHub repo into the target directory.');
             parts.push('Keep raw SSH available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
+            parts.push('Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');
         }
 
         return parts.filter(Boolean).join('\n\n');
