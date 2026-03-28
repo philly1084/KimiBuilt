@@ -367,6 +367,104 @@ const Editor = (function() {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
+
+    function looksLikeStructuredMarkdownPaste(text = '') {
+        const normalized = String(text || '').trim();
+        if (!normalized) {
+            return false;
+        }
+
+        if (/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/i.test(normalized)) {
+            return true;
+        }
+
+        if (normalized.includes('\n') && (
+            /^#{1,3}\s+/m.test(normalized) ||
+            /^[>*-]\s+/m.test(normalized) ||
+            /^\d+\.\s+/m.test(normalized) ||
+            /^```/m.test(normalized)
+        )) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function normalizeStructuredPasteText(text = '') {
+        return String(text || '')
+            .replace(/\r\n/g, '\n')
+            .split('\n')
+            .filter((line) => !/^\s*\+\s*$/.test(line))
+            .join('\n')
+            .trim();
+    }
+
+    function isReplaceableEmptyBlock(block = null) {
+        if (!block || block.type !== 'text') {
+            return false;
+        }
+
+        if (Array.isArray(block.children) && block.children.length > 0) {
+            return false;
+        }
+
+        return !extractBlockText(block).trim();
+    }
+
+    function getPasteTargetBlockId() {
+        const selectedBlockId = window.Selection?.getSelectedBlockId?.();
+        if (selectedBlockId) {
+            return selectedBlockId;
+        }
+
+        const activeElement = document.activeElement;
+        const blockEl = activeElement?.closest?.('.block');
+        return blockEl?.dataset?.blockId || null;
+    }
+
+    function applyStructuredMarkdownPaste(text = '') {
+        const normalizedText = normalizeStructuredPasteText(text);
+        if (!normalizedText || !window.ImportExport?.importFromMarkdown) {
+            return false;
+        }
+
+        const importedPage = window.ImportExport.importFromMarkdown(normalizedText);
+        const importedBlocks = Array.isArray(importedPage?.blocks)
+            ? importedPage.blocks.filter((block) => {
+                if (!block || !block.type) {
+                    return false;
+                }
+
+                if (block.type === 'divider') {
+                    return true;
+                }
+
+                return Boolean(extractBlockText(block).trim())
+                    || ['image', 'ai_image', 'bookmark', 'database'].includes(block.type);
+            })
+            : [];
+
+        if (importedBlocks.length === 0) {
+            return false;
+        }
+
+        const targetBlockId = getPasteTargetBlockId();
+        const targetBlock = targetBlockId ? getBlock(targetBlockId) : null;
+        const inserted = isReplaceableEmptyBlock(targetBlock)
+            ? replaceBlockWithBlocks(targetBlockId, importedBlocks)
+            : insertBlocksAfter(targetBlockId, importedBlocks);
+
+        if (!inserted.length) {
+            return false;
+        }
+
+        const focusBlockId = inserted[0]?.id || targetBlockId;
+        if (focusBlockId) {
+            focusBlock(focusBlockId);
+        }
+
+        return true;
+    }
     
     /**
      * Initialize the editor
@@ -1589,11 +1687,14 @@ const Editor = (function() {
      * Handle paste
      */
     function handlePaste(e) {
-        e.preventDefault();
-        
         const text = e.clipboardData.getData('text/plain');
-        const html = e.clipboardData.getData('text/html');
-        
+        if (looksLikeStructuredMarkdownPaste(text) && applyStructuredMarkdownPaste(text)) {
+            e.preventDefault();
+            return;
+        }
+
+        e.preventDefault();
+
         // Simple paste - insert as text
         document.execCommand('insertText', false, text);
     }
