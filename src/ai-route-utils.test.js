@@ -425,6 +425,40 @@ describe('ai-route-utils', () => {
         expect(sshContext.effectivePrompt).toContain('SSH into root@162.55.163.199');
     });
 
+    test('resolveSshRequestContext does not treat an email address as an explicit SSH target override', () => {
+        const sshContext = resolveSshRequestContext(
+            'Please update the contact email to philly1084@gmail.com on the deployed site.',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '162.55.163.199',
+                        username: 'root',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        target: {
+                            host: '162.55.163.199',
+                            username: 'root',
+                            port: 22,
+                        },
+                        lastCommand: 'grep -R "support@" /opt/kimibuilt',
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.target).toEqual({
+            host: '162.55.163.199',
+            username: 'root',
+            port: 22,
+        });
+        expect(sshContext.effectivePrompt).toContain('SSH into root@162.55.163.199');
+        expect(sshContext.effectivePrompt).toContain('philly1084@gmail.com');
+    });
+
     test('extractSshSessionMetadataFromToolEvents keeps the last good host after a hostname-resolution failure on a bogus host', () => {
         const metadata = extractSshSessionMetadataFromToolEvents([
             {

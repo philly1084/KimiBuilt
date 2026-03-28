@@ -523,9 +523,23 @@ function promptHasExplicitSshIntent(prompt = '') {
             && /\b(over ssh|via ssh)\b/i.test(normalizedPrompt));
 }
 
+function hasExplicitSshTargetCue(prompt = '') {
+    const normalizedPrompt = String(prompt || '').toLowerCase();
+    if (!normalizedPrompt) {
+        return false;
+    }
+
+    return promptHasExplicitSshIntent(normalizedPrompt)
+        || /\b(host|server|machine|node|target)\b/i.test(normalizedPrompt);
+}
+
 function extractExplicitSshTarget(prompt = '') {
     const text = String(prompt || '').trim();
     if (!text) {
+        return null;
+    }
+
+    if (!hasExplicitSshTargetCue(text)) {
         return null;
     }
 

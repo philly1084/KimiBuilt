@@ -346,9 +346,23 @@ function promptHasExplicitSshIntent(text = '') {
         || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(normalized);
 }
 
+function hasExplicitSshTargetCue(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return promptHasExplicitSshIntent(normalized)
+        || /\b(host|server|machine|node|target)\b/.test(normalized);
+}
+
 function extractExplicitSshTarget(text = '') {
     const normalized = String(text || '').trim();
     if (!normalized) {
+        return null;
+    }
+
+    if (!hasExplicitSshTargetCue(normalized)) {
         return null;
     }
 
