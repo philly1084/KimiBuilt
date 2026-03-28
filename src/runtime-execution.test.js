@@ -178,4 +178,14 @@ describe('runtime-execution', () => {
         })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Answer directly.' })).toBe('default');
     });
+
+    test('uses the latest user turn instead of stale remote transcript content when inferring execution profile', () => {
+        expect(inferExecutionProfile({
+            input: [
+                { role: 'user', content: 'SSH into the remote server and check kubectl.' },
+                { role: 'assistant', content: 'I can inspect the cluster over SSH.' },
+                { role: 'user', content: 'Create a React component for a todo list.' },
+            ],
+        })).toBe('default');
+    });
 });

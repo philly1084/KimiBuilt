@@ -15,7 +15,7 @@ const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 const WEB_CHAT_TASK_TYPE = 'chat';
 const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
-const WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED = true;
+const WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED = false;
 
 // Retry configuration
 const RETRY_CONFIG = {
@@ -248,10 +248,13 @@ class OpenAIAPIClient extends EventTarget {
             taskType: WEB_CHAT_TASK_TYPE,
             clientSurface: WEB_CHAT_CLIENT_SURFACE,
             metadata: {
-                remoteBuildAutonomyApproved: WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED,
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
             },
         };
+
+        if (WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED) {
+            params.metadata.remoteBuildAutonomyApproved = true;
+        }
 
         if (reasoningEffort) {
             params.reasoning_effort = reasoningEffort;
@@ -536,7 +539,7 @@ class OpenAIAPIClient extends EventTarget {
      * @param {string} model - Model ID to use
      * @returns {Object} - Response with content and sessionId
      */
-    async chat(messages, model = 'gpt-4o') {
+    async chat(messages, model = 'gpt-4o', reasoningEffort = '') {
         const params = {
             model,
             messages,
@@ -544,10 +547,17 @@ class OpenAIAPIClient extends EventTarget {
             taskType: WEB_CHAT_TASK_TYPE,
             clientSurface: WEB_CHAT_CLIENT_SURFACE,
             metadata: {
-                remoteBuildAutonomyApproved: WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED,
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
             },
         };
+
+        if (WEB_CHAT_REMOTE_BUILD_AUTONOMY_APPROVED) {
+            params.metadata.remoteBuildAutonomyApproved = true;
+        }
+
+        if (reasoningEffort) {
+            params.reasoning_effort = reasoningEffort;
+        }
         
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
             params.session_id = this.currentSessionId;

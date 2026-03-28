@@ -71,21 +71,33 @@ function extractRuntimeText(input = '') {
         return '';
     }
 
+    const normalizeContent = (content) => {
+        if (typeof content === 'string') {
+            return content;
+        }
+
+        if (Array.isArray(content)) {
+            return content
+                .map((part) => part?.text || '')
+                .filter(Boolean)
+                .join('\n');
+        }
+
+        return '';
+    };
+
+    for (let index = input.length - 1; index >= 0; index -= 1) {
+        const item = input[index];
+        if (item?.role === 'user') {
+            const content = normalizeContent(item.content);
+            if (content) {
+                return content;
+            }
+        }
+    }
+
     return input
-        .map((item) => {
-            if (typeof item?.content === 'string') {
-                return item.content;
-            }
-
-            if (Array.isArray(item?.content)) {
-                return item.content
-                    .map((part) => part?.text || '')
-                    .filter(Boolean)
-                    .join('\n');
-            }
-
-            return '';
-        })
+        .map((item) => normalizeContent(item?.content))
         .filter(Boolean)
         .join('\n');
 }
@@ -119,7 +131,7 @@ function inferExecutionProfile(payload = {}) {
         return REMOTE_BUILD_EXECUTION_PROFILE;
     }
 
-    const text = extractRuntimeText(payload?.input || payload?.memoryInput || '');
+    const text = String(payload?.memoryInput || '').trim() || extractRuntimeText(payload?.input || '');
     const normalized = String(text || '').toLowerCase();
     const stickyRemoteIntent = ['ssh-execute', 'remote-command'].includes(
         String(

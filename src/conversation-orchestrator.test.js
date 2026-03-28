@@ -86,6 +86,42 @@ describe('ConversationOrchestrator', () => {
         expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-1', 'Plain answer');
     });
 
+    test('passes reasoning effort into final response synthesis', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Synthesized answer', 'resp_reasoning')),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        await orchestrator.buildFinalResponse({
+            input: 'Summarize the verified results.',
+            objective: 'Summarize the verified results.',
+            reasoningEffort: 'high',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'web-fetch',
+                    },
+                },
+                result: {
+                    success: true,
+                    data: {
+                        text: 'Verified source material',
+                    },
+                },
+            }],
+        });
+
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            reasoningEffort: 'high',
+        }));
+    });
+
     test('recovers missing file-write content from recent assistant html when the planner omits it', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Saved the HTML file.', 'resp_file_write')),
