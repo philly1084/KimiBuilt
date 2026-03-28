@@ -1571,8 +1571,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'git-safe')) {
         guidance.push('- Use `git-safe` for local repository save flows: inspect git status, stage files, commit, and push.');
+        guidance.push('- Use `git-safe remote-info` before pushing when you need to verify the current branch, HEAD revision, upstream tracking, or configured remotes.');
         guidance.push('- Prefer `save-and-push` when the user clearly wants the latest local changes committed and pushed to GitHub.');
         guidance.push('- Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
+        guidance.push('- Do not claim generic local shell or sandbox limits for Git work when `git-safe` is attached. Continue through the constrained Git tool path instead.');
     }
 
     const remoteGuidanceToolId = automaticTools.some((entry) => entry.id === 'remote-command')
@@ -1611,6 +1613,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Prefer `k3s-deploy` over raw SSH when the task is a standard k3s deploy/update flow.');
         guidance.push('- Do not treat a missing project checkout on the remote host as a blocker for deployment work. `sync-repo` or `sync-and-apply` can clone the configured GitHub repo into the target directory.');
         guidance.push('- Keep `remote-command` available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
+        guidance.push('- Prefer immutable deploys: push code, let CI build artifacts or images, then deploy those results into k3s instead of hand-editing the live server.');
         guidance.push('- Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');
     }
 

@@ -3397,7 +3397,9 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes('git-safe')) {
             parts.push('Use `git-safe` for restricted local repository save flows: status, add, commit, push, and save-and-push.');
+            parts.push('Use `git-safe remote-info` when you need to verify the current branch, HEAD revision, upstream tracking, or configured remotes before pushing.');
             parts.push('Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
+            parts.push('Do not claim generic local shell or sandbox limits for Git work when `git-safe` is available. Continue through the constrained Git tool path instead.');
         }
 
         if (allowedToolIds.includes('web-scrape')) {
@@ -3432,6 +3434,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `k3s-deploy` for standard remote deployment flows over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
             parts.push('Do not treat a missing project checkout on the remote host as a blocker for deployment work. `sync-repo` or `sync-and-apply` can clone the configured GitHub repo into the target directory.');
             parts.push('Keep raw SSH available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
+            parts.push('Prefer immutable delivery: local authoring and Git push, then CI or GitHub Actions, then k3s rollout. Avoid treating the live server as the place where software is created unless the user explicitly asks for that workflow.');
             parts.push('Never initialize a new Git repository on the remote host or adopt an arbitrary web root as the canonical project unless the user explicitly asked for that server-local workflow.');
         }
 

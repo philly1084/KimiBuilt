@@ -8,6 +8,7 @@ const ALLOWED_ACTIONS = new Set([
   'status',
   'diff',
   'branch',
+  'remote-info',
   'add',
   'commit',
   'push',
@@ -97,6 +98,8 @@ class GitLocalTool extends ToolBase {
     let result;
     if (action === 'save-and-push') {
       result = await this.runSaveAndPush(repoRoot, params, timeout, tracker);
+    } else if (action === 'remote-info') {
+      result = await this.runRemoteInfo(repoRoot, timeout, tracker);
     } else {
       const args = await this.buildArgs(action, repoRoot, params);
       tracker.recordExecution(`git ${args.join(' ')}`, { repoRoot, action });
@@ -157,6 +160,41 @@ class GitLocalTool extends ToolBase {
     };
   }
 
+  async runRemoteInfo(repoRoot, timeout, tracker) {
+    tracker.recordExecution('git remote inspection', { repoRoot, action: 'remote-info' });
+
+    const branch = await this.getCurrentBranch(repoRoot).catch(() => '');
+    const head = await this.spawnGitAllowFailure(['rev-parse', 'HEAD'], {
+      cwd: repoRoot,
+      timeout,
+    });
+    const upstream = await this.spawnGitAllowFailure(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], {
+      cwd: repoRoot,
+      timeout,
+    });
+    const remotes = await this.spawnGitAllowFailure(['remote', '-v'], {
+      cwd: repoRoot,
+      timeout,
+    });
+
+    const stdoutLines = [
+      branch ? `branch: ${branch}` : '',
+      head.stdout ? `head: ${head.stdout}` : '',
+      upstream.exitCode === 0 && upstream.stdout ? `upstream: ${upstream.stdout}` : 'upstream: none',
+      remotes.stdout ? `remotes:\n${remotes.stdout}` : 'remotes: none',
+    ].filter(Boolean);
+
+    const stderrLines = [head.stderr, upstream.exitCode === 0 ? '' : upstream.stderr, remotes.stderr]
+      .filter(Boolean);
+
+    return {
+      exitCode: 0,
+      stdout: stdoutLines.join('\n'),
+      stderr: stderrLines.join('\n').trim(),
+      duration: head.duration + upstream.duration + remotes.duration,
+    };
+  }
+
   async buildArgs(action, repoRoot, params) {
     switch (action) {
       case 'status':
@@ -165,6 +203,8 @@ class GitLocalTool extends ToolBase {
         return ['diff', '--stat'];
       case 'branch':
         return ['branch', '--show-current'];
+      case 'remote-info':
+        return ['remote', '-v'];
       case 'add':
         return ['add', '--', ...this.sanitizePathspecs(params.paths, { allowDefaultAll: false })];
       case 'commit':
@@ -324,6 +364,19 @@ class GitLocalTool extends ToolBase {
         });
       });
     });
+  }
+
+  async spawnGitAllowFailure(args, options = {}) {
+    try {
+      return await this.spawnGit(args, options);
+    } catch (error) {
+      return {
+        exitCode: Number(error?.exitCode) || 1,
+        stdout: String(error?.stdout || '').trim(),
+        stderr: String(error?.stderr || error?.message || '').trim(),
+        duration: 0,
+      };
+    }
   }
 }
 
