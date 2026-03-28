@@ -1,9 +1,31 @@
 const { artifactService } = require('./artifacts/artifact-service');
 const { normalizeFormat } = require('./artifacts/constants');
 const { buildSessionInstructions } = require('./session-instructions');
+const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+
+function normalizeReasoningEffort(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ALLOWED_REASONING_EFFORTS.has(normalized) ? normalized : null;
+}
+
+function resolveReasoningEffort(payload = {}, fallback = null) {
+    const candidate = [
+        payload?.reasoningEffort,
+        payload?.reasoning_effort,
+        payload?.reasoning?.effort,
+        payload?.metadata?.reasoningEffort,
+        payload?.metadata?.reasoning_effort,
+        payload?.metadata?.reasoning?.effort,
+        fallback,
+        config.openai.reasoningEffort,
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    return normalizeReasoningEffort(candidate);
+}
 
 async function buildInstructionsWithArtifacts(session, baseInstructions = '', artifactIds = []) {
     let artifactContext = '';
@@ -33,6 +55,7 @@ async function maybeGenerateOutputArtifact({
     artifactIds = [],
     existingContent = '',
     model = null,
+    reasoningEffort = null,
 }) {
     if (!outputFormat) {
         return [];
@@ -49,6 +72,7 @@ async function maybeGenerateOutputArtifact({
                 artifactIds,
                 existingContent,
                 model,
+                reasoningEffort,
             });
             return [result.artifact];
         }
@@ -833,6 +857,7 @@ async function generateOutputArtifactFromPrompt({
     artifactIds = [],
     existingContent = '',
     model = null,
+    reasoningEffort = null,
     parentArtifactId = null,
 }) {
     if (!outputFormat) {
@@ -854,6 +879,7 @@ async function generateOutputArtifactFromPrompt({
         artifactIds,
         existingContent,
         model,
+        reasoningEffort,
         parentArtifactId,
     });
 
@@ -882,6 +908,8 @@ module.exports = {
     shouldPreGenerateImagesForArtifactRequest,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    normalizeReasoningEffort,
+    resolveReasoningEffort,
     resolveSshRequestContext,
     formatSshToolResult,
     getPreferredRemoteToolId,

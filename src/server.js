@@ -248,6 +248,7 @@ async function start() {
                     input: prompt,
                     stream: false,
                     model: options.model || null,
+                    reasoningEffort: options.reasoningEffort || null,
                 });
 
                 return response.output

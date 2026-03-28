@@ -1642,6 +1642,7 @@ class ConversationOrchestrator extends EventEmitter {
                     input: prompt,
                     stream: false,
                     model: options.model || null,
+                    reasoningEffort: options.reasoningEffort || null,
                 });
                 return extractResponseText(response);
             },
@@ -1660,6 +1661,7 @@ class ConversationOrchestrator extends EventEmitter {
             input: taskConfig.input || taskConfig.prompt || '',
             sessionId,
             model: taskConfig.model || null,
+            reasoningEffort: taskConfig.reasoningEffort || taskConfig.options?.reasoningEffort || null,
             instructions: taskConfig.instructions || null,
             executionProfile: taskConfig.options?.executionProfile || taskConfig.executionProfile || DEFAULT_EXECUTION_PROFILE,
             metadata: taskConfig.options || {},
@@ -1682,6 +1684,7 @@ class ConversationOrchestrator extends EventEmitter {
         recentMessages = [],
         stream = false,
         model = null,
+        reasoningEffort = null,
         toolManager = null,
         toolContext = {},
         loadContextMessages = true,
@@ -1865,6 +1868,7 @@ class ConversationOrchestrator extends EventEmitter {
                         executionProfile: resolvedProfile,
                         toolPolicy,
                         model,
+                        reasoningEffort,
                         taskType,
                         toolEvents,
                         autonomyApproved,
@@ -2679,6 +2683,7 @@ class ConversationOrchestrator extends EventEmitter {
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolPolicy = {},
         model = null,
+        reasoningEffort = null,
         taskType = 'chat',
         toolEvents = [],
         autonomyApproved = false,
@@ -2780,7 +2785,7 @@ class ConversationOrchestrator extends EventEmitter {
                     : []),
         ].join('\n');
 
-        const plannerOutput = await this.completeText(prompt, { model });
+        const plannerOutput = await this.completeText(prompt, { model, reasoningEffort });
         const parsed = safeJsonParse(plannerOutput);
         const requestedSteps = (Array.isArray(parsed?.steps) ? parsed.steps : [])
             .slice(0, MAX_PLAN_STEPS)
@@ -2994,6 +2999,7 @@ class ConversationOrchestrator extends EventEmitter {
             recentMessages,
             stream: false,
             model,
+            reasoningEffort,
             enableAutomaticToolCalls: false,
         });
 
@@ -3038,6 +3044,7 @@ class ConversationOrchestrator extends EventEmitter {
                 recentMessages,
                 stream: false,
                 model,
+                reasoningEffort,
                 enableAutomaticToolCalls: false,
             });
 
@@ -3098,6 +3105,7 @@ class ConversationOrchestrator extends EventEmitter {
             recentMessages,
             stream: false,
             model,
+            reasoningEffort,
             enableAutomaticToolCalls: false,
         });
 
@@ -3275,6 +3283,7 @@ class ConversationOrchestrator extends EventEmitter {
             input: prompt,
             stream: false,
             model: options.model || null,
+            reasoningEffort: options.reasoningEffort || null,
             enableAutomaticToolCalls: false,
         });
 

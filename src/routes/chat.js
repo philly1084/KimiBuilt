@@ -16,6 +16,7 @@ const {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    resolveReasoningEffort,
 } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
@@ -48,6 +49,9 @@ const chatSchema = {
     sessionId: { required: false, type: 'string' },
     stream: { required: false, type: 'boolean' },
     model: { required: false, type: 'string' },
+    reasoningEffort: { required: false, type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+    reasoning_effort: { required: false, type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+    reasoning: { required: false, type: 'object' },
     artifactIds: { required: false, type: 'array' },
     outputFormat: { required: false, type: 'string' },
     enableConversationExecutor: { required: false, type: 'boolean' },
@@ -79,11 +83,13 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             message,
             stream = true,
             model = null,
+            reasoning: _ignoredReasoning = null,
             artifactIds = [],
             outputFormat = null,
             executionProfile = null,
             metadata: requestMetadata = {},
         } = req.body;
+        const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
         const requestedTaskType = resolveConversationTaskType(requestMetadata);
@@ -132,7 +138,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             model: model || session?.metadata?.model || null,
             mode: 'chat',
             transport: 'http',
-            metadata: { route: '/api/chat', stream, phase: 'preflight' },
+            metadata: { route: '/api/chat', stream, phase: 'preflight', reasoningEffort },
         });
 
         if (effectiveOutputFormat) {
@@ -158,6 +164,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 prompt: message,
                 artifactIds: preparedImages.artifactIds,
                 model,
+                reasoningEffort,
             });
             const responseArtifacts = [
                 ...preparedImages.artifacts,
@@ -252,6 +259,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 instructions,
                 stream: true,
                 model,
+                reasoningEffort,
                 toolManager,
                 toolContext: {
                     sessionId,
@@ -300,6 +308,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         responseId: event.response.id,
                         artifactIds,
                         model,
+                        reasoningEffort,
                     });
                     await updateSessionProjectMemory(sessionId, {
                         userText: message,
@@ -331,6 +340,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            reasoningEffort,
             toolManager: runtimeToolManager,
             toolContext: {
                 sessionId,
@@ -375,6 +385,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             responseId: response.id,
             artifactIds,
             model,
+            reasoningEffort,
         });
         await updateSessionProjectMemory(sessionId, {
             userText: message,
@@ -403,6 +414,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             error: err,
             duration: Date.now() - startedAt,
             model: req.body?.model || null,
+            metadata: { reasoningEffort: resolveReasoningEffort(req.body) },
         });
         next(err);
     }

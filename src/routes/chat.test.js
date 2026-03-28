@@ -43,6 +43,7 @@ jest.mock('../ai-route-utils', () => ({
     })),
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
+    resolveReasoningEffort: jest.fn(() => null),
     resolveSshRequestContext: jest.fn(),
     extractSshSessionMetadataFromToolEvents: jest.fn(() => null),
     inferOutputFormatFromSession: jest.fn(() => null),
@@ -75,6 +76,7 @@ const {
     resolveSshRequestContext,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    resolveReasoningEffort,
 } = require('../ai-route-utils');
 
 const chatRouter = require('./chat');
@@ -315,5 +317,53 @@ describe('/api/chat route', () => {
             { id: 'pdf-artifact-1', filename: 'hypercars.pdf' },
         ]);
         expect(response.body.toolEvents).toEqual([{ toolCall: { function: { name: 'image-generate' } } }]);
+    });
+
+    test('forwards normalized reasoning effort into runtime execution', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Answer directly with more reasoning.',
+        });
+        resolveReasoningEffort.mockReturnValue('high');
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-reasoning-1',
+                model: 'gpt-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Reasoned answer' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Answer directly with more reasoning.',
+                stream: false,
+                reasoning_effort: 'high',
+            });
+
+        expect(response.status).toBe(200);
+        expect(resolveReasoningEffort).toHaveBeenCalledWith(expect.objectContaining({
+            reasoning_effort: 'high',
+        }));
+        expect(executeConversationRuntime).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                reasoningEffort: 'high',
+            }),
+        );
     });
 });

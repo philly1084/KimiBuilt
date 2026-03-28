@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
 const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
+const { normalizeReasoningEffort } = require('./ai-route-utils');
 const { PROMOTED_LOCAL_TOOL_IDS } = require('./tool-execution-profiles');
 
 let chatClient = null;
@@ -2049,9 +2050,11 @@ async function runAutomaticToolLoopWithResponses(openai, {
     model,
     messages,
     selectedTools,
+    reasoningEffort = null,
     toolContext = {},
 }) {
     const prompt = getLastUserText(messages);
+    const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
     if (selectedTools.length === 0) {
         return null;
     }
@@ -2090,6 +2093,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             model,
             input: buildResponsesInput(workingMessages),
             tool_choice: 'none',
+            ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
         });
 
         if (toolEvents.length > 0) {
@@ -2115,6 +2119,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             tools: remainingTools.map((entry) => entry.responseDefinition),
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses', { model, prompt }) : 'auto',
             parallel_tool_calls: false,
+            ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
         });
 
         const toolCalls = getResponseFunctionCalls(finalResponse);
@@ -2175,6 +2180,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
         previous_response_id: previousResponseId,
         tools: remainingTools.map((entry) => entry.responseDefinition),
         tool_choice: 'none',
+        ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
     });
 
     if (toolEvents.length > 0) {
@@ -2190,12 +2196,14 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     model,
     messages,
     selectedTools,
+    reasoningEffort = null,
     toolContext = {},
 }) {
     if (selectedTools.length === 0) {
         return null;
     }
 
+    const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
     const prompt = getLastUserText(messages);
     const workingMessages = [...messages];
     let finalResponse = null;
@@ -2231,6 +2239,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             model,
             messages: workingMessages,
             stream: false,
+            ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
         });
 
         if (toolEvents.length > 0) {
@@ -2253,6 +2262,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             tools: remainingTools.map((entry) => entry.chatDefinition),
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt }) : 'auto',
             stream: false,
+            ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
         });
 
         const assistantMessage = finalResponse.choices[0]?.message || {};
@@ -2301,6 +2311,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         model,
         messages: workingMessages,
         stream: false,
+        ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
     });
 
     if (toolEvents.length > 0) {
@@ -2315,6 +2326,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
 async function runAutomaticToolLoop(openai, {
     model,
     messages,
+    reasoningEffort = null,
     toolManager,
     toolContext = {},
 }) {
@@ -2336,6 +2348,7 @@ async function runAutomaticToolLoop(openai, {
             model,
             messages,
             selectedTools,
+            reasoningEffort,
             toolContext: context,
         });
     }
@@ -2345,6 +2358,7 @@ async function runAutomaticToolLoop(openai, {
             model,
             messages,
             selectedTools,
+            reasoningEffort,
             toolContext: context,
         });
     } catch (error) {
@@ -2357,6 +2371,7 @@ async function runAutomaticToolLoop(openai, {
             model,
             messages,
             selectedTools,
+            reasoningEffort,
             toolContext: context,
         });
     }
@@ -2495,6 +2510,7 @@ async function createResponse({
     instructions = null,
     stream = false,
     model = null,
+    reasoningEffort = null,
     toolManager = null,
     toolContext = {},
     enableAutomaticToolCalls = false,
@@ -2508,14 +2524,18 @@ async function createResponse({
         recentMessages,
     });
 
+    const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
     const params = {
         model: model || config.openai.model,
         input: buildResponsesInput(messages),
         stream,
     };
+    if (normalizedReasoningEffort) {
+        params.reasoning = { effort: normalizedReasoningEffort };
+    }
     const prompt = getLastUserText(messages);
 
-    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}`);
+    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}, reasoning=${normalizedReasoningEffort || 'default'}`);
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
 
     try {
@@ -2565,6 +2585,7 @@ async function createResponse({
                 const toolResponse = await runAutomaticToolLoop(openai, {
                     model: params.model,
                     messages,
+                    reasoningEffort: normalizedReasoningEffort,
                     toolManager,
                     toolContext: toolExecutionContext,
                 });
@@ -2598,6 +2619,9 @@ async function createResponse({
             messages,
             stream,
         };
+        if (normalizedReasoningEffort) {
+            chatParams.reasoning_effort = normalizedReasoningEffort;
+        }
         const response = await openai.chat.completions.create(chatParams);
         return stream ? normalizeChatCompletionsStream(response) : normalizeChatResponse(response);
     } catch (error) {

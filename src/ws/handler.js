@@ -14,6 +14,7 @@ const {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    resolveReasoningEffort,
 } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
@@ -138,6 +139,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
     let runtimeTask = null;
     const startedAt = Date.now();
     const { message, model = null, artifactIds = [], outputFormat = null, executionProfile = null } = payload;
+    const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -173,7 +175,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
         model,
         mode: 'chat',
         transport: 'ws',
-        metadata: { route: '/ws', stream: true, phase: 'preflight' },
+        metadata: { route: '/ws', stream: true, phase: 'preflight', reasoningEffort },
     });
 
     try {
@@ -201,6 +203,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                 prompt: message,
                 artifactIds: preparedImages.artifactIds,
                 model,
+                reasoningEffort,
             });
             const responseArtifacts = [
                 ...preparedImages.artifacts,
@@ -267,6 +270,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
             instructions,
             stream: true,
             model,
+            reasoningEffort,
             toolManager: runtimeToolManager,
             toolContext: {
                 sessionId: session.id,
@@ -312,6 +316,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null) {
                     responseId: event.response.id,
                     artifactIds,
                     model,
+                    reasoningEffort,
                 });
                 await updateSessionProjectMemory(session.id, {
                     userText: message,
@@ -356,6 +361,7 @@ async function handleCanvas(ws, session, payload = {}) {
         outputFormat = null,
         executionProfile = null,
     } = payload;
+    const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
 
     if (!message) {
@@ -369,7 +375,7 @@ async function handleCanvas(ws, session, payload = {}) {
         model,
         mode: 'canvas',
         transport: 'ws',
-        metadata: { route: '/ws', canvasType, phase: 'preflight' },
+        metadata: { route: '/ws', canvasType, phase: 'preflight', reasoningEffort },
     });
 
     try {
@@ -386,6 +392,7 @@ async function handleCanvas(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            reasoningEffort,
             executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
@@ -418,6 +425,7 @@ async function handleCanvas(ws, session, payload = {}) {
             artifactIds,
             existingContent,
             model,
+            reasoningEffort,
         });
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
@@ -461,6 +469,7 @@ async function handleNotation(ws, session, payload = {}) {
         outputFormat = null,
         executionProfile = null,
     } = payload;
+    const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
 
     if (!notation) {
@@ -474,7 +483,7 @@ async function handleNotation(ws, session, payload = {}) {
         model,
         mode: 'notation',
         transport: 'ws',
-        metadata: { route: '/ws', helperMode, phase: 'preflight' },
+        metadata: { route: '/ws', helperMode, phase: 'preflight', reasoningEffort },
     });
 
     try {
@@ -491,6 +500,7 @@ async function handleNotation(ws, session, payload = {}) {
             instructions,
             stream: false,
             model,
+            reasoningEffort,
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
@@ -523,6 +533,7 @@ async function handleNotation(ws, session, payload = {}) {
             artifactIds,
             existingContent: context,
             model,
+            reasoningEffort,
         });
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,

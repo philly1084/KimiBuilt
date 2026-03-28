@@ -3,7 +3,7 @@ const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
-const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact } = require('../ai-route-utils');
+const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReasoningEffort } = require('../ai-route-utils');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
@@ -14,6 +14,9 @@ const canvasSchema = {
     canvasType: { required: false, type: 'string', enum: ['code', 'document', 'diagram'] },
     existingContent: { required: false, type: 'string' },
     model: { required: false, type: 'string' },
+    reasoningEffort: { required: false, type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+    reasoning_effort: { required: false, type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+    reasoning: { required: false, type: 'object' },
     artifactIds: { required: false, type: 'array' },
     outputFormat: { required: false, type: 'string' },
     enableConversationExecutor: { required: false, type: 'boolean' },
@@ -30,10 +33,12 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             canvasType = 'document',
             existingContent = '',
             model = null,
+            reasoning: _ignoredReasoning = null,
             artifactIds = [],
             outputFormat = null,
             executionProfile = null,
         } = req.body;
+        const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
 
@@ -58,7 +63,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             model: model || null,
             mode: 'canvas',
             transport: 'http',
-            metadata: { route: '/api/canvas', canvasType, phase: 'preflight' },
+            metadata: { route: '/api/canvas', canvasType, phase: 'preflight', reasoningEffort },
         });
         const instructions = await buildInstructionsWithArtifacts(
             session,
@@ -74,6 +79,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            reasoningEffort,
             executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
@@ -107,6 +113,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             artifactIds,
             existingContent,
             model,
+            reasoningEffort,
         });
 
         completeRuntimeTask(runtimeTask?.id, {
@@ -132,7 +139,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             error: err,
             duration: Date.now() - startedAt,
             model: req.body?.model || null,
-            metadata: { canvasType: req.body?.canvasType || 'document' },
+            metadata: { canvasType: req.body?.canvasType || 'document', reasoningEffort: resolveReasoningEffort(req.body) },
         });
         next(err);
     }

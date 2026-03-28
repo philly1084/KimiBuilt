@@ -149,10 +149,14 @@ describe('runtime-execution', () => {
             sessionId: 'session-3',
             input: 'Fallback cleanly.',
             enableConversationExecutor: true,
+            reasoningEffort: 'high',
             memoryInput: 'Fallback cleanly.',
         });
 
         expect(createResponse).toHaveBeenCalledTimes(1);
+        expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            reasoningEffort: 'high',
+        }));
         expect(result.handledPersistence).toBe(false);
         expect(result.runtimeMode).toBe('direct');
     });

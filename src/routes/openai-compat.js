@@ -17,6 +17,7 @@ const {
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
     resolveArtifactContextIds,
+    resolveReasoningEffort,
 } = require('../ai-route-utils');
 const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
@@ -237,11 +238,13 @@ router.post('/chat/completions', async (req, res, next) => {
             model,
             messages,
             stream = false,
+            reasoning: _ignoredReasoning = null,
             artifact_ids = [],
             output_format = null,
             executionProfile = null,
             metadata: requestMetadata = {},
         } = req.body;
+        const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -319,7 +322,7 @@ router.post('/chat/completions', async (req, res, next) => {
             model: model || null,
             mode: 'openai-chat',
             transport: 'http',
-            metadata: { route: '/v1/chat/completions', stream, phase: 'preflight' },
+            metadata: { route: '/v1/chat/completions', stream, phase: 'preflight', reasoningEffort },
         });
         if (effectiveOutputFormat) {
             setSessionHeaders(res, sessionId);
@@ -352,6 +355,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 prompt: artifactPrompt,
                 artifactIds: preparedImages.artifactIds,
                 model,
+                reasoningEffort,
             });
             const responseArtifacts = [
                 ...preparedImages.artifacts,
@@ -476,6 +480,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 instructions,
                 stream: true,
                 model,
+                reasoningEffort,
                 toolManager,
                 toolContext: {
                     sessionId,
@@ -532,6 +537,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         responseId: event.response.id,
                         artifactIds: artifact_ids,
                         model,
+                        reasoningEffort,
                     });
                     await updateSessionProjectMemory(sessionId, {
                         userText: lastUserText,
@@ -577,6 +583,7 @@ router.post('/chat/completions', async (req, res, next) => {
             instructions,
             stream: false,
             model,
+            reasoningEffort,
             toolManager: runtimeToolManager,
             toolContext: {
                 sessionId,
@@ -617,6 +624,7 @@ router.post('/chat/completions', async (req, res, next) => {
             responseId: response.id,
             artifactIds: artifact_ids,
             model,
+            reasoningEffort,
         });
         await updateSessionProjectMemory(sessionId, {
             userText: lastUserText,
@@ -661,6 +669,7 @@ router.post('/chat/completions', async (req, res, next) => {
             error: err,
             duration: Date.now() - startedAt,
             model: req.body?.model || null,
+            metadata: { reasoningEffort: resolveReasoningEffort(req.body) },
         });
         next(err);
     }
@@ -675,11 +684,13 @@ router.post('/responses', async (req, res, next) => {
             input,
             instructions,
             stream = false,
+            reasoning: _ignoredReasoning = null,
             artifact_ids = [],
             output_format = null,
             executionProfile = null,
             metadata: requestMetadata = {},
         } = req.body;
+        const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
 
         let sessionId = resolveSessionId(req);
@@ -742,7 +753,7 @@ router.post('/responses', async (req, res, next) => {
             model: model || null,
             mode: 'openai-responses',
             transport: 'http',
-            metadata: { route: '/v1/responses', stream, phase: 'preflight' },
+            metadata: { route: '/v1/responses', stream, phase: 'preflight', reasoningEffort },
         });
         if (effectiveOutputFormat) {
             setSessionHeaders(res, sessionId);
@@ -775,6 +786,7 @@ router.post('/responses', async (req, res, next) => {
                 prompt: artifactPrompt,
                 artifactIds: preparedImages.artifactIds,
                 model,
+                reasoningEffort,
             });
             const responseArtifacts = [
                 ...preparedImages.artifacts,
@@ -895,6 +907,7 @@ router.post('/responses', async (req, res, next) => {
                 instructions: fullInstructions,
                 stream: true,
                 model,
+                reasoningEffort,
                 toolManager,
                 toolContext: {
                     sessionId,
@@ -941,6 +954,7 @@ router.post('/responses', async (req, res, next) => {
                         responseId: event.response.id,
                         artifactIds: artifact_ids,
                         model,
+                        reasoningEffort,
                     });
                     await updateSessionProjectMemory(sessionId, {
                         userText: userInput,
@@ -975,6 +989,7 @@ router.post('/responses', async (req, res, next) => {
             instructions: fullInstructions,
             stream: false,
             model,
+            reasoningEffort,
             toolManager: runtimeToolManager,
             toolContext: {
                 sessionId,
@@ -1015,6 +1030,7 @@ router.post('/responses', async (req, res, next) => {
             responseId: response.id,
             artifactIds: artifact_ids,
             model,
+            reasoningEffort,
         });
         await updateSessionProjectMemory(sessionId, {
             userText: userInput,
@@ -1040,6 +1056,7 @@ router.post('/responses', async (req, res, next) => {
             error: err,
             duration: Date.now() - startedAt,
             model: req.body?.model || null,
+            metadata: { reasoningEffort: resolveReasoningEffort(req.body) },
         });
         next(err);
     }

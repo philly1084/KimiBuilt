@@ -778,6 +778,7 @@ class ArtifactService {
         input,
         instructions,
         model = null,
+        reasoningEffort = null,
         previousResponseId = null,
     }) {
         const response = await createResponse({
@@ -788,6 +789,7 @@ class ArtifactService {
             instructions,
             stream: false,
             model,
+            reasoningEffort,
         });
 
         return {
@@ -957,6 +959,7 @@ class ArtifactService {
         promptContext = '',
         existingContent = '',
         model = null,
+        reasoningEffort = null,
         imageReferences = [],
         imageReferenceContext = '',
     }) {
@@ -971,6 +974,7 @@ class ArtifactService {
                 this.getArtifactPlanInstructions(format, enrichedPromptContext, existingContent),
             ),
             model,
+            reasoningEffort,
             previousResponseId: session?.previousResponseId || null,
         });
 
@@ -1011,6 +1015,7 @@ class ArtifactService {
                 this.getArtifactExpansionInstructions(format, enrichedPromptContext, existingContent),
             ),
             model,
+            reasoningEffort,
         });
 
         const parsedExpanded = safeJsonParse(expansionPass.outputText) || {};
@@ -1043,6 +1048,7 @@ class ArtifactService {
                 this.getArtifactCompositionInstructions(format, enrichedPromptContext),
             ),
             model,
+            reasoningEffort,
         });
 
         const usedCompositionRecovery = shouldRecoverCompositionOutput(compositionPass.outputText, expandedDocument);
@@ -1078,6 +1084,7 @@ class ArtifactService {
         existingContent = '',
         template = '',
         model = null,
+        reasoningEffort = null,
         parentArtifactId = null,
     }) {
         const normalizedFormat = normalizeFormat(format);
@@ -1104,6 +1111,7 @@ class ArtifactService {
                 promptContext,
                 existingContent: combinedExistingContent,
                 model,
+                reasoningEffort,
                 imageReferences,
                 imageReferenceContext,
             })
@@ -1119,6 +1127,7 @@ class ArtifactService {
                     ),
                 ),
                 model,
+                reasoningEffort,
                 previousResponseId: session?.previousResponseId || null,
             });
 

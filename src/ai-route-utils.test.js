@@ -31,6 +31,7 @@ const {
     inferOutputFormatFromSession,
     maybePrepareImagesForArtifactPrompt,
     getPreferredRemoteToolId,
+    resolveReasoningEffort,
     resolveSshRequestContext,
     resolveArtifactContextIds,
     shouldPreGenerateImagesForArtifactRequest,
@@ -313,6 +314,13 @@ describe('ai-route-utils', () => {
         };
 
         expect(getPreferredRemoteToolId(toolManager)).toBe('remote-command');
+    });
+
+    test('resolveReasoningEffort accepts camelCase, snake_case, and OpenAI-style reasoning objects', () => {
+        expect(resolveReasoningEffort({ reasoningEffort: 'high' })).toBe('high');
+        expect(resolveReasoningEffort({ reasoning_effort: 'medium' })).toBe('medium');
+        expect(resolveReasoningEffort({ reasoning: { effort: 'low' } })).toBe('low');
+        expect(resolveReasoningEffort({ reasoningEffort: 'invalid' })).toBeNull();
     });
 
     test('resolveSshRequestContext does not infer kubectl pod listing for generic cluster deployment continuations', () => {
