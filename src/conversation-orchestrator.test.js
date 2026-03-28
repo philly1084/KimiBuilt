@@ -687,6 +687,106 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('defaults remote-build autonomy on from config even without frontend approval metadata', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Remote inspection completed.', 'resp_default_remote_auto')),
+            complete: jest.fn()
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            tool: 'remote-command',
+                            reason: 'Inspect the node first',
+                            params: {
+                                command: 'hostname && uname -m',
+                            },
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({
+                    steps: [
+                        {
+                            tool: 'remote-command',
+                            reason: 'Inspect pods after node verification',
+                            params: {
+                                command: 'kubectl get pods -A',
+                            },
+                        },
+                    ],
+                }))
+                .mockResolvedValueOnce(JSON.stringify({ steps: [] })),
+        };
+
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'host-a\naarch64', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'kube-system traefik Running', stderr: '', host: '10.0.0.5:22' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-config-remote', metadata: {} }),
+            getOrCreate: jest.fn().mockResolvedValue({ id: 'session-config-remote', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const originalDefault = config.config.runtime.remoteBuildAutonomyDefault;
+        config.config.runtime.remoteBuildAutonomyDefault = true;
+
+        try {
+            const orchestrator = new ConversationOrchestrator({
+                llmClient,
+                toolManager,
+                sessionStore,
+                memoryService,
+            });
+
+            const result = await orchestrator.executeConversation({
+                input: 'Inspect the cluster state on the server.',
+                sessionId: 'session-config-remote',
+                executionProfile: 'remote-build',
+                stream: false,
+            });
+
+            expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+            expect(result.response.metadata.executionTrace.find((entry) => entry.name === 'Remote-build autonomy approved')).toMatchObject({
+                details: expect.objectContaining({
+                    approved: true,
+                    source: 'config',
+                }),
+            });
+        } finally {
+            config.config.runtime.remoteBuildAutonomyDefault = originalDefault;
+        }
+    });
+
     test('continues beyond the old three-round cap while remote-build work is still making progress', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

@@ -1765,6 +1765,8 @@ class ConversationOrchestrator extends EventEmitter {
                 ? 'user'
                 : session?.metadata?.remoteBuildAutonomyApproved
                     ? 'session'
+                    : config.runtime.remoteBuildAutonomyDefault
+                        ? 'config'
                     : null;
         const autonomyApproved = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
             && !hasAutonomyRevocation(objective)
@@ -1772,6 +1774,7 @@ class ConversationOrchestrator extends EventEmitter {
                 requestedAutonomyApproval
                 || hasAutonomousRemoteApproval(objective)
                 || Boolean(session?.metadata?.remoteBuildAutonomyApproved)
+                || Boolean(config.runtime.remoteBuildAutonomyDefault)
             );
         const autonomyBudget = getRemoteBuildAutonomyBudget();
         const allowsDeterministicResearchFollowup = !autonomyApproved && hasExplicitWebResearchIntentText(objective);

@@ -32,9 +32,16 @@ function isRemoteBuildAutonomyApproved() {
         const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
             ?? window.localStorage?.getItem?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
             ?? '';
-        return ['1', 'true', 'yes', 'on'].includes(String(stored || '').trim().toLowerCase());
+        const normalized = String(stored || '').trim().toLowerCase();
+        if (!normalized) {
+            return true;
+        }
+        if (['0', 'false', 'no', 'off'].includes(normalized)) {
+            return false;
+        }
+        return ['1', 'true', 'yes', 'on'].includes(normalized);
     } catch (_error) {
-        return false;
+        return true;
     }
 }
 
@@ -256,10 +263,12 @@ class OpenAIAPIClient extends EventTarget {
             model,
             messages,
             stream: true,
+            enableConversationExecutor: true,
             taskType: WEB_CHAT_TASK_TYPE,
             clientSurface: WEB_CHAT_CLIENT_SURFACE,
             metadata: {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                enableConversationExecutor: true,
             },
         };
 
@@ -555,10 +564,12 @@ class OpenAIAPIClient extends EventTarget {
             model,
             messages,
             stream: false,
+            enableConversationExecutor: true,
             taskType: WEB_CHAT_TASK_TYPE,
             clientSurface: WEB_CHAT_CLIENT_SURFACE,
             metadata: {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                enableConversationExecutor: true,
             },
         };
 

@@ -17,9 +17,16 @@
             const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
                 ?? window.localStorage?.getItem?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
                 ?? '';
-            return ['1', 'true', 'yes', 'on'].includes(String(stored || '').trim().toLowerCase());
+            const normalized = String(stored || '').trim().toLowerCase();
+            if (!normalized) {
+                return true;
+            }
+            if (['0', 'false', 'no', 'off'].includes(normalized)) {
+                return false;
+            }
+            return ['1', 'true', 'yes', 'on'].includes(normalized);
         } catch (_error) {
-            return false;
+            return true;
         }
     }
 
@@ -608,10 +615,12 @@
                 model,
                 messages,
                 stream: true,
+                enableConversationExecutor: true,
                 taskType: 'chat',
                 clientSurface: 'web-chat',
                 metadata: {
                     clientSurface: 'web-chat',
+                    enableConversationExecutor: true,
                 },
             };
             if (isRemoteBuildAutonomyApproved()) {

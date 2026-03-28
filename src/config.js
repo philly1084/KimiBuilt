@@ -102,6 +102,7 @@ const config = {
     },
 
     runtime: {
+        remoteBuildAutonomyDefault: process.env.REMOTE_BUILD_AUTONOMY_DEFAULT !== 'false',
         remoteBuildMaxAutonomousRounds: Math.max(
             1,
             parseInt(process.env.REMOTE_BUILD_MAX_AUTONOMOUS_ROUNDS, 10) || 8,

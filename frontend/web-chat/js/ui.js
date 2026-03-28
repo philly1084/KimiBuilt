@@ -28,7 +28,7 @@ class UIHelpers {
         const savedRemoteAutonomy = window.sessionManager?.safeStorageGet?.('kimibuilt_remote_build_autonomy');
         this.currentModel = savedModel || 'gpt-4o';
         this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
-        this.remoteBuildAutonomyApproved = ['1', 'true', 'yes', 'on'].includes(String(savedRemoteAutonomy || '').trim().toLowerCase());
+        this.remoteBuildAutonomyApproved = this.parseRemoteBuildAutonomyPreference(savedRemoteAutonomy);
         this.updateModelUI();
         this.updateReasoningUI();
         this.updateRemoteBuildAutonomyUI();
@@ -1685,6 +1685,19 @@ class UIHelpers {
         return this.remoteBuildAutonomyApproved === true;
     }
 
+    parseRemoteBuildAutonomyPreference(value) {
+        const normalized = String(value ?? '').trim().toLowerCase();
+        if (!normalized) {
+            return true;
+        }
+
+        if (['0', 'false', 'no', 'off'].includes(normalized)) {
+            return false;
+        }
+
+        return ['1', 'true', 'yes', 'on'].includes(normalized);
+    }
+
     setCurrentReasoningEffort(value) {
         this.currentReasoningEffort = this.normalizeReasoningEffort(value);
         if (this.currentReasoningEffort) {
@@ -1717,7 +1730,7 @@ class UIHelpers {
         if (this.remoteBuildAutonomyApproved) {
             window.sessionManager?.safeStorageSet?.('kimibuilt_remote_build_autonomy', 'true');
         } else {
-            window.sessionManager?.safeStorageRemove?.('kimibuilt_remote_build_autonomy');
+            window.sessionManager?.safeStorageSet?.('kimibuilt_remote_build_autonomy', 'false');
         }
         this.updateRemoteBuildAutonomyUI();
         window.dispatchEvent(new CustomEvent('remoteBuildAutonomyChanged', {
