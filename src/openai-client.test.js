@@ -381,6 +381,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
                 toolId: 'web-search',
                 params: expect.objectContaining({
                     query: 'tigers and cats differences',
+                    limit: 10,
                 }),
             },
             {
@@ -487,6 +488,72 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toEqual(['web-search', 'file-mkdir']);
+    });
+
+    test('deterministic research preflight fetches top pages and stores distilled notes', async () => {
+        const memoryService = {
+            rememberResearchNote: jest.fn().mockResolvedValue('note-1'),
+        };
+        const toolManager = {
+            executeTool: jest.fn(async (toolId, params) => {
+                if (toolId === 'web-search') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            results: [
+                                {
+                                    title: 'Tiger article',
+                                    url: 'https://example.com/tiger',
+                                    snippet: 'Tigers are large cats.',
+                                },
+                                {
+                                    title: 'Cat article',
+                                    url: 'https://example.com/cat',
+                                    snippet: 'Cats are smaller felines.',
+                                },
+                            ],
+                        },
+                    };
+                }
+
+                if (toolId === 'web-fetch') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            url: params.url,
+                            body: `<html><head><title>${params.url}</title></head><body><main>Important research facts about ${params.url}</main></body></html>`,
+                        },
+                    };
+                }
+
+                throw new Error(`Unexpected tool: ${toolId}`);
+            }),
+            getTool: jest.fn(),
+        };
+
+        const result = await __testUtils.runDeterministicToolPreflight({
+            toolManager,
+            automaticTools: [
+                { id: 'web-search' },
+                { id: 'web-fetch' },
+            ],
+            prompt: 'Please web research tigers and cats differences.',
+            toolContext: {
+                sessionId: 'session-1',
+                memoryService,
+            },
+        });
+
+        expect(result.toolEvents.map((event) => event.toolCall.function.name)).toEqual([
+            'web-search',
+            'web-fetch',
+            'web-fetch',
+        ]);
+        expect(memoryService.rememberResearchNote).toHaveBeenCalledTimes(2);
+        expect(memoryService.rememberResearchNote.mock.calls[0][1]).toContain('[Research note]');
+        expect(memoryService.rememberResearchNote.mock.calls[0][1]).toContain('Query: tigers and cats differences');
     });
 
     test('selects image tools for generation, unsplash, and direct URL prompts', () => {

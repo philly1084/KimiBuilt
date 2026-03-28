@@ -901,7 +901,7 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
             toolId: 'web-search',
             params: {
                 query: webQuery,
-                limit: 5,
+                limit: normalizeResearchSearchResultCount(),
                 region: 'us-en',
                 timeRange: 'all',
                 includeSnippets: true,
@@ -949,6 +949,187 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     }
 
     return actions;
+}
+
+function normalizeResearchFollowupPageCount() {
+    return Math.max(2, Math.min(config.memory.researchFollowupPages, 4));
+}
+
+function normalizeResearchSearchResultCount() {
+    return Math.max(8, Math.min(config.memory.researchSearchLimit, 12));
+}
+
+function stripHtmlToText(html = '') {
+    return String(html || '')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, '\'')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractFetchBodyText(result = {}) {
+    const body = String(result?.data?.body || '').trim();
+    if (!body) {
+        return '';
+    }
+
+    return /<html\b|<body\b|<article\b|<main\b|<section\b/i.test(body)
+        ? stripHtmlToText(body)
+        : body.replace(/\s+/g, ' ').trim();
+}
+
+function extractResearchFollowupCandidates(searchResult = {}, maxPages = normalizeResearchFollowupPageCount()) {
+    const results = Array.isArray(searchResult?.data?.results) ? searchResult.data.results : [];
+    const seen = new Set();
+
+    return results
+        .filter((entry) => {
+            const url = String(entry?.url || '').trim();
+            if (!url || seen.has(url)) {
+                return false;
+            }
+
+            seen.add(url);
+            return true;
+        })
+        .slice(0, maxPages);
+}
+
+function buildResearchMemoryNote({ query = '', candidate = {}, result = {} } = {}) {
+    const sourceUrl = String(candidate?.url || result?.data?.url || '').trim();
+    const title = String(candidate?.title || result?.data?.title || '').trim();
+    const snippet = String(candidate?.snippet || '').replace(/\s+/g, ' ').trim();
+    const textBody = result?.toolId === 'web-scrape'
+        ? stripHtmlToText(JSON.stringify(result?.data?.data || {}))
+        : extractFetchBodyText(result);
+    const excerpt = textBody.slice(0, 1200).trim();
+
+    if (!sourceUrl || (!title && !snippet && !excerpt)) {
+        return null;
+    }
+
+    return [
+        '[Research note]',
+        query ? `Query: ${query}` : null,
+        title ? `Title: ${title}` : null,
+        `URL: ${sourceUrl}`,
+        snippet ? `Search snippet: ${snippet}` : null,
+        excerpt ? `Source notes: ${excerpt}` : null,
+    ].filter(Boolean).join('\n');
+}
+
+async function maybeStoreResearchMemoryNote({ toolContext = {}, query = '', candidate = {}, result = {} } = {}) {
+    if (!toolContext?.memoryService?.rememberResearchNote || !toolContext?.sessionId) {
+        return;
+    }
+
+    const note = buildResearchMemoryNote({ query, candidate, result });
+    if (!note) {
+        return;
+    }
+
+    await toolContext.memoryService.rememberResearchNote(toolContext.sessionId, note, {
+        sourceUrl: String(candidate?.url || result?.data?.url || '').trim(),
+        sourceTitle: String(candidate?.title || result?.data?.title || '').trim(),
+        query,
+    });
+}
+
+async function runResearchFollowupPreflight({
+    toolManager,
+    searchEvent = null,
+    automaticTools = [],
+    toolContext = {},
+}) {
+    const availableToolIds = new Set((automaticTools || []).map((entry) => entry.id));
+    const canFetch = availableToolIds.has('web-fetch');
+    const canScrape = availableToolIds.has('web-scrape');
+    const searchResult = searchEvent?.result || {};
+    const query = String(searchEvent?.toolCall?.function?.arguments ? (parseToolArguments(searchEvent.toolCall.function.arguments).query || '') : '').trim();
+
+    if ((!canFetch && !canScrape) || !searchResult?.success) {
+        return [];
+    }
+
+    const followupCandidates = extractResearchFollowupCandidates(searchResult);
+    const followupEvents = [];
+
+    for (const candidate of followupCandidates) {
+        let result = null;
+        let toolId = null;
+        let params = null;
+
+        if (canFetch) {
+            toolId = 'web-fetch';
+            params = {
+                url: candidate.url,
+                timeout: 20000,
+                cache: true,
+            };
+            result = await executeAutomaticToolCall(toolManager, {
+                id: `research_fetch_${followupEvents.length + 1}`,
+                type: 'function',
+                function: {
+                    name: toolId,
+                    arguments: JSON.stringify(params),
+                },
+            }, toolContext);
+        }
+
+        if ((!result || result.success === false) && canScrape) {
+            toolId = 'web-scrape';
+            params = {
+                url: candidate.url,
+                browser: true,
+                timeout: 20000,
+            };
+            result = await executeAutomaticToolCall(toolManager, {
+                id: `research_scrape_${followupEvents.length + 1}`,
+                type: 'function',
+                function: {
+                    name: toolId,
+                    arguments: JSON.stringify(params),
+                },
+            }, toolContext);
+        }
+
+        if (!result || !toolId || !params) {
+            continue;
+        }
+
+        const event = {
+            toolCall: normalizeToolCall({
+                id: `${toolId}_${followupEvents.length + 1}`,
+                type: 'function',
+                function: {
+                    name: toolId,
+                    arguments: JSON.stringify(params),
+                },
+            }),
+            reason: 'Deterministic research follow-up on a top search result.',
+            result,
+        };
+        followupEvents.push(event);
+
+        if (result.success) {
+            await maybeStoreResearchMemoryNote({
+                toolContext,
+                query,
+                candidate,
+                result,
+            });
+        }
+    }
+
+    return followupEvents;
 }
 
 function sanitizeToolSchema(schema) {
@@ -1276,6 +1457,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'web-search')) {
         guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
         guidance.push('- When the user explicitly asks for research, call `web-search` first. This backend routes it through the configured Perplexity provider.');
+        guidance.push('- For explicit research requests, do not stop at search snippets. Verify the strongest search results with `web-fetch` or `web-scrape` and ground the answer in those source pages.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'web-fetch')) {
@@ -1548,10 +1730,26 @@ async function runDeterministicToolPreflight({
         };
 
         const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
-        toolEvents.push({
+        const event = {
             toolCall: normalizeToolCall(toolCall),
+            reason: action.toolId === 'web-search'
+                ? 'Deterministic research preflight.'
+                : 'Deterministic preflight action.',
             result,
-        });
+        };
+        toolEvents.push(event);
+
+        if (action.toolId === 'web-search' && result.success) {
+            const followupEvents = await runResearchFollowupPreflight({
+                toolManager,
+                searchEvent: event,
+                automaticTools,
+                toolContext,
+            });
+            if (followupEvents.length > 0) {
+                toolEvents.push(...followupEvents);
+            }
+        }
     }
 
     return {
@@ -2399,6 +2597,7 @@ module.exports = {
         getResponseApiText,
         normalizeModelResponse,
         normalizeToolResultForModel,
+        runDeterministicToolPreflight,
         runDirectRequiredToolAction,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,

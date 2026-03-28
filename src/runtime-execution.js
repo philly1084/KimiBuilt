@@ -7,6 +7,17 @@ const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 
+function inferRecallProfile(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'default';
+    }
+
+    return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized)
+        ? 'research'
+        : 'default';
+}
+
 function resolveConversationExecutorFlag(payload = {}) {
     return [
         payload?.enableConversationExecutor,
@@ -174,10 +185,13 @@ async function executeConversationRuntime(app, params = {}) {
         };
     }
 
+    const recallInput = params.memoryInput || extractRuntimeText(params.input || '');
     const contextMessages = params.contextMessages || (
         params.loadContextMessages === false
             ? []
-            : await memoryService.process(params.sessionId, params.memoryInput || '')
+            : await memoryService.process(params.sessionId, recallInput, {
+                profile: inferRecallProfile(recallInput),
+            })
     );
     const recentMessages = params.recentMessages || (
         params.loadRecentMessages === false

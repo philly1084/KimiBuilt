@@ -72,6 +72,17 @@ function normalizeMessageContent(content) {
   return '';
 }
 
+function inferRecallProfileFromObjective(text = '') {
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) {
+    return 'default';
+  }
+
+  return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized)
+    ? 'research'
+    : 'default';
+}
+
 function isUuidLike(value) {
   return typeof value === 'string' && UUID_V4_REGEX.test(value.trim());
 }
@@ -962,6 +973,7 @@ class AgentOrchestrator {
     try {
       return await this.memoryService.recall(objective, {
         sessionId,
+        profile: inferRecallProfileFromObjective(objective),
       });
     } catch (error) {
       console.error('[AgentOrchestrator] Failed to load recalled context:', error.message);

@@ -1,6 +1,6 @@
-const MAX_PROJECT_URLS = 24;
-const MAX_PROJECT_TASKS = 16;
-const MAX_PROJECT_ARTIFACTS = 16;
+const MAX_PROJECT_URLS = 40;
+const MAX_PROJECT_TASKS = 24;
+const MAX_PROJECT_ARTIFACTS = 24;
 
 function sanitizeText(value = '', limit = 280) {
     const text = String(value || '').replace(/\s+/g, ' ').trim();

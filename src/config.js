@@ -64,6 +64,31 @@ const config = {
         perplexityBaseURL: process.env.PERPLEXITY_BASE_URL || 'https://api.perplexity.ai',
     },
 
+    memory: {
+        recallTopK: Math.max(
+            1,
+            parseInt(process.env.MEMORY_RECALL_TOP_K, 10) || 8,
+        ),
+        recallScoreThreshold: Number.isFinite(parseFloat(process.env.MEMORY_RECALL_SCORE_THRESHOLD))
+            ? parseFloat(process.env.MEMORY_RECALL_SCORE_THRESHOLD)
+            : 0.7,
+        researchRecallTopK: Math.max(
+            1,
+            parseInt(process.env.MEMORY_RESEARCH_RECALL_TOP_K, 10) || 10,
+        ),
+        researchRecallScoreThreshold: Number.isFinite(parseFloat(process.env.MEMORY_RESEARCH_RECALL_SCORE_THRESHOLD))
+            ? parseFloat(process.env.MEMORY_RESEARCH_RECALL_SCORE_THRESHOLD)
+            : 0.64,
+        researchSearchLimit: Math.max(
+            1,
+            parseInt(process.env.WEB_RESEARCH_SEARCH_LIMIT, 10) || 10,
+        ),
+        researchFollowupPages: Math.max(
+            1,
+            parseInt(process.env.WEB_RESEARCH_FOLLOWUP_PAGES, 10) || 3,
+        ),
+    },
+
     runtime: {
         remoteBuildMaxAutonomousRounds: Math.max(
             1,

@@ -85,7 +85,11 @@ class VectorStore {
         }
 
         const query = queryOrCollection;
-        const { sessionId = null, topK = 5, scoreThreshold = 0.7 } = options;
+        const {
+            sessionId = null,
+            topK = config.memory.recallTopK,
+            scoreThreshold = config.memory.recallScoreThreshold,
+        } = options;
         await this.ensureCollection(this.collection);
         const vector = await embedder.embed(query);
 

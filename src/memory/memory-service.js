@@ -1,4 +1,8 @@
+const { config } = require('../config');
 const { vectorStore } = require('./vector-store');
+
+const DEFAULT_RECALL_PROFILE = 'default';
+const RESEARCH_RECALL_PROFILE = 'research';
 
 /**
  * Memory service orchestrates the contextual memory pipeline:
@@ -36,15 +40,35 @@ class MemoryService {
      * @param {string} query - The current user message
      * @param {Object} [options]
      * @param {string} [options.sessionId] - Scope search to this session
-     * @param {number} [options.topK=5] - Max results
-     * @param {number} [options.scoreThreshold=0.7] - Min similarity
+     * @param {number} [options.topK] - Max results, defaults by recall profile
+     * @param {number} [options.scoreThreshold] - Min similarity, defaults by recall profile
+     * @param {string} [options.profile='default'] - Recall profile (`default` or `research`)
      * @returns {Promise<string[]>} Array of relevant text snippets
      */
-    async recall(query, { sessionId = null, topK = 5, scoreThreshold = 0.7 } = {}) {
-        const results = await this.store.search(query, {
-            sessionId,
+    getRecallOptions({ profile = DEFAULT_RECALL_PROFILE, topK, scoreThreshold } = {}) {
+        const normalizedProfile = String(profile || DEFAULT_RECALL_PROFILE).trim().toLowerCase();
+        const isResearch = normalizedProfile === RESEARCH_RECALL_PROFILE;
+
+        return {
+            topK: Number.isFinite(Number(topK))
+                ? Number(topK)
+                : (isResearch ? config.memory.researchRecallTopK : config.memory.recallTopK),
+            scoreThreshold: Number.isFinite(Number(scoreThreshold))
+                ? Number(scoreThreshold)
+                : (isResearch ? config.memory.researchRecallScoreThreshold : config.memory.recallScoreThreshold),
+        };
+    }
+
+    async recall(query, { sessionId = null, topK, scoreThreshold, profile = DEFAULT_RECALL_PROFILE } = {}) {
+        const recallOptions = this.getRecallOptions({
+            profile,
             topK,
             scoreThreshold,
+        });
+        const results = await this.store.search(query, {
+            sessionId,
+            topK: recallOptions.topK,
+            scoreThreshold: recallOptions.scoreThreshold,
         });
 
         const seen = new Set();
@@ -104,6 +128,24 @@ class MemoryService {
         }
     }
 
+    async rememberResearchNote(sessionId, note, metadata = {}) {
+        const normalizedNote = String(note || '').trim();
+        if (!normalizedNote) {
+            return null;
+        }
+
+        try {
+            return await this.store.store(sessionId, normalizedNote, {
+                role: 'research-note',
+                memoryType: 'research',
+                ...metadata,
+            });
+        } catch (err) {
+            console.error('[Memory] Failed to store research note:', err.message);
+            return null;
+        }
+    }
+
     /**
      * Delete all memories for a session.
      * @param {string} sessionId
@@ -126,4 +168,9 @@ class MemoryService {
 // Singleton
 const memoryService = new MemoryService();
 
-module.exports = { memoryService, MemoryService };
+module.exports = {
+    memoryService,
+    MemoryService,
+    DEFAULT_RECALL_PROFILE,
+    RESEARCH_RECALL_PROFILE,
+};

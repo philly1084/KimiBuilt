@@ -105,6 +105,17 @@ function hasExplicitWebResearchIntentText(text = '') {
     return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(normalized);
 }
 
+function inferRecallProfileFromText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'default';
+    }
+
+    return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized)
+        ? 'research'
+        : 'default';
+}
+
 function extractExplicitWebResearchQuery(text = '') {
     const prompt = String(text || '').trim();
     if (!prompt) {
@@ -189,6 +200,22 @@ function truncateText(value = '', limit = MAX_TOOL_RESULT_CHARS) {
     }
 
     return `${text.slice(0, limit)}\n[truncated ${text.length - limit} chars]`;
+}
+
+function stripHtmlToText(html = '') {
+    return String(html || '')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, '\'')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function hasUsableSshDefaults() {
@@ -1021,6 +1048,67 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
     return [];
 }
 
+function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [] } = {}) {
+    if (!hasExplicitWebResearchIntentText(objective)) {
+        return [];
+    }
+
+    const lastSearchEvent = getLastSuccessfulToolEvent(toolEvents, 'web-search');
+    const searchResults = Array.isArray(lastSearchEvent?.result?.data?.results)
+        ? lastSearchEvent.result.data.results
+        : [];
+    if (searchResults.length === 0) {
+        return [];
+    }
+
+    const maxPages = Math.max(2, Math.min(config.memory.researchFollowupPages, 4));
+    const followupCandidates = [];
+    const seen = new Set();
+
+    for (const entry of searchResults) {
+        const url = String(entry?.url || '').trim();
+        if (!url || seen.has(url)) {
+            continue;
+        }
+
+        seen.add(url);
+        followupCandidates.push(url);
+        if (followupCandidates.length >= maxPages) {
+            break;
+        }
+    }
+
+    if (followupCandidates.length === 0) {
+        return [];
+    }
+
+    if (toolPolicy.candidateToolIds.includes('web-fetch')) {
+        return followupCandidates.map((url) => ({
+            tool: 'web-fetch',
+            reason: 'Deterministic research follow-up should verify top search results with page fetches.',
+            params: {
+                url,
+                timeout: 20000,
+                cache: true,
+            },
+        }));
+    }
+
+    if (toolPolicy.candidateToolIds.includes('web-scrape')) {
+        return followupCandidates.map((url) => ({
+            tool: 'web-scrape',
+            reason: 'Deterministic research follow-up should verify top search results with rendered page scraping.',
+            params: {
+                url,
+                browser: true,
+                timeout: 20000,
+            },
+        }));
+    }
+
+    return [];
+}
+
 function isInvalidRuntimeResponseText(text = '') {
     const normalized = String(text || '').trim().toLowerCase().replace(/[â€™]/g, '\'');
     if (!normalized) {
@@ -1433,6 +1521,57 @@ function extractVerifiedImageEmbeds(toolEvents = []) {
     });
 }
 
+function buildResearchMemoryNotesFromToolEvents({ objective = '', toolEvents = [] } = {}) {
+    if (!hasExplicitWebResearchIntentText(objective)) {
+        return [];
+    }
+
+    const searchResults = Array.isArray(getLastSuccessfulToolEvent(toolEvents, 'web-search')?.result?.data?.results)
+        ? getLastSuccessfulToolEvent(toolEvents, 'web-search').result.data.results
+        : [];
+    const searchResultByUrl = new Map(
+        searchResults
+            .filter((entry) => String(entry?.url || '').trim())
+            .map((entry) => [String(entry.url).trim(), entry]),
+    );
+    const seen = new Set();
+
+    return toolEvents
+        .filter((event) => event?.result?.success && ['web-fetch', 'web-scrape'].includes(event?.result?.toolId || event?.toolCall?.function?.name))
+        .map((event) => {
+            const result = event.result || {};
+            const url = String(result?.data?.url || '').trim();
+            if (!url || seen.has(url)) {
+                return null;
+            }
+
+            seen.add(url);
+            const searchMeta = searchResultByUrl.get(url) || {};
+            const title = String(searchMeta.title || result?.data?.title || '').trim();
+            const snippet = String(searchMeta.snippet || '').replace(/\s+/g, ' ').trim();
+            const sourceNotes = (result.toolId === 'web-fetch'
+                ? stripHtmlToText(String(result?.data?.body || ''))
+                : stripHtmlToText(JSON.stringify(result?.data?.data || {})))
+                .slice(0, 1200)
+                .trim();
+
+            if (!title && !snippet && !sourceNotes) {
+                return null;
+            }
+
+            return [
+                '[Research note]',
+                `Query: ${objective}`,
+                title ? `Title: ${title}` : null,
+                `URL: ${url}`,
+                snippet ? `Search snippet: ${snippet}` : null,
+                sourceNotes ? `Source notes: ${sourceNotes}` : null,
+            ].filter(Boolean).join('\n');
+        })
+        .filter(Boolean)
+        .slice(0, Math.max(2, Math.min(config.memory.researchFollowupPages, 4)));
+}
+
 function buildSyntheticResponse({ output, responseId, model, metadata = {} }) {
     return {
         id: responseId || `resp_orch_${Date.now()}`,
@@ -1551,7 +1690,9 @@ class ConversationOrchestrator extends EventEmitter {
         const resolvedContextMessages = contextMessages.length > 0
             ? contextMessages
             : loadContextMessages !== false && this.memoryService?.process
-                ? await this.memoryService.process(sessionId, memoryInput || objective)
+                ? await this.memoryService.process(sessionId, memoryInput || objective, {
+                    profile: inferRecallProfileFromText(memoryInput || objective),
+                })
                 : [];
         const resolvedRecentMessages = recentMessages.length > 0
             ? recentMessages
@@ -1610,7 +1751,8 @@ class ConversationOrchestrator extends EventEmitter {
                 || Boolean(session?.metadata?.remoteBuildAutonomyApproved)
             );
         const autonomyBudget = getRemoteBuildAutonomyBudget();
-        const maxAutonomousRounds = autonomyApproved ? autonomyBudget.maxRounds : 1;
+        const allowsDeterministicResearchFollowup = !autonomyApproved && hasExplicitWebResearchIntentText(objective);
+        const maxAutonomousRounds = autonomyApproved ? autonomyBudget.maxRounds : (allowsDeterministicResearchFollowup ? 2 : 1);
         const maxAutonomousToolCalls = autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS;
         const autonomyDeadline = autonomyApproved ? startedAt + autonomyBudget.maxDurationMs : startedAt;
 
@@ -1736,6 +1878,23 @@ class ConversationOrchestrator extends EventEmitter {
                     if (guidedRemotePlan.length > 0
                         && (nextPlan.length === 0 || shouldPreferRemoteFollowupPlan(toolEvents))) {
                         nextPlan = guidedRemotePlan;
+                        runtimeMode = 'guided-tools';
+                    }
+                }
+
+                if (!autonomyApproved && nextPlan.length === 0) {
+                    const guidedResearchPlan = filterRepeatedPlanSteps(
+                        buildResearchFollowupPlanFromToolEvents({
+                            objective,
+                            toolPolicy,
+                            toolEvents,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
+
+                    if (guidedResearchPlan.length > 0) {
+                        nextPlan = guidedResearchPlan;
                         runtimeMode = 'guided-tools';
                     }
                 }
@@ -2272,7 +2431,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     query: researchQuery,
                     engine: 'perplexity',
-                    limit: 5,
+                    limit: Math.max(8, Math.min(config.memory.researchSearchLimit, 12)),
                     region: 'us-en',
                     timeRange: 'all',
                     includeSnippets: true,
@@ -2400,7 +2559,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     query,
                     engine: 'perplexity',
-                    limit: 5,
+                    limit: Math.max(8, Math.min(config.memory.researchSearchLimit, 12)),
                     region: 'us-en',
                     timeRange: 'all',
                     includeSnippets: true,
@@ -3028,6 +3187,14 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (this.memoryService?.rememberResponse) {
             this.memoryService.rememberResponse(sessionId, assistantText);
+        }
+
+        if (this.memoryService?.rememberResearchNote) {
+            const researchNotes = buildResearchMemoryNotesFromToolEvents({
+                objective: userText,
+                toolEvents,
+            });
+            await Promise.all(researchNotes.map((note) => this.memoryService.rememberResearchNote(sessionId, note)));
         }
 
         if (this.sessionStore?.appendMessages) {
