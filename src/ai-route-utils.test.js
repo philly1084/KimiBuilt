@@ -201,6 +201,22 @@ describe('ai-route-utils', () => {
         })).toBe(false);
     });
 
+    test('shouldSuppressNotesSurfaceArtifact keeps Power Query inline on notes unless file delivery was explicit', () => {
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Write a Power Query script to clean these columns and put it in the note.',
+            outputFormat: 'power-query',
+            outputFormatProvided: false,
+        })).toBe(true);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Create a Power Query file and give me the artifact link.',
+            outputFormat: 'power-query',
+            outputFormatProvided: false,
+        })).toBe(false);
+    });
+
     test('inferOutputFormatFromSession does not keep mermaid sticky on generic continuation turns', () => {
         expect(inferOutputFormatFromSession('another pass, keep the pacing quieter', {
             metadata: {

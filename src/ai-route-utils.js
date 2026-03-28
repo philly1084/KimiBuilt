@@ -182,6 +182,10 @@ function shouldSuppressNotesSurfaceArtifact({
         return !hasExplicitMermaidFileIntent(text);
     }
 
+    if (normalizedFormat === 'power-query') {
+        return !hasExplicitArtifactDeliveryIntent(text);
+    }
+
     return hasExplicitNotesPageEditIntent(text) && !hasExplicitArtifactDeliveryIntent(text);
 }
 
