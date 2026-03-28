@@ -16,7 +16,7 @@ FROM --platform=$TARGETPLATFORM node:20-bookworm-slim
 WORKDIR /app
 
 RUN apt-get update && \
-  apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates openssh-client docker.io && \
+  apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates openssh-client docker.io git && \
   rm -rf /var/lib/apt/lists/*
 
 # Security: run as non-root

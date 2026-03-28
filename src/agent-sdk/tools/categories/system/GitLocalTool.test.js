@@ -76,4 +76,20 @@ describe('GitLocalTool', () => {
     expect(result.data.stdout).toContain('upstream: none');
     expect(result.data.stdout).toContain('origin https://github.com/example/repo.git (fetch)');
   });
+
+  test('returns a helpful error when git is missing from the runtime', async () => {
+    const tool = new GitLocalTool();
+
+    tool.resolveRepoRoot = jest.fn().mockRejectedValue(Object.assign(new Error('spawn git ENOENT'), {
+      code: 'ENOENT',
+    }));
+
+    const result = await tool.execute({
+      action: 'status',
+      repositoryPath: '/repo',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Git CLI is unavailable in the backend runtime');
+  });
 });

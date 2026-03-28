@@ -90,36 +90,43 @@ class GitLocalTool extends ToolBase {
       throw new Error(`Unsupported git-safe action '${action}'`);
     }
 
-    const repositoryPath = params.repositoryPath || context.repositoryPath || config.deploy.defaultRepositoryPath;
-    const repoPath = path.resolve(String(repositoryPath || process.cwd()));
-    const repoRoot = await this.resolveRepoRoot(repoPath);
-    const timeout = Math.max(1000, Number(params.timeout) || 60000);
+    try {
+      const repositoryPath = params.repositoryPath || context.repositoryPath || config.deploy.defaultRepositoryPath;
+      const repoPath = path.resolve(String(repositoryPath || process.cwd()));
+      const repoRoot = await this.resolveRepoRoot(repoPath);
+      const timeout = Math.max(1000, Number(params.timeout) || 60000);
 
-    let result;
-    if (action === 'save-and-push') {
-      result = await this.runSaveAndPush(repoRoot, params, timeout, tracker);
-    } else if (action === 'remote-info') {
-      result = await this.runRemoteInfo(repoRoot, timeout, tracker);
-    } else {
-      const args = await this.buildArgs(action, repoRoot, params);
-      tracker.recordExecution(`git ${args.join(' ')}`, { repoRoot, action });
-      result = await this.spawnGit(args, {
-        cwd: repoRoot,
-        timeout,
-      });
+      let result;
+      if (action === 'save-and-push') {
+        result = await this.runSaveAndPush(repoRoot, params, timeout, tracker);
+      } else if (action === 'remote-info') {
+        result = await this.runRemoteInfo(repoRoot, timeout, tracker);
+      } else {
+        const args = await this.buildArgs(action, repoRoot, params);
+        tracker.recordExecution(`git ${args.join(' ')}`, { repoRoot, action });
+        result = await this.spawnGit(args, {
+          cwd: repoRoot,
+          timeout,
+        });
+      }
+
+      const branch = await this.getCurrentBranch(repoRoot).catch(() => '');
+
+      return {
+        action,
+        repoRoot,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        branch,
+        duration: result.duration,
+      };
+    } catch (error) {
+      if (error?.code === 'ENOENT' && /git/i.test(String(error?.message || ''))) {
+        throw new Error('Git CLI is unavailable in the backend runtime. Install `git` in the runtime image or ensure it is on PATH before using git-safe.');
+      }
+      throw error;
     }
-
-    const branch = await this.getCurrentBranch(repoRoot).catch(() => '');
-
-    return {
-      action,
-      repoRoot,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      exitCode: result.exitCode,
-      branch,
-      duration: result.duration,
-    };
   }
 
   async runSaveAndPush(repoRoot, params, timeout, tracker) {
