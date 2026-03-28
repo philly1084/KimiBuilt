@@ -103,4 +103,32 @@ describe('notes agent parsing', () => {
             }),
         ]));
     });
+
+    test('rebuilds the page from assistant reply plus top-level markdown content when actions are omitted', () => {
+        const agent = loadAgent();
+        const responseText = JSON.stringify({
+            assistant_reply: 'I turned this into a page draft.',
+            content: '# Paris Art Guide\n\n![Paris hero](https://images.unsplash.com/photo-44444)\n\nMontmartre is still one of the city\'s best-known art neighborhoods.',
+        });
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('I turned this into a page draft.');
+        expect(parsed.actions).toHaveLength(1);
+        expect(parsed.actions[0].op).toBe('rebuild_page');
+        expect(parsed.actions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_1', content: 'Paris Art Guide' }),
+            expect.objectContaining({
+                type: 'ai_image',
+                content: expect.objectContaining({
+                    imageUrl: 'https://images.unsplash.com/photo-44444',
+                    source: 'unsplash',
+                }),
+            }),
+            expect.objectContaining({
+                type: 'text',
+                content: 'Montmartre is still one of the city\'s best-known art neighborhoods.',
+            }),
+        ]));
+    });
 });

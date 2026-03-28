@@ -1788,6 +1788,55 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         }
     }
 
+    function buildImplicitNotesActionsFromPayload(payload) {
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return null;
+        }
+
+        const directAction = normalizeLegacyNotesAction(payload);
+        if (directAction) {
+            return [directAction];
+        }
+
+        const pageLikeBlocks = Array.isArray(payload.blocks)
+            ? payload.blocks
+            : (Array.isArray(payload.page?.blocks)
+                ? payload.page.blocks
+                : (Array.isArray(payload.document?.blocks)
+                    ? payload.document.blocks
+                    : null));
+        if (Array.isArray(pageLikeBlocks) && pageLikeBlocks.length > 0) {
+            return [{
+                op: 'rebuild_page',
+                blocks: pageLikeBlocks
+            }];
+        }
+
+        const textSource = [
+            payload.content,
+            payload.markdown,
+            payload.text,
+            payload.body,
+            payload.result,
+            payload.output,
+            payload.page?.content,
+            payload.document?.content
+        ].find((value) => typeof value === 'string' && value.trim());
+        if (!textSource) {
+            return null;
+        }
+
+        const blocks = extractPreferredBlocksFromSourceText(textSource).blocks;
+        if (!blocks.length) {
+            return null;
+        }
+
+        return [{
+            op: 'rebuild_page',
+            blocks
+        }];
+    }
+
     function getNotesPayloadActions(payload) {
         if (!payload || typeof payload !== 'object') {
             return null;
@@ -1804,7 +1853,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                         : null)));
 
         if (!Array.isArray(actions)) {
-            return null;
+            return buildImplicitNotesActionsFromPayload(payload);
         }
 
         return actions
@@ -2047,10 +2096,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return false;
         }
 
-        const type = canonicalizeBlockType(value.type || '');
-        if (!type) {
+        if (typeof value.type !== 'string' || !value.type.trim()) {
             return false;
         }
+        const type = canonicalizeBlockType(value.type);
 
         if (Object.prototype.hasOwnProperty.call(value, 'content')) {
             return true;
