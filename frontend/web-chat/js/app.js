@@ -480,7 +480,6 @@ class ChatApp {
         // Get current model
         const model = uiHelpers.getCurrentModel();
         const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
-        const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
         
         // Create placeholder for assistant response
         const assistantMessage = {
@@ -1679,6 +1678,7 @@ class ChatApp {
         
         // Get current model
         const model = uiHelpers.getCurrentModel();
+        const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
         
         // Build message history and stream
         this.currentAbortController = new AbortController();
