@@ -480,6 +480,7 @@ class ChatApp {
         // Get current model
         const model = uiHelpers.getCurrentModel();
         const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
+        const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
         
         // Create placeholder for assistant response
         const assistantMessage = {
@@ -1686,7 +1687,7 @@ class ChatApp {
             apiClient.setSessionId(sessionId);
             const history = this.buildMessageHistory(sessionId);
             
-            for await (const chunk of apiClient.streamChat(history, model, this.currentAbortController.signal)) {
+            for await (const chunk of apiClient.streamChat(history, model, this.currentAbortController.signal, reasoningEffort)) {
                 if (chunk.sessionId) {
                     this.syncBackendSession(chunk.sessionId);
                 }
