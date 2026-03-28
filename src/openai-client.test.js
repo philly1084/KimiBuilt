@@ -687,6 +687,16 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('does not force a single tool for combined git push and k3s deploy requests', () => {
+        expect(__testUtils.buildAutomaticToolChoice(
+            [{ id: 'git-safe' }, { id: 'k3s-deploy' }, { id: 'remote-command' }],
+            'responses',
+            {
+                prompt: 'Commit the latest files to GitHub and deploy them to k3s.',
+            },
+        )).toBe('auto');
+    });
+
     test('exposes ssh-execute unconditionally when defaults exist', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,
@@ -768,6 +778,18 @@ describe('openai-client automatic tool orchestration helpers', () => {
 
         expect(guidance).toContain('run_shell_command');
         expect(guidance).toContain('actual SSH error');
+    });
+
+    test('git and k3s guidance keeps ssh for config while clarifying repo source of truth', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'git-safe' },
+            { id: 'k3s-deploy' },
+            { id: 'remote-command' },
+        ]);
+
+        expect(guidance).toContain('local workspace repository as the source of truth');
+        expect(guidance).toContain('missing project checkout on the remote host');
+        expect(guidance).toContain('Keep `remote-command` available for one-off server configuration and troubleshooting');
     });
 
     test('detects ssh as a required tool for explicit ssh prompts', () => {

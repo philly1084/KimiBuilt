@@ -2,6 +2,12 @@
 # Backend serves frontend static files and API from the same pod.
 # Domain: kimibuilt.secdevsolutions.help
 # Requires existing secret: kimibuilt-secrets with OPENAI_API_KEY and POSTGRES_PASSWORD.
+# Optional remote deploy defaults are set below.
+# Optional SSH secret keys for backend-driven deploys:
+# - KIMIBUILT_SSH_HOST
+# - KIMIBUILT_SSH_PORT
+# - KIMIBUILT_SSH_USERNAME
+# - KIMIBUILT_SSH_PASSWORD
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -60,3 +66,17 @@ spec:
               value: /usr/bin/chromium
             - name: ARTIFACT_PDF_TIMEOUT_MS
               value: "15000"
+            - name: KIMIBUILT_DEPLOY_REPO_URL
+              value: https://github.com/philly1084/KimiBuilt.git
+            - name: KIMIBUILT_DEPLOY_TARGET_DIR
+              value: /opt/kimibuilt
+            - name: KIMIBUILT_DEPLOY_MANIFESTS_PATH
+              value: k8s
+            - name: KIMIBUILT_DEPLOY_NAMESPACE
+              value: kimibuilt
+            - name: KIMIBUILT_DEPLOY_DEPLOYMENT
+              value: backend
+            - name: KIMIBUILT_DEPLOY_CONTAINER
+              value: backend
+            - name: KIMIBUILT_DEPLOY_BRANCH
+              value: master

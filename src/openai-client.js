@@ -647,7 +647,8 @@ function hasExplicitGitIntent(prompt = '') {
     }
 
     return /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/i.test(text)
-        || /\b(status|diff|branch|stage|add|commit|push)\b[\s\S]{0,40}\bgit\b/i.test(text);
+        || /\b(status|diff|branch|stage|add|commit|push)\b[\s\S]{0,40}\bgit\b/i.test(text)
+        || /\b(commit|push|save)\b[\s\S]{0,40}\b(files?|changes?|work|design|project)\b[\s\S]{0,40}\b(to|into)\b[\s\S]{0,20}\bgithub\b/i.test(text);
 }
 
 function hasExplicitK3sDeployIntent(prompt = '') {
@@ -1420,6 +1421,20 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : 'remote-command');
+    const explicitK3sDeployIntent = hasExplicitK3sDeployIntent(prompt);
+    const explicitGitIntent = hasExplicitGitIntent(prompt);
+
+    if (explicitK3sDeployIntent && explicitGitIntent) {
+        return null;
+    }
+
+    if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {
+        return 'k3s-deploy';
+    }
+
+    if (explicitGitIntent && availableToolIds.has('git-safe')) {
+        return 'git-safe';
+    }
 
     if (remoteToolId
         && hasRemoteWebsiteUpdateIntent(prompt)
@@ -1429,14 +1444,6 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
 
     if (promptHasExplicitSshIntent(prompt)) {
         return remoteToolId;
-    }
-
-    if (hasExplicitK3sDeployIntent(prompt) && availableToolIds.has('k3s-deploy')) {
-        return 'k3s-deploy';
-    }
-
-    if (hasExplicitGitIntent(prompt) && availableToolIds.has('git-safe')) {
-        return 'git-safe';
     }
 
     if (hasExplicitWebResearchIntent(prompt)) {
@@ -1549,6 +1556,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'git-safe')) {
         guidance.push('- Use `git-safe` for local repository save flows: inspect git status, stage files, commit, and push.');
         guidance.push('- Prefer `save-and-push` when the user clearly wants the latest local changes committed and pushed to GitHub.');
+        guidance.push('- Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
     }
 
     const remoteGuidanceToolId = automaticTools.some((entry) => entry.id === 'remote-command')
@@ -1583,6 +1591,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'k3s-deploy')) {
         guidance.push('- Use `k3s-deploy` for restricted deployment work over SSH: sync a GitHub repo on the server, apply manifests, set deployment images, and check rollout status.');
         guidance.push('- Prefer `k3s-deploy` over raw SSH when the task is a standard k3s deploy/update flow.');
+        guidance.push('- Do not treat a missing project checkout on the remote host as a blocker for deployment work. `sync-repo` or `sync-and-apply` can clone the configured GitHub repo into the target directory.');
+        guidance.push('- Keep `remote-command` available for one-off server configuration and troubleshooting, but use `git-safe` plus `k3s-deploy` when the user wants code pushed to GitHub and then deployed.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'code-sandbox')) {

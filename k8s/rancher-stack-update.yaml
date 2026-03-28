@@ -5,6 +5,11 @@
 # 1. kimibuilt-secrets
 #    - OPENAI_API_KEY
 #    - POSTGRES_PASSWORD
+# Optional but recommended for remote deploy operations from the backend:
+#    - KIMIBUILT_SSH_HOST
+#    - KIMIBUILT_SSH_PORT
+#    - KIMIBUILT_SSH_USERNAME
+#    - KIMIBUILT_SSH_PASSWORD
 #
 # This stack keeps nginx as the public frontend tier.
 # nginx proxies all frontend, API, and WebSocket traffic to the backend service.
@@ -39,6 +44,13 @@ data:
   ARTIFACT_BROWSER_PATH: "/usr/bin/chromium"
   ARTIFACT_BROWSER_ARGS: "--disable-software-rasterizer"
   ARTIFACT_PDF_TIMEOUT_MS: "15000"
+  KIMIBUILT_DEPLOY_REPO_URL: "https://github.com/philly1084/KimiBuilt.git"
+  KIMIBUILT_DEPLOY_TARGET_DIR: "/opt/kimibuilt"
+  KIMIBUILT_DEPLOY_MANIFESTS_PATH: "k8s"
+  KIMIBUILT_DEPLOY_NAMESPACE: "kimibuilt"
+  KIMIBUILT_DEPLOY_DEPLOYMENT: "backend"
+  KIMIBUILT_DEPLOY_CONTAINER: "backend"
+  KIMIBUILT_DEPLOY_BRANCH: "master"
   PORT: "3000"
   NODE_ENV: "production"
 
