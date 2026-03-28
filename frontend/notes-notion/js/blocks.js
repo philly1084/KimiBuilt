@@ -380,8 +380,13 @@ const Blocks = (function() {
         
         checkbox.addEventListener('click', () => {
             checkbox.classList.toggle('checked');
-            block.content = { ...content, checked: !content.checked };
-            wrapper.closest('.block').classList.toggle('checked', !content.checked);
+            const nextChecked = checkbox.classList.contains('checked');
+            block.content = {
+                ...content,
+                text: (block.content && typeof block.content === 'object' ? block.content.text : content.text) || '',
+                checked: nextChecked
+            };
+            wrapper.closest('.block')?.classList.toggle('checked', nextChecked);
             
             // Trigger save
             if (window.Editor) {
@@ -2051,6 +2056,14 @@ const Blocks = (function() {
         // Rows (editable)
         const rowsContainer = document.createElement('div');
         rowsContainer.className = 'database-rows';
+
+        if (data.rows.length === 0) {
+            const emptyState = document.createElement('div');
+            emptyState.className = 'database-empty-state';
+            emptyState.textContent = 'No rows yet. Add one to start tracking information.';
+            emptyState.style.cssText = 'padding: 16px 12px; color: var(--text-muted); font-size: 13px;';
+            rowsContainer.appendChild(emptyState);
+        }
         
         data.rows.forEach((row, rowIndex) => {
             const rowEl = document.createElement('div');

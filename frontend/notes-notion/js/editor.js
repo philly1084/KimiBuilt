@@ -112,20 +112,28 @@ const Editor = (function() {
                 };
             case 'image':
                 return {
-                    url: existing?.url || (isLikelyUrl(text) ? text : ''),
-                    caption: existing?.caption || (isLikelyUrl(text) ? '' : text)
+                    url: existing?.url || existing?.imageUrl || existing?._resolvedImageUrl || existing?.downloadUrl || (isLikelyUrl(text) ? text : ''),
+                    caption: existing?.caption || existing?.prompt || (isLikelyUrl(text) ? '' : text)
                 };
             case 'ai_image':
                 return {
-                    prompt: text,
-                    imageUrl: existing?.imageUrl || null,
+                    ...existing,
+                    prompt: text || existing?.prompt || '',
+                    imageUrl: existing?.imageUrl || existing?.url || null,
                     model: existing?.model || null,
                     size: existing?.size || '1024x1024',
-                    quality: existing?.quality || 'standard'
+                    quality: existing?.quality || 'standard',
+                    style: existing?.style || 'vivid',
+                    status: existing?.status || ((existing?.imageUrl || existing?.url) ? 'done' : 'pending'),
+                    source: existing?.source || (existing?.url ? 'upload' : 'ai'),
+                    _resolvedImageUrl: existing?._resolvedImageUrl || (existing?.url && !String(existing.url).startsWith('asset://') ? existing.url : null),
+                    imageAssetId: existing?.imageAssetId || null,
+                    artifactId: existing?.artifactId || null,
+                    downloadUrl: existing?.downloadUrl || existing?.imageUrl || existing?.url || null,
                 };
             case 'bookmark':
                 return {
-                    url: existing?.url || text,
+                    url: existing?.url || existing?.imageUrl || existing?.downloadUrl || text,
                     title: existing?.title || '',
                     description: existing?.description || '',
                     favicon: existing?.favicon || '',
@@ -134,7 +142,7 @@ const Editor = (function() {
             case 'database':
                 return (Array.isArray(existing?.columns) || Array.isArray(existing?.rows)) ? existing : {
                     columns: ['Name', 'Status', 'Notes'],
-                    rows: text.trim() ? [[text.trim(), '', '']] : [['', '', '']],
+                    rows: text.trim() ? [[text.trim(), '', '']] : [],
                     sortColumn: null,
                     sortDirection: 'asc'
                 };
@@ -300,6 +308,38 @@ const Editor = (function() {
     function getEditableBlockInput(blockEl) {
         if (!blockEl) return null;
         return blockEl.querySelector('.block-input, [contenteditable="true"]');
+    }
+
+    function getBlockFocusTarget(blockEl) {
+        if (!blockEl) return null;
+
+        return blockEl.querySelector(
+            '.block-input, textarea, input:not([type="file"]):not([type="checkbox"]):not([type="radio"]), [contenteditable="true"]'
+        );
+    }
+
+    function focusEditableElement(target, position = 'end') {
+        if (!target) return;
+
+        target.focus();
+
+        if (typeof target.setSelectionRange === 'function') {
+            const value = target.value || '';
+            const offset = position === 'start' ? 0 : value.length;
+            target.setSelectionRange(offset, offset);
+            return;
+        }
+
+        if (!target.isContentEditable) {
+            return;
+        }
+
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.selectNodeContents(target);
+        range.collapse(position === 'start');
+        sel.removeAllRanges();
+        sel.addRange(range);
     }
 
     function syncBlockInput(blockId, input, options = {}) {
@@ -912,6 +952,7 @@ const Editor = (function() {
         blockEl.dataset.type = block.type;
         blockEl.dataset.depth = String(depth);
         blockEl.draggable = true;
+        blockEl.tabIndex = -1;
         
         if (block.color) {
             blockEl.classList.add(`color-${block.color}`);
@@ -996,6 +1037,14 @@ const Editor = (function() {
      * Setup interactions for a block
      */
     function setupBlockInteractions(blockEl, block) {
+        Selection.setupDragAndDrop(blockEl, block.id);
+
+        blockEl.addEventListener('click', (e) => {
+            if (e.target === blockEl || e.target.classList.contains('block-handle')) {
+                Selection.selectBlock(block.id);
+            }
+        });
+
         const input = blockEl.querySelector('.block-input, [contenteditable="true"]');
         if (!input) return;
         
@@ -1097,16 +1146,6 @@ const Editor = (function() {
         input.addEventListener('keyup', (e) => {
             if (isComposing) return;
             handleBlockKeyup(e, block, input);
-        });
-        
-        // Setup drag and drop
-        Selection.setupDragAndDrop(blockEl, block.id);
-        
-        // Click to select
-        blockEl.addEventListener('click', (e) => {
-            if (e.target === blockEl || e.target.classList.contains('block-handle')) {
-                Selection.selectBlock(block.id);
-            }
         });
     }
     
@@ -1637,25 +1676,13 @@ const Editor = (function() {
         const blockEl = document.querySelector(`.block[data-block-id="${blockId}"]`);
         if (!blockEl) return;
         
-        const input = blockEl.querySelector('.block-input, [contenteditable="true"]');
-        if (!input) return;
-        
-        input.focus();
-        
-        // Set cursor position
-        const range = document.createRange();
-        const sel = window.getSelection();
-        
-        if (position === 'start') {
-            range.selectNodeContents(input);
-            range.collapse(true);
-        } else {
-            range.selectNodeContents(input);
-            range.collapse(false);
+        const target = getBlockFocusTarget(blockEl);
+        if (target) {
+            focusEditableElement(target, position);
+            return;
         }
-        
-        sel.removeAllRanges();
-        sel.addRange(range);
+
+        blockEl.focus();
     }
     
     /**

@@ -121,6 +121,7 @@ const SlashMenu = (function() {
         filterInput = '';
         selectedIndex = 0;
         currentBlockId = null;
+        onSelectCallback = null;
         
         document.removeEventListener('keydown', handleKeyDown);
         document.removeEventListener('click', handleClickOutside);
@@ -262,10 +263,12 @@ const SlashMenu = (function() {
      */
     function selectItem(type) {
         const blockId = currentBlockId;
+        const callback = onSelectCallback;
         hide();
         
-        if (onSelectCallback) {
-            onSelectCallback(type, blockId);
+        if (callback) {
+            callback(type, blockId);
+            return;
         }
         
         // Dispatch event for editor

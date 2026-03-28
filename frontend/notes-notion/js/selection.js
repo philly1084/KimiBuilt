@@ -200,16 +200,24 @@ const Selection = (function() {
             block.classList.add('selected');
             
             if (focus) {
-                const input = block.querySelector('.block-input, [contenteditable="true"]');
+                const input = block.querySelector(
+                    '.block-input, textarea, input:not([type="file"]):not([type="checkbox"]):not([type="radio"]), [contenteditable="true"]'
+                );
                 if (input) {
                     input.focus();
-                    // Place cursor at end
-                    const range = document.createRange();
-                    const sel = window.getSelection();
-                    range.selectNodeContents(input);
-                    range.collapse(false);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
+                    if (typeof input.setSelectionRange === 'function') {
+                        const value = input.value || '';
+                        input.setSelectionRange(value.length, value.length);
+                    } else if (input.isContentEditable) {
+                        const range = document.createRange();
+                        const sel = window.getSelection();
+                        range.selectNodeContents(input);
+                        range.collapse(false);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                    }
+                } else {
+                    block.focus();
                 }
             }
             
@@ -585,7 +593,7 @@ const Selection = (function() {
         
         // Keep menu on screen
         const menuWidth = 180;
-        const menuHeight = 150;
+        const menuHeight = 220;
         
         let posX = x;
         let posY = y;
