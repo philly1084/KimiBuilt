@@ -380,6 +380,22 @@ function hasExplicitSshTargetCue(text = '') {
         || /\b(host|server|machine|node|target)\b/.test(normalized);
 }
 
+function isFileLikeSshTargetHost(host = '') {
+    const normalized = String(host || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const blockedExtensions = new Set([
+        'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
+        'json', 'yaml', 'yml', 'xml', 'txt', 'md', 'pdf',
+        'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+    ]);
+
+    const lastLabel = normalized.split('.').pop() || '';
+    return blockedExtensions.has(lastLabel);
+}
+
 function extractExplicitSshTarget(text = '') {
     const normalized = String(text || '').trim();
     if (!normalized) {
@@ -390,16 +406,22 @@ function extractExplicitSshTarget(text = '') {
         return null;
     }
 
-    const match = normalized.match(/\b(?:(?<username>[a-zA-Z0-9._-]+)@)?(?<host>(?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?::(?<port>\d{2,5}))?\b/);
-    if (!match?.groups?.host) {
-        return null;
+    const candidates = normalized.matchAll(/\b(?:(?<username>[a-zA-Z0-9._-]+)@)?(?<host>(?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?::(?<port>\d{2,5}))?\b/g);
+
+    for (const match of candidates) {
+        const host = match?.groups?.host || '';
+        if (!host || isSuspiciousSshTargetHost(host) || isFileLikeSshTargetHost(host)) {
+            continue;
+        }
+
+        return {
+            host,
+            username: match.groups.username || null,
+            port: match.groups.port ? Number(match.groups.port) : null,
+        };
     }
 
-    return {
-        host: match.groups.host,
-        username: match.groups.username || null,
-        port: match.groups.port ? Number(match.groups.port) : null,
-    };
+    return null;
 }
 
 function extractRequestedSshCommand(text = '') {

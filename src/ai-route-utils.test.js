@@ -467,6 +467,39 @@ describe('ai-route-utils', () => {
         expect(sshContext.effectivePrompt).toContain('philly1084@gmail.com');
     });
 
+    test('resolveSshRequestContext does not treat index.html as an SSH host override', () => {
+        const sshContext = resolveSshRequestContext(
+            'SSH into the server and replace the index.html with the 3D tic tac toe game on game.demoserver2.buzz.',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '162.55.163.199',
+                        username: 'root',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        target: {
+                            host: '162.55.163.199',
+                            username: 'root',
+                            port: 22,
+                        },
+                        lastCommand: 'kubectl get ingress -A',
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.target).toEqual({
+            host: 'game.demoserver2.buzz',
+            username: null,
+            port: null,
+        });
+        expect(sshContext.effectivePrompt).toContain('index.html');
+        expect(sshContext.effectivePrompt).not.toContain('index.html and');
+    });
+
     test('extractSshSessionMetadataFromToolEvents keeps the last good host after a hostname-resolution failure on a bogus host', () => {
         const metadata = extractSshSessionMetadataFromToolEvents([
             {
