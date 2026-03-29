@@ -10,6 +10,7 @@ const { RetryEngine } = require('./execution/RetryEngine');
 const { Verifier } = require('./execution/Verifier');
 const { Planner } = require('./execution/Planner');
 const { VALID_TASK_TYPES } = require('./core/TaskSchema');
+const { createResponse } = require('../openai-client');
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const settingsController = require('../routes/admin/settings.controller');
 
@@ -470,7 +471,7 @@ class AgentOrchestrator {
         }
       }
 
-      const response = await this.llmClient.createResponse({
+      const response = await this.requestResponse({
         input,
         previousResponseId,
         contextMessages: resolvedContextMessages,
@@ -1548,6 +1549,15 @@ class AgentOrchestrator {
   async shutdown() {
     this.clearAllWorkingMemories();
     this.eventHandlers.clear();
+  }
+
+  async requestResponse(params = {}) {
+    if (typeof this.llmClient?.createResponse === 'function') {
+      return this.llmClient.createResponse(params);
+    }
+
+    console.warn('[AgentOrchestrator] llmClient.createResponse is unavailable; falling back to openai-client.createResponse');
+    return createResponse(params);
   }
 }
 

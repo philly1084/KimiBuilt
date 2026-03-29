@@ -7,6 +7,62 @@ class AIDocumentGenerator {
     this.openai = openaiClient;
   }
 
+  extractText(response) {
+    if (Array.isArray(response?.output)) {
+      return response.output
+        .filter((item) => item?.type === 'message')
+        .map((item) => (Array.isArray(item.content) ? item.content : [])
+          .map((content) => content?.text || '')
+          .join(''))
+        .join('\n')
+        .trim();
+    }
+
+    return String(response?.choices?.[0]?.message?.content || '').trim();
+  }
+
+  async requestResponse({ messages, model, reasoningEffort = null, stream = false }) {
+    if (typeof this.openai?.createResponse === 'function') {
+      return this.openai.createResponse({
+        input: messages,
+        stream,
+        model: model || null,
+        reasoningEffort: reasoningEffort || null,
+      });
+    }
+
+    if (typeof this.openai?.chat?.completions?.create === 'function') {
+      return this.openai.chat.completions.create({
+        model: model || 'gpt-4o',
+        messages,
+        stream,
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      });
+    }
+
+    if (typeof this.openai?.responses?.create === 'function') {
+      return this.openai.responses.create({
+        model: model || 'gpt-4o',
+        input: messages,
+        stream,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+      });
+    }
+
+    throw new Error('No compatible response client is configured');
+  }
+
+  async requestJson({ messages, model, reasoningEffort = null }) {
+    const response = await this.requestResponse({ messages, model, reasoningEffort, stream: false });
+    const text = this.extractText(response);
+    return JSON.parse(text);
+  }
+
+  async requestText({ messages, model, reasoningEffort = null }) {
+    const response = await this.requestResponse({ messages, model, reasoningEffort, stream: false });
+    return this.extractText(response);
+  }
+
   /**
    * Generate document content using AI
    * @param {string} prompt - User prompt
@@ -22,15 +78,11 @@ class AIDocumentGenerator {
     ];
 
     try {
-      const response = await this.openai.responses.create({
-        model: options.model || 'gpt-4o',
+      const content = await this.requestJson({
         messages,
-        temperature: options.temperature || 0.7,
-        max_tokens: options.maxTokens || 4000,
-        response_format: { type: 'json_object' }
+        model: options.model || 'gpt-4o',
+        reasoningEffort: options.reasoningEffort || null,
       });
-
-      const content = JSON.parse(response.choices[0].message.content);
       
       // Validate and normalize response
       return this.normalizeDocumentStructure(content);
@@ -84,15 +136,11 @@ Output JSON:
 }`;
 
     try {
-      const response = await this.openai.responses.create({
-        model: options.model || 'gpt-4o',
+      const result = await this.requestJson({
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        max_tokens: 2000,
-        response_format: { type: 'json_object' }
+        model: options.model || 'gpt-4o',
+        reasoningEffort: options.reasoningEffort || null,
       });
-
-      const result = JSON.parse(response.choices[0].message.content);
 
       return {
         ...item,
@@ -157,14 +205,11 @@ ${content}
 Return only the improved text, no explanations.`;
 
     try {
-      const response = await this.openai.responses.create({
-        model: options.model || 'gpt-4o',
+      return await this.requestText({
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.5,
-        max_tokens: 2000
+        model: options.model || 'gpt-4o',
+        reasoningEffort: options.reasoningEffort || null,
       });
-
-      return response.choices[0].message.content.trim();
     } catch (error) {
       console.error('[AIDocumentGenerator] Improvement failed:', error);
       return content; // Return original on failure
@@ -193,14 +238,10 @@ Return JSON:
 }`;
 
     try {
-      const response = await this.openai.responses.create({
-        model: 'gpt-4o-mini',
+      return await this.requestJson({
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        response_format: { type: 'json_object' }
+        model: 'gpt-4o-mini',
       });
-
-      return JSON.parse(response.choices[0].message.content);
     } catch (error) {
       console.error('[AIDocumentGenerator] Metadata generation failed:', error);
       return {
@@ -369,15 +410,11 @@ Guidelines:
 - Image prompts should be detailed and descriptive for DALL-E generation`;
 
     try {
-      const response = await this.openai.responses.create({
-        model: options.model || 'gpt-4o',
+      const result = await this.requestJson({
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        max_tokens: 4000,
-        response_format: { type: 'json_object' }
+        model: options.model || 'gpt-4o',
+        reasoningEffort: options.reasoningEffort || null,
       });
-
-      const result = JSON.parse(response.choices[0].message.content);
       
       // Ensure proper structure
       return {
@@ -429,14 +466,12 @@ Return JSON array of suggestions:
 ]`;
 
     try {
-      const response = await this.openai.responses.create({
-        model: 'gpt-4o-mini',
+      const result = await this.requestJson({
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.5,
-        response_format: { type: 'json_object' }
+        model: 'gpt-4o-mini',
       });
 
-      return JSON.parse(response.choices[0].message.content).suggestions || [];
+      return Array.isArray(result) ? result : (result.suggestions || []);
     } catch (error) {
       return [];
     }

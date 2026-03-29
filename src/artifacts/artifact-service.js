@@ -6,7 +6,6 @@ const { renderArtifact } = require('./artifact-renderer');
 const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMATS, inferFormat, normalizeFormat } = require('./constants');
 const { chunkText, escapeHtml, stripHtml } = require('../utils/text');
 const { vectorStore } = require('../memory/vector-store');
-const { createResponse } = require('../openai-client');
 const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
@@ -38,6 +37,14 @@ function extractResponseText(response) {
         .map((item) => item.content.map((content) => content.text).join(''))
         .join('\n')
         .trim();
+}
+
+function requestModelResponse(params = {}) {
+    const { createResponse } = require('../openai-client');
+    if (typeof createResponse !== 'function') {
+        throw new Error('openai-client.createResponse is unavailable');
+    }
+    return createResponse(params);
 }
 
 function unwrapCodeFence(text = '') {
@@ -781,7 +788,7 @@ class ArtifactService {
         reasoningEffort = null,
         previousResponseId = null,
     }) {
-        const response = await createResponse({
+        const response = await requestModelResponse({
             input,
             previousResponseId,
             contextMessages: [],

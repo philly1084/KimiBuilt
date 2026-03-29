@@ -255,7 +255,46 @@ async function start() {
                     .filter((item) => item.type === 'message')
                     .map((item) => item.content.map((content) => content.text).join(''))
                     .join('\n');
-            }
+            },
+        };
+        openaiClient.responses = {
+            create: async (params = {}) => createResponse({
+                input: params.input || params.messages || '',
+                stream: Boolean(params.stream),
+                model: params.model || null,
+                reasoningEffort: params.reasoning?.effort || params.reasoning_effort || null,
+            }),
+        };
+        openaiClient.chat = {
+            completions: {
+                create: async (params = {}) => {
+                    const response = await createResponse({
+                        input: params.messages || params.input || '',
+                        stream: Boolean(params.stream),
+                        model: params.model || null,
+                        reasoningEffort: params.reasoning_effort || params.reasoning?.effort || null,
+                    });
+                    const content = response.output
+                        .filter((item) => item.type === 'message')
+                        .map((item) => item.content.map((entry) => entry.text).join(''))
+                        .join('\n');
+
+                    return {
+                        id: response.id,
+                        object: 'chat.completion',
+                        created: response.created || Math.floor(Date.now() / 1000),
+                        model: response.model || params.model || null,
+                        choices: [{
+                            index: 0,
+                            message: {
+                                role: 'assistant',
+                                content,
+                            },
+                            finish_reason: 'stop',
+                        }],
+                    };
+                },
+            },
         };
         const documentService = new DocumentService(openaiClient);
         app.locals.documentService = documentService;
