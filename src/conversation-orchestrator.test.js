@@ -232,6 +232,102 @@ describe('ConversationOrchestrator', () => {
         expect(text).not.toContain('<html>');
     });
 
+    test('tool synthesis unwraps assistant content arrays with stringified output_text payloads', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_wrapped_synthesis',
+                model: 'gpt-test',
+                choices: [{
+                    message: {
+                        role: 'assistant',
+                        content: [
+                            {
+                                type: 'think',
+                                think: 'Internal reasoning that should stay hidden.',
+                            },
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    output_text: 'Remote build is reachable, Docker is installed, and BuildKit is not fully confirmed yet.',
+                                    finish_reason: 'stop',
+                                }),
+                            },
+                        ],
+                    },
+                }],
+                metadata: {},
+            }),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        const response = await orchestrator.buildFinalResponse({
+            input: 'Can you check if remote build is on?',
+            objective: 'Can you check if remote build is on?',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                    },
+                },
+                reason: 'Fallback for explicit server or remote-build intent.',
+                result: {
+                    success: true,
+                    data: {
+                        stdout: 'ubuntu-32gb-fsn1-2',
+                    },
+                },
+            }],
+        });
+
+        const text = response.output[0].content[0].text;
+        expect(text).toBe('Remote build is reachable, Docker is installed, and BuildKit is not fully confirmed yet.');
+        expect(text).not.toContain('Based on the verified tool results');
+    });
+
+    test('tool synthesis prompt explicitly forbids wrapped JSON answers', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Plain tool synthesis answer', 'resp_tool_synthesis_prompt')),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        await orchestrator.buildFinalResponse({
+            input: 'Can you check if remote build is on?',
+            objective: 'Can you check if remote build is on?',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                    },
+                },
+                result: {
+                    success: true,
+                    data: {
+                        stdout: 'ubuntu-32gb-fsn1-2',
+                    },
+                },
+            }],
+        });
+
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.stringContaining('Return plain user-facing text only.'),
+        }));
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.stringContaining('`output_text`'),
+        }));
+    });
+
     test('recovers missing file-write content from recent assistant html when the planner omits it', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Saved the HTML file.', 'resp_file_write')),

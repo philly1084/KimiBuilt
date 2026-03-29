@@ -31,14 +31,98 @@ function sha256(buffer) {
     return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-function extractResponseContentText(content) {
+function tryParseResponseJsonString(value = '') {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || ((!trimmed.startsWith('{') || !trimmed.endsWith('}'))
+        && (!trimmed.startsWith('[') || !trimmed.endsWith(']')))) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(trimmed);
+    } catch (_error) {
+        return null;
+    }
+}
+
+function extractFunctionPayloadText(content, depth = 0) {
+    if (!content || typeof content !== 'object' || Array.isArray(content) || depth > 8) {
+        return '';
+    }
+
+    const type = String(content.type || '').trim().toLowerCase();
+    const functionName = String(content.name || content.function?.name || '').trim();
+    if (type !== 'function' && !functionName) {
+        return '';
+    }
+
+    const parameterSources = [
+        content.parameters,
+        content.arguments,
+        content.function?.arguments,
+        content.function?.parameters,
+    ];
+
+    for (const source of parameterSources) {
+        const parsed = typeof source === 'string'
+            ? tryParseResponseJsonString(source)
+            : source;
+        if (!parsed || typeof parsed !== 'object') {
+            continue;
+        }
+
+        const functionText = [
+            parsed.notes_page_update,
+            parsed.assistant_reply,
+            parsed.assistantReply,
+            parsed.message,
+            parsed.content,
+            parsed.text,
+            parsed.result,
+            parsed.response,
+            parsed.output_text,
+            parsed.outputText,
+            parsed.answer,
+        ].find((entry) => typeof entry === 'string' && entry.trim());
+
+        if (functionText) {
+            return functionText.trim();
+        }
+
+        const nested = extractResponseContentText(parsed, depth + 1);
+        if (nested) {
+            return nested;
+        }
+    }
+
+    return '';
+}
+
+function extractResponseContentText(content, depth = 0) {
+    if (depth > 8) {
+        return '';
+    }
+
     if (typeof content === 'string') {
-        return content;
+        const trimmed = content.trim();
+        if (!trimmed) {
+            return '';
+        }
+
+        const parsed = tryParseResponseJsonString(trimmed);
+        if (parsed) {
+            const extracted = extractResponseContentText(parsed, depth + 1);
+            if (extracted) {
+                return extracted;
+            }
+        }
+
+        return trimmed;
     }
 
     if (Array.isArray(content)) {
         return content
-            .map((item) => extractResponseContentText(item))
+            .map((item) => extractResponseContentText(item, depth + 1))
             .filter(Boolean)
             .join('');
     }
@@ -47,28 +131,51 @@ function extractResponseContentText(content) {
         return '';
     }
 
+    const functionPayloadText = extractFunctionPayloadText(content, depth + 1);
+    if (functionPayloadText) {
+        return functionPayloadText;
+    }
+
     if (typeof content.text === 'string') {
-        return content.text;
+        return extractResponseContentText(content.text, depth + 1);
     }
 
     if (typeof content.output_text === 'string') {
-        return content.output_text;
+        return extractResponseContentText(content.output_text, depth + 1);
     }
 
     if (typeof content.content === 'string') {
-        return content.content;
+        return extractResponseContentText(content.content, depth + 1);
     }
 
     if (typeof content.message === 'string') {
-        return content.message;
+        return extractResponseContentText(content.message, depth + 1);
     }
 
     if (typeof content.value === 'string') {
-        return content.value;
+        return extractResponseContentText(content.value, depth + 1);
     }
 
-    if (content.content != null) {
-        return extractResponseContentText(content.content);
+    const nestedKeys = [
+        'content',
+        'parts',
+        'items',
+        'output',
+        'payload',
+        'data',
+        'result',
+        'value',
+        'message',
+    ];
+    for (const key of nestedKeys) {
+        if (content[key] == null) {
+            continue;
+        }
+
+        const nested = extractResponseContentText(content[key], depth + 1);
+        if (nested) {
+            return nested;
+        }
     }
 
     return '';

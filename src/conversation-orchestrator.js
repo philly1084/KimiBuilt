@@ -3501,6 +3501,9 @@ class ConversationOrchestrator extends EventEmitter {
         const synthesisPrompt = [
             'Use the verified tool results below to answer the user.',
             'If a tool failed, state the exact failure plainly.',
+            'Return plain user-facing text only.',
+            'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
+            'Do not wrap the final answer in code fences.',
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
             ...(taskType === NOTES_EXECUTION_PROFILE
                 ? [
