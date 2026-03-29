@@ -428,6 +428,32 @@ function normalizeMessageContent(content) {
             .join('');
     }
 
+    if (content && typeof content === 'object') {
+        if (typeof content.text === 'string') {
+            return content.text;
+        }
+
+        if (typeof content.value === 'string') {
+            return content.value;
+        }
+
+        if (typeof content.content === 'string') {
+            return content.content;
+        }
+
+        if (Array.isArray(content.content)) {
+            return normalizeMessageContent(content.content);
+        }
+
+        if (Array.isArray(content.parts)) {
+            return normalizeMessageContent(content.parts);
+        }
+
+        if (Array.isArray(content.items)) {
+            return normalizeMessageContent(content.items);
+        }
+    }
+
     return '';
 }
 
@@ -2415,7 +2441,18 @@ async function runAutomaticToolLoop(openai, {
 }
 
 function getChatCompletionText(response) {
-    return normalizeMessageContent(response?.choices?.[0]?.message?.content || '');
+    const message = response?.choices?.[0]?.message || {};
+    const candidates = [
+        normalizeMessageContent(message.content),
+        normalizeMessageContent(message.text),
+        normalizeMessageContent(message.output_text),
+        normalizeMessageContent(message.reasoning_content),
+        normalizeMessageContent(message.reasoning),
+        normalizeMessageContent(message.refusal),
+        normalizeMessageContent(response?.choices?.[0]?.text),
+    ];
+
+    return candidates.find((value) => typeof value === 'string' && value.trim()) || '';
 }
 
 function getModelResponseText(response) {
@@ -2737,7 +2774,9 @@ module.exports = {
         extractExplicitWebResearchQuery,
         extractRequestedDirectoryPath,
         getResponseApiText,
+        getChatCompletionText,
         normalizeOpenAIApiMode,
+        normalizeMessageContent,
         normalizeModelResponse,
         normalizeToolResultForModel,
         resolveOpenAIApiMode,

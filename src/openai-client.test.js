@@ -1175,4 +1175,15 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
         expect(messages).toHaveLength(2);
     });
+
+    test('extracts text from object-shaped chat message content', () => {
+        expect(__testUtils.normalizeMessageContent({ text: 'hello' })).toBe('hello');
+        expect(__testUtils.getChatCompletionText({
+            choices: [{
+                message: {
+                    content: { text: 'final answer' },
+                },
+            }],
+        })).toBe('final answer');
+    });
 });
