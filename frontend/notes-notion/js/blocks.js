@@ -186,25 +186,53 @@ const Blocks = (function() {
         }
         
         if (typeof result === 'string') {
-            return result;
+            const trimmed = result.trim();
+            if (!trimmed) {
+                return '';
+            }
+
+            if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    const extracted = extractResponseText(parsed);
+                    if (extracted) {
+                        return extracted;
+                    }
+                } catch (_error) {
+                    // Ignore parse failures and fall back to the raw string.
+                }
+            }
+
+            return trimmed;
         }
         
         if (typeof result === 'object') {
             // Try common response formats
+            if (result.output_text && typeof result.output_text === 'string') {
+                return extractResponseText(result.output_text);
+            }
             if (result.response && typeof result.response === 'string') {
-                return result.response;
+                return extractResponseText(result.response);
             }
             if (result.text && typeof result.text === 'string') {
-                return result.text;
+                return extractResponseText(result.text);
             }
             if (result.content && typeof result.content === 'string') {
-                return result.content;
+                return extractResponseText(result.content);
             }
             if (result.message && typeof result.message === 'string') {
-                return result.message;
+                return extractResponseText(result.message);
             }
             if (result.output && typeof result.output === 'string') {
-                return result.output;
+                return extractResponseText(result.output);
+            }
+            if (result.role === 'assistant' && Array.isArray(result.content)) {
+                const text = result.content.map((entry) => extractResponseText(entry)).filter(Boolean).join('');
+                if (text) return text;
+            }
+            if (Array.isArray(result.content)) {
+                const text = result.content.map((entry) => extractResponseText(entry)).filter(Boolean).join('');
+                if (text) return text;
             }
             // Deep extraction for nested objects
             const text = findTextInObject(result);
@@ -231,15 +259,15 @@ const Blocks = (function() {
         if (depth > 5) return null; // Prevent infinite recursion
         
         if (typeof obj === 'string' && obj.length > 0) {
-            return obj;
+            return extractResponseText(obj);
         }
         
         if (typeof obj === 'object' && obj !== null) {
             // Check common text keys first
-            const textKeys = ['text', 'content', 'response', 'message', 'output', 'value', 'data'];
+            const textKeys = ['output_text', 'text', 'content', 'response', 'message', 'output', 'value', 'data'];
             for (const key of textKeys) {
                 if (obj[key] && typeof obj[key] === 'string' && obj[key].length > 0) {
-                    return obj[key];
+                    return extractResponseText(obj[key]);
                 }
             }
             

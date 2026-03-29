@@ -1187,6 +1187,26 @@ describe('openai-client automatic tool orchestration helpers', () => {
         })).toBe('final answer');
     });
 
+    test('extracts Gemini-style chat content from message parts', () => {
+        expect(__testUtils.getChatCompletionText({
+            choices: [{
+                message: {
+                    parts: [{ text: 'Gemini answer' }],
+                },
+            }],
+        })).toBe('Gemini answer');
+    });
+
+    test('extracts Gemini-style chat content from candidates payloads', () => {
+        expect(__testUtils.getChatCompletionText({
+            candidates: [{
+                content: {
+                    parts: [{ text: 'Candidate answer' }],
+                },
+            }],
+        })).toBe('Candidate answer');
+    });
+
     test('extracts responses text from both output_text and text content items', () => {
         expect(__testUtils.getResponseApiText({
             output: [{

@@ -79,6 +79,39 @@ function extractResponseText(response) {
         return response.output_text.trim();
     }
 
+    const choiceMessage = response?.choices?.[0]?.message || null;
+    if (choiceMessage) {
+        const choiceText = extractResponseContentText(
+            choiceMessage.content
+            ?? choiceMessage.parts
+            ?? choiceMessage.items
+            ?? choiceMessage.text
+            ?? choiceMessage.output_text
+            ?? ''
+        ).trim();
+        if (choiceText) {
+            return choiceText;
+        }
+    }
+
+    const choiceText = extractResponseContentText(response?.choices?.[0]?.text || '').trim();
+    if (choiceText) {
+        return choiceText;
+    }
+
+    const candidate = response?.candidates?.[0] || null;
+    if (candidate) {
+        const candidateText = extractResponseContentText(
+            candidate.content
+            ?? candidate.parts
+            ?? candidate.text
+            ?? ''
+        ).trim();
+        if (candidateText) {
+            return candidateText;
+        }
+    }
+
     const output = Array.isArray(response?.output) ? response.output : [];
 
     return output

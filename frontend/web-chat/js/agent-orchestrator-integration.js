@@ -7,6 +7,44 @@
 
 (function() {
   'use strict';
+
+  function extractMessageText(value) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return '';
+
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const extracted = extractMessageText(parsed);
+          if (extracted) return extracted;
+        } catch (_error) {
+          // Ignore parse failures and fall back to the raw string.
+        }
+      }
+
+      return trimmed;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => extractMessageText(item)).filter(Boolean).join('');
+    }
+
+    if (!value || typeof value !== 'object') {
+      return '';
+    }
+
+    return extractMessageText(
+      value.output_text
+      ?? value.text
+      ?? value.content
+      ?? value.message
+      ?? value.response
+      ?? value.output
+      ?? value.data
+      ?? ''
+    );
+  }
   
   // Check if Agent SDK is available
   if (typeof AgentOrchestrator === 'undefined') {
@@ -54,7 +92,7 @@
           });
           
           const data = await response.json();
-          return data.choices[0].message.content;
+          return extractMessageText(data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.message ?? data);
         },
         
         completeStream: async (prompt, options = {}) => {

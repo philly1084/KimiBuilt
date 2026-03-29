@@ -2452,14 +2452,22 @@ async function runAutomaticToolLoop(openai, {
 
 function getChatCompletionText(response) {
     const message = response?.choices?.[0]?.message || {};
+    const firstCandidate = response?.candidates?.[0] || {};
     const candidates = [
         normalizeMessageContent(message.content),
+        normalizeMessageContent(message.parts),
+        normalizeMessageContent(message.items),
         normalizeMessageContent(message.text),
         normalizeMessageContent(message.output_text),
         normalizeMessageContent(message.reasoning_content),
         normalizeMessageContent(message.reasoning),
         normalizeMessageContent(message.refusal),
         normalizeMessageContent(response?.choices?.[0]?.text),
+        normalizeMessageContent(firstCandidate?.content),
+        normalizeMessageContent(firstCandidate?.content?.parts),
+        normalizeMessageContent(firstCandidate?.parts),
+        normalizeMessageContent(firstCandidate?.text),
+        normalizeMessageContent(response?.output_text),
     ];
 
     return candidates.find((value) => typeof value === 'string' && value.trim()) || '';

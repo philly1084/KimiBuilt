@@ -97,8 +97,85 @@ const API = (function() {
         return [{ role: 'user', content: message }];
     }
 
+    function extractTextFromValue(value) {
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!trimmed) {
+                return '';
+            }
+
+            if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    const extracted = extractTextFromValue(parsed);
+                    if (extracted) {
+                        return extracted;
+                    }
+                } catch (_error) {
+                    // Ignore parse failures and fall back to the raw string.
+                }
+            }
+
+            return trimmed;
+        }
+
+        if (Array.isArray(value)) {
+            return value
+                .map((item) => extractTextFromValue(item))
+                .filter(Boolean)
+                .join('');
+        }
+
+        if (!value || typeof value !== 'object') {
+            return '';
+        }
+
+        if (typeof value.output_text === 'string' && value.output_text.trim()) {
+            return value.output_text.trim();
+        }
+
+        if (typeof value.text === 'string' && value.text.trim()) {
+            return extractTextFromValue(value.text);
+        }
+
+        if (typeof value.content === 'string' && value.content.trim()) {
+            return extractTextFromValue(value.content);
+        }
+
+        if (typeof value.message === 'string' && value.message.trim()) {
+            return extractTextFromValue(value.message);
+        }
+
+        if (typeof value.response === 'string' && value.response.trim()) {
+            return extractTextFromValue(value.response);
+        }
+
+        if (typeof value.output === 'string' && value.output.trim()) {
+            return extractTextFromValue(value.output);
+        }
+
+        if (value.role === 'assistant' && Array.isArray(value.content)) {
+            return extractTextFromValue(value.content);
+        }
+
+        const nestedKeys = ['content', 'output', 'message', 'response', 'data', 'item', 'items', 'value'];
+        for (const key of nestedKeys) {
+            const extracted = extractTextFromValue(value[key]);
+            if (extracted) {
+                return extracted;
+            }
+        }
+
+        return '';
+    }
+
     function extractChatContent(response) {
-        return response?.choices?.[0]?.message?.content || '';
+        return extractTextFromValue(
+            response?.choices?.[0]?.message?.content
+            ?? response?.choices?.[0]?.message
+            ?? response?.output_text
+            ?? response
+        );
     }
 
     function setSessionId(id) {

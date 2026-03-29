@@ -72,6 +72,32 @@ function normalizeMessageContent(content) {
       .join('');
   }
 
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') {
+      return content.text;
+    }
+
+    if (typeof content.value === 'string') {
+      return content.value;
+    }
+
+    if (typeof content.content === 'string') {
+      return content.content;
+    }
+
+    if (Array.isArray(content.content)) {
+      return normalizeMessageContent(content.content);
+    }
+
+    if (Array.isArray(content.parts)) {
+      return normalizeMessageContent(content.parts);
+    }
+
+    if (Array.isArray(content.items)) {
+      return normalizeMessageContent(content.items);
+    }
+  }
+
   return '';
 }
 

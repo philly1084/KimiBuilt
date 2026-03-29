@@ -127,6 +127,22 @@ describe('ArtifactService', () => {
                 },
             ],
         })).toBe('First part. Second part.');
+
+        expect(extractResponseText({
+            choices: [{
+                message: {
+                    parts: [{ text: 'Gemini parts answer' }],
+                },
+            }],
+        })).toBe('Gemini parts answer');
+
+        expect(extractResponseText({
+            candidates: [{
+                content: {
+                    parts: [{ text: 'Gemini candidate answer' }],
+                },
+            }],
+        })).toBe('Gemini candidate answer');
     });
 
     test('resolveCompletedResponseText recovers the final answer when streaming deltas were missing', () => {
