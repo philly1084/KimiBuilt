@@ -132,6 +132,32 @@ describe('notes agent parsing', () => {
         ]));
     });
 
+    test('unwraps nested assistant content arrays and stringified output_text payloads', () => {
+        const agent = loadAgent();
+        const responseText = JSON.stringify({
+            role: 'assistant',
+            content: [
+                {
+                    type: 'think',
+                    think: 'Internal reasoning that should stay hidden.',
+                    encrypted: null,
+                },
+                {
+                    type: 'text',
+                    text: JSON.stringify({
+                        output_text: 'Hey there! How can I help you today?',
+                        finish_reason: 'stop',
+                    }),
+                },
+            ],
+        });
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Hey there! How can I help you today?');
+        expect(parsed.actions).toEqual([]);
+    });
+
     test('treats explicit website review prompts as non-page runtime work', () => {
         const agent = loadAgent();
         const question = 'Can you continue to look over the site https://bicyclethief.ca and continue researching what is new?';

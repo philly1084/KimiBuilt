@@ -2077,7 +2077,17 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
     function extractGenericWrapperContent(value) {
         if (typeof value === 'string') {
-            return value.trim() || null;
+            const trimmed = value.trim();
+            if (!trimmed) {
+                return null;
+            }
+
+            const parsedPayload = tryParseGenericContentPayload(trimmed);
+            if (parsedPayload?.displayText) {
+                return parsedPayload.displayText;
+            }
+
+            return trimmed;
         }
 
         if (value == null) {
@@ -2100,7 +2110,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
         const imageMarkdown = extractMarkdownImageContent(value);
 
-        const directKeys = ['content', 'text', 'message', 'result', 'response', 'output', 'markdown'];
+        const directKeys = ['content', 'text', 'message', 'result', 'response', 'output', 'output_text', 'outputText', 'markdown'];
         let primaryText = null;
         for (const key of directKeys) {
             if (typeof value[key] === 'string' && value[key].trim()) {
@@ -2121,7 +2131,18 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return imageMarkdown;
         }
 
-        const nestedKeys = ['payload', 'data', 'item', 'items', 'value', 'result', 'details', 'toolResult'];
+        const nestedKeys = [
+            'content',
+            'output',
+            'payload',
+            'data',
+            'item',
+            'items',
+            'value',
+            'result',
+            'details',
+            'toolResult',
+        ];
         for (const key of nestedKeys) {
             const extracted = extractGenericWrapperContent(value[key]);
             if (extracted) {
