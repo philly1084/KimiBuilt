@@ -2970,6 +2970,27 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         };
     }
 
+    function resolveVisibleAssistantText(preparedDisplayText = '', responseText = '') {
+        const normalizedPrepared = String(preparedDisplayText || '').trim();
+        if (normalizedPrepared && !isAssistantReplyPlaceholderText(normalizedPrepared)) {
+            return normalizedPrepared;
+        }
+
+        const normalizedGeneric = unwrapGenericResponseContent(responseText);
+        if (normalizedGeneric
+            && !looksLikeNotesActionResponse(responseText)
+            && !isAssistantReplyPlaceholderText(normalizedGeneric)) {
+            return normalizedGeneric;
+        }
+
+        const strippedStructured = stripStructuredResponseText(responseText);
+        if (strippedStructured && !isAssistantReplyPlaceholderText(strippedStructured)) {
+            return strippedStructured;
+        }
+
+        return '';
+    }
+
     function getStreamingVisibleText(text) {
         const value = String(text || '');
         const trimmed = value.trim();
@@ -4888,7 +4909,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     const blindArtifactNotice = blindArtifactSelectionResult.selectionCount > 0
                         ? `\n\nAdded ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
                         : '';
-                    const baseVisibleResponse = preparedResponse.displayText || responseText || '';
+                    const baseVisibleResponse = resolveVisibleAssistantText(preparedResponse.displayText, responseText);
                     const fallbackVisibleResponse = blindArtifactSelectionResult.selectionCount > 0
                         ? `Added ${blindArtifactSelectionResult.imageCount} captured image option${blindArtifactSelectionResult.imageCount === 1 ? '' : 's'} to the page as selectable image blocks.`
                         : (mermaidArtifactApplyResult.appliedCount > 0
@@ -4993,7 +5014,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             
             // Add assistant message
             const preparedResponse = prepareAssistantResponse(responseText);
-            const visibleResponse = preparedResponse.displayText || responseText;
+            const visibleResponse = resolveVisibleAssistantText(preparedResponse.displayText, responseText);
 
             const assistantMessage = hiddenAssistantMessage
                 ? null
