@@ -184,6 +184,43 @@ describe('notes agent parsing', () => {
         expect(parsed.actions).toEqual([]);
     });
 
+    test('suppresses leaked internal notes planning scaffolds instead of showing them in chat', () => {
+        const agent = loadAgent();
+        const responseText = `Original request:
+read the different block options and build this page to cool
+
+Interpret "page" as the current notes page shown in this editor.
+
+Approved page plan:
+{
+  "title": "Cool Page",
+  "sections": [
+    { "heading": "Intro", "goal": "Open strong", "blockTypes": ["heading_1", "text"] }
+  ]
+}`;
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('');
+        expect(parsed.actions).toEqual([]);
+    });
+
+    test('strips null bytes from wrapped function payload text', () => {
+        const agent = loadAgent();
+        const responseText = JSON.stringify({
+            type: 'function',
+            name: 'update_notes_page',
+            parameters: {
+                notes_page_update: 'Hello\u0000 world'
+            }
+        });
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('Hello world');
+        expect(parsed.actions).toEqual([]);
+    });
+
     test('treats explicit website review prompts as non-page runtime work', () => {
         const agent = loadAgent();
         const question = 'Can you continue to look over the site https://bicyclethief.ca and continue researching what is new?';

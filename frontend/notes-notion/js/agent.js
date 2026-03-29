@@ -119,9 +119,54 @@ const Agent = (function() {
         return date.toISOString();
     }
 
+    function stripUnsafeNullCharacters(value = '') {
+        return String(value || '').replace(/\u0000/g, '');
+    }
+
+    function sanitizeStructuredValue(value) {
+        if (typeof value === 'string') {
+            return stripUnsafeNullCharacters(value);
+        }
+
+        if (Array.isArray(value)) {
+            return value.map((entry) => sanitizeStructuredValue(entry));
+        }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        const sanitized = {};
+        Object.entries(value).forEach(([key, entryValue]) => {
+            sanitized[key] = sanitizeStructuredValue(entryValue);
+        });
+        return sanitized;
+    }
+
+    function looksLikeInternalNotesScaffold(text = '') {
+        const normalized = stripUnsafeNullCharacters(text).trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return (
+            normalized.includes('original request:')
+            && (
+                normalized.includes('approved page plan:')
+                || normalized.includes('previous failed reply:')
+            )
+        )
+            || normalized.includes('interpret "page" as the current notes page shown in this editor')
+            || normalized.includes('return notes-actions that apply the content to the current notes page')
+            || normalized.includes('use this approved page plan:')
+            || normalized.includes('use these expanded section briefs:')
+            || normalized.includes('hidden planning pass for a substantial notes-writing request')
+            || normalized.includes('hidden section-expansion pass for a substantial notes-writing request');
+    }
+
     function coerceTextValue(value) {
         if (typeof value === 'string') {
-            return value;
+            return stripUnsafeNullCharacters(value);
         }
 
         if (value == null) {
@@ -130,17 +175,17 @@ const Agent = (function() {
 
         const extracted = window.Blocks?.extractResponseText?.(value);
         if (typeof extracted === 'string' && extracted) {
-            return extracted;
+            return stripUnsafeNullCharacters(extracted);
         }
 
         if (typeof value === 'object') {
-            if (typeof value.text === 'string') return value.text;
-            if (typeof value.content === 'string') return value.content;
-            if (typeof value.message === 'string') return value.message;
-            if (typeof value.prompt === 'string') return value.prompt;
+            if (typeof value.text === 'string') return stripUnsafeNullCharacters(value.text);
+            if (typeof value.content === 'string') return stripUnsafeNullCharacters(value.content);
+            if (typeof value.message === 'string') return stripUnsafeNullCharacters(value.message);
+            if (typeof value.prompt === 'string') return stripUnsafeNullCharacters(value.prompt);
         }
 
-        return String(value);
+        return stripUnsafeNullCharacters(String(value));
     }
 
     function extractBlockTextValue(block) {
@@ -411,7 +456,7 @@ GUIDELINES:
     }
 
     function unwrapCodeFence(text = '') {
-        const trimmed = String(text || '').trim();
+        const trimmed = stripUnsafeNullCharacters(text).trim();
         const match = trimmed.match(/^```(?:json|notes-actions)?\s*([\s\S]*?)\s*```$/i);
         return match ? match[1].trim() : trimmed;
     }
@@ -426,6 +471,30 @@ GUIDELINES:
 
     function normalizeStructuredPayloadText(text = '') {
         return stripDiffStylePrefixes(unwrapCodeFence(text)).trim();
+    }
+
+    function isValidHiddenDraftPayload(payload = null) {
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return false;
+        }
+
+        const sections = Array.isArray(payload.sections) ? payload.sections : [];
+        if (sections.length === 0) {
+            return false;
+        }
+
+        return sections.some((section) => {
+            if (!section || typeof section !== 'object' || Array.isArray(section)) {
+                return false;
+            }
+
+            return typeof section.heading === 'string'
+                || typeof section.goal === 'string'
+                || typeof section.summary === 'string'
+                || Array.isArray(section.keyPoints)
+                || Array.isArray(section.blockTypes)
+                || Array.isArray(section.suggestedBlocks);
+        });
     }
 
     function shouldUseMultiPassNotesDraft(question = '', context = null, requestOptions = {}) {
@@ -447,6 +516,20 @@ GUIDELINES:
         const pageHasEnoughSurface = (context?.blockCount || 0) > 3 || (context?.outline?.length || 0) > 1;
 
         return writingVerb && (substantialTarget || pageHasEnoughSurface);
+    }
+
+    function supportsStructuredNotesDrafting(modelId = '') {
+        const normalized = String(modelId || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return !(
+            /\bgpt-oss\b/.test(normalized)
+            || /\boss\b/.test(normalized)
+            || /\bgemini\b/.test(normalized)
+            || /\bkimi\b/.test(normalized)
+        );
     }
 
     function isExplicitPageEditIntent(question = '') {
@@ -538,7 +621,7 @@ GUIDELINES:
 
     function getLastSubstantialAssistantMessage(excludeText = '') {
         syncConversationWithCurrentPage({ emitEvent: false });
-        const excluded = String(excludeText || '').trim();
+        const excluded = stripUnsafeNullCharacters(excludeText).trim();
 
         for (let index = state.messages.length - 1; index >= 0; index -= 1) {
             const message = state.messages[index];
@@ -547,7 +630,7 @@ GUIDELINES:
             }
 
             const content = unwrapGenericResponseContent(message.content || '');
-            if (!content || content === excluded) {
+            if (!content || content === excluded || looksLikeInternalNotesScaffold(content)) {
                 continue;
             }
 
@@ -1295,6 +1378,10 @@ GUIDELINES:
     }
 
     function buildFallbackNotesActionsFromText(question = '', sourceText = '', context = null) {
+        if (looksLikeInternalNotesScaffold(sourceText)) {
+            return null;
+        }
+
         const { importedPage, blocks } = extractPreferredBlocksFromSourceText(sourceText);
 
         if (!blocks.length) {
@@ -1349,11 +1436,12 @@ GUIDELINES:
     }
 
     function extractPreferredBlocksFromSourceText(sourceText = '') {
-        const importedPage = window.ImportExport?.importFromMarkdown?.(sourceText);
+        const normalizedSourceText = stripUnsafeNullCharacters(sourceText);
+        const importedPage = window.ImportExport?.importFromMarkdown?.(normalizedSourceText);
         const importedBlocks = Array.isArray(importedPage?.blocks)
             ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))
             : [];
-        const richTextBlocks = buildBlocksFromRichText(sourceText);
+        const richTextBlocks = buildBlocksFromRichText(normalizedSourceText);
 
         return {
             importedPage,
@@ -1450,13 +1538,8 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
 
     function normalizeHiddenDraftResult(text = '', fallback = null) {
         const parsed = safeJsonParse(text);
-        if (parsed) {
+        if (isValidHiddenDraftPayload(parsed)) {
             return JSON.stringify(parsed, null, 2);
-        }
-
-        const normalized = unwrapCodeFence(text);
-        if (normalized) {
-            return normalized.slice(0, 6000);
         }
 
         return fallback;
@@ -1566,7 +1649,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function normalizeActionContent(type, content) {
-        const value = content == null ? '' : content;
+        const value = sanitizeStructuredValue(content == null ? '' : content);
 
         switch (type) {
             case 'todo':
@@ -1721,7 +1804,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             case 'divider':
                 return '';
             default:
-                return typeof value === 'string' ? value : String(value || '');
+                return typeof value === 'string' ? value : stripUnsafeNullCharacters(String(value || ''));
         }
     }
 
@@ -2057,7 +2140,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function stripDiffStylePrefixes(text = '') {
-        const source = String(text || '');
+        const source = stripUnsafeNullCharacters(text);
         const lines = source.split(/\r?\n/);
         const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
         if (nonEmptyLines.length === 0) {
@@ -2092,7 +2175,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         }
 
         try {
-            return JSON.parse(value);
+            return JSON.parse(stripUnsafeNullCharacters(value));
         } catch (_error) {
             return null;
         }
@@ -2138,7 +2221,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             ].find((entry) => typeof entry === 'string' && entry.trim() && !isAssistantReplyPlaceholderText(entry));
 
             if (functionText) {
-                return functionText.trim();
+                const normalizedFunctionText = stripUnsafeNullCharacters(functionText).trim();
+                return looksLikeInternalNotesScaffold(normalizedFunctionText) ? null : normalizedFunctionText;
             }
         }
 
@@ -2147,17 +2231,17 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
     function extractGenericWrapperContent(value) {
         if (typeof value === 'string') {
-            const trimmed = value.trim();
+            const trimmed = stripUnsafeNullCharacters(value).trim();
             if (!trimmed) {
                 return null;
             }
 
             const parsedPayload = tryParseGenericContentPayload(trimmed);
-            if (parsedPayload?.displayText) {
+            if (parsedPayload?.displayText && !looksLikeInternalNotesScaffold(parsedPayload.displayText)) {
                 return parsedPayload.displayText;
             }
 
-            return isAssistantReplyPlaceholderText(trimmed) ? null : trimmed;
+            return (isAssistantReplyPlaceholderText(trimmed) || looksLikeInternalNotesScaffold(trimmed)) ? null : trimmed;
         }
 
         if (value == null) {
@@ -2189,8 +2273,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         let primaryText = null;
         for (const key of directKeys) {
             if (typeof value[key] === 'string' && value[key].trim() && !isAssistantReplyPlaceholderText(value[key])) {
-                primaryText = value[key].trim();
-                break;
+                const candidateText = stripUnsafeNullCharacters(value[key]).trim();
+                if (!looksLikeInternalNotesScaffold(candidateText)) {
+                    primaryText = candidateText;
+                    break;
+                }
             }
         }
 
@@ -2251,7 +2338,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             }
 
             const content = extractGenericWrapperContent(payload);
-            if (!content) {
+            if (!content || looksLikeInternalNotesScaffold(content)) {
                 return null;
             }
 
@@ -2265,7 +2352,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function findBalancedGenericContentPayload(text) {
-        const source = stripDiffStylePrefixes(String(text || ''));
+        const source = stripDiffStylePrefixes(text);
         if (!source.includes('{') && !source.includes('[')) {
             return null;
         }
@@ -2323,16 +2410,17 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
     function unwrapGenericResponseContent(text = '') {
         const directPayload = tryParseGenericContentPayload(text);
-        if (directPayload?.displayText) {
+        if (directPayload?.displayText && !looksLikeInternalNotesScaffold(directPayload.displayText)) {
             return directPayload.displayText;
         }
 
         const balancedPayload = findBalancedGenericContentPayload(text);
-        if (balancedPayload?.parsed?.displayText) {
+        if (balancedPayload?.parsed?.displayText && !looksLikeInternalNotesScaffold(balancedPayload.parsed.displayText)) {
             return balancedPayload.parsed.displayText;
         }
 
-        return stripDiffStylePrefixes(text).trim();
+        const normalized = stripDiffStylePrefixes(text).trim();
+        return looksLikeInternalNotesScaffold(normalized) ? '' : normalized;
     }
 
     function isNotesBlockDefinition(value) {
@@ -2602,7 +2690,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function looksLikeNotesActionResponse(text) {
-        const value = String(text || '');
+        const value = stripUnsafeNullCharacters(text);
         return /```notes-actions/i.test(value) ||
             /```json/i.test(value) ||
             /"assistant_reply"\s*:/i.test(value) ||
@@ -2615,13 +2703,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function stripStructuredResponseText(text) {
-        const value = String(text || '');
-        if (startsWithMermaidResponse(value)) {
+        const value = stripUnsafeNullCharacters(text);
+        if (startsWithMermaidResponse(value) || looksLikeInternalNotesScaffold(value)) {
             return '';
         }
 
         const genericContent = tryParseGenericContentPayload(value) || findBalancedGenericContentPayload(value)?.parsed;
-        if (genericContent?.displayText) {
+        if (genericContent?.displayText && !looksLikeInternalNotesScaffold(genericContent.displayText)) {
             return genericContent.displayText;
         }
 
@@ -2633,7 +2721,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function extractNotesActionPlan(responseText) {
-        const text = String(responseText || '');
+        const text = stripUnsafeNullCharacters(responseText);
         const match = text.match(/```notes-actions\s*([\s\S]*?)```/i);
         if (!match) {
             const jsonFenceMatch = text.match(/```json\s*([\s\S]*?)```/i);
@@ -2662,7 +2750,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             }
 
             return {
-                displayText: looksLikeNotesActionResponse(text) || isAssistantReplyPlaceholderText(text) ? '' : text.trim(),
+                displayText: looksLikeNotesActionResponse(text)
+                    || isAssistantReplyPlaceholderText(text)
+                    || looksLikeInternalNotesScaffold(text)
+                    ? ''
+                    : text.trim(),
                 actions: [],
                 parseFailed: looksLikeNotesActionResponse(text)
             };
@@ -2682,14 +2774,16 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         if (!parsed) {
             console.warn('Failed to parse notes action plan payload');
             return {
-                displayText: visibleText || '',
+                displayText: looksLikeInternalNotesScaffold(visibleText) ? '' : (visibleText || ''),
                 actions: [],
                 parseFailed: true
             };
         }
 
         return {
-            displayText: String(parsed.displayText || visibleText || '').trim(),
+            displayText: looksLikeInternalNotesScaffold(parsed.displayText || visibleText || '')
+                ? ''
+                : String(parsed.displayText || visibleText || '').trim(),
             actions: parsed.actions
         };
     }
@@ -2971,8 +3065,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function resolveVisibleAssistantText(preparedDisplayText = '', responseText = '') {
-        const normalizedPrepared = String(preparedDisplayText || '').trim();
-        if (normalizedPrepared && !isAssistantReplyPlaceholderText(normalizedPrepared)) {
+        const normalizedPrepared = stripUnsafeNullCharacters(preparedDisplayText).trim();
+        if (normalizedPrepared
+            && !isAssistantReplyPlaceholderText(normalizedPrepared)
+            && !looksLikeInternalNotesScaffold(normalizedPrepared)) {
             return normalizedPrepared;
         }
 
@@ -2992,11 +3088,15 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     }
 
     function getStreamingVisibleText(text) {
-        const value = String(text || '');
+        const value = stripUnsafeNullCharacters(text);
         const trimmed = value.trim();
 
         if (/^\{[\s\S]*"(?:actions|operations|edits)"\s*:/i.test(trimmed)
             && /"(?:assistant_reply|assistantReply)"\s*:/i.test(trimmed)) {
+            return '';
+        }
+
+        if (looksLikeInternalNotesScaffold(trimmed)) {
             return '';
         }
 
@@ -4709,7 +4809,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 }
 
                 attemptedModels.push(model);
-                const useMultiPassDraft = shouldUseMultiPassNotesDraft(question, context, requestOptions);
+                const useMultiPassDraft = supportsStructuredNotesDrafting(model)
+                    && shouldUseMultiPassNotesDraft(question, context, requestOptions);
                 const forcePageEditActions = shouldForcePageEditActions(question, context, requestOptions);
                 const effectiveQuestion = forcePageEditActions
                     ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Do not reply with chat prose alone.`

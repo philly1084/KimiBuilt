@@ -66,6 +66,10 @@ function normalizeWhitespace(value = '') {
         .trim();
 }
 
+function stripNullCharacters(value = '') {
+    return String(value || '').replace(/\u0000/g, '');
+}
+
 function slugifyFilename(value = 'artifact') {
     const clean = String(value)
         .toLowerCase()
@@ -207,6 +211,7 @@ module.exports = {
     generatePleasantFilenamePair,
     normalizeWhitespace,
     slugifyFilename,
+    stripNullCharacters,
     stripHtml,
     xmlToText,
 };

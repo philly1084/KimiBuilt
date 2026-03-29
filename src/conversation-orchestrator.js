@@ -16,6 +16,7 @@ const {
     buildProjectMemoryUpdate,
     mergeProjectMemory,
 } = require('./project-memory');
+const { stripNullCharacters } = require('./utils/text');
 const {
     DEFAULT_EXECUTION_PROFILE,
     NOTES_EXECUTION_PROFILE,
@@ -73,7 +74,7 @@ function normalizeExecutionProfile(value = '') {
 
 function normalizeMessageText(content = '') {
     if (typeof content === 'string') {
-        return content;
+        return stripNullCharacters(content);
     }
 
     if (Array.isArray(content)) {
@@ -84,7 +85,7 @@ function normalizeMessageText(content = '') {
                 }
 
                 if (item?.type === 'text' || item?.type === 'input_text' || item?.type === 'output_text') {
-                    return item.text || '';
+                    return stripNullCharacters(item.text || '');
                 }
 
                 return '';

@@ -28,6 +28,22 @@ describe('SessionStore recent message continuity', () => {
         ]);
     });
 
+    test('strips null bytes from recent messages before persistence', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' });
+
+        await store.appendMessages(session.id, [
+            { role: 'assistant', content: 'Hello\u0000 world' },
+        ]);
+
+        const updated = await store.get(session.id);
+        await expect(store.getRecentMessages(updated)).resolves.toEqual([
+            expect.objectContaining({ role: 'assistant', content: 'Hello world' }),
+        ]);
+    });
+
     test('getOrCreateOwned persists owner metadata for new sessions', async () => {
         const store = new SessionStore();
         store.initialized = true;

@@ -1,5 +1,6 @@
 const { config } = require('../config');
 const { vectorStore } = require('./vector-store');
+const { stripNullCharacters } = require('../utils/text');
 
 const DEFAULT_RECALL_PROFILE = 'default';
 const RESEARCH_RECALL_PROFILE = 'research';
@@ -30,7 +31,7 @@ class MemoryService {
      * @returns {Promise<string>} Point ID
      */
     async remember(sessionId, message, role = 'user', metadata = {}) {
-        return this.store.store(sessionId, message, { role, ...metadata });
+        return this.store.store(sessionId, stripNullCharacters(message), { role, ...metadata });
     }
 
     /**
@@ -132,7 +133,7 @@ class MemoryService {
     }
 
     async rememberResearchNote(sessionId, note, metadata = {}) {
-        const normalizedNote = String(note || '').trim();
+        const normalizedNote = stripNullCharacters(note).trim();
         if (!normalizedNote) {
             return null;
         }

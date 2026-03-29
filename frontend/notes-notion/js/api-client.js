@@ -105,9 +105,13 @@ function isTerminalFinishReason(finishReason) {
     return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
 }
 
+function stripNullCharacters(value = '') {
+    return String(value || '').replace(/\u0000/g, '');
+}
+
 function extractAssistantText(value) {
     if (typeof value === 'string') {
-        const trimmed = value.trim();
+        const trimmed = stripNullCharacters(value).trim();
         if (!trimmed) {
             return '';
         }
@@ -148,7 +152,7 @@ function extractAssistantText(value) {
         const parsed = typeof source === 'string'
             ? (() => {
                 try {
-                    return JSON.parse(source);
+                    return JSON.parse(stripNullCharacters(source));
                 } catch (_error) {
                     return null;
                 }
@@ -172,7 +176,7 @@ function extractAssistantText(value) {
         ].find((entry) => typeof entry === 'string' && entry.trim());
 
         if (functionText) {
-            return functionText.trim();
+            return stripNullCharacters(functionText).trim();
         }
     }
 
@@ -476,7 +480,7 @@ class NotesAPIClient {
                                     }
                                     
                                     // Extract content from delta
-                                    const content = parsed.choices?.[0]?.delta?.content || '';
+                                    const content = stripNullCharacters(parsed.choices?.[0]?.delta?.content || '');
                                     if (content) {
                                         yield { type: 'delta', content };
                                     }

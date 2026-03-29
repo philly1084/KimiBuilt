@@ -145,6 +145,19 @@ describe('ArtifactService', () => {
         })).toBe('Gemini candidate answer');
     });
 
+    test('extractResponseText strips null bytes from wrapped model outputs', () => {
+        expect(extractResponseText({
+            choices: [{
+                message: {
+                    content: [
+                        { type: 'think', think: 'hidden', encrypted: null },
+                        { type: 'text', text: '{"output_text":"Hello\\u0000 world","finish_reason":"stop"}' },
+                    ],
+                },
+            }],
+        })).toBe('Hello world');
+    });
+
     test('resolveCompletedResponseText recovers the final answer when streaming deltas were missing', () => {
         const response = {
             output: [

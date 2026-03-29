@@ -4,7 +4,7 @@ const { artifactStore } = require('./artifact-store');
 const { extractArtifact } = require('./artifact-extractor');
 const { renderArtifact } = require('./artifact-renderer');
 const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMATS, inferFormat, normalizeFormat } = require('./constants');
-const { chunkText, escapeHtml, stripHtml } = require('../utils/text');
+const { chunkText, escapeHtml, stripHtml, stripNullCharacters } = require('../utils/text');
 const { vectorStore } = require('../memory/vector-store');
 const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
@@ -104,7 +104,7 @@ function extractResponseContentText(content, depth = 0) {
     }
 
     if (typeof content === 'string') {
-        const trimmed = content.trim();
+        const trimmed = stripNullCharacters(content).trim();
         if (!trimmed) {
             return '';
         }
@@ -183,7 +183,7 @@ function extractResponseContentText(content, depth = 0) {
 
 function extractResponseText(response) {
     if (typeof response?.output_text === 'string' && response.output_text.trim()) {
-        return response.output_text.trim();
+        return stripNullCharacters(response.output_text).trim();
     }
 
     const choiceMessage = response?.choices?.[0]?.message || null;
@@ -197,11 +197,11 @@ function extractResponseText(response) {
             ?? ''
         ).trim();
         if (choiceText) {
-            return choiceText;
+            return stripNullCharacters(choiceText).trim();
         }
     }
 
-    const choiceText = extractResponseContentText(response?.choices?.[0]?.text || '').trim();
+    const choiceText = stripNullCharacters(extractResponseContentText(response?.choices?.[0]?.text || '')).trim();
     if (choiceText) {
         return choiceText;
     }
@@ -215,7 +215,7 @@ function extractResponseText(response) {
             ?? ''
         ).trim();
         if (candidateText) {
-            return candidateText;
+            return stripNullCharacters(candidateText).trim();
         }
     }
 
@@ -226,11 +226,12 @@ function extractResponseText(response) {
         .map((item) => extractResponseContentText(item?.content ?? item?.text ?? item?.output_text ?? ''))
         .filter(Boolean)
         .join('\n')
+        .replace(/\u0000/g, '')
         .trim();
 }
 
 function resolveCompletedResponseText(streamedText = '', response = {}) {
-    const streamed = String(streamedText || '');
+    const streamed = stripNullCharacters(streamedText);
     const completed = extractResponseText(response);
 
     if (!completed) {

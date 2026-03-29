@@ -25,6 +25,7 @@ const {
     resolveCompletedResponseText,
     getMissingCompletionDelta,
 } = require('../artifacts/artifact-service');
+const { stripNullCharacters } = require('../utils/text');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
@@ -38,7 +39,7 @@ function getRequestOwnerId(req) {
 
 function normalizeMessageText(content = '') {
     if (typeof content === 'string') {
-        return content;
+        return stripNullCharacters(content);
     }
 
     if (Array.isArray(content)) {
@@ -49,7 +50,7 @@ function normalizeMessageText(content = '') {
                 }
 
                 if (item?.type === 'text' || item?.type === 'input_text' || item?.type === 'output_text') {
-                    return item.text || '';
+                    return stripNullCharacters(item.text || '');
                 }
 
                 return '';

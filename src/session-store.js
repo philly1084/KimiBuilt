@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { postgres } = require('./postgres');
+const { stripNullCharacters } = require('./utils/text');
 
 const MAX_RECENT_MESSAGES = 24;
 const MAX_RECENT_MESSAGE_LENGTH = 4000;
@@ -12,7 +13,7 @@ class SessionStore {
     }
 
     trimRecentMessageContent(content = '') {
-        const value = String(content || '').trim();
+        const value = stripNullCharacters(content).trim();
         if (!value) {
             return '';
         }
