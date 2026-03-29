@@ -225,11 +225,7 @@ class PdfGenerator {
           });
         }
 
-        // Section content
-        if (section.content) {
-          const paragraphs = this.parseContent(section.content);
-          docContent.push(...paragraphs);
-        }
+        docContent.push(...this.buildStructuredSection(section));
       }
     }
 
@@ -278,6 +274,114 @@ class PdfGenerator {
         fontSize: 9,
         margin: [0, 20, 0, 0]
       }) : undefined
+    };
+  }
+
+  buildStructuredSection(section = {}) {
+    const nodes = [];
+
+    if (section.content) {
+      nodes.push(...this.parseContent(section.content));
+    }
+
+    if (Array.isArray(section.bullets) && section.bullets.length > 0) {
+      nodes.push({
+        ul: section.bullets.map((bullet) => String(bullet || '')),
+        margin: [0, 0, 0, 8]
+      });
+    }
+
+    const callout = this.normalizeCallout(section.callout);
+    if (callout) {
+      nodes.push({
+        table: {
+          widths: ['*'],
+          body: [[{
+            stack: [
+              ...(callout.title ? [{ text: callout.title, bold: true, margin: [0, 0, 0, 6] }] : []),
+              { text: callout.body || '' }
+            ]
+          }]]
+        },
+        layout: this.createCardLayout ? this.createCardLayout('#E5E7EB') : 'lightHorizontalLines',
+        margin: [0, 10, 0, 14]
+      });
+    }
+
+    if (Array.isArray(section.stats) && section.stats.length > 0) {
+      nodes.push(this.buildStatsTable(section.stats));
+    }
+
+    if (section.table?.headers?.length || section.table?.rows?.length) {
+      nodes.push(this.buildDataTable(section.table.headers || [], section.table.rows || [], section.table.caption || ''));
+    }
+
+    if (section.chart?.series?.length) {
+      if (section.chart.title) {
+        nodes.push({ text: section.chart.title, style: 'heading3' });
+      }
+      if (section.chart.summary) {
+        nodes.push({ text: section.chart.summary, style: 'paragraph' });
+      }
+      nodes.push(this.buildDataTable(
+        ['Label', 'Value'],
+        section.chart.series.map((point) => [point.label || '', String(point.value ?? '')]),
+      ));
+    }
+
+    return nodes;
+  }
+
+  normalizeCallout(callout) {
+    if (!callout) {
+      return null;
+    }
+
+    if (typeof callout === 'string') {
+      return {
+        title: '',
+        body: callout,
+      };
+    }
+
+    return {
+      title: callout.title || '',
+      body: callout.body || callout.content || callout.text || '',
+    };
+  }
+
+  buildStatsTable(stats = []) {
+    const rows = stats.map((stat) => [
+      { text: stat.label || 'Metric', bold: true },
+      { text: stat.value || '' },
+      { text: stat.detail || '' }
+    ]);
+
+    return this.buildDataTable(['Metric', 'Value', 'Context'], rows);
+  }
+
+  buildDataTable(headers = [], rows = [], caption = '') {
+    const safeHeaders = Array.isArray(headers) ? headers : [];
+    const safeRows = Array.isArray(rows) ? rows : [];
+
+    return {
+      stack: [
+        ...(caption ? [{ text: caption, style: 'paragraph', color: '#64748B' }] : []),
+        {
+          table: {
+            headerRows: safeHeaders.length > 0 ? 1 : 0,
+            widths: safeHeaders.length > 0
+              ? safeHeaders.map(() => '*')
+              : (safeRows[0] || ['']).map(() => '*'),
+            body: [
+              ...(safeHeaders.length > 0 ? [safeHeaders.map((header) => ({ text: header, bold: true, fillColor: '#F8FAFC' }))] : []),
+              ...safeRows.map((row) => row.map((cell) => ({ text: String(cell ?? '') }))),
+            ]
+          },
+          layout: 'lightHorizontalLines',
+          margin: [0, 6, 0, 14]
+        }
+      ]
     };
   }
 

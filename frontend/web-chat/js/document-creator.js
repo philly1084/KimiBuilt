@@ -154,6 +154,9 @@ class DocumentCreator {
                   <option value="report">Report</option>
                   <option value="letter">Letter</option>
                   <option value="memo">Memo</option>
+                  <option value="presentation">Presentation</option>
+                  <option value="pitch-deck">Pitch Deck</option>
+                  <option value="website-slides">Website Slides</option>
                 </select>
               </div>
               
@@ -176,13 +179,24 @@ class DocumentCreator {
                   <option value="detailed">Detailed</option>
                 </select>
               </div>
+
+              <div class="doc-option-group">
+                <label>Visual Style:</label>
+                <select id="doc-ai-style">
+                  <option value="editorial">Editorial</option>
+                  <option value="executive">Executive</option>
+                  <option value="product">Product</option>
+                  <option value="bold">Bold</option>
+                </select>
+              </div>
               
               <div class="doc-option-group">
                 <label>Format:</label>
                 <select id="doc-ai-format">
                   <option value="docx">Word (DOCX)</option>
                   <option value="pdf">PDF</option>
-                  <option value="html">HTML</option>
+                  <option value="html">HTML / Website</option>
+                  <option value="pptx">Slides (PPTX)</option>
                 </select>
               </div>
             </div>
@@ -396,10 +410,13 @@ class DocumentCreator {
     const form = document.getElementById('doc-variables-form');
     if (!form || !this.currentTemplate) return;
     
-    const variables = this.currentTemplate.variables || [];
+    const variables = this.getTemplateVariables();
     
     form.innerHTML = variables.map(variable => {
       const inputId = `var-${variable.id}`;
+      const defaultValue = variable.type === 'array' && Array.isArray(variable.default)
+        ? JSON.stringify(variable.default, null, 2)
+        : (variable.default || '');
       
       switch (variable.type) {
         case 'textarea':
@@ -411,11 +428,37 @@ class DocumentCreator {
                         name="${variable.id}"
                         rows="${variable.rows || 4}"
                         ${variable.required ? 'required' : ''}
-                        placeholder="${variable.placeholder || ''}">${variable.default || ''}</textarea>
+                        placeholder="${variable.placeholder || ''}">${defaultValue}</textarea>
               ${variable.hint ? `<span class="doc-input-hint">${variable.hint}</span>` : ''}
             </div>
           `;
           
+        case 'array':
+          return `
+            <div class="doc-form-group">
+              <label for="${inputId}">${variable.label}${variable.required ? ' *' : ''}</label>
+              <textarea id="${inputId}"
+                        name="${variable.id}"
+                        rows="${variable.rows || 8}"
+                        ${variable.required ? 'required' : ''}
+                        placeholder="${this.buildArrayPlaceholder(variable)}">${defaultValue}</textarea>
+              <span class="doc-input-hint">Enter valid JSON for repeatable items such as slides.</span>
+            </div>
+          `;
+
+        case 'boolean':
+          return `
+            <div class="doc-form-group">
+              <label class="doc-checkbox-label" for="${inputId}">
+                <input type="checkbox" id="${inputId}"
+                       name="${variable.id}"
+                       ${variable.default ? 'checked' : ''}>
+                <span>${variable.label}</span>
+              </label>
+              ${variable.description ? `<span class="doc-input-hint">${variable.description}</span>` : ''}
+            </div>
+          `;
+
         case 'select':
           return `
             <div class="doc-form-group">
@@ -448,7 +491,7 @@ class DocumentCreator {
               <label for="${inputId}">${variable.label}${variable.required ? ' *' : ''}</label>
               <input type="${variable.type || 'text'}" id="${inputId}" 
                      name="${variable.id}"
-                     value="${variable.default || ''}"
+                     value="${defaultValue}"
                      placeholder="${variable.placeholder || ''}"
                      ${variable.required ? 'required' : ''}>
               ${variable.hint ? `<span class="doc-input-hint">${variable.hint}</span>` : ''}
@@ -486,9 +529,29 @@ class DocumentCreator {
     const form = document.getElementById('doc-variables-form');
     const formData = new FormData(form);
     const variables = {};
+    const variableDefs = this.getTemplateVariables();
     
-    for (const [key, value] of formData.entries()) {
-      variables[key] = value;
+    try {
+      for (const variable of variableDefs) {
+        if (!variable?.id) {
+          continue;
+        }
+
+        if (variable.type === 'boolean') {
+          variables[variable.id] = formData.get(variable.id) === 'on';
+          continue;
+        }
+
+        if (variable.type === 'array') {
+          variables[variable.id] = this.parseArrayInput(formData.get(variable.id), variable);
+          continue;
+        }
+
+        variables[variable.id] = formData.get(variable.id) || '';
+      }
+    } catch (error) {
+      this.showError(error.message || 'Invalid template input.');
+      return;
     }
     
     // Get selected format
@@ -557,6 +620,7 @@ class DocumentCreator {
     const documentType = document.getElementById('doc-ai-type').value;
     const tone = document.getElementById('doc-ai-tone').value;
     const length = document.getElementById('doc-ai-length').value;
+    const style = document.getElementById('doc-ai-style').value;
     const format = document.getElementById('doc-ai-format').value;
     
     this.showLoading('AI is generating your document...');
@@ -573,7 +637,8 @@ class DocumentCreator {
           format,
           options: {
             includePageNumbers: true,
-            includeTableOfContents: true
+            includeTableOfContents: true,
+            theme: style,
           }
         })
       });
@@ -605,6 +670,61 @@ class DocumentCreator {
     } catch (error) {
       console.error('[DocumentCreator] AI generation failed:', error);
       this.showError('Failed to generate document with AI. Please try again.');
+    }
+  }
+
+  getTemplateVariables() {
+    const rawVariables = this.currentTemplate?.variables || [];
+    if (Array.isArray(rawVariables)) {
+      return rawVariables;
+    }
+
+    if (rawVariables && typeof rawVariables === 'object') {
+      return Object.entries(rawVariables).map(([id, variable]) => ({
+        id,
+        ...(variable || {}),
+      }));
+    }
+
+    return [];
+  }
+
+  buildArrayPlaceholder(variable = {}) {
+    if (variable?.itemFields && typeof variable.itemFields === 'object') {
+      const fieldEntries = Object.entries(variable.itemFields);
+      const example = {};
+      fieldEntries.forEach(([fieldId, fieldDef]) => {
+        if (fieldDef?.type === 'textarea') {
+          example[fieldId] = fieldId === 'bullets'
+            ? ['Point one', 'Point two']
+            : `${fieldDef.label || fieldId} text`;
+        } else if (fieldDef?.type === 'select' && Array.isArray(fieldDef.options) && fieldDef.options.length > 0) {
+          const firstOption = fieldDef.options[0];
+          example[fieldId] = typeof firstOption === 'string' ? firstOption : firstOption.value;
+        } else {
+          example[fieldId] = fieldDef?.placeholder || fieldDef?.label || fieldId;
+        }
+      });
+      return JSON.stringify([example], null, 2);
+    }
+
+    return '[\n  {\n    "title": "Slide title",\n    "bullets": ["Point one", "Point two"]\n  }\n]';
+  }
+
+  parseArrayInput(rawValue, variable = {}) {
+    const text = String(rawValue || '').trim();
+    if (!text) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) {
+        throw new Error();
+      }
+      return parsed;
+    } catch (_error) {
+      throw new Error(`"${variable.label || variable.id}" must be valid JSON array input.`);
     }
   }
 

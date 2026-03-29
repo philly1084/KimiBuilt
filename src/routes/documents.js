@@ -218,11 +218,6 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       ...options
     });
     
-    res.setHeader('Content-Type', document.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
-    res.setHeader('X-Document-Id', document.id);
-    res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata));
-    
     res.json({
       success: true,
       document: {
@@ -266,10 +261,6 @@ router.post('/expand-outline', validate(expandOutlineSchema), async (req, res, n
       model,
       ...options
     });
-    
-    res.setHeader('Content-Type', document.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
-    res.setHeader('X-Document-Id', document.id);
     
     res.json({
       success: true,
@@ -364,6 +355,10 @@ router.post('/presentation', async (req, res, next) => {
       outline,
       title,
       subtitle,
+      format = 'pptx',
+      slideCount,
+      audience,
+      style,
       generateImages = true,
       theme = 'default',
       model
@@ -383,6 +378,10 @@ router.post('/presentation', async (req, res, next) => {
     const document = await documentService.generatePresentation(presentationContent, {
       title,
       subtitle,
+      format,
+      slideCount,
+      audience,
+      style,
       generateImages,
       theme,
       model
@@ -465,10 +464,21 @@ router.post('/export-notes-page-pdf', validate(exportNotesPagePdfSchema), async 
  */
 router.get('/:id/download', async (req, res, next) => {
   try {
-    // TODO: Implement document storage and retrieval
-    res.status(501).json({
-      error: { message: 'Document storage not yet implemented' }
-    });
+    const documentService = req.app.locals.documentService;
+    const document = documentService?.getDocument?.(req.params.id);
+
+    if (!document) {
+      return res.status(404).json({
+        error: { message: `Document not found: ${req.params.id}` }
+      });
+    }
+
+    res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${document.filename || 'document'}"`);
+    res.setHeader('X-Document-Id', document.id);
+    res.setHeader('X-Document-Metadata', JSON.stringify(document.metadata || {}));
+
+    res.send(document.contentBuffer || document.content);
   } catch (err) {
     next(err);
   }

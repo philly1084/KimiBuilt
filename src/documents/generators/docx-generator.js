@@ -114,11 +114,7 @@ class DocxGenerator {
           }));
         }
 
-        // Section content
-        if (section.content) {
-          const paragraphs = this.parseContent(section.content);
-          children.push(...paragraphs);
-        }
+        children.push(...this.buildStructuredSection(section));
       }
     }
 
@@ -283,6 +279,144 @@ class DocxGenerator {
     }
 
     return children;
+  }
+
+  buildStructuredSection(section = {}) {
+    const children = [];
+
+    if (section.content) {
+      children.push(...this.parseContent(section.content));
+    }
+
+    if (Array.isArray(section.bullets) && section.bullets.length > 0) {
+      section.bullets.forEach((bullet) => {
+        children.push(new Paragraph({
+          text: bullet,
+          bullet: { level: 0 },
+          spacing: { after: 100 }
+        }));
+      });
+    }
+
+    const callout = this.normalizeCallout(section.callout);
+    if (callout) {
+      children.push(this.buildCalloutTable(callout));
+    }
+
+    if (Array.isArray(section.stats) && section.stats.length > 0) {
+      children.push(this.buildKeyValueTable(
+        ['Metric', 'Value', 'Context'],
+        section.stats.map((stat) => [stat.label || '', stat.value || '', stat.detail || ''])
+      ));
+    }
+
+    if (section.table?.headers?.length || section.table?.rows?.length) {
+      children.push(this.buildKeyValueTable(
+        section.table.headers || [],
+        section.table.rows || [],
+        section.table.caption || ''
+      ));
+    }
+
+    if (section.chart?.series?.length) {
+      children.push(new Paragraph({
+        text: section.chart.title || 'Chart',
+        heading: HeadingLevel.HEADING_3,
+        spacing: { before: 160, after: 100 }
+      }));
+      if (section.chart.summary) {
+        children.push(...this.parseContent(section.chart.summary));
+      }
+      children.push(this.buildKeyValueTable(
+        ['Label', 'Value'],
+        section.chart.series.map((point) => [point.label || '', String(point.value ?? '')]),
+      ));
+    }
+
+    return children;
+  }
+
+  normalizeCallout(callout) {
+    if (!callout) {
+      return null;
+    }
+
+    if (typeof callout === 'string') {
+      return {
+        title: '',
+        body: callout,
+      };
+    }
+
+    return {
+      title: callout.title || '',
+      body: callout.body || callout.content || callout.text || '',
+    };
+  }
+
+  buildCalloutTable(callout) {
+    const text = [callout.title, callout.body].filter(Boolean).join('\n');
+    return new Table({
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              children: [new Paragraph({
+                children: this.parseInlineFormatting(text),
+                spacing: { after: 120 },
+              })],
+              width: { size: 100, type: WidthType.PERCENTAGE }
+            })
+          ]
+        })
+      ],
+      width: { size: 100, type: WidthType.PERCENTAGE }
+    });
+  }
+
+  buildKeyValueTable(headers = [], rows = [], caption = '') {
+    const safeHeaders = Array.isArray(headers) ? headers : [];
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const tableRows = [];
+
+    if (caption) {
+      tableRows.push(new TableRow({
+        children: [
+          new TableCell({
+            children: [new Paragraph({
+              text: caption,
+              spacing: { after: 80 }
+            })],
+            columnSpan: Math.max(safeHeaders.length || 1, 1),
+            width: { size: 100, type: WidthType.PERCENTAGE }
+          }),
+          ...Array.from({ length: Math.max((safeHeaders.length || 1) - 1, 0) }, () => new TableCell({ children: [new Paragraph('')] }))
+        ]
+      }));
+    }
+
+    if (safeHeaders.length > 0) {
+      tableRows.push(new TableRow({
+        children: safeHeaders.map((header) => new TableCell({
+          children: [new Paragraph({
+            children: [new TextRun({ text: header, bold: true })]
+          })]
+        }))
+      }));
+    }
+
+    safeRows.forEach((row) => {
+      tableRows.push(new TableRow({
+        children: row.map((cell) => new TableCell({
+          children: [new Paragraph(String(cell ?? ''))]
+        }))
+      }));
+    });
+
+    return new Table({
+      rows: tableRows,
+      width: { size: 100, type: WidthType.PERCENTAGE }
+    });
   }
 
   /**

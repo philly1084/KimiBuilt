@@ -291,11 +291,35 @@ OUTPUT FORMAT:
 Return a JSON object with this exact structure:
 {
   "title": "Document Title",
+  "subtitle": "Optional subtitle",
+  "theme": "editorial|executive|product|bold",
   "sections": [
     {
       "heading": "Section Heading",
       "content": "Section content with proper paragraphs...",
-      "level": 1
+      "level": 1,
+      "bullets": ["Optional concise bullet", "Optional concise bullet"],
+      "callout": {
+        "title": "Optional callout heading",
+        "body": "Optional high-signal note or warning",
+        "tone": "note|highlight|warning"
+      },
+      "stats": [
+        { "label": "Metric", "value": "Value", "detail": "Optional context" }
+      ],
+      "table": {
+        "caption": "Optional table caption",
+        "headers": ["Column A", "Column B"],
+        "rows": [["Value 1", "Value 2"]]
+      },
+      "chart": {
+        "title": "Optional chart title",
+        "type": "bar|line|comparison",
+        "summary": "Optional chart takeaway",
+        "series": [
+          { "label": "Series label", "value": 42 }
+        ]
+      }
     }
   ],
   "metadata": {
@@ -312,7 +336,8 @@ GUIDELINES:
 - Maintain consistency throughout
 - Ensure professional quality suitable for business use
 - Write the actual content, not placeholders
-- For sections that would have tables, describe the table structure in the content`;
+- When a section benefits from metrics, tables, or a chart, populate the matching structured field instead of burying everything in prose
+- Only include bullets, stats, tables, charts, or callouts when they strengthen the document`;
   }
 
   /**
@@ -324,6 +349,8 @@ GUIDELINES:
     // Ensure required fields exist
     const normalized = {
       title: content.title || 'Untitled Document',
+      subtitle: content.subtitle || '',
+      theme: content.theme || 'editorial',
       sections: [],
       metadata: {
         wordCount: 0,
@@ -335,17 +362,15 @@ GUIDELINES:
 
     // Normalize sections
     if (Array.isArray(content.sections)) {
-      normalized.sections = content.sections.map((section, index) => ({
-        heading: section.heading || section.title || `Section ${index + 1}`,
-        content: section.content || '',
-        level: section.level || 1
-      }));
+      normalized.sections = content.sections.map((section, index) => this.normalizeDocumentSection(section, index));
     } else if (content.content) {
       // Single content block
       normalized.sections = [{
         heading: 'Content',
         content: content.content,
-        level: 1
+        level: 1,
+        bullets: [],
+        stats: [],
       }];
     }
 
@@ -365,6 +390,26 @@ GUIDELINES:
     return normalized;
   }
 
+  normalizeDocumentSection(section = {}, index = 0) {
+    const normalizedTable = this.normalizeTable(section.table);
+    const normalizedChart = this.normalizeChart(section.chart);
+
+    return {
+      heading: section.heading || section.title || `Section ${index + 1}`,
+      content: typeof section.content === 'string'
+        ? section.content
+        : Array.isArray(section.content)
+          ? section.content.filter(Boolean).join('\n')
+          : '',
+      level: Number(section.level) || 1,
+      bullets: this.normalizeStringList(section.bullets || section.points || section.keyPoints),
+      callout: this.normalizeCallout(section.callout || section.highlight || section.note),
+      stats: this.normalizeStats(section.stats || section.metrics || section.highlights),
+      table: normalizedTable,
+      chart: normalizedChart,
+    };
+  }
+
   /**
    * Generate presentation content from a topic or outline
    * @param {string} topic - Presentation topic
@@ -374,28 +419,55 @@ GUIDELINES:
   async generatePresentationContent(topic, options = {}) {
     const slideCount = options.slideCount || 6;
     const tone = options.tone || 'professional';
+    const audience = options.audience || 'general audience';
+    const theme = options.theme || options.style || 'editorial';
     const includeImages = options.includeImages !== false;
+    const includeCharts = options.includeCharts !== false;
 
     const prompt = `Create a presentation about: ${topic}
 
 Requirements:
 - Create exactly ${slideCount} slides
 - Tone: ${tone}
+- Audience: ${audience}
+- Theme/style: ${theme}
 - Include a compelling title slide
 - Structure content logically with clear progression
 - Each slide should have a clear title and key bullet points (3-5 bullets)
 ${includeImages ? '- For key slides, suggest an image description that would enhance the visual impact' : ''}
+${includeCharts ? '- Use chart slides when comparison or trend data helps the story; provide explicit chart series data' : ''}
 
 Return JSON with this structure:
 {
   "title": "Presentation Title",
   "subtitle": "Subtitle or tagline",
+  "theme": "editorial|executive|product|bold",
   "slides": [
     {
       "layout": "title|content|section|image|two-column|chart",
+      "kicker": "Optional slide eyebrow",
       "title": "Slide Title",
+      "subtitle": "Optional supporting line",
       "content": "Main content text (for content slides)",
       "bullets": ["Point 1", "Point 2", "Point 3"],
+      "stats": [
+        { "label": "Metric", "value": "42%", "detail": "Optional context" }
+      ],
+      "columns": [
+        {
+          "heading": "Optional column heading",
+          "content": "Optional column content",
+          "bullets": ["Optional", "Column bullets"]
+        }
+      ],
+      "chart": {
+        "title": "Optional chart title",
+        "type": "bar|line|comparison",
+        "summary": "Takeaway from the chart",
+        "series": [
+          { "label": "Label", "value": 42 }
+        ]
+      },
       "imagePrompt": "Description for AI image generation (optional, for visual slides)"
     }
   ]
@@ -406,8 +478,11 @@ Guidelines:
 - Use "section" layout for major topic dividers
 - Use "image" layout for slides that benefit from visuals
 - Use "content" or "bullets" layout for information slides
+- Use "two-column" for comparisons, before/after, or parallel tracks
+- Use "chart" only when you can provide explicit series data
 - Keep bullet points concise (10-15 words max)
-- Image prompts should be detailed and descriptive for DALL-E generation`;
+- Image prompts should be detailed and descriptive for DALL-E generation
+- Slides should feel presentation-ready, not like a memo split into pages`;
 
     try {
       const result = await this.requestJson({
@@ -415,32 +490,181 @@ Guidelines:
         model: options.model || 'gpt-4o',
         reasoningEffort: options.reasoningEffort || null,
       });
-      
-      // Ensure proper structure
-      return {
-        title: result.title || topic,
-        subtitle: result.subtitle || '',
-        slides: (result.slides || []).map((slide, index) => ({
-          layout: slide.layout || (index === 0 ? 'title' : 'content'),
-          title: slide.title || `Slide ${index + 1}`,
-          content: slide.content || '',
-          bullets: slide.bullets || [],
-          imagePrompt: slide.imagePrompt,
-          generateImage: !!slide.imagePrompt && includeImages
-        }))
-      };
+
+      return this.normalizePresentationStructure(result, {
+        ...options,
+        defaultTitle: topic,
+        includeImages,
+      });
     } catch (error) {
       console.error('[AIDocumentGenerator] Presentation generation failed:', error);
       // Return a basic structure on failure
-      return {
+      return this.normalizePresentationStructure({
         title: topic,
         subtitle: '',
         slides: [
           { layout: 'title', title: topic, subtitle: '' },
           { layout: 'content', title: 'Introduction', bullets: ['Overview of the topic'] }
         ]
+      }, {
+        ...options,
+        defaultTitle: topic,
+        includeImages,
+      });
+    }
+  }
+
+  normalizePresentationStructure(content = {}, options = {}) {
+    const includeImages = options.includeImages !== false;
+    const slides = Array.isArray(content.slides) ? content.slides : [];
+
+    return {
+      title: content.title || options.defaultTitle || 'Presentation',
+      subtitle: content.subtitle || '',
+      theme: content.theme || options.theme || options.style || 'editorial',
+      slides: slides.map((slide, index) => ({
+        layout: slide.layout || (index === 0 ? 'title' : 'content'),
+        kicker: slide.kicker || '',
+        title: slide.title || `Slide ${index + 1}`,
+        subtitle: slide.subtitle || '',
+        content: typeof slide.content === 'string' ? slide.content : '',
+        bullets: this.normalizeStringList(slide.bullets || slide.points),
+        stats: this.normalizeStats(slide.stats || slide.metrics),
+        columns: this.normalizeColumns(slide.columns),
+        chart: this.normalizeChart(slide.chart),
+        imagePrompt: slide.imagePrompt || '',
+        generateImage: !!slide.imagePrompt && includeImages,
+      })),
+    };
+  }
+
+  normalizeColumns(columns = []) {
+    if (!Array.isArray(columns)) {
+      return [];
+    }
+
+    return columns
+      .filter((column) => column && typeof column === 'object')
+      .map((column) => ({
+        heading: column.heading || '',
+        content: typeof column.content === 'string' ? column.content : '',
+        bullets: this.normalizeStringList(column.bullets || column.points),
+      }))
+      .filter((column) => column.heading || column.content || column.bullets.length > 0);
+  }
+
+  normalizeStringList(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean);
+    }
+
+    if (typeof value === 'string') {
+      return value
+        .split('\n')
+        .map((entry) => entry.replace(/^[-*]\s*/, '').trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  }
+
+  normalizeStats(stats = []) {
+    if (!Array.isArray(stats)) {
+      return [];
+    }
+
+    return stats
+      .map((stat) => {
+        if (stat == null) {
+          return null;
+        }
+
+        if (typeof stat === 'string') {
+          return { label: stat, value: '', detail: '' };
+        }
+
+        return {
+          label: stat.label || stat.name || 'Metric',
+          value: stat.value != null ? String(stat.value) : '',
+          detail: stat.detail || stat.context || '',
+        };
+      })
+      .filter((stat) => stat && (stat.label || stat.value || stat.detail));
+  }
+
+  normalizeCallout(callout) {
+    if (!callout) {
+      return null;
+    }
+
+    if (typeof callout === 'string') {
+      return {
+        title: '',
+        body: callout,
+        tone: 'note',
       };
     }
+
+    return {
+      title: callout.title || '',
+      body: callout.body || callout.content || callout.text || '',
+      tone: callout.tone || 'note',
+    };
+  }
+
+  normalizeTable(table) {
+    if (!table || typeof table !== 'object') {
+      return null;
+    }
+
+    const headers = Array.isArray(table.headers) ? table.headers.map((entry) => String(entry || '')) : [];
+    const rows = Array.isArray(table.rows)
+      ? table.rows.map((row) => Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : [])
+      : [];
+
+    if (headers.length === 0 && rows.length === 0) {
+      return null;
+    }
+
+    return {
+      caption: table.caption || '',
+      headers,
+      rows,
+    };
+  }
+
+  normalizeChart(chart) {
+    if (!chart || typeof chart !== 'object') {
+      return null;
+    }
+
+    const series = Array.isArray(chart.series)
+      ? chart.series
+        .map((point) => {
+          if (!point || typeof point !== 'object') {
+            return null;
+          }
+
+          return {
+            label: point.label || point.name || '',
+            value: point.value != null ? point.value : '',
+          };
+        })
+        .filter((point) => point && point.label)
+      : [];
+
+    if (series.length === 0) {
+      return null;
+    }
+
+    return {
+      title: chart.title || '',
+      type: chart.type || 'bar',
+      summary: chart.summary || '',
+      series,
+    };
   }
 
   /**

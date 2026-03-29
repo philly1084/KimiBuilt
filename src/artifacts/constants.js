@@ -4,6 +4,7 @@ const SUPPORTED_UPLOAD_FORMATS = new Set([
     'doc',
     'pdf',
     'docx',
+    'pptx',
     'xml',
     'html',
     'mermaid',
@@ -14,6 +15,7 @@ const SUPPORTED_GENERATION_FORMATS = new Set([
     'xlsx',
     'pdf',
     'docx',
+    'pptx',
     'html',
     'xml',
     'mermaid',
@@ -31,6 +33,7 @@ const FORMAT_MIME_TYPES = {
     mermaid: 'text/vnd.mermaid',
     mmd: 'text/vnd.mermaid',
     pdf: 'application/pdf',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     pq: 'text/plain',
     'power-query': 'text/plain',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -46,6 +49,7 @@ const FORMAT_EXTENSIONS = {
     mermaid: '.mmd',
     mmd: '.mmd',
     pdf: '.pdf',
+    pptx: '.pptx',
     pq: '.pq',
     'power-query': '.pq',
     xlsx: '.xlsx',
@@ -75,6 +79,7 @@ function inferFormat(filename = '', mimeType = '') {
 
     if (lowerMime.includes('spreadsheetml')) return 'xlsx';
     if (lowerMime.includes('wordprocessingml')) return 'docx';
+    if (lowerMime.includes('presentationml')) return 'pptx';
     if (lowerMime.includes('msword')) return 'doc';
     if (lowerMime.includes('pdf')) return 'pdf';
     if (lowerMime.includes('html')) return 'html';
