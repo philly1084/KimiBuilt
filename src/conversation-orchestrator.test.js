@@ -122,6 +122,116 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('fallback synthesis summarizes web-search results without dumping raw json', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_empty_search',
+                model: 'gpt-test',
+                choices: [{ message: {} }],
+                metadata: {},
+            }),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        const response = await orchestrator.buildFinalResponse({
+            input: 'Find a great resort destination for April.',
+            objective: 'Find a great resort destination for April.',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'web-search',
+                    },
+                },
+                reason: 'Find great places to resort in April.',
+                result: {
+                    success: true,
+                    toolId: 'web-search',
+                    data: {
+                        query: 'best resorts in April',
+                        engine: 'perplexity',
+                        results: [
+                            {
+                                title: 'Maui Beach Resorts Guide',
+                                url: 'https://example.com/maui',
+                                snippet: 'Maui combines warm April weather, beach resorts, and direct flights from many North American hubs.',
+                                source: 'example.com',
+                            },
+                            {
+                                title: 'Cancun All-Inclusive Resorts',
+                                url: 'https://travel.example/cancun',
+                                snippet: 'Cancun is strong in April for reliable heat, resort density, and family-friendly packages.',
+                                source: 'travel.example',
+                            },
+                        ],
+                    },
+                },
+            }],
+        });
+
+        const text = response.output[0].content[0].text;
+        expect(text).toContain('Based on the verified tool results');
+        expect(text).toContain('Maui Beach Resorts Guide');
+        expect(text).toContain('Cancun All-Inclusive Resorts');
+        expect(text).not.toContain('{"query"');
+        expect(text).not.toContain('[truncated');
+    });
+
+    test('fallback synthesis summarizes fetched page content instead of returning raw html', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_empty_fetch',
+                model: 'gpt-test',
+                choices: [{ message: {} }],
+                metadata: {},
+            }),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        const response = await orchestrator.buildFinalResponse({
+            input: 'Review the Bicycle Thief homepage.',
+            objective: 'Review the Bicycle Thief homepage.',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'web-fetch',
+                    },
+                },
+                reason: 'Fetch the Bicycle Thief homepage for review.',
+                result: {
+                    success: true,
+                    toolId: 'web-fetch',
+                    data: {
+                        status: 200,
+                        statusText: 'OK',
+                        url: 'https://bicyclethief.ca',
+                        headers: {
+                            'content-type': 'text/html; charset=utf-8',
+                        },
+                        body: '<!DOCTYPE html><html><head><title>Bicycle Thief</title></head><body><main>Harbourfront restaurant in Halifax with seafood, pasta, and cocktails.</main></body></html>',
+                    },
+                },
+            }],
+        });
+
+        const text = response.output[0].content[0].text;
+        expect(text).toContain('Title: Bicycle Thief.');
+        expect(text).toContain('Harbourfront restaurant in Halifax with seafood, pasta, and cocktails.');
+        expect(text).toContain('Source: https://bicyclethief.ca.');
+        expect(text).not.toContain('<html>');
+    });
+
     test('recovers missing file-write content from recent assistant html when the planner omits it', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Saved the HTML file.', 'resp_file_write')),

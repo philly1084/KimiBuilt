@@ -218,6 +218,86 @@ function stripHtmlToText(html = '') {
         .trim();
 }
 
+function normalizeInlineText(value = '') {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function deriveSourceLabel(url = '', fallback = '') {
+    if (fallback) {
+        return String(fallback).trim();
+    }
+
+    try {
+        return new URL(String(url || '')).hostname.replace(/^www\./i, '');
+    } catch (_error) {
+        return '';
+    }
+}
+
+function extractHtmlTitle(html = '') {
+    const match = String(html || '').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+    return normalizeInlineText(match?.[1] || '');
+}
+
+function summarizeSearchResults(results = []) {
+    if (!Array.isArray(results) || results.length === 0) {
+        return '';
+    }
+
+    return results
+        .slice(0, 3)
+        .map((entry, index) => {
+            const title = truncateText(normalizeInlineText(entry?.title || 'Untitled result'), 100);
+            const url = String(entry?.url || '').trim();
+            const source = deriveSourceLabel(url, entry?.source);
+            const snippet = truncateText(normalizeInlineText(entry?.snippet || ''), 160);
+
+            return [
+                `${index + 1}. ${title}`,
+                source ? `(${source})` : '',
+                snippet ? `- ${snippet}` : '',
+                url ? `[${url}]` : '',
+            ].filter(Boolean).join(' ');
+        })
+        .join(' ');
+}
+
+function summarizeFetchedContent(data = {}) {
+    const url = String(data?.url || '').trim();
+    const status = Number.isFinite(Number(data?.status)) ? Number(data.status) : null;
+    const statusText = normalizeInlineText(data?.statusText || '');
+    const body = typeof data?.body === 'string' ? data.body : '';
+    const contentType = String(data?.headers?.['content-type'] || data?.headers?.['Content-Type'] || '').trim().toLowerCase();
+    const title = normalizeInlineText(data?.title || extractHtmlTitle(body));
+    const rawSummary = contentType.includes('html') ? stripHtmlToText(body) : body;
+    const bodyPreview = truncateText(normalizeInlineText(rawSummary), 220);
+
+    return [
+        status != null ? `${status}${statusText ? ` ${statusText}` : ''}.` : '',
+        title ? `Title: ${truncateText(title, 120)}.` : '',
+        bodyPreview ? `Summary: ${bodyPreview}.` : '',
+        url ? `Source: ${url}.` : '',
+    ].filter(Boolean).join(' ');
+}
+
+function summarizeObjectData(data = {}) {
+    if (!data || typeof data !== 'object') {
+        return '';
+    }
+
+    const preferredKeys = ['title', 'url', 'status', 'statusText', 'message', 'summary', 'text', 'content'];
+    const pairs = preferredKeys
+        .filter((key) => data[key] != null && typeof data[key] !== 'object')
+        .slice(0, 4)
+        .map((key) => `${key}: ${truncateText(normalizeInlineText(data[key]), 120)}`);
+
+    if (pairs.length > 0) {
+        return pairs.join('; ');
+    }
+
+    return truncateText(normalizeInlineText(JSON.stringify(data)), 220);
+}
+
 function hasUsableSshDefaults() {
     const sshConfig = settingsController.getEffectiveSshConfig();
 
@@ -1463,19 +1543,26 @@ function summarizeToolEventForUser(event = {}) {
     const stderr = String(data?.stderr || '').trim();
     const error = String(result?.error || '').trim();
     const exitCode = Number.isFinite(Number(data?.exitCode)) ? Number(data.exitCode) : null;
-    const previewSource = stdout || stderr || error || (
-        typeof data === 'string'
-            ? data
-            : (data && typeof data === 'object' ? JSON.stringify(data) : '')
-    );
-    const preview = truncateText(previewSource.replace(/\s+/g, ' ').trim(), 320);
+    let preview = '';
+
+    if (tool === 'web-search') {
+        preview = summarizeSearchResults(data?.results || []);
+    } else if (tool === 'web-fetch') {
+        preview = summarizeFetchedContent(data);
+    } else if (stdout || stderr || error) {
+        preview = truncateText(normalizeInlineText(stdout || stderr || error), 320);
+    } else if (typeof data === 'string') {
+        preview = truncateText(normalizeInlineText(data), 320);
+    } else if (data && typeof data === 'object') {
+        preview = summarizeObjectData(data);
+    }
 
     if (!success) {
         return [
             `- ${tool}: failed`,
             reason ? `Reason: ${reason}.` : '',
             error ? `Error: ${error}.` : '',
-            stderr && !error ? `Details: ${truncateText(stderr.replace(/\s+/g, ' ').trim(), 220)}.` : '',
+            stderr && !error ? `Details: ${truncateText(normalizeInlineText(stderr), 220)}.` : '',
         ].filter(Boolean).join(' ');
     }
 
@@ -1490,17 +1577,18 @@ function summarizeToolEventForUser(event = {}) {
 function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
     if (events.length === 0) {
-        return 'The model returned an empty final response after processing the request.';
+        return 'I completed the request, but the final answer could not be synthesized from the model response.';
     }
 
     const successes = events.filter((event) => event?.result?.success !== false).length;
     const failures = events.length - successes;
+    const normalizedObjective = truncateText(normalizeInlineText(objective), 280);
     const lines = [
-        'The model returned an empty final response, so here is a summary from the verified tool results.',
-        objective ? `Request: ${objective}` : '',
+        'Based on the verified tool results, here is the best available answer.',
+        normalizedObjective ? `Request: ${normalizedObjective}` : '',
         `Tool calls completed: ${events.length}. Successful: ${successes}. Failed: ${failures}.`,
         '',
-        'Verified results:',
+        'Verified findings:',
         ...events.slice(0, 8).map((event) => summarizeToolEventForUser(event)),
     ];
 
