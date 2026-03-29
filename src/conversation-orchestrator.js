@@ -3237,7 +3237,7 @@ class ConversationOrchestrator extends EventEmitter {
             })), null, 2),
         ].join('\n');
 
-        const response = await this.llmClient.createResponse({
+        const response = await this.requestResponse({
             input: repairPrompt,
             instructions: runtimeInstructions,
             contextMessages,
@@ -3283,7 +3283,7 @@ class ConversationOrchestrator extends EventEmitter {
         });
 
         if (toolEvents.length === 0) {
-            const response = await this.llmClient.createResponse({
+            const response = await this.requestResponse({
                 input,
                 instructions: runtimeInstructions,
                 contextMessages,
@@ -3344,7 +3344,7 @@ class ConversationOrchestrator extends EventEmitter {
             })), null, 2),
         ].join('\n');
 
-        const response = await this.llmClient.createResponse({
+        const response = await this.requestResponse({
             input: synthesisPrompt,
             instructions: runtimeInstructions,
             contextMessages,
@@ -3535,7 +3535,7 @@ class ConversationOrchestrator extends EventEmitter {
             return this.llmClient.complete(prompt, options);
         }
 
-        const response = await this.llmClient.createResponse({
+        const response = await this.requestResponse({
             input: prompt,
             stream: false,
             model: options.model || null,
@@ -3544,6 +3544,15 @@ class ConversationOrchestrator extends EventEmitter {
         });
 
         return extractResponseText(response);
+    }
+
+    async requestResponse(params = {}) {
+        if (typeof this.llmClient?.createResponse === 'function') {
+            return this.llmClient.createResponse(params);
+        }
+
+        console.warn('[ConversationOrchestrator] llmClient.createResponse is unavailable; falling back to openai-client.createResponse');
+        return createResponse(params);
     }
 }
 
