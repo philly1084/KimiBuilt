@@ -131,4 +131,28 @@ describe('notes agent parsing', () => {
             }),
         ]));
     });
+
+    test('treats explicit website review prompts as non-page runtime work', () => {
+        const agent = loadAgent();
+        const question = 'Can you continue to look over the site https://bicyclethief.ca and continue researching what is new?';
+        const context = {
+            blockCount: 8,
+            outline: [{ id: 'h1' }],
+        };
+
+        expect(agent._hasNonPageRuntimeIntent(question, {})).toBe(true);
+        expect(agent._shouldForcePageEditActions(question, context, {})).toBe(false);
+    });
+
+    test('still forces page actions for direct current-page writing requests', () => {
+        const agent = loadAgent();
+        const question = 'Continue this page and turn it into a cleaner summary with better structure.';
+        const context = {
+            blockCount: 8,
+            outline: [{ id: 'h1' }],
+        };
+
+        expect(agent._hasNonPageRuntimeIntent(question, {})).toBe(false);
+        expect(agent._shouldForcePageEditActions(question, context, {})).toBe(true);
+    });
 });

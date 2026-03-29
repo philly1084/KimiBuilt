@@ -462,6 +462,21 @@ GUIDELINES:
         ].some((pattern) => pattern.test(normalized));
     }
 
+    function hasExplicitExternalPageIntent(question = '') {
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        if (/https?:\/\//.test(normalized)) {
+            return true;
+        }
+
+        const externalTarget = /\b(site|website|web\s*page|homepage|landing\s*page|url)\b/.test(normalized);
+        const externalVerb = /\b(look over|review|inspect|analyze|audit|browse|scrape|check|visit)\b/.test(normalized);
+        return externalTarget && externalVerb;
+    }
+
     function hasNonPageRuntimeIntent(question = '', requestOptions = {}) {
         if (requestOptions?.outputFormat) {
             return true;
@@ -472,7 +487,8 @@ GUIDELINES:
             return false;
         }
 
-        return /\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|container|ingress|traefik|dns|tls|acme|cert|debug|troubleshoot|logs|research|search the web|browse|scrape|tool call|tool use)\b/.test(normalized);
+        return hasExplicitExternalPageIntent(normalized)
+            || /\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|container|ingress|traefik|dns|tls|acme|cert|debug|troubleshoot|logs|research|search the web|browse|scrape|tool call|tool use)\b/.test(normalized);
     }
 
     function isImplicitPageBuildIntent(question = '', context = null, requestOptions = {}) {
@@ -494,6 +510,10 @@ GUIDELINES:
     }
 
     function shouldForcePageEditActions(question = '', context = null, requestOptions = {}) {
+        if (hasNonPageRuntimeIntent(question, requestOptions)) {
+            return false;
+        }
+
         return isExplicitPageEditIntent(question)
             || isImplicitPageBuildIntent(question, context, requestOptions)
             || shouldUseMultiPassNotesDraft(question, context, requestOptions);
@@ -5409,7 +5429,9 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         _simulateStreaming: simulateStreaming,
         _buildSystemPrompt: buildSystemPrompt,
         _applyNotesActions: applyNotesActions,
-        _extractNotesActionPlan: extractNotesActionPlan
+        _extractNotesActionPlan: extractNotesActionPlan,
+        _hasNonPageRuntimeIntent: hasNonPageRuntimeIntent,
+        _shouldForcePageEditActions: shouldForcePageEditActions
     };
 })();
 
