@@ -43,13 +43,46 @@ function normalizeModelId(modelId = '') {
     return String(modelId || '').trim();
 }
 
-function shouldUseResponsesAPI() {
-    try {
-        const parsed = new URL(String(config.openai.baseURL || 'https://api.openai.com/v1'));
-        return /(^|\.)openai\.com$/i.test(parsed.hostname);
-    } catch (_error) {
-        return false;
+function normalizeOpenAIApiMode(mode = '') {
+    const normalized = String(mode || '').trim().toLowerCase();
+
+    if ([
+        'chat',
+        'chat-completions',
+        'chat_completions',
+        'chatcompletions',
+        'completions',
+    ].includes(normalized)) {
+        return 'chat';
     }
+
+    if (normalized === 'responses') {
+        return 'responses';
+    }
+
+    return 'auto';
+}
+
+function resolveOpenAIApiMode({
+    baseURL = config.openai.baseURL,
+    requestedMode = config.openai.apiMode,
+} = {}) {
+    const normalizedMode = normalizeOpenAIApiMode(requestedMode);
+
+    if (normalizedMode !== 'auto') {
+        return normalizedMode;
+    }
+
+    try {
+        const parsed = new URL(String(baseURL || 'https://api.openai.com/v1'));
+        return /(^|\.)openai\.com$/i.test(parsed.hostname) ? 'responses' : 'chat';
+    } catch (_error) {
+        return 'chat';
+    }
+}
+
+function shouldUseResponsesAPI(options = {}) {
+    return resolveOpenAIApiMode(options) === 'responses';
 }
 
 const AUTO_TOOL_ALLOWLIST = new Set([
@@ -2529,6 +2562,7 @@ async function createResponse({
     });
 
     const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
+    const apiMode = resolveOpenAIApiMode();
     const params = {
         model: model || config.openai.model,
         input: buildResponsesInput(messages),
@@ -2539,7 +2573,7 @@ async function createResponse({
     }
     const prompt = getLastUserText(messages);
 
-    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}, reasoning=${normalizedReasoningEffort || 'default'}`);
+    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}, reasoning=${normalizedReasoningEffort || 'default'}, apiMode=${apiMode}`);
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
 
     try {
@@ -2613,7 +2647,7 @@ async function createResponse({
             }
         }
 
-        if (shouldUseResponsesAPI()) {
+        if (apiMode === 'responses') {
             const response = await openai.responses.create(params);
             return stream ? normalizeStreamResponse(response) : normalizeModelResponse(response);
         }
@@ -2703,13 +2737,16 @@ module.exports = {
         extractExplicitWebResearchQuery,
         extractRequestedDirectoryPath,
         getResponseApiText,
+        normalizeOpenAIApiMode,
         normalizeModelResponse,
         normalizeToolResultForModel,
+        resolveOpenAIApiMode,
         runDeterministicToolPreflight,
         runDirectRequiredToolAction,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,
         shouldAutoUseTool,
+        shouldUseResponsesAPI,
         promptHasExplicitSshIntent,
         hasUsableSshDefaults,
         isTerminalFinishReason,

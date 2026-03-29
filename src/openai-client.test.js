@@ -336,6 +336,42 @@ describe('openai-client automatic tool orchestration helpers', () => {
         jest.restoreAllMocks();
     });
 
+    test('uses responses mode automatically for official OpenAI hosts', () => {
+        expect(__testUtils.resolveOpenAIApiMode({
+            baseURL: 'https://api.openai.com/v1',
+            requestedMode: 'auto',
+        })).toBe('responses');
+    });
+
+    test('uses chat mode automatically for custom hosts', () => {
+        expect(__testUtils.resolveOpenAIApiMode({
+            baseURL: 'https://api.groq.com/openai/v1',
+            requestedMode: 'auto',
+        })).toBe('chat');
+    });
+
+    test('allows forcing chat mode regardless of host', () => {
+        expect(__testUtils.resolveOpenAIApiMode({
+            baseURL: 'https://api.openai.com/v1',
+            requestedMode: 'chat',
+        })).toBe('chat');
+        expect(__testUtils.shouldUseResponsesAPI({
+            baseURL: 'https://api.openai.com/v1',
+            requestedMode: 'chat',
+        })).toBe(false);
+    });
+
+    test('allows forcing responses mode regardless of host', () => {
+        expect(__testUtils.resolveOpenAIApiMode({
+            baseURL: 'https://api.groq.com/openai/v1',
+            requestedMode: 'responses',
+        })).toBe('responses');
+        expect(__testUtils.shouldUseResponsesAPI({
+            baseURL: 'https://api.groq.com/openai/v1',
+            requestedMode: 'responses',
+        })).toBe(true);
+    });
+
     test('sanitizes union schema types into a single tool-compatible type', () => {
         expect(__testUtils.sanitizeToolSchema({
             type: 'object',
