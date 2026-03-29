@@ -2055,8 +2055,18 @@ function getResponseApiText(response) {
     return response.output
         .filter((item) => item?.type === 'message' && item?.role === 'assistant')
         .flatMap((item) => item.content || [])
-        .filter((content) => content?.type === 'output_text')
-        .map((content) => content.text || '')
+        .map((content) => {
+            if (typeof content === 'string') {
+                return content;
+            }
+
+            if (content?.type === 'output_text' || content?.type === 'text') {
+                return content.text || '';
+            }
+
+            return content?.text || content?.output_text || '';
+        })
+        .filter(Boolean)
         .join('');
 }
 

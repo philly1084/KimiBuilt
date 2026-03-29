@@ -1186,4 +1186,17 @@ describe('openai-client automatic tool orchestration helpers', () => {
             }],
         })).toBe('final answer');
     });
+
+    test('extracts responses text from both output_text and text content items', () => {
+        expect(__testUtils.getResponseApiText({
+            output: [{
+                type: 'message',
+                role: 'assistant',
+                content: [
+                    { type: 'text', text: 'Hello ' },
+                    { type: 'output_text', text: 'world' },
+                ],
+            }],
+        })).toBe('Hello world');
+    });
 });

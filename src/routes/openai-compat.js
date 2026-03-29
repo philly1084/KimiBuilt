@@ -19,7 +19,12 @@ const {
     resolveArtifactContextIds,
     resolveReasoningEffort,
 } = require('../ai-route-utils');
-const { artifactService, extractResponseText } = require('../artifacts/artifact-service');
+const {
+    artifactService,
+    extractResponseText,
+    resolveCompletedResponseText,
+    getMissingCompletionDelta,
+} = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
@@ -522,6 +527,22 @@ router.post('/chat/completions', async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
+                    const completedText = resolveCompletedResponseText(fullText, event.response);
+                    const missingDelta = getMissingCompletionDelta(fullText, completedText);
+                    if (missingDelta) {
+                        fullText = completedText;
+                        res.write(`data: ${JSON.stringify({
+                            id: `chatcmpl-${sessionId}-${chunkIndex}`,
+                            object: 'chat.completion.chunk',
+                            created: Math.floor(Date.now() / 1000),
+                            model: model || 'gpt-4o',
+                            choices: [{ index: 0, delta: { content: missingDelta }, finish_reason: null }],
+                        })}\n\n`);
+                        chunkIndex += 1;
+                    } else {
+                        fullText = completedText;
+                    }
+
                     const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
@@ -945,6 +966,15 @@ router.post('/responses', async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
+                    const completedText = resolveCompletedResponseText(fullText, event.response);
+                    const missingDelta = getMissingCompletionDelta(fullText, completedText);
+                    if (missingDelta) {
+                        fullText = completedText;
+                        res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: missingDelta })}\n\n`);
+                    } else {
+                        fullText = completedText;
+                    }
+
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
                         memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});

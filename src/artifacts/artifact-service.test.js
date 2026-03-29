@@ -37,7 +37,7 @@ jest.mock('../postgres', () => ({
     },
 }));
 
-const { artifactService } = require('./artifact-service');
+const { artifactService, extractResponseText, resolveCompletedResponseText } = require('./artifact-service');
 const { artifactStore } = require('./artifact-store');
 const { postgres } = require('../postgres');
 const { renderArtifact } = require('./artifact-renderer');
@@ -108,6 +108,42 @@ describe('ArtifactService', () => {
         expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-1',
         }));
+    });
+
+    test('extractResponseText handles direct output_text and mixed content item types', () => {
+        expect(extractResponseText({
+            output_text: 'Top-level answer',
+        })).toBe('Top-level answer');
+
+        expect(extractResponseText({
+            output: [
+                {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [
+                        { type: 'text', text: 'First part. ' },
+                        { type: 'output_text', text: 'Second part.' },
+                    ],
+                },
+            ],
+        })).toBe('First part. Second part.');
+    });
+
+    test('resolveCompletedResponseText recovers the final answer when streaming deltas were missing', () => {
+        const response = {
+            output: [
+                {
+                    type: 'message',
+                    role: 'assistant',
+                    content: [
+                        { type: 'text', text: 'Recovered final answer' },
+                    ],
+                },
+            ],
+        };
+
+        expect(resolveCompletedResponseText('', response)).toBe('Recovered final answer');
+        expect(resolveCompletedResponseText('Recovered', response)).toBe('Recovered final answer');
     });
 
     test('uses multi-pass generation for html-family artifacts', async () => {

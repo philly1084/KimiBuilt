@@ -31,12 +31,108 @@ function sha256(buffer) {
     return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function extractResponseContentText(content) {
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map((item) => extractResponseContentText(item))
+            .filter(Boolean)
+            .join('');
+    }
+
+    if (!content || typeof content !== 'object') {
+        return '';
+    }
+
+    if (typeof content.text === 'string') {
+        return content.text;
+    }
+
+    if (typeof content.output_text === 'string') {
+        return content.output_text;
+    }
+
+    if (typeof content.content === 'string') {
+        return content.content;
+    }
+
+    if (typeof content.message === 'string') {
+        return content.message;
+    }
+
+    if (typeof content.value === 'string') {
+        return content.value;
+    }
+
+    if (content.content != null) {
+        return extractResponseContentText(content.content);
+    }
+
+    return '';
+}
+
 function extractResponseText(response) {
-    return response.output
-        .filter((item) => item.type === 'message')
-        .map((item) => item.content.map((content) => content.text).join(''))
+    if (typeof response?.output_text === 'string' && response.output_text.trim()) {
+        return response.output_text.trim();
+    }
+
+    const output = Array.isArray(response?.output) ? response.output : [];
+
+    return output
+        .filter((item) => item?.type === 'message' || item?.role === 'assistant')
+        .map((item) => extractResponseContentText(item?.content ?? item?.text ?? item?.output_text ?? ''))
+        .filter(Boolean)
         .join('\n')
         .trim();
+}
+
+function resolveCompletedResponseText(streamedText = '', response = {}) {
+    const streamed = String(streamedText || '');
+    const completed = extractResponseText(response);
+
+    if (!completed) {
+        return streamed.trim();
+    }
+
+    if (!streamed) {
+        return completed;
+    }
+
+    if (completed === streamed) {
+        return streamed;
+    }
+
+    if (completed.startsWith(streamed)) {
+        return completed;
+    }
+
+    if (streamed.includes(completed)) {
+        return streamed;
+    }
+
+    return completed;
+}
+
+function getMissingCompletionDelta(streamedText = '', completedText = '') {
+    const streamed = String(streamedText || '');
+    const completed = String(completedText || '');
+
+    if (!completed) {
+        return '';
+    }
+
+    if (!streamed) {
+        return completed;
+    }
+
+    if (completed.startsWith(streamed)) {
+        return completed.slice(streamed.length);
+    }
+
+    return '';
 }
 
 function requestModelResponse(params = {}) {
@@ -1227,6 +1323,8 @@ module.exports = {
     artifactService,
     ArtifactService,
     extractResponseText,
+    resolveCompletedResponseText,
+    getMissingCompletionDelta,
 };
 
 

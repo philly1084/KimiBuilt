@@ -369,4 +369,52 @@ describe('/api/chat route', () => {
             }),
         );
     });
+
+    test('streams the completed response text when the runtime emits no deltas', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Say hello.',
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: false,
+            response: (async function* streamWithoutDeltas() {
+                yield {
+                    type: 'response.completed',
+                    response: {
+                        id: 'resp-final-only',
+                        model: 'gpt-test',
+                        output: [{
+                            type: 'message',
+                            role: 'assistant',
+                            content: [{ type: 'text', text: 'Recovered final answer' }],
+                        }],
+                        metadata: {
+                            toolEvents: [],
+                        },
+                    },
+                };
+            }()),
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Say hello.',
+                stream: true,
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('"type":"delta","content":"Recovered final answer"');
+        expect(response.text).toContain('data: [DONE]');
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', expect.arrayContaining([
+            expect.objectContaining({ role: 'assistant', content: 'Recovered final answer' }),
+        ]));
+    });
 });

@@ -35,6 +35,7 @@ const { ConversationOrchestrator } = require('./conversation-orchestrator');
 // Document Service
 const { DocumentService } = require('./documents/document-service');
 const { createResponse } = require('./openai-client');
+const { extractResponseText } = require('./artifacts/artifact-service');
 
 validate();
 
@@ -251,10 +252,7 @@ async function start() {
                     reasoningEffort: options.reasoningEffort || null,
                 });
 
-                return response.output
-                    .filter((item) => item.type === 'message')
-                    .map((item) => item.content.map((content) => content.text).join(''))
-                    .join('\n');
+                return extractResponseText(response);
             },
         };
         openaiClient.responses = {
@@ -274,10 +272,7 @@ async function start() {
                         model: params.model || null,
                         reasoningEffort: params.reasoning_effort || params.reasoning?.effort || null,
                     });
-                    const content = response.output
-                        .filter((item) => item.type === 'message')
-                        .map((item) => item.content.map((entry) => entry.text).join(''))
-                        .join('\n');
+                    const content = extractResponseText(response);
 
                     return {
                         id: response.id,

@@ -4,6 +4,7 @@ const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReasoningEffort } = require('../ai-route-utils');
+const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 
 const router = Router();
@@ -95,10 +96,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             await sessionStore.recordResponse(sessionId, response.id);
         }
 
-        const outputText = response.output
-            .filter((item) => item.type === 'message')
-            .map((item) => item.content.map((content) => content.text).join(''))
-            .join('\n');
+        const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [

@@ -18,6 +18,11 @@ const {
     resolveArtifactContextIds,
     resolveReasoningEffort,
 } = require('../ai-route-utils');
+const {
+    extractResponseText,
+    resolveCompletedResponseText,
+    getMissingCompletionDelta,
+} = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
@@ -293,6 +298,15 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 }
 
                 if (event.type === 'response.completed') {
+                    const completedText = resolveCompletedResponseText(fullText, event.response);
+                    const missingDelta = getMissingCompletionDelta(fullText, completedText);
+                    if (missingDelta) {
+                        fullText = completedText;
+                        res.write(`data: ${JSON.stringify({ type: 'delta', content: missingDelta })}\n\n`);
+                    } else {
+                        fullText = completedText;
+                    }
+
                     const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
@@ -370,10 +384,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             await sessionStore.recordResponse(sessionId, response.id);
         }
 
-        const outputText = response.output
-            .filter((item) => item.type === 'message')
-            .map((item) => item.content.map((content) => content.text).join(''))
-            .join('\n');
+        const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [

@@ -1038,10 +1038,7 @@ class AgentOrchestrator {
   }
 
   extractResponseOutput(response) {
-    return (response?.output || [])
-      .filter((item) => item.type === 'message')
-      .map((item) => (item.content || []).map((content) => content.text).join(''))
-      .join('\n');
+    return extractResponseText(response);
   }
 
   extractToolEvents(response = {}) {
@@ -1072,6 +1069,7 @@ class AgentOrchestrator {
           }
 
           if (event.type === 'response.completed') {
+            fullText = orchestrator.extractResponseOutput(event.response) || fullText;
             const toolEvents = orchestrator.extractToolEvents(event.response);
             const duration = orchestrator.finalizeRuntimeTask(task, workingMemory, fullText);
             await orchestrator.persistConversationState({

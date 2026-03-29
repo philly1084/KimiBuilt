@@ -16,6 +16,11 @@ const {
     resolveArtifactContextIds,
     resolveReasoningEffort,
 } = require('../ai-route-utils');
+const {
+    extractResponseText,
+    resolveCompletedResponseText,
+    getMissingCompletionDelta,
+} = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
@@ -299,6 +304,15 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             }
 
             if (event.type === 'response.completed') {
+                const completedText = resolveCompletedResponseText(fullText, event.response);
+                const missingDelta = getMissingCompletionDelta(fullText, completedText);
+                if (missingDelta) {
+                    fullText = completedText;
+                    ws.send(JSON.stringify({ type: 'delta', content: missingDelta }));
+                } else {
+                    fullText = completedText;
+                }
+
                 if (!execution.handledPersistence) {
                     await sessionStore.recordResponse(session.id, event.response.id);
                     memoryService.rememberResponse(session.id, fullText, ownerId ? { ownerId } : {});
@@ -409,10 +423,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
             await sessionStore.recordResponse(session.id, response.id);
         }
 
-        const outputText = response.output
-            .filter((item) => item.type === 'message')
-            .map((item) => item.content.map((content) => content.text).join(''))
-            .join('\n');
+        const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(session.id, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(session.id, [
@@ -518,10 +529,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             await sessionStore.recordResponse(session.id, response.id);
         }
 
-        const outputText = response.output
-            .filter((item) => item.type === 'message')
-            .map((item) => item.content.map((content) => content.text).join(''))
-            .join('\n');
+        const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(session.id, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(session.id, [
