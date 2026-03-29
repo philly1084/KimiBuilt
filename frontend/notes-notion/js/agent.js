@@ -2075,6 +2075,76 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             .trim();
     }
 
+    function isAssistantReplyPlaceholderText(text = '') {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        return /^<\s*assistant(?:\s+reply)?\s*\/?>$/i.test(normalized)
+            || normalized === 'assistant reply'
+            || normalized === 'assistant_reply';
+    }
+
+    function parseLooseJsonValue(value) {
+        if (!value || typeof value !== 'string') {
+            return null;
+        }
+
+        try {
+            return JSON.parse(value);
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function extractFunctionPayloadText(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            return null;
+        }
+
+        const type = String(value.type || '').trim().toLowerCase();
+        const functionName = String(value.name || value.function?.name || '').trim();
+        if (type !== 'function' && !functionName) {
+            return null;
+        }
+
+        const candidateSources = [
+            value.parameters,
+            value.arguments,
+            value.function?.arguments,
+            value.function?.parameters,
+        ];
+
+        for (const source of candidateSources) {
+            const parsed = typeof source === 'string'
+                ? parseLooseJsonValue(source)
+                : source;
+            if (!parsed || typeof parsed !== 'object') {
+                continue;
+            }
+
+            const functionText = [
+                parsed.notes_page_update,
+                parsed.assistant_reply,
+                parsed.assistantReply,
+                parsed.message,
+                parsed.content,
+                parsed.text,
+                parsed.result,
+                parsed.response,
+                parsed.output_text,
+                parsed.outputText,
+            ].find((entry) => typeof entry === 'string' && entry.trim() && !isAssistantReplyPlaceholderText(entry));
+
+            if (functionText) {
+                return functionText.trim();
+            }
+        }
+
+        return null;
+    }
+
     function extractGenericWrapperContent(value) {
         if (typeof value === 'string') {
             const trimmed = value.trim();
@@ -2087,7 +2157,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 return parsedPayload.displayText;
             }
 
-            return trimmed;
+            return isAssistantReplyPlaceholderText(trimmed) ? null : trimmed;
         }
 
         if (value == null) {
@@ -2108,12 +2178,17 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return null;
         }
 
+        const functionPayloadText = extractFunctionPayloadText(value);
+        if (functionPayloadText) {
+            return functionPayloadText;
+        }
+
         const imageMarkdown = extractMarkdownImageContent(value);
 
         const directKeys = ['content', 'text', 'message', 'result', 'response', 'output', 'output_text', 'outputText', 'markdown'];
         let primaryText = null;
         for (const key of directKeys) {
-            if (typeof value[key] === 'string' && value[key].trim()) {
+            if (typeof value[key] === 'string' && value[key].trim() && !isAssistantReplyPlaceholderText(value[key])) {
                 primaryText = value[key].trim();
                 break;
             }
@@ -2550,7 +2625,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return genericContent.displayText;
         }
 
-        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"assistantReply"\s*:|"notes-actions"\s*:|"(?:actions|operations|edits)"\s*:|"action"\s*:\s*"(?:replace-content|append-content|prepend-content)"|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
+        const markerIndex = value.search(/```notes-actions|```json|"assistant_reply"\s*:|"assistantReply"\s*:|"notes-actions"\s*:|"(?:actions|operations|edits)"\s*:|"action"\s*:\s*"(?:replace-content|append-content|prepend-content)"|"type"\s*:\s*"function"|"name"\s*:\s*"update_notes_page"|"type"\s*:\s*"(?:text|heading_1|heading_2|heading_3|bulleted_list|numbered_list|todo|code|quote|callout|divider|mermaid|image|ai_image|bookmark|database|ai|toggle|math)"/i);
         if (markerIndex >= 0) {
             return value.slice(0, markerIndex).trim();
         }
@@ -2587,7 +2662,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             }
 
             return {
-                displayText: looksLikeNotesActionResponse(text) ? '' : text.trim(),
+                displayText: looksLikeNotesActionResponse(text) || isAssistantReplyPlaceholderText(text) ? '' : text.trim(),
                 actions: [],
                 parseFailed: looksLikeNotesActionResponse(text)
             };

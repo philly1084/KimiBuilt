@@ -158,6 +158,32 @@ describe('notes agent parsing', () => {
         expect(parsed.actions).toEqual([]);
     });
 
+    test('unwraps raw function payloads into visible assistant text instead of showing the tool wrapper', () => {
+        const agent = loadAgent();
+        const responseText = JSON.stringify({
+            type: 'function',
+            name: 'update_notes_page',
+            parameters: {
+                notes_page_update: 'It is going well, thanks for asking. How can I help?'
+            }
+        });
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('It is going well, thanks for asking. How can I help?');
+        expect(parsed.actions).toEqual([]);
+    });
+
+    test('suppresses placeholder-only assistant replies', () => {
+        const agent = loadAgent();
+        const responseText = '<assistant reply>';
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+
+        expect(parsed.displayText).toBe('');
+        expect(parsed.actions).toEqual([]);
+    });
+
     test('treats explicit website review prompts as non-page runtime work', () => {
         const agent = loadAgent();
         const question = 'Can you continue to look over the site https://bicyclethief.ca and continue researching what is new?';

@@ -27,6 +27,103 @@ const RETRY_CONFIG = {
 
 const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
 
+function extractAssistantText(value) {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return '';
+        }
+
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                const extracted = extractAssistantText(parsed);
+                if (extracted) {
+                    return extracted;
+                }
+            } catch (_error) {
+                // Ignore parse failures and fall back to the raw string.
+            }
+        }
+
+        return trimmed;
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => extractAssistantText(entry))
+            .filter(Boolean)
+            .join('');
+    }
+
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    const functionPayloadSources = [
+        value.parameters,
+        value.arguments,
+        value.function?.arguments,
+        value.function?.parameters,
+    ];
+    for (const source of functionPayloadSources) {
+        const parsed = typeof source === 'string'
+            ? (() => {
+                try {
+                    return JSON.parse(source);
+                } catch (_error) {
+                    return null;
+                }
+            })()
+            : source;
+        if (!parsed || typeof parsed !== 'object') {
+            continue;
+        }
+
+        const functionText = [
+            parsed.notes_page_update,
+            parsed.assistant_reply,
+            parsed.assistantReply,
+            parsed.message,
+            parsed.content,
+            parsed.text,
+            parsed.result,
+            parsed.response,
+            parsed.output_text,
+            parsed.outputText,
+        ].find((entry) => typeof entry === 'string' && entry.trim());
+
+        if (functionText) {
+            return functionText.trim();
+        }
+    }
+
+    const directKeys = ['output_text', 'text', 'content', 'message', 'response', 'output'];
+    for (const key of directKeys) {
+        const extracted = extractAssistantText(value[key]);
+        if (extracted) {
+            return extracted;
+        }
+    }
+
+    if (value.role === 'assistant' && Array.isArray(value.content)) {
+        const extracted = extractAssistantText(value.content);
+        if (extracted) {
+            return extracted;
+        }
+    }
+
+    const nestedKeys = ['content', 'output', 'payload', 'data', 'item', 'items', 'value', 'result'];
+    for (const key of nestedKeys) {
+        const extracted = extractAssistantText(value[key]);
+        if (extracted) {
+            return extracted;
+        }
+    }
+
+    return '';
+}
+
 function isRemoteBuildAutonomyApproved() {
     try {
         const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
@@ -598,7 +695,12 @@ class OpenAIAPIClient extends EventTarget {
             }
             
             return {
-                content: response.choices[0]?.message?.content || '',
+                content: extractAssistantText(
+                    response?.choices?.[0]?.message?.content
+                    ?? response?.choices?.[0]?.message
+                    ?? response?.output_text
+                    ?? response
+                ),
                 sessionId: this.currentSessionId,
                 toolEvents: this.extractToolEvents(response),
             };
@@ -647,7 +749,12 @@ class OpenAIAPIClient extends EventTarget {
                 }
                 
                 return {
-                    content: data.choices?.[0]?.message?.content || '',
+                    content: extractAssistantText(
+                        data?.choices?.[0]?.message?.content
+                        ?? data?.choices?.[0]?.message
+                        ?? data?.output_text
+                        ?? data
+                    ),
                     sessionId: this.currentSessionId,
                     toolEvents: this.extractToolEvents(data),
                 };
