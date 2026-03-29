@@ -1453,6 +1453,100 @@ function appendModelResponseTrace(executionTrace = [], response = null, {
     }));
 }
 
+function summarizeToolEventForUser(event = {}) {
+    const tool = String(event?.toolCall?.function?.name || event?.result?.toolId || 'tool').trim();
+    const reason = String(event?.reason || '').trim();
+    const result = event?.result || {};
+    const success = result?.success !== false;
+    const data = result?.data || {};
+    const stdout = String(data?.stdout || '').trim();
+    const stderr = String(data?.stderr || '').trim();
+    const error = String(result?.error || '').trim();
+    const exitCode = Number.isFinite(Number(data?.exitCode)) ? Number(data.exitCode) : null;
+    const previewSource = stdout || stderr || error || (
+        typeof data === 'string'
+            ? data
+            : (data && typeof data === 'object' ? JSON.stringify(data) : '')
+    );
+    const preview = truncateText(previewSource.replace(/\s+/g, ' ').trim(), 320);
+
+    if (!success) {
+        return [
+            `- ${tool}: failed`,
+            reason ? `Reason: ${reason}.` : '',
+            error ? `Error: ${error}.` : '',
+            stderr && !error ? `Details: ${truncateText(stderr.replace(/\s+/g, ' ').trim(), 220)}.` : '',
+        ].filter(Boolean).join(' ');
+    }
+
+    return [
+        `- ${tool}: succeeded`,
+        reason ? `Reason: ${reason}.` : '',
+        exitCode != null ? `Exit code: ${exitCode}.` : '',
+        preview ? `Output: ${preview}.` : '',
+    ].filter(Boolean).join(' ');
+}
+
+function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    if (events.length === 0) {
+        return 'The model returned an empty final response after processing the request.';
+    }
+
+    const successes = events.filter((event) => event?.result?.success !== false).length;
+    const failures = events.length - successes;
+    const lines = [
+        'The model returned an empty final response, so here is a summary from the verified tool results.',
+        objective ? `Request: ${objective}` : '',
+        `Tool calls completed: ${events.length}. Successful: ${successes}. Failed: ${failures}.`,
+        '',
+        'Verified results:',
+        ...events.slice(0, 8).map((event) => summarizeToolEventForUser(event)),
+    ];
+
+    if (events.length > 8) {
+        lines.push(`- Additional tool results omitted: ${events.length - 8}.`);
+    }
+
+    return lines.filter(Boolean).join('\n');
+}
+
+function recoverEmptyModelResponse(response = null, {
+    objective = '',
+    toolEvents = [],
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    runtimeMode = 'plain',
+    phase = 'final-response',
+} = {}) {
+    const output = extractResponseText(response);
+    if (output.trim()) {
+        return response;
+    }
+
+    const shape = {
+        responseKeys: response && typeof response === 'object' ? Object.keys(response).slice(0, 20) : [],
+        choiceKeys: response?.choices?.[0] && typeof response.choices[0] === 'object' ? Object.keys(response.choices[0]).slice(0, 20) : [],
+        messageKeys: response?.choices?.[0]?.message && typeof response.choices[0].message === 'object' ? Object.keys(response.choices[0].message).slice(0, 20) : [],
+        outputItemCount: Array.isArray(response?.output) ? response.output.length : 0,
+    };
+    console.warn(`[ConversationOrchestrator] Empty model output during ${phase}. Falling back to verified tool summary. Shape=${JSON.stringify(shape)}`);
+
+    return buildSyntheticResponse({
+        output: buildFallbackSynthesisText({ objective, toolEvents }),
+        responseId: response?.id || null,
+        model: response?.model || null,
+        metadata: {
+            ...(response?.metadata && typeof response.metadata === 'object' ? response.metadata : {}),
+            executionProfile,
+            runtimeMode,
+            toolEvents,
+            emptyModelOutputRecovered: true,
+            emptyModelOutputPhase: phase,
+            rawResponseShape: shape,
+        },
+    });
+}
+
 function getRemoteBuildAutonomyBudget() {
     return {
         maxRounds: Math.max(1, Number(config.runtime?.remoteBuildMaxAutonomousRounds) || 8),
@@ -3237,7 +3331,7 @@ class ConversationOrchestrator extends EventEmitter {
             })), null, 2),
         ].join('\n');
 
-        const response = await this.requestResponse({
+        const response = recoverEmptyModelResponse(await this.requestResponse({
             input: repairPrompt,
             instructions: runtimeInstructions,
             contextMessages,
@@ -3246,6 +3340,12 @@ class ConversationOrchestrator extends EventEmitter {
             model,
             reasoningEffort,
             enableAutomaticToolCalls: false,
+        }), {
+            objective,
+            toolEvents,
+            executionProfile,
+            runtimeMode,
+            phase: 'repair',
         });
 
         return this.withResponseMetadata(response, {
@@ -3283,7 +3383,7 @@ class ConversationOrchestrator extends EventEmitter {
         });
 
         if (toolEvents.length === 0) {
-            const response = await this.requestResponse({
+            const response = recoverEmptyModelResponse(await this.requestResponse({
                 input,
                 instructions: runtimeInstructions,
                 contextMessages,
@@ -3292,6 +3392,12 @@ class ConversationOrchestrator extends EventEmitter {
                 model,
                 reasoningEffort,
                 enableAutomaticToolCalls: false,
+            }), {
+                objective,
+                toolEvents,
+                executionProfile,
+                runtimeMode,
+                phase: 'direct-response',
             });
 
             return this.withResponseMetadata(response, {
@@ -3344,7 +3450,7 @@ class ConversationOrchestrator extends EventEmitter {
             })), null, 2),
         ].join('\n');
 
-        const response = await this.requestResponse({
+        const response = recoverEmptyModelResponse(await this.requestResponse({
             input: synthesisPrompt,
             instructions: runtimeInstructions,
             contextMessages,
@@ -3353,6 +3459,12 @@ class ConversationOrchestrator extends EventEmitter {
             model,
             reasoningEffort,
             enableAutomaticToolCalls: false,
+        }), {
+            objective,
+            toolEvents,
+            executionProfile,
+            runtimeMode,
+            phase: 'tool-synthesis',
         });
 
         return this.withResponseMetadata(response, {
