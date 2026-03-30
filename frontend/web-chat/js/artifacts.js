@@ -185,6 +185,22 @@
             .artifact-generated-card .artifact-mermaid-preview {
                 margin-bottom: 12px;
             }
+
+            .artifact-generated-card .artifact-html-preview {
+                margin-bottom: 12px;
+                border: 1px solid rgba(245, 158, 11, 0.22);
+                border-radius: 12px;
+                overflow: hidden;
+                background: rgba(15, 23, 42, 0.06);
+            }
+
+            .artifact-generated-card .artifact-html-preview iframe {
+                display: block;
+                width: 100%;
+                height: 320px;
+                border: none;
+                background: #ffffff;
+            }
             
             .artifact-generated-card .file-actions {
                 display: flex;
@@ -471,6 +487,18 @@
         return `Created ${files.length} files. Use Download below.`;
     }
 
+    function isHtmlArtifact(artifact) {
+        return String(artifact?.format || '').toLowerCase() === 'html';
+    }
+
+    function getHtmlPreviewUrl(artifact) {
+        if (!artifact?.downloadUrl) {
+            return '';
+        }
+
+        return `${API_BASE}${artifact.downloadUrl}?inline=1`;
+    }
+
     function renderGeneratedArtifacts(artifacts) {
         const container = document.getElementById('messages-container');
         if (!container) return;
@@ -483,12 +511,20 @@
                 ? getMermaidSourceFromArtifact(artifact)
                 : '';
             const mermaidBaseName = getArtifactBaseName(artifact.filename);
+            const htmlPreviewUrl = isHtmlArtifact(artifact) ? getHtmlPreviewUrl(artifact) : '';
             const mermaidPreview = mermaidSource
                 ? `
                     <div class="artifact-mermaid-preview">
                         <div class="mermaid-render-surface" data-mermaid-source="${escapeHtmlAttr(mermaidSource)}" data-mermaid-filename="${escapeHtmlAttr(mermaidBaseName)}">
                             <div class="mermaid-placeholder">Rendering diagram...</div>
                         </div>
+                    </div>
+                `
+                : '';
+            const htmlPreview = htmlPreviewUrl
+                ? `
+                    <div class="artifact-html-preview">
+                        <iframe src="${escapeHtmlAttr(htmlPreviewUrl)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals"></iframe>
                     </div>
                 `
                 : '';
@@ -504,6 +540,14 @@
                     </button>
                 `
                 : '';
+            const htmlActions = htmlPreviewUrl
+                ? `
+                    <button onclick="artifactManager.openArtifactPreview('${artifact.id}')">
+                        <i data-lucide="external-link" class="w-4 h-4"></i>
+                        Preview
+                    </button>
+                `
+                : '';
             
             card.className = 'artifact-generated-card';
             card.innerHTML = `
@@ -515,12 +559,14 @@
                     ${artifact.format?.toUpperCase() || 'FILE'} | ${formatFileSize(artifact.sizeBytes)}
                 </div>
                 ${mermaidPreview}
+                ${htmlPreview}
                 <div class="file-actions">
                     <button class="primary" onclick="artifactManager.downloadArtifact('${artifact.id}', '${escapeHtml(artifact.filename)}')">
                         <i data-lucide="download" class="w-4 h-4"></i>
                         Download
                     </button>
                     ${mermaidActions}
+                    ${htmlActions}
                     <button onclick="artifactManager.addToContext('${artifact.id}')">
                         <i data-lucide="plus" class="w-4 h-4"></i>
                         Add to Context
@@ -991,6 +1037,18 @@
                     uiHelpers.showToast('Download failed: ' + error.message, 'error');
                 }
             }
+        },
+
+        openArtifactPreview: (id) => {
+            const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
+            if (!artifact?.downloadUrl) {
+                if (window.uiHelpers?.showToast) {
+                    uiHelpers.showToast('Preview is not available for this file yet.', 'warning');
+                }
+                return;
+            }
+
+            window.open(`${API_BASE}${artifact.downloadUrl}?inline=1`, '_blank', 'noopener');
         },
         
         addToContext: (id) => {

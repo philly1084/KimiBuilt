@@ -16,7 +16,7 @@ function getRequestOwnerId(req) {
 const canvasSchema = {
     message: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
-    canvasType: { required: false, type: 'string', enum: ['code', 'document', 'diagram'] },
+    canvasType: { required: false, type: 'string', enum: ['code', 'document', 'diagram', 'frontend'] },
     existingContent: { required: false, type: 'string' },
     model: { required: false, type: 'string' },
     reasoningEffort: { required: false, type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
@@ -28,6 +28,152 @@ const canvasSchema = {
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
 };
+
+function inferFrontendTitle(content = '') {
+    const source = String(content || '').trim();
+    if (!source) {
+        return 'Frontend Demo';
+    }
+
+    const titleMatch = source.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (titleMatch?.[1]) {
+        return titleMatch[1].replace(/\s+/g, ' ').trim();
+    }
+
+    const h1Match = source.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    if (h1Match?.[1]) {
+        return h1Match[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    return 'Frontend Demo';
+}
+
+function normalizeFrontendBundle(bundle = null, content = '') {
+    const files = [];
+    const source = bundle?.files;
+
+    if (Array.isArray(source)) {
+        source.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') {
+                return;
+            }
+
+            const fileContent = typeof entry.content === 'string' ? entry.content : '';
+            const filePath = String(entry.path || entry.name || '').trim();
+            if (!filePath || !fileContent.trim()) {
+                return;
+            }
+
+            files.push({
+                path: filePath,
+                language: String(entry.language || '').trim() || null,
+                purpose: String(entry.purpose || '').trim() || null,
+                content: fileContent,
+            });
+        });
+    } else if (source && typeof source === 'object') {
+        Object.entries(source).forEach(([filePath, fileContent]) => {
+            if (!String(filePath || '').trim() || typeof fileContent !== 'string' || !fileContent.trim()) {
+                return;
+            }
+
+            files.push({
+                path: String(filePath).trim(),
+                language: null,
+                purpose: null,
+                content: fileContent,
+            });
+        });
+    }
+
+    if (!files.find((entry) => entry.path.toLowerCase() === 'index.html') && String(content || '').trim()) {
+        files.unshift({
+            path: 'index.html',
+            language: 'html',
+            purpose: 'Standalone demo entry point for preview and export.',
+            content: String(content || '').trim(),
+        });
+    }
+
+    return {
+        entry: String(bundle?.entry || 'index.html').trim() || 'index.html',
+        files,
+    };
+}
+
+function normalizeFrontendHandoff(handoff = null, metadata = {}, content = '') {
+    const targetFramework = String(
+        handoff?.targetFramework
+        || handoff?.framework
+        || metadata.frameworkTarget
+        || 'static'
+    ).trim() || 'static';
+
+    const componentMap = Array.isArray(handoff?.componentMap)
+        ? handoff.componentMap
+            .map((entry) => ({
+                name: String(entry?.name || '').trim(),
+                purpose: String(entry?.purpose || '').trim(),
+                targetPath: String(entry?.targetPath || '').trim() || null,
+            }))
+            .filter((entry) => entry.name && entry.purpose)
+        : [];
+
+    const integrationSteps = Array.isArray(handoff?.integrationSteps)
+        ? handoff.integrationSteps
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+        : [];
+
+    return {
+        summary: String(
+            handoff?.summary
+            || metadata.summary
+            || 'Portable frontend demo with a standalone HTML preview and repo-ready file guidance.'
+        ).trim() || 'Portable frontend demo with a standalone HTML preview and repo-ready file guidance.',
+        targetFramework,
+        componentMap,
+        integrationSteps: integrationSteps.length > 0
+            ? integrationSteps
+            : [
+                'Keep the generated demo as a visual reference first, then split it into project components.',
+                'Move shared colors, spacing, and typography into your design system tokens.',
+                'Replace demo copy, mock data, and inline scripts with live project data and components.',
+            ],
+        entryFile: String(handoff?.entryFile || 'index.html').trim() || 'index.html',
+        sourceType: /<html\b/i.test(String(content || '')) ? 'standalone-html' : 'markup-fragment',
+    };
+}
+
+function buildFrontendFallbackMetadata(content = '') {
+    const title = inferFrontendTitle(content);
+    return {
+        type: 'frontend',
+        title,
+        language: 'html',
+        frameworkTarget: 'static',
+        previewMode: 'iframe',
+        bundle: normalizeFrontendBundle(null, content),
+        handoff: normalizeFrontendHandoff({ summary: `Standalone frontend demo for ${title}.` }, {}, content),
+    };
+}
+
+function normalizeFrontendMetadata(metadata = {}, content = '') {
+    const normalized = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? { ...metadata }
+        : {};
+
+    return {
+        ...normalized,
+        type: 'frontend',
+        title: String(normalized.title || '').trim() || inferFrontendTitle(content),
+        language: String(normalized.language || 'html').trim() || 'html',
+        frameworkTarget: String(normalized.frameworkTarget || normalized.framework || 'static').trim() || 'static',
+        previewMode: 'iframe',
+        bundle: normalizeFrontendBundle(normalized.bundle, content),
+        handoff: normalizeFrontendHandoff(normalized.handoff, normalized, content),
+    };
+}
 
 router.post('/', validate(canvasSchema), async (req, res, next) => {
     let runtimeTask = null;
@@ -163,6 +309,7 @@ Always respond with valid JSON in this format:
         code: '\n\nYou are generating CODE. Include the programming language in metadata.language. Provide working, well-commented code. Suggestions should be improvements or alternative approaches.',
         document: '\n\nYou are generating a DOCUMENT. Use markdown formatting. Include a title in metadata.title. Suggestions should be ways to expand or improve the document.',
         diagram: '\n\nYou are generating a DIAGRAM using Mermaid syntax. Include the diagram type in metadata.type (flowchart, sequence, etc). Suggestions should be ways to enhance the diagram.',
+        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML. Favor polished marketing sites, product pages, landing pages, editorial promos, dashboards, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. Suggestions should be concrete next frontend iterations.',
     };
 
     let instructions = base + (typeInstructions[canvasType] || typeInstructions.document);
@@ -177,12 +324,26 @@ Always respond with valid JSON in this format:
 function parseCanvasResponse(text, canvasType) {
     try {
         const parsed = JSON.parse(text);
+        const parsedContent = typeof parsed.content === 'string'
+            ? parsed.content
+            : String(parsed.content || '');
+        const metadata = canvasType === 'frontend'
+            ? normalizeFrontendMetadata(parsed.metadata, parsedContent)
+            : (parsed.metadata || { type: canvasType });
         return {
-            content: parsed.content || text,
-            metadata: parsed.metadata || { type: canvasType },
+            content: parsedContent || text,
+            metadata,
             suggestions: parsed.suggestions || [],
         };
     } catch {
+        if (canvasType === 'frontend') {
+            return {
+                content: text,
+                metadata: buildFrontendFallbackMetadata(text),
+                suggestions: [],
+            };
+        }
+
         return {
             content: text,
             metadata: { type: canvasType },
@@ -192,4 +353,10 @@ function parseCanvasResponse(text, canvasType) {
 }
 
 module.exports = router;
+module.exports._private = {
+    buildCanvasInstructions,
+    parseCanvasResponse,
+    buildFrontendFallbackMetadata,
+    normalizeFrontendMetadata,
+};
 

@@ -264,6 +264,11 @@ function inferRequestedOutputFormat(text = '') {
         return 'mermaid';
     }
 
+    if (hasArtifactIntent
+        && /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)) {
+        return 'html';
+    }
+
     if (/\bhtml\b/.test(normalized) && hasArtifactIntent) {
         return 'html';
     }

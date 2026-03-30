@@ -31,7 +31,8 @@ class ExportManager {
                 default: '.txt'
             },
             document: '.md',
-            diagram: '.mmd'
+            diagram: '.mmd',
+            frontend: '.html',
         };
 
         this.mimeTypes = {
@@ -113,7 +114,17 @@ class ExportManager {
      */
     downloadFile(content, canvasType, language = '', suggestedName = '') {
         const extension = this._getExtension(canvasType, language);
-        const filename = suggestedName || this._generateFilename(canvasType, extension);
+        const filename = suggestedName
+            ? (String(suggestedName).includes('.') ? suggestedName : `${suggestedName}${extension}`)
+            : this._generateFilename(canvasType, extension);
+        return this.downloadNamedFile(content, filename);
+    }
+
+    downloadNamedFile(content, filename = 'download.txt') {
+        const normalizedName = String(filename || 'download.txt');
+        const extension = normalizedName.includes('.')
+            ? `.${normalizedName.split('.').pop()}`.toLowerCase()
+            : '.txt';
         const mimeType = this.mimeTypes[extension] || 'text/plain';
 
         const blob = new Blob([content], { type: mimeType });
@@ -121,7 +132,7 @@ class ExportManager {
 
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename;
+        link.download = normalizedName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

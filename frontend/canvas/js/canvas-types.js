@@ -7,7 +7,8 @@ class CanvasTypeManager {
         this.types = {
             code: new CodeHandler(),
             document: new DocumentHandler(),
-            diagram: new DiagramHandler()
+            diagram: new DiagramHandler(),
+            frontend: new FrontendHandler()
         };
         this.currentType = 'code';
     }
@@ -394,6 +395,213 @@ class DocumentHandler extends CanvasTypeHandler {
 }
 
 /**
+ * Frontend Demo Handler
+ */
+class FrontendHandler extends CanvasTypeHandler {
+    getInfo() {
+        return {
+            name: 'Frontend',
+            description: 'Website demo builder with live preview',
+            icon: 'layout',
+            supportsPreview: true,
+            supportsSplitView: true,
+        };
+    }
+
+    getDefaultContent() {
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frontend Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5efe5;
+      --ink: #15221a;
+      --accent: #c7512c;
+      --card: rgba(255, 255, 255, 0.72);
+      --line: rgba(21, 34, 26, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, 'Times New Roman', serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(199, 81, 44, 0.22), transparent 34%),
+        linear-gradient(135deg, #f7f0e7 0%, #e9efe6 55%, #dbe6ea 100%);
+      min-height: 100vh;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 64px 0 88px;
+    }
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      padding: 28px;
+      backdrop-filter: blur(12px);
+      margin-bottom: 24px;
+    }
+
+    h1, h2, p { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="hero" data-component="hero">
+      <p>Portable demo frontend</p>
+      <h1>Use this canvas mode to build a polished web concept.</h1>
+      <p>Generate a landing page, product demo, promo microsite, or dashboard and then split it into repo files later.</p>
+    </section>
+  </main>
+</body>
+</html>`;
+    }
+
+    getCodeMirrorMode() {
+        return 'htmlmixed';
+    }
+
+    getFileExtension() {
+        return '.html';
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = String(text || '');
+        return div.innerHTML;
+    }
+
+    ensureHtmlDocument(content = '') {
+        const source = String(content || '').trim();
+        if (!source) {
+            return this.getDefaultContent();
+        }
+
+        if (/<html[\s>]/i.test(source)) {
+            return source;
+        }
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${this.escapeHtml('Frontend Demo')}</title>
+</head>
+<body>
+${source}
+</body>
+</html>`;
+    }
+
+    buildSummaryMarkup(metadata = {}) {
+        const handoff = metadata?.handoff || {};
+        const bundleFiles = Array.isArray(metadata?.bundle?.files) ? metadata.bundle.files : [];
+        const componentMap = Array.isArray(handoff.componentMap) ? handoff.componentMap : [];
+        const integrationSteps = Array.isArray(handoff.integrationSteps) ? handoff.integrationSteps : [];
+        const frameworkTarget = this.escapeHtml(metadata?.frameworkTarget || handoff.targetFramework || 'static');
+        const title = this.escapeHtml(metadata?.title || 'Frontend Demo');
+        const summary = this.escapeHtml(handoff.summary || 'Portable demo frontend with repo handoff guidance.');
+
+        const fileMarkup = bundleFiles.length > 0
+            ? `
+                <div class="frontend-preview-meta-block">
+                    <h4>Files</h4>
+                    <ul class="frontend-preview-list">
+                        ${bundleFiles.map((file) => `
+                            <li>
+                                <strong>${this.escapeHtml(file.path || 'file')}</strong>
+                                <span>${this.escapeHtml(file.purpose || file.language || 'Project scaffold file')}</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `
+            : '';
+
+        const componentMarkup = componentMap.length > 0
+            ? `
+                <div class="frontend-preview-meta-block">
+                    <h4>Component Map</h4>
+                    <ul class="frontend-preview-list">
+                        ${componentMap.map((entry) => `
+                            <li>
+                                <strong>${this.escapeHtml(entry.name || 'Section')}</strong>
+                                <span>${this.escapeHtml(entry.purpose || '')}</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `
+            : '';
+
+        const integrationMarkup = integrationSteps.length > 0
+            ? `
+                <div class="frontend-preview-meta-block">
+                    <h4>Integration Steps</h4>
+                    <ol class="frontend-preview-steps">
+                        ${integrationSteps.map((entry) => `<li>${this.escapeHtml(entry)}</li>`).join('')}
+                    </ol>
+                </div>
+            `
+            : '';
+
+        return `
+            <div class="frontend-preview-meta">
+                <div class="frontend-preview-meta-header">
+                    <div>
+                        <p class="frontend-preview-eyebrow">Repo-ready demo</p>
+                        <h3>${title}</h3>
+                    </div>
+                    <span class="frontend-preview-framework">${frameworkTarget}</span>
+                </div>
+                <p class="frontend-preview-summary">${summary}</p>
+                <div class="frontend-preview-meta-grid">
+                    ${fileMarkup}
+                    ${componentMarkup}
+                    ${integrationMarkup}
+                </div>
+            </div>
+        `;
+    }
+
+    renderPreview(content, metadata = {}, elementId = 'preview-content') {
+        const element = typeof elementId === 'string' ? document.getElementById(elementId) : elementId;
+        if (!element) {
+            return;
+        }
+
+        const html = this.ensureHtmlDocument(content);
+        element.innerHTML = `
+            <div class="frontend-preview-shell">
+                ${this.buildSummaryMarkup(metadata)}
+                <div class="frontend-preview-stage">
+                    <iframe
+                        class="frontend-preview-frame"
+                        title="${this.escapeHtml(metadata?.title || 'Frontend demo preview')}"
+                        sandbox="allow-scripts allow-forms allow-modals"
+                    ></iframe>
+                </div>
+            </div>
+        `;
+
+        const frame = element.querySelector('.frontend-preview-frame');
+        if (frame) {
+            frame.srcdoc = html;
+        }
+    }
+}
+
+/**
  * Diagram Handler
  */
 class DiagramHandler extends CanvasTypeHandler {
@@ -738,5 +946,5 @@ class DiagramHandler extends CanvasTypeHandler {
 
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { CanvasTypeManager, CanvasTypeHandler, CodeHandler, DocumentHandler, DiagramHandler };
+    module.exports = { CanvasTypeManager, CanvasTypeHandler, CodeHandler, DocumentHandler, FrontendHandler, DiagramHandler };
 }

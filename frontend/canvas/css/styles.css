@@ -474,6 +474,12 @@ body {
     border: 1px solid rgba(204, 167, 0, 0.3);
 }
 
+.category-badge.frontend {
+    background: rgba(245, 158, 11, 0.14);
+    color: #ffbf5a;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
 .category-chips {
     display: flex;
     flex-wrap: wrap;
@@ -964,6 +970,115 @@ body {
     max-width: 100%;
     height: auto;
     border-radius: var(--radius-md);
+}
+
+.frontend-preview-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.frontend-preview-meta {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px 22px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0.08), rgba(137, 209, 133, 0.08));
+}
+
+.frontend-preview-meta-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.frontend-preview-eyebrow {
+    margin: 0 0 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.frontend-preview-meta h3 {
+    margin: 0;
+    font-size: 24px;
+}
+
+.frontend-preview-framework {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.frontend-preview-summary {
+    margin: 0 0 16px;
+    color: var(--text-primary);
+}
+
+.frontend-preview-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.frontend-preview-meta-block {
+    padding: 14px;
+    border-radius: 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+}
+
+.frontend-preview-meta-block h4 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+}
+
+.frontend-preview-list,
+.frontend-preview-steps {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.frontend-preview-list li,
+.frontend-preview-steps li {
+    margin-bottom: 8px;
+}
+
+.frontend-preview-list li span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.frontend-preview-stage {
+    max-width: 1100px;
+    margin: 0 auto;
+    border-radius: 24px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-lg);
+}
+
+.frontend-preview-frame {
+    display: block;
+    width: 100%;
+    min-height: 780px;
+    border: none;
+    background: #ffffff;
 }
 
 /* Diagram Wrapper */
@@ -1479,6 +1594,18 @@ body {
     /* Diagram controls on mobile */
     .diagram-controls {
         padding: 12px;
+    }
+
+    .frontend-preview-meta {
+        padding: 16px;
+    }
+
+    .frontend-preview-meta-header {
+        flex-direction: column;
+    }
+
+    .frontend-preview-frame {
+        min-height: 520px;
     }
     
     /* Model selector on mobile */

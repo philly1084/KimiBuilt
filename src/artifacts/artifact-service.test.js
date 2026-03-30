@@ -238,6 +238,43 @@ describe('ArtifactService', () => {
         expect(result.responseId).toBe('resp-compose');
     });
 
+    test('uses single-pass frontend-demo generation for html landing-page requests', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-frontend-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: '<!DOCTYPE html><html><head><title>Nova Studio</title></head><body><section id="hero" data-component="hero"><h1>Nova Studio</h1></section></body></html>',
+                }],
+            }],
+        });
+
+        const result = await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-1', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Build a landing page demo for Nova Studio with a premium editorial feel.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse).toHaveBeenCalledTimes(1);
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Build a polished frontend demo instead of a plain document.');
+        expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            format: 'html',
+            title: expect.stringContaining('Nova Studio'),
+            content: expect.stringContaining('data-component="hero"'),
+        }));
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                generationStrategy: 'single-pass-frontend-demo',
+            }),
+        }));
+        expect(result.responseId).toBe('resp-frontend-1');
+    });
+
     test('injects verified session image references into multi-pass document instructions', async () => {
         createResponse
             .mockResolvedValueOnce({

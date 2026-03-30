@@ -745,6 +745,15 @@ function inferUnsplashQuery(prompt = '') {
     return cleaned.split(' ').slice(0, 6).join(' ');
 }
 
+function isFrontendDemoArtifactRequest(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup)\b/.test(normalized);
+}
+
 class ArtifactService {
     ensureEnabled() {
         if (!postgres.enabled) {
@@ -997,6 +1006,22 @@ class ArtifactService {
             promptContext,
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
         ].filter(Boolean).join('\n\n');
+
+        if (normalizedFormat === 'html' && isFrontendDemoArtifactRequest(`${promptContext}\n${existingContent}`)) {
+            return [
+                base,
+                buildDocumentImageInstructions(),
+                'Return standalone HTML only.',
+                'Build a polished frontend demo instead of a plain document.',
+                'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium landing-page or microsite feel.',
+                'Use semantic sections, responsive CSS, and purposeful but restrained interaction.',
+                'Keep the result portable so it can be moved into a real frontend repository later.',
+                'Use stable ids or data-component attributes on major sections to help later component extraction.',
+                'Prefer realistic copy, concrete sections, and clean calls to action over filler cards or placeholder boxes.',
+                'Inline CSS and JavaScript are acceptable when they help keep the demo self-contained.',
+                'Do not output markdown fences, implementation notes, or follow-up instructions.',
+            ].filter(Boolean).join('\n\n');
+        }
 
         if (normalizedFormat === 'html' || normalizedFormat === 'pdf' || normalizedFormat === 'docx') {
             return `${base}\n\n${buildDocumentImageInstructions()}\n\nReturn valid standalone HTML with inline-friendly structure and business formatting.`;
@@ -1332,6 +1357,7 @@ class ArtifactService {
         parentArtifactId = null,
     }) {
         const normalizedFormat = normalizeFormat(format);
+        const frontendDemoRequest = normalizedFormat === 'html' && isFrontendDemoArtifactRequest(prompt);
         if (!SUPPORTED_GENERATION_FORMATS.has(normalizedFormat)) {
             throw new Error(`Unsupported generation format: ${format}`);
         }
@@ -1341,13 +1367,35 @@ class ArtifactService {
             ? (await Promise.all(artifactIds.slice(0, 8).map((artifactId) => artifactStore.get(artifactId)))).filter(Boolean)
             : [];
         const imageReferences = await this.resolveImageReferences(session, prompt, {
-            desiredCount: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat) ? DEFAULT_DOCUMENT_IMAGE_TARGET : 3,
-            preferVisualDefaults: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat),
+            desiredCount: (MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat) || frontendDemoRequest) ? DEFAULT_DOCUMENT_IMAGE_TARGET : 3,
+            preferVisualDefaults: MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat) || frontendDemoRequest,
             selectedArtifacts,
         });
         const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
-        const generated = MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
+        const generated = frontendDemoRequest
+            ? {
+                ...(await this.runGenerationPass({
+                    session,
+                    input: prompt,
+                    instructions: buildSessionInstructions(
+                        session,
+                        this.getGenerationInstructions(
+                            normalizedFormat,
+                            combinedExistingContent,
+                            [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
+                        ),
+                    ),
+                    model,
+                    reasoningEffort,
+                    previousResponseId: session?.previousResponseId || null,
+                })),
+                title: inferDocumentTitle(prompt, 'Frontend Demo'),
+                metadata: {
+                    generationStrategy: 'single-pass-frontend-demo',
+                },
+            }
+            : MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
             ? await this.generateMultiPassDocumentSource({
                 session,
                 prompt,

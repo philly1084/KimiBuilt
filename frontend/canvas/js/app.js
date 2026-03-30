@@ -29,6 +29,7 @@ class CanvasApp {
 
         // Auto-save timer
         this.autoSaveTimer = null;
+        this.previewRenderTimer = null;
 
         this.init();
     }
@@ -345,6 +346,13 @@ class CanvasApp {
             if (this.state.canvasType === 'diagram' && (this.state.isPreviewMode || this.state.isSplitView)) {
                 const handler = this.typeManager.getHandler('diagram');
                 handler.scheduleAutoRender(value, 'diagram-output');
+            }
+
+            if (this.state.canvasType === 'frontend' && (this.state.isPreviewMode || this.state.isSplitView)) {
+                clearTimeout(this.previewRenderTimer);
+                this.previewRenderTimer = setTimeout(() => {
+                    this.renderPreview();
+                }, 180);
             }
         });
 
@@ -667,7 +675,7 @@ class CanvasApp {
                     diagramWrapper.classList.remove('hidden');
                 }
             }
-        } else if (this.state.canvasType === 'document') {
+        } else if (this.state.canvasType === 'document' || this.state.canvasType === 'frontend') {
             // Document mode
             if (this.state.isPreviewMode || this.state.isSplitView) {
                 if (this.state.isSplitView) {
@@ -693,6 +701,8 @@ class CanvasApp {
         if (this.state.canvasType === 'document') {
             const html = handler.renderMarkdown(content);
             document.getElementById('preview-content').innerHTML = html;
+        } else if (this.state.canvasType === 'frontend') {
+            handler.renderPreview(content, this.state.metadata, 'preview-content');
         } else if (this.state.canvasType === 'diagram') {
             // Reset zoom when manually rendering
             handler.resetZoom();
@@ -772,6 +782,10 @@ class CanvasApp {
         this.state.metadata = response.metadata || {};
         this.state.suggestions = response.suggestions || [];
 
+        if (response.canvasType && response.canvasType !== this.state.canvasType) {
+            this.switchCanvasType(response.canvasType);
+        }
+
         // Update session ID display
         document.getElementById('session-id').textContent = 
             this.state.sessionId ? this.state.sessionId.slice(0, 16) + '...' : 'New Session';
@@ -781,18 +795,32 @@ class CanvasApp {
         const responsePreview = document.getElementById('response-preview');
         
         responseSection.classList.remove('hidden');
-        responsePreview.textContent = response.content?.slice(0, 500) + 
-            (response.content?.length > 500 ? '...' : '');
+        responsePreview.textContent = this.buildResponsePreview(response);
 
         // Update suggestions
         this.updateSuggestions(response.suggestions || []);
 
-        // Update metadata
-        if (response.canvasType && response.canvasType !== this.state.canvasType) {
-            this.switchCanvasType(response.canvasType);
+        this.saveToLocalStorage();
+    }
+
+    buildResponsePreview(response) {
+        if (!response) {
+            return '';
         }
 
-        this.saveToLocalStorage();
+        if (response.canvasType === 'frontend') {
+            const metadata = response.metadata || {};
+            const handoff = metadata.handoff || {};
+            const files = Array.isArray(metadata.bundle?.files) ? metadata.bundle.files : [];
+            return [
+                handoff.summary || 'Frontend demo ready for preview and repo handoff.',
+                files.length > 0 ? `Files: ${files.map((file) => file.path).filter(Boolean).join(', ')}` : '',
+                metadata.frameworkTarget ? `Framework target: ${metadata.frameworkTarget}` : '',
+            ].filter(Boolean).join('\n');
+        }
+
+        const content = String(response.content || '');
+        return content.slice(0, 500) + (content.length > 500 ? '...' : '');
     }
 
     /**
@@ -825,6 +853,10 @@ class CanvasApp {
         // Update tab title
         const title = this.state.metadata?.title || 'Untitled';
         document.getElementById('tab-title').textContent = title;
+
+        if (this.state.isPreviewMode || this.state.isSplitView) {
+            this.renderPreview();
+        }
 
         this.saveToLocalStorage();
         this.showToast('Content applied to canvas', 'success');
@@ -995,6 +1027,16 @@ class CanvasApp {
         }
 
         try {
+            if (this.state.canvasType === 'frontend') {
+                const bundleFiles = Array.isArray(this.state.metadata?.bundle?.files)
+                    ? this.state.metadata.bundle.files.filter((file) => file?.path && typeof file.content === 'string')
+                    : [];
+                if (bundleFiles.length > 1) {
+                    this.showFrontendExportOptions(bundleFiles);
+                    return;
+                }
+            }
+
             if (this.state.canvasType === 'diagram') {
                 // For diagrams, offer SVG/PNG export
                 const svgElement = document.querySelector('#diagram-output svg');
@@ -1053,6 +1095,71 @@ class CanvasApp {
         modal.querySelectorAll('[data-index]').forEach(btn => {
             btn.addEventListener('click', () => {
                 options[btn.dataset.index].action();
+                modal.remove();
+            });
+        });
+
+        modal.querySelector('.toast-close').addEventListener('click', () => {
+            modal.remove();
+        });
+
+        document.getElementById('toast-container').appendChild(modal);
+    }
+
+    showFrontendExportOptions(bundleFiles = []) {
+        const safeFiles = bundleFiles.filter((file) => file?.path && typeof file.content === 'string');
+        const handoff = this.state.metadata?.handoff || {};
+        const options = [
+            {
+                label: 'Preview HTML (.html)',
+                action: () => {
+                    this.exportManager.downloadFile(
+                        this.editor.getValue(),
+                        'frontend',
+                        'html',
+                        this.state.metadata?.title || 'frontend-demo'
+                    );
+                },
+            },
+        ];
+
+        if (safeFiles.length > 0) {
+            options.push({
+                label: 'All Scaffold Files',
+                action: () => {
+                    safeFiles.forEach((file) => {
+                        this.exportManager.downloadNamedFile(file.content, file.path);
+                    });
+                },
+            });
+        }
+
+        options.push({
+            label: 'Handoff Manifest (.json)',
+            action: () => {
+                const manifest = JSON.stringify({
+                    title: this.state.metadata?.title || 'Frontend Demo',
+                    frameworkTarget: this.state.metadata?.frameworkTarget || 'static',
+                    bundle: this.state.metadata?.bundle || { entry: 'index.html', files: safeFiles },
+                    handoff,
+                }, null, 2);
+                this.exportManager.downloadNamedFile(manifest, 'frontend-handoff.json');
+            },
+        });
+
+        const modal = document.createElement('div');
+        modal.className = 'toast info';
+        modal.innerHTML = `
+            <div class="toast-message">
+                <strong>Export Frontend Demo</strong><br>
+                ${options.map((opt, i) => `<button class="btn btn-secondary" style="margin: 4px;" data-index="${i}">${opt.label}</button>`).join('')}
+            </div>
+            <button class="toast-close">&times;</button>
+        `;
+
+        modal.querySelectorAll('[data-index]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                options[Number(btn.dataset.index)].action();
                 modal.remove();
             });
         });
@@ -1190,6 +1297,11 @@ class CanvasApp {
         const langBadge = document.getElementById('language-badge');
         if (lang && this.state.canvasType === 'code') {
             langBadge.textContent = handler.getLanguageLabel?.(lang) || lang;
+            langBadge.classList.remove('hidden');
+        } else if (this.state.canvasType === 'frontend') {
+            langBadge.textContent = this.state.metadata?.frameworkTarget
+                ? `${this.state.metadata.frameworkTarget} demo`
+                : 'HTML demo';
             langBadge.classList.remove('hidden');
         } else {
             langBadge.classList.add('hidden');

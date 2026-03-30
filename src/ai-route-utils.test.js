@@ -129,6 +129,11 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Export this as a Mermaid file')).toBe('mermaid');
     });
 
+    test('inferRequestedOutputFormat treats landing-page and frontend-demo requests as html artifacts', () => {
+        expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBe('html');
+        expect(inferRequestedOutputFormat('Create a frontend demo microsite for our product launch')).toBe('html');
+    });
+
     test('hasExplicitMermaidFileIntent only returns true for file-like Mermaid requests', () => {
         expect(hasExplicitMermaidFileIntent('Create a Mermaid diagram for the auth flow')).toBe(false);
         expect(hasExplicitMermaidFileIntent('Export this as a Mermaid file')).toBe(true);
