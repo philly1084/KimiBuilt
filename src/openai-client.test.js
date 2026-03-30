@@ -269,26 +269,26 @@ function createToolManager() {
     ]);
 
     const skills = new Map([
-        ['web-fetch', { enabled: true, triggerPatterns: ['fetch', 'load page'] }],
-        ['web-search', { enabled: true, triggerPatterns: ['search', 'look up'] }],
-        ['web-scrape', { enabled: true, triggerPatterns: ['scrape', 'extract from'] }],
-        ['image-generate', { enabled: true, triggerPatterns: ['generate image', 'create image'] }],
-        ['image-search-unsplash', { enabled: true, triggerPatterns: ['unsplash', 'image search'] }],
-        ['image-from-url', { enabled: true, triggerPatterns: ['image url', 'embed image'] }],
-        ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'] }],
-        ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'] }],
-        ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'] }],
-        ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'] }],
-        ['git-safe', { enabled: true, triggerPatterns: ['git push', 'commit to github', 'save and push'] }],
-        ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'] }],
-        ['architecture-design', { enabled: true, triggerPatterns: ['design architecture', 'system design'] }],
-        ['uml-generate', { enabled: true, triggerPatterns: ['generate uml', 'class diagram'] }],
-        ['api-design', { enabled: true, triggerPatterns: ['design api', 'openapi'] }],
-        ['schema-generate', { enabled: true, triggerPatterns: ['database schema', 'generate ddl'] }],
-        ['migration-create', { enabled: true, triggerPatterns: ['create migration', 'schema migration'] }],
-        ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'] }],
-        ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'] }],
-        ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'] }],
+        ['web-fetch', { enabled: true, triggerPatterns: ['fetch', 'load page'], requiresConfirmation: false }],
+        ['web-search', { enabled: true, triggerPatterns: ['search', 'look up'], requiresConfirmation: false }],
+        ['web-scrape', { enabled: true, triggerPatterns: ['scrape', 'extract from'], requiresConfirmation: true }],
+        ['image-generate', { enabled: true, triggerPatterns: ['generate image', 'create image'], requiresConfirmation: false }],
+        ['image-search-unsplash', { enabled: true, triggerPatterns: ['unsplash', 'image search'], requiresConfirmation: false }],
+        ['image-from-url', { enabled: true, triggerPatterns: ['image url', 'embed image'], requiresConfirmation: false }],
+        ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'], requiresConfirmation: false }],
+        ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'], requiresConfirmation: true }],
+        ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'], requiresConfirmation: false }],
+        ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'], requiresConfirmation: false }],
+        ['git-safe', { enabled: true, triggerPatterns: ['git push', 'commit to github', 'save and push'], requiresConfirmation: true }],
+        ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'], requiresConfirmation: false }],
+        ['architecture-design', { enabled: true, triggerPatterns: ['design architecture', 'system design'], requiresConfirmation: false }],
+        ['uml-generate', { enabled: true, triggerPatterns: ['generate uml', 'class diagram'], requiresConfirmation: false }],
+        ['api-design', { enabled: true, triggerPatterns: ['design api', 'openapi'], requiresConfirmation: false }],
+        ['schema-generate', { enabled: true, triggerPatterns: ['database schema', 'generate ddl'], requiresConfirmation: true }],
+        ['migration-create', { enabled: true, triggerPatterns: ['create migration', 'schema migration'], requiresConfirmation: true }],
+        ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'], requiresConfirmation: true }],
+        ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'], requiresConfirmation: true }],
+        ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'], requiresConfirmation: true }],
     ]);
 
     return {
@@ -383,7 +383,54 @@ describe('openai-client automatic tool orchestration helpers', () => {
             properties: {
                 body: { type: 'string' },
             },
+            additionalProperties: false,
         });
+    });
+
+    test('defaults object schemas with named properties to disallow extra arguments', () => {
+        expect(__testUtils.sanitizeToolSchema({
+            type: 'object',
+            properties: {
+                payload: {
+                    type: 'object',
+                    properties: {
+                        title: { type: 'string' },
+                    },
+                },
+                metadata: {
+                    type: 'object',
+                },
+            },
+        })).toEqual({
+            type: 'object',
+            properties: {
+                payload: {
+                    type: 'object',
+                    properties: {
+                        title: { type: 'string' },
+                    },
+                    additionalProperties: false,
+                },
+                metadata: {
+                    type: 'object',
+                },
+            },
+            additionalProperties: false,
+        });
+    });
+
+    test('enriches automatic tool descriptions with trigger and confirmation guidance', () => {
+        const toolManager = createToolManager();
+        const selectedTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Check the remote build host',
+        );
+        const remoteCommand = selectedTools.find((tool) => tool.id === 'remote-command');
+
+        expect(remoteCommand).toBeTruthy();
+        expect(remoteCommand.description).toContain('Execute remote server commands over SSH');
+        expect(remoteCommand.description).toContain('"remote command"');
+        expect(remoteCommand.description).toContain('Confirm before destructive or state-changing use');
     });
 
     test('selects general tools generically instead of using prompt heuristics', () => {
@@ -421,9 +468,9 @@ describe('openai-client automatic tool orchestration helpers', () => {
 
     test('filesystem tool guidance forbids invented availability excuses', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
-            { id: 'file-read' },
-            { id: 'file-write' },
-            { id: 'file-mkdir' },
+            { id: 'file-read', skill: { requiresConfirmation: false } },
+            { id: 'file-write', skill: { requiresConfirmation: true } },
+            { id: 'file-mkdir', skill: { requiresConfirmation: false } },
         ]);
 
         expect(guidance).toContain('source of truth for tool availability');
@@ -431,6 +478,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('file-mkdir');
         expect(guidance).toContain('full file body as `content`');
         expect(guidance).toContain('container-only paths');
+        expect(guidance).toContain('confirm the action first');
     });
 
     test('extracts explicit web research queries for deterministic preflight', () => {

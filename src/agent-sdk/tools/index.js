@@ -720,15 +720,46 @@ class ToolManager {
   /**
    * Create tool definition with defaults
    */
+  normalizeSkillTriggerPatterns(values = []) {
+    return Array.from(new Set(
+      (Array.isArray(values) ? values : [values])
+        .map((value) => String(value || '')
+          .trim()
+          .toLowerCase()
+          .replace(/[_-]+/g, ' ')
+          .replace(/\s+/g, ' '))
+        .filter(Boolean),
+    ));
+  }
+
+  inferToolRequiresConfirmation(tool) {
+    const sideEffects = new Set(
+      Array.isArray(tool?.sideEffects)
+        ? tool.sideEffects.map((effect) => String(effect || '').toLowerCase())
+        : [],
+    );
+    const category = String(tool?.category || '').toLowerCase();
+
+    return sideEffects.has('write')
+      || sideEffects.has('execute')
+      || category === 'ssh'
+      || category === 'database';
+  }
+
   createToolDefinition(tool, overrides = {}) {
     const base = tool.toDefinition();
+    const defaultTriggerPatterns = this.normalizeSkillTriggerPatterns([
+      tool.name,
+      tool.id,
+      tool.id ? tool.id.replace(/[-_]+/g, ' ') : '',
+    ]);
     
     return {
       ...base,
       skill: {
-        triggerPatterns: [tool.name.toLowerCase()],
+        triggerPatterns: defaultTriggerPatterns,
         autoApply: false,
-        requiresConfirmation: false,
+        requiresConfirmation: this.inferToolRequiresConfirmation(tool),
         ...overrides.skill
       },
       frontend: {

@@ -47,4 +47,50 @@ describe('UnifiedRegistry invocation stats', () => {
       }),
     ]);
   });
+
+  test('derives normalized trigger patterns and confirmation from tool metadata', () => {
+    const registry = new UnifiedRegistry();
+
+    registry.register({
+      id: 'file-write',
+      name: 'File Writer',
+      description: 'Write file contents',
+      category: 'system',
+      backend: {
+        handler: async () => ({}),
+        sideEffects: ['write'],
+      },
+    });
+
+    const skill = registry.getSkill('file-write');
+
+    expect(skill.triggerPatterns).toEqual(expect.arrayContaining([
+      'file writer',
+      'file write',
+    ]));
+    expect(skill.requiresConfirmation).toBe(true);
+  });
+
+  test('keeps read-only tools confirmation-free by default', () => {
+    const registry = new UnifiedRegistry();
+
+    registry.register({
+      id: 'file-read',
+      name: 'File Reader',
+      description: 'Read file contents',
+      category: 'system',
+      backend: {
+        handler: async () => ({}),
+        sideEffects: ['read'],
+      },
+    });
+
+    const skill = registry.getSkill('file-read');
+
+    expect(skill.triggerPatterns).toEqual(expect.arrayContaining([
+      'file reader',
+      'file read',
+    ]));
+    expect(skill.requiresConfirmation).toBe(false);
+  });
 });

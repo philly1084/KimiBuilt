@@ -351,6 +351,50 @@ class UnifiedRegistry extends EventEmitter {
     };
   }
 
+  normalizeTriggerPattern(pattern) {
+    return String(pattern || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ');
+  }
+
+  deriveTriggerPatterns(toolDef = {}) {
+    const explicitPatterns = Array.isArray(toolDef.skill?.triggerPatterns)
+      ? toolDef.skill.triggerPatterns
+      : [];
+
+    const derivedPatterns = [
+      toolDef.name,
+      toolDef.id,
+      toolDef.id ? toolDef.id.replace(/[-_]+/g, ' ') : '',
+    ];
+
+    return Array.from(new Set(
+      [...explicitPatterns, ...derivedPatterns]
+        .map((pattern) => this.normalizeTriggerPattern(pattern))
+        .filter(Boolean),
+    ));
+  }
+
+  inferRequiresConfirmation(toolDef = {}) {
+    if (typeof toolDef.skill?.requiresConfirmation === 'boolean') {
+      return toolDef.skill.requiresConfirmation;
+    }
+
+    const sideEffects = new Set(
+      Array.isArray(toolDef.backend?.sideEffects)
+        ? toolDef.backend.sideEffects.map((effect) => String(effect || '').toLowerCase())
+        : [],
+    );
+    const category = String(toolDef.category || '').toLowerCase();
+
+    return sideEffects.has('write')
+      || sideEffects.has('execute')
+      || category === 'ssh'
+      || category === 'database';
+  }
+
   /**
    * Generate skill from tool definition
    */
@@ -363,14 +407,13 @@ class UnifiedRegistry extends EventEmitter {
       version: toolDef.version || '1.0.0',
       
       // Skill-specific properties
-      triggerPatterns: toolDef.skill?.triggerPatterns || [
-        toolDef.name?.toLowerCase(),
-        toolDef.id.toLowerCase().replace(/-/g, ' ')
-      ].filter(Boolean),
+      triggerPatterns: this.deriveTriggerPatterns(toolDef),
       
-      autoApply: toolDef.skill?.autoApply || false,
-      requiresConfirmation: toolDef.skill?.requiresConfirmation !== false,
-      confidenceThreshold: toolDef.skill?.confidenceThreshold || 0.7,
+      autoApply: toolDef.skill?.autoApply === true,
+      requiresConfirmation: this.inferRequiresConfirmation(toolDef),
+      confidenceThreshold: Number.isFinite(toolDef.skill?.confidenceThreshold)
+        ? toolDef.skill.confidenceThreshold
+        : 0.7,
       
       // Tool reference
       toolId: toolDef.id,

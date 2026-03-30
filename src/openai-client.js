@@ -1250,6 +1250,8 @@ function sanitizeToolSchema(schema) {
         'description',
         'enum',
         'default',
+        'format',
+        'pattern',
         'required',
         'properties',
         'items',
@@ -1297,7 +1299,43 @@ function sanitizeToolSchema(schema) {
         sanitized.type = 'object';
     }
 
+    if (sanitized.type === 'object'
+        && sanitized.properties
+        && sanitized.additionalProperties === undefined) {
+        sanitized.additionalProperties = false;
+    }
+
     return sanitized;
+}
+
+function normalizeToolTriggerPattern(pattern = '') {
+    return String(pattern || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ');
+}
+
+function buildAutomaticToolDescription(toolId, tool = {}, skill = null) {
+    const baseDescription = String(tool?.description || tool?.name || toolId || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const triggerPatterns = Array.from(new Set(
+        (Array.isArray(skill?.triggerPatterns) ? skill.triggerPatterns : [])
+            .map((pattern) => normalizeToolTriggerPattern(pattern))
+            .filter(Boolean),
+    )).slice(0, 4);
+    const guidance = [];
+
+    if (triggerPatterns.length) {
+        guidance.push(`Use when the request mentions ${triggerPatterns.map((pattern) => `"${pattern}"`).join(', ')}.`);
+    }
+
+    if (skill?.requiresConfirmation === true) {
+        guidance.push('Confirm before destructive or state-changing use unless the user already explicitly requested that exact action.');
+    }
+
+    return [baseDescription, ...guidance].filter(Boolean).join(' ').trim() || toolId;
 }
 
 function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
@@ -1318,32 +1356,35 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
                 return null;
             }
 
+            const description = buildAutomaticToolDescription(toolId, tool, skill);
+            const parameters = sanitizeToolSchema(tool.inputSchema);
+
             return {
                 id: toolId,
                 skill,
-                description: tool.description || tool.name || toolId,
-                parameters: sanitizeToolSchema(tool.inputSchema),
+                description,
+                parameters,
                 definition: {
                     type: 'function',
                     function: {
                         name: toolId,
-                        description: tool.description || tool.name || toolId,
-                        parameters: sanitizeToolSchema(tool.inputSchema),
+                        description,
+                        parameters,
                     },
                 },
                 chatDefinition: {
                     type: 'function',
                     function: {
                         name: toolId,
-                        description: tool.description || tool.name || toolId,
-                        parameters: sanitizeToolSchema(tool.inputSchema),
+                        description,
+                        parameters,
                     },
                 },
                 responseDefinition: {
                     type: 'function',
                     name: toolId,
-                    description: tool.description || tool.name || toolId,
-                    parameters: sanitizeToolSchema(tool.inputSchema),
+                    description,
+                    parameters,
                     strict: true,
                 },
             };
@@ -1578,6 +1619,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         'Treat the tool definitions attached to this request as the source of truth for tool availability.',
         'Do not claim tools are unavailable because of absent meta variables or guessed config names when the tool definitions are attached to the request.',
     ];
+
+    if (automaticTools.some((entry) => entry.skill?.requiresConfirmation === true)) {
+        guidance.push('For tools that change remote state, local files, deployments, or other persistent state, confirm the action first unless the user already requested that exact change.');
+    }
 
     if (automaticTools.some((entry) => entry.id === 'web-search')) {
         guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
