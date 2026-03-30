@@ -421,6 +421,7 @@ GUIDELINES:
 - You are free to change block types, replace weak sections, move blocks, delete redundant content, and rebuild the page structure when that produces a better result.
 - In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
 - If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions, not a request to inspect a remote server or codebase.
+- Never satisfy a notes-page edit by writing a local repo/runtime file or by mentioning /app or filesystem write failures. Use notes-actions unless the user explicitly asks for an export, download, or file.
 - Use \`\`\`notes-actions only when the user is actually asking to edit, create, delete, reorganize, or restyle page content.
 - If the user is asking for remote execution, SSH work, cluster setup, deployment, debugging, research, or other non-page tasks, answer normally and use the available backend tools instead of forcing a notes-actions JSON response.
 - For multi-step non-page work, keep ownership of the original ask and continue through the next concrete diagnostic, repair, and verification steps instead of turning each intermediate issue into a new user task.
@@ -1560,6 +1561,7 @@ If the request is for a substantial page, brief, report, plan, or rewrite, prefe
 
 Hidden planning pass for a substantial notes-writing request.
 Do not return notes-actions in this pass.
+Do not plan filesystem writes, repo paths, or local file creation.
 Return JSON only in this shape:
 {
   "title": "Page title",
@@ -1591,6 +1593,7 @@ Return JSON only in this shape:
 
 Hidden section-expansion pass for a substantial notes-writing request.
 Do not return notes-actions in this pass.
+Do not plan filesystem writes, repo paths, or local file creation.
 You will receive the original request plus the approved page plan.
 Return JSON only in this shape:
 {
@@ -1631,6 +1634,7 @@ Return JSON only in this shape:
 
 Use the hidden planning work below as internal guidance.
 For this final pass, return the finished answer only.
+Do not mention local file writes, /app paths, or filesystem errors.
 If the user is editing the page, return notes-actions as needed.`
             },
             {

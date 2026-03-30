@@ -1052,6 +1052,18 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(automaticTools.some((tool) => tool.id === 'ssh-execute')).toBe(false);
     });
 
+    test('does not expose local file write tools to notes sessions', () => {
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Put this 3D tic tac toe implementation plan on the page.',
+            { executionProfile: 'notes' },
+        );
+
+        expect(automaticTools.some((tool) => tool.id === 'file-write')).toBe(false);
+        expect(automaticTools.some((tool) => tool.id === 'file-mkdir')).toBe(false);
+    });
+
     test('does not create a deterministic remote-command preflight for generic cluster deployment wording', () => {
         jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
             enabled: true,

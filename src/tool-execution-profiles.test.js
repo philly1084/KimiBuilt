@@ -30,6 +30,8 @@ describe('tool execution profiles', () => {
             'architecture-design',
             'schema-generate',
         ]));
+        expect(toolIds).not.toContain('file-write');
+        expect(toolIds).not.toContain('file-mkdir');
         expect(toolIds).not.toContain('ssh-execute');
     });
 

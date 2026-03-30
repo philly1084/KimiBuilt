@@ -27,6 +27,15 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     ...PROMOTED_LOCAL_TOOL_IDS,
 ]);
 
+const NOTES_EXCLUDED_TOOL_IDS = new Set([
+    'file-write',
+    'file-mkdir',
+]);
+
+const NOTES_SHARED_TOOL_IDS = Object.freeze(
+    BASE_SHARED_TOOL_IDS.filter((toolId) => !NOTES_EXCLUDED_TOOL_IDS.has(toolId)),
+);
+
 const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
     [DEFAULT_EXECUTION_PROFILE]: Object.freeze([
         ...BASE_SHARED_TOOL_IDS,
@@ -35,7 +44,7 @@ const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
         'remote-command',
         'k3s-deploy',
         'docker-exec',
-        ...BASE_SHARED_TOOL_IDS,
+        ...NOTES_SHARED_TOOL_IDS,
     ]),
     [REMOTE_BUILD_EXECUTION_PROFILE]: Object.freeze([
         'remote-command',

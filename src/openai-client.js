@@ -2,7 +2,10 @@ const OpenAI = require('openai');
 const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
 const { normalizeReasoningEffort } = require('./ai-route-utils');
-const { PROMOTED_LOCAL_TOOL_IDS } = require('./tool-execution-profiles');
+const {
+    PROMOTED_LOCAL_TOOL_IDS,
+    getAllowedToolIdsForProfile,
+} = require('./tool-execution-profiles');
 
 let chatClient = null;
 
@@ -1498,9 +1501,15 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
         return [];
     }
 
+    const executionProfile = normalizeExecutionProfile(
+        options?.executionProfile
+        || options?.toolContext?.executionProfile,
+    );
+    const allowedToolIds = new Set(getAllowedToolIdsForProfile(executionProfile));
     const hasRemoteCommandAlias = Boolean(toolManager.getTool('remote-command'));
 
     return Array.from(AUTO_TOOL_ALLOWLIST)
+        .filter((toolId) => allowedToolIds.has(toolId))
         .filter((toolId) => !(toolId === 'ssh-execute' && hasRemoteCommandAlias))
         .map((toolId) => {
             const tool = toolManager.getTool(toolId);

@@ -2310,6 +2310,34 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('Lilly-style block-based notes document');
         expect(instructions).toContain('Prefer returning `notes-actions` or page-ready notes content');
         expect(instructions).toContain('Do not mention `/app`');
+        expect(instructions).toContain('Do not use `file-write` or `file-mkdir`');
+    });
+
+    test('notes tool policy does not surface local file writes for page-edit requests', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['file-read', 'file-search', 'file-write', 'file-mkdir', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Put this 3D tic tac toe implementation plan on the page and organize the notes.',
+            executionProfile: 'notes',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.allowedToolIds).not.toContain('file-write');
+        expect(toolPolicy.allowedToolIds).not.toContain('file-mkdir');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-write');
+        expect(toolPolicy.candidateToolIds).not.toContain('file-mkdir');
     });
 
     test('falls back to web-search planning when planner output is not valid json', async () => {

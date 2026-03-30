@@ -477,6 +477,7 @@ function buildNotesSynthesisInstructions() {
         'In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, repo file, or server page.',
         'If the user is asking to add, place, insert, rewrite, reorganize, or polish content on the page, answer as a notes-page edit, not as a workspace/file task.',
         'Prefer returning `notes-actions` or page-ready notes content over raw standalone HTML, local file paths, workspace write steps, or filesystem commentary.',
+        'Do not use `file-write` or `file-mkdir` to satisfy a notes-page edit. Apply the content to the current page instead.',
         'When you return `notes-actions`, use this exact payload shape: `{ "assistant_reply": "...", "actions": [{ "op": "append_to_page", "blocks": [...] }] }`.',
         'Do not use a top-level `"notes-actions"` property. Do not use `"action"` in place of `"op"`.',
         'Do not use legacy ops like `replace-content`, `append-content`, or `prepend-content`. Use `rebuild_page`, `append_to_page`, `prepend_to_page`, `replace_block`, `insert_after`, or `update_block`.',
