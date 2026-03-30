@@ -1272,6 +1272,84 @@ class ChatApp {
         };
     }
 
+    stripHtmlToText(html = '') {
+        return String(html || '')
+            .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, '\'')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    buildResearchSearchLookup(toolEvents = []) {
+        const lookup = new Map();
+
+        (Array.isArray(toolEvents) ? toolEvents : []).forEach((event) => {
+            const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+            if (toolId !== 'web-search' || event?.result?.success === false) {
+                return;
+            }
+
+            const results = Array.isArray(event?.result?.data?.results)
+                ? event.result.data.results
+                : [];
+
+            results.forEach((result) => {
+                const normalized = this.normalizeSearchResult(result);
+                if (normalized?.url && !lookup.has(normalized.url)) {
+                    lookup.set(normalized.url, normalized);
+                }
+            });
+        });
+
+        return lookup;
+    }
+
+    normalizeResearchSourceEvent(event, searchLookup = new Map()) {
+        const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+        if ((toolId !== 'web-fetch' && toolId !== 'web-scrape') || event?.result?.success === false) {
+            return null;
+        }
+
+        const args = this.parseToolArguments(event?.toolCall?.function?.arguments);
+        const data = event?.result?.data || {};
+        const url = data.url || args.url || '';
+        if (!url) {
+            return null;
+        }
+
+        const searchMeta = searchLookup.get(url) || null;
+        const title = data.title || searchMeta?.title || url;
+        const source = searchMeta?.source || '';
+        const snippet = searchMeta?.snippet || '';
+        const publishedAt = searchMeta?.publishedAt || '';
+        const rawExcerpt = toolId === 'web-scrape'
+            ? (data.summary || data.text || data.content || JSON.stringify(data.data || {}))
+            : this.stripHtmlToText(data.body || '');
+        const excerpt = String(rawExcerpt || '').replace(/\s+/g, ' ').trim().slice(0, 420);
+
+        if (!snippet && !excerpt) {
+            return null;
+        }
+
+        return {
+            title,
+            url,
+            source,
+            snippet,
+            excerpt,
+            publishedAt,
+            toolId,
+        };
+    }
+
     appendToolSelectionMessages(parentMessageId, toolEvents = []) {
         const sessionId = sessionManager.currentSessionId;
         if (!sessionId || !parentMessageId || !Array.isArray(toolEvents) || toolEvents.length === 0) {
@@ -1279,6 +1357,7 @@ class ChatApp {
         }
 
         const nextMessages = [];
+        const searchLookup = this.buildResearchSearchLookup(toolEvents);
 
         toolEvents.forEach((event, index) => {
             const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
@@ -1391,6 +1470,40 @@ class ChatApp {
                 });
             }
         });
+
+        const searchEvent = [...toolEvents].reverse().find((event) => (
+            (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'web-search'
+            && event?.result?.success !== false
+        ));
+        const researchSources = [];
+        const seenResearchUrls = new Set();
+
+        toolEvents.forEach((event) => {
+            const normalized = this.normalizeResearchSourceEvent(event, searchLookup);
+            if (!normalized || seenResearchUrls.has(normalized.url)) {
+                return;
+            }
+
+            seenResearchUrls.add(normalized.url);
+            researchSources.push(normalized);
+        });
+
+        if (researchSources.length > 0) {
+            const searchArgs = this.parseToolArguments(searchEvent?.toolCall?.function?.arguments);
+            const query = searchEvent?.result?.data?.query || searchArgs.query || '';
+
+            nextMessages.push({
+                id: `${parentMessageId}-research-sources`,
+                parentMessageId,
+                role: 'assistant',
+                type: 'research-sources',
+                content: `Verified source excerpts for "${query || 'research'}"`,
+                query,
+                results: researchSources,
+                total: researchSources.length,
+                timestamp: new Date().toISOString(),
+            });
+        }
 
         if (nextMessages.length === 0) {
             return;

@@ -3231,6 +3231,33 @@ code[class*="language-"] {
     line-height: 1.55;
 }
 
+.research-source-card {
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
+        var(--bg-tertiary);
+}
+
+.research-source-label {
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.research-source-excerpt {
+    margin: 0 0 0.875rem;
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--assistant-message-bg);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
 .search-result-actions {
     display: flex;
     flex-wrap: wrap;

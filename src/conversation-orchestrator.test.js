@@ -232,6 +232,78 @@ describe('ConversationOrchestrator', () => {
         expect(text).not.toContain('<html>');
     });
 
+    test('fallback synthesis keeps verified research extracts when both search and fetched pages exist', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue({
+                id: 'resp_empty_research',
+                model: 'gpt-test',
+                choices: [{ message: {} }],
+                metadata: {},
+            }),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        const response = await orchestrator.buildFinalResponse({
+            input: 'Research the best project documentation hosts.',
+            objective: 'Research the best project documentation hosts.',
+            toolEvents: [
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-search',
+                            arguments: JSON.stringify({ query: 'best project documentation hosts' }),
+                        },
+                    },
+                    reason: 'Deterministic research preflight.',
+                    result: {
+                        success: true,
+                        toolId: 'web-search',
+                        data: {
+                            query: 'best project documentation hosts',
+                            results: [
+                                {
+                                    title: 'Docs hosting comparison',
+                                    url: 'https://example.com/docs-hosting',
+                                    snippet: 'Compares Vercel, Cloudflare Pages, Netlify, and GitHub Pages for docs sites.',
+                                    source: 'example.com',
+                                },
+                            ],
+                        },
+                    },
+                },
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-fetch',
+                            arguments: JSON.stringify({ url: 'https://example.com/docs-hosting' }),
+                        },
+                    },
+                    reason: 'Deterministic research follow-up on a top search result.',
+                    result: {
+                        success: true,
+                        toolId: 'web-fetch',
+                        data: {
+                            url: 'https://example.com/docs-hosting',
+                            body: '<html><head><title>Docs hosting comparison</title></head><body><main>Vercel offers fast previews, Cloudflare Pages is cost-efficient, Netlify is strong for workflow integrations, and GitHub Pages remains the simplest static option.</main></body></html>',
+                        },
+                    },
+                },
+            ],
+        });
+
+        const text = response.output[0].content[0].text;
+        expect(text).toContain('Research dossier:');
+        expect(text).toContain('Docs hosting comparison');
+        expect(text).toContain('Search snippet: Compares Vercel, Cloudflare Pages, Netlify, and GitHub Pages for docs sites.');
+        expect(text).toContain('Verified extract: Vercel offers fast previews, Cloudflare Pages is cost-efficient, Netlify is strong for workflow integrations, and GitHub Pages remains the simplest static option.');
+    });
+
     test('tool synthesis unwraps assistant content arrays with stringified output_text payloads', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue({

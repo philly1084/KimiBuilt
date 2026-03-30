@@ -1054,11 +1054,11 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
 }
 
 function normalizeResearchFollowupPageCount() {
-    return Math.max(2, Math.min(config.memory.researchFollowupPages, 4));
+    return Math.max(2, Math.min(config.memory.researchFollowupPages, 6));
 }
 
 function normalizeResearchSearchResultCount() {
-    return Math.max(8, Math.min(config.memory.researchSearchLimit, 12));
+    return Math.max(8, Math.min(config.memory.researchSearchLimit, 16));
 }
 
 function stripHtmlToText(html = '') {
@@ -1112,7 +1112,7 @@ function buildResearchMemoryNote({ query = '', candidate = {}, result = {} } = {
     const textBody = result?.toolId === 'web-scrape'
         ? stripHtmlToText(JSON.stringify(result?.data?.data || {}))
         : extractFetchBodyText(result);
-    const excerpt = textBody.slice(0, 1200).trim();
+    const excerpt = textBody.slice(0, 2000).trim();
 
     if (!sourceUrl || (!title && !snippet && !excerpt)) {
         return null;
@@ -1126,6 +1126,161 @@ function buildResearchMemoryNote({ query = '', candidate = {}, result = {} } = {
         snippet ? `Search snippet: ${snippet}` : null,
         excerpt ? `Source notes: ${excerpt}` : null,
     ].filter(Boolean).join('\n');
+}
+
+function deriveResearchSourceLabel(url = '', fallback = '') {
+    const normalizedFallback = String(fallback || '').trim();
+    if (normalizedFallback) {
+        return normalizedFallback;
+    }
+
+    try {
+        return new URL(String(url || '')).hostname.replace(/^www\./i, '');
+    } catch (_error) {
+        return '';
+    }
+}
+
+function extractResearchSourceText(result = {}) {
+    if (result?.toolId === 'web-scrape') {
+        const directText = [
+            result?.data?.summary,
+            result?.data?.text,
+            result?.data?.content,
+            result?.data?.markdown,
+        ].find((entry) => typeof entry === 'string' && entry.trim());
+
+        if (directText) {
+            return String(directText).replace(/\s+/g, ' ').trim();
+        }
+
+        return stripHtmlToText(JSON.stringify(result?.data?.data || {}));
+    }
+
+    return extractFetchBodyText(result);
+}
+
+function findSearchMetadataForUrl(searchResults = [], url = '') {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl || !Array.isArray(searchResults)) {
+        return null;
+    }
+
+    return searchResults.find((entry) => String(entry?.url || '').trim() === normalizedUrl) || null;
+}
+
+function buildResearchDossier(toolEvents = [], {
+    maxSearchResults = 8,
+    maxSources = 6,
+    excerptChars = 1000,
+} = {}) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const searchEvent = [...events].reverse().find((event) => (
+        (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'web-search'
+        && event?.result?.success !== false
+    ));
+    const searchResults = Array.isArray(searchEvent?.result?.data?.results)
+        ? searchEvent.result.data.results
+        : [];
+    const query = String(
+        searchEvent?.result?.data?.query
+        || parseToolArguments(searchEvent?.toolCall?.function?.arguments || '{}').query
+        || '',
+    ).trim();
+
+    const sourceEntries = events
+        .filter((event) => {
+            const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+            return (toolId === 'web-fetch' || toolId === 'web-scrape') && event?.result?.success !== false;
+        })
+        .map((event) => {
+            const result = event?.result || {};
+            const data = result?.data || {};
+            const url = String(data?.url || parseToolArguments(event?.toolCall?.function?.arguments || '{}').url || '').trim();
+            const searchMeta = findSearchMetadataForUrl(searchResults, url);
+            const sourceText = trimString(extractResearchSourceText(result), excerptChars);
+            const title = String(data?.title || searchMeta?.title || '').trim();
+            const snippet = String(searchMeta?.snippet || '').replace(/\s+/g, ' ').trim();
+            const source = deriveResearchSourceLabel(url, searchMeta?.source || data?.source || '');
+
+            if (!url || (!title && !snippet && !sourceText)) {
+                return null;
+            }
+
+            return {
+                url,
+                title,
+                snippet,
+                source,
+                sourceText,
+                toolId: event?.toolCall?.function?.name || result?.toolId || '',
+            };
+        })
+        .filter(Boolean)
+        .slice(0, maxSources);
+
+    if (!query && searchResults.length === 0 && sourceEntries.length === 0) {
+        return '';
+    }
+
+    const lines = ['[Research dossier]'];
+    if (query) {
+        lines.push(`Query: ${query}`);
+    }
+
+    if (searchResults.length > 0) {
+        lines.push('Top search results:');
+        searchResults.slice(0, maxSearchResults).forEach((entry, index) => {
+            const title = trimString(String(entry?.title || 'Untitled result').replace(/\s+/g, ' ').trim(), 120);
+            const url = String(entry?.url || '').trim();
+            const snippet = trimString(String(entry?.snippet || '').replace(/\s+/g, ' ').trim(), 240);
+            const source = deriveResearchSourceLabel(url, entry?.source || '');
+            lines.push([
+                `${index + 1}. ${title}`,
+                source ? `(${source})` : '',
+                url ? `[${url}]` : '',
+            ].filter(Boolean).join(' '));
+            if (snippet) {
+                lines.push(`   Snippet: ${snippet}`);
+            }
+        });
+    }
+
+    if (sourceEntries.length > 0) {
+        lines.push('Verified source extracts:');
+        sourceEntries.forEach((entry, index) => {
+            lines.push([
+                `${index + 1}. ${trimString(entry.title || entry.url, 140)}`,
+                entry.source ? `(${entry.source})` : '',
+                `[${entry.url}]`,
+                entry.toolId ? `via ${entry.toolId}` : '',
+            ].filter(Boolean).join(' '));
+            if (entry.snippet) {
+                lines.push(`   Search snippet: ${trimString(entry.snippet, 240)}`);
+            }
+            if (entry.sourceText) {
+                lines.push(`   Verified extract: ${entry.sourceText}`);
+            }
+        });
+    }
+
+    return lines.join('\n');
+}
+
+function buildAutomaticToolSummaryMessage(toolEvents = []) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const researchDossier = buildResearchDossier(events);
+
+    return {
+        role: 'system',
+        content: [
+            '[Automatic tool results]',
+            'Use these verified tool results when answering. If any tool result contains an error, explain that exact error plainly instead of claiming the tool is unavailable.',
+            researchDossier || '',
+            '[Raw tool events]',
+            JSON.stringify(events, null, 2),
+        ].filter(Boolean).join('\n\n'),
+    };
 }
 
 async function maybeStoreResearchMemoryNote({ toolContext = {}, query = '', candidate = {}, result = {} } = {}) {
@@ -1943,10 +2098,7 @@ async function runDeterministicToolPreflight({
 
     return {
         toolEvents,
-        summaryMessage: {
-            role: 'system',
-            content: `[Automatic tool results]\nUse these verified tool results when answering. If any tool result contains an error, explain that exact error plainly instead of claiming the tool is unavailable.\n${JSON.stringify(toolEvents, null, 2)}`,
-        },
+        summaryMessage: buildAutomaticToolSummaryMessage(toolEvents),
     };
 }
 

@@ -299,6 +299,142 @@ function summarizeObjectData(data = {}) {
     return truncateText(normalizeInlineText(JSON.stringify(data)), 220);
 }
 
+function deriveResearchSourceLabel(url = '', fallback = '') {
+    const normalizedFallback = normalizeInlineText(fallback || '');
+    if (normalizedFallback) {
+        return normalizedFallback;
+    }
+
+    try {
+        return new URL(String(url || '')).hostname.replace(/^www\./i, '');
+    } catch (_error) {
+        return '';
+    }
+}
+
+function findSearchResultByUrl(searchResults = [], url = '') {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl || !Array.isArray(searchResults)) {
+        return null;
+    }
+
+    return searchResults.find((entry) => String(entry?.url || '').trim() === normalizedUrl) || null;
+}
+
+function extractResearchSourceExcerpt(event = {}) {
+    const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+    const data = event?.result?.data || {};
+
+    if (toolId === 'web-scrape') {
+        const direct = [
+            data?.summary,
+            data?.text,
+            data?.content,
+            data?.markdown,
+        ].find((value) => typeof value === 'string' && value.trim());
+
+        if (direct) {
+            return truncateText(normalizeInlineText(direct), 900);
+        }
+
+        return truncateText(normalizeInlineText(stripHtmlToText(JSON.stringify(data?.data || {}))), 900);
+    }
+
+    return truncateText(normalizeInlineText(extractFetchBodyText(event?.result || {})), 900);
+}
+
+function buildResearchDossierFromToolEvents({ objective = '', toolEvents = [] } = {}) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const lastSearchEvent = getLastSuccessfulToolEvent(events, 'web-search');
+    const searchResults = Array.isArray(lastSearchEvent?.result?.data?.results)
+        ? lastSearchEvent.result.data.results
+        : [];
+    const query = normalizeInlineText(
+        lastSearchEvent?.result?.data?.query
+        || parseToolCallArguments(lastSearchEvent?.toolCall?.function?.arguments || '{}').query
+        || objective,
+    );
+
+    const sourceEntries = events
+        .filter((event) => {
+            const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+            return (toolId === 'web-fetch' || toolId === 'web-scrape') && event?.result?.success !== false;
+        })
+        .map((event) => {
+            const data = event?.result?.data || {};
+            const args = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+            const url = String(data?.url || args?.url || '').trim();
+            const searchResult = findSearchResultByUrl(searchResults, url);
+            const title = normalizeInlineText(data?.title || searchResult?.title || url);
+            const snippet = truncateText(normalizeInlineText(searchResult?.snippet || ''), 260);
+            const excerpt = extractResearchSourceExcerpt(event);
+            const source = deriveResearchSourceLabel(url, searchResult?.source || data?.source || '');
+            const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+
+            if (!url || (!title && !snippet && !excerpt)) {
+                return null;
+            }
+
+            return {
+                url,
+                title,
+                snippet,
+                excerpt,
+                source,
+                toolId,
+            };
+        })
+        .filter(Boolean)
+        .slice(0, 6);
+
+    if (!query && searchResults.length === 0 && sourceEntries.length === 0) {
+        return '';
+    }
+
+    const lines = [];
+    if (query) {
+        lines.push(`Research query: ${query}`);
+    }
+
+    if (searchResults.length > 0) {
+        lines.push('Top search results:');
+        searchResults.slice(0, 6).forEach((entry, index) => {
+            const title = truncateText(normalizeInlineText(entry?.title || 'Untitled result'), 120);
+            const url = String(entry?.url || '').trim();
+            const source = deriveResearchSourceLabel(url, entry?.source || '');
+            const snippet = truncateText(normalizeInlineText(entry?.snippet || ''), 220);
+            lines.push([
+                `${index + 1}. ${title}`,
+                source ? `(${source})` : '',
+                url ? `[${url}]` : '',
+            ].filter(Boolean).join(' '));
+            if (snippet) {
+                lines.push(`   Snippet: ${snippet}`);
+            }
+        });
+    }
+
+    if (sourceEntries.length > 0) {
+        lines.push('Verified source extracts:');
+        sourceEntries.forEach((entry, index) => {
+            lines.push([
+                `${index + 1}. ${truncateText(entry.title || entry.url, 140)}`,
+                entry.source ? `(${entry.source})` : '',
+                `[${entry.url}]`,
+                entry.toolId ? `via ${entry.toolId}` : '',
+            ].filter(Boolean).join(' '));
+            if (entry.snippet) {
+                lines.push(`   Search snippet: ${entry.snippet}`);
+            }
+            if (entry.excerpt) {
+                lines.push(`   Verified extract: ${entry.excerpt}`);
+            }
+        });
+    }
+
+    return lines.join('\n');
+}
+
 function hasUsableSshDefaults() {
     const sshConfig = settingsController.getEffectiveSshConfig();
 
@@ -1156,7 +1292,7 @@ function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = 
         return [];
     }
 
-    const maxPages = Math.max(2, Math.min(config.memory.researchFollowupPages, 4));
+    const maxPages = Math.max(2, Math.min(config.memory.researchFollowupPages, 6));
     const followupCandidates = [];
     const seen = new Set();
 
@@ -1584,17 +1720,25 @@ function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
     const successes = events.filter((event) => event?.result?.success !== false).length;
     const failures = events.length - successes;
     const normalizedObjective = truncateText(normalizeInlineText(objective), 280);
+    const researchDossier = buildResearchDossierFromToolEvents({ objective, toolEvents: events });
     const lines = [
         'Based on the verified tool results, here is the best available answer.',
         normalizedObjective ? `Request: ${normalizedObjective}` : '',
         `Tool calls completed: ${events.length}. Successful: ${successes}. Failed: ${failures}.`,
         '',
-        'Verified findings:',
-        ...events.slice(0, 8).map((event) => summarizeToolEventForUser(event)),
+        researchDossier ? 'Research dossier:' : 'Verified findings:',
+        researchDossier || '',
+        ...events
+            .filter((event) => !['web-search', 'web-fetch', 'web-scrape'].includes(event?.toolCall?.function?.name || event?.result?.toolId || ''))
+            .slice(0, 8)
+            .map((event) => summarizeToolEventForUser(event)),
     ];
 
-    if (events.length > 8) {
-        lines.push(`- Additional tool results omitted: ${events.length - 8}.`);
+    const omittedEvents = events
+        .filter((event) => !['web-search', 'web-fetch', 'web-scrape'].includes(event?.toolCall?.function?.name || event?.result?.toolId || ''))
+        .length - 8;
+    if (omittedEvents > 0) {
+        lines.push(`- Additional tool results omitted: ${omittedEvents}.`);
     }
 
     return lines.filter(Boolean).join('\n');
@@ -3388,6 +3532,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not mention turn-level tool availability, missing tools, sandbox limits, or inability to execute commands.',
             'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
             'If a tool failed, state the exact tool failure plainly.',
+            'When the request is research-heavy, synthesize across the verified sources and keep concrete facts, comparisons, and caveats instead of collapsing everything into a shallow summary.',
             `Task type: ${taskType}`,
             ...(taskType === NOTES_EXECUTION_PROFILE
                 ? [
@@ -3409,6 +3554,13 @@ class ConversationOrchestrator extends EventEmitter {
                     ...extractVerifiedImageEmbeds(toolEvents),
                     '',
                     'Reuse those image embeds directly when they satisfy the request.',
+                    '',
+                ]
+                : []),
+            ...(buildResearchDossierFromToolEvents({ objective, toolEvents })
+                ? [
+                    'Research dossier:',
+                    buildResearchDossierFromToolEvents({ objective, toolEvents }),
                     '',
                 ]
                 : []),
@@ -3506,6 +3658,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
             'Do not wrap the final answer in code fences.',
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
+            'If the request is research-heavy, synthesize across the verified sources with concrete detail, cross-source comparison, and caveats instead of flattening the findings into one thin paragraph.',
             ...(taskType === NOTES_EXECUTION_PROFILE
                 ? [
                     'This is a notes-surface request.',
@@ -3531,6 +3684,13 @@ class ConversationOrchestrator extends EventEmitter {
                     ...extractVerifiedImageEmbeds(toolEvents),
                     '',
                     'Reuse those image embeds directly when they satisfy the request.',
+                    '',
+                ]
+                : []),
+            ...(buildResearchDossierFromToolEvents({ objective, toolEvents })
+                ? [
+                    'Research dossier:',
+                    buildResearchDossierFromToolEvents({ objective, toolEvents }),
                     '',
                 ]
                 : []),

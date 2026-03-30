@@ -83,11 +83,11 @@ const config = {
             : 0.64,
         researchSearchLimit: Math.max(
             1,
-            parseInt(process.env.WEB_RESEARCH_SEARCH_LIMIT, 10) || 10,
+            parseInt(process.env.WEB_RESEARCH_SEARCH_LIMIT, 10) || 12,
         ),
         researchFollowupPages: Math.max(
             1,
-            parseInt(process.env.WEB_RESEARCH_FOLLOWUP_PAGES, 10) || 3,
+            parseInt(process.env.WEB_RESEARCH_FOLLOWUP_PAGES, 10) || 4,
         ),
     },
 

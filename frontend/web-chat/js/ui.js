@@ -456,6 +456,10 @@ class UIHelpers {
             return this.renderSearchResultsMessage(message);
         }
 
+        if (message.type === 'research-sources') {
+            return this.renderResearchSourcesMessage(message);
+        }
+
         if (message.type === 'image-selection') {
             return this.renderImageSelectionMessage(message);
         }
@@ -866,6 +870,78 @@ class UIHelpers {
                         </div>
                         <span class="text">Choose a page</span>
                         <span class="meta">${results.length} options</span>
+                    </div>
+                    ${query ? `<p class="selection-panel-query">"${this.escapeHtml(query)}"</p>` : ''}
+                    ${contentHtml}
+                </div>
+            </div>
+        `;
+
+        return messageEl;
+    }
+
+    renderResearchSourcesMessage(message) {
+        const messageId = message.id || this.generateMessageId();
+        const time = this.formatTime(message.timestamp);
+        const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
+        const query = message.query || '';
+        const results = Array.isArray(message.results) ? message.results : [];
+
+        const messageEl = document.createElement('div');
+        messageEl.className = 'message assistant';
+        messageEl.id = messageId;
+        messageEl.dataset.messageId = messageId;
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', 'Verified source excerpts');
+
+        const contentHtml = results.length > 0
+            ? `
+                <div class="search-results-list">
+                    ${results.map((result) => `
+                        <div class="search-result-card research-source-card">
+                            <div class="search-result-topline">
+                                <div class="search-result-title">${this.escapeHtml(result.title || result.url)}</div>
+                                <div class="search-result-meta">
+                                    ${result.source ? `<span>${this.escapeHtml(result.source)}</span>` : ''}
+                                    ${this.formatToolResultDate(result.publishedAt) ? `<span>${this.escapeHtml(this.formatToolResultDate(result.publishedAt))}</span>` : ''}
+                                    ${result.toolId ? `<span class="research-source-label">${this.escapeHtml(result.toolId)}</span>` : ''}
+                                </div>
+                            </div>
+                            <a class="search-result-url" href="${this.escapeHtmlAttr(result.url)}" target="_blank" rel="noopener noreferrer nofollow">${this.escapeHtml(result.url)}</a>
+                            ${result.snippet ? `<p class="search-result-snippet">${this.escapeHtml(result.snippet)}</p>` : ''}
+                            ${result.excerpt ? `<div class="research-source-excerpt">${this.escapeHtml(result.excerpt)}</div>` : ''}
+                            <div class="search-result-actions">
+                                <button type="button" class="selection-action-btn" onclick="window.open('${this.escapeHtmlAttr(result.url)}', '_blank', 'noopener')">
+                                    Open Source
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `
+            : `
+                <div class="unsplash-search-empty">
+                    <i data-lucide="search-x" class="w-8 h-8" aria-hidden="true"></i>
+                    <p>No verified source excerpts were returned.</p>
+                </div>
+            `;
+
+        messageEl.innerHTML = `
+            <div class="message-avatar assistant" aria-hidden="true">
+                <i data-lucide="book-open" class="w-4 h-4"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-author">Verified Sources</span>
+                    <span class="message-time" title="${fullTimestamp}">${time}</span>
+                </div>
+                <div class="message-selection-panel">
+                    <div class="selection-panel-info">
+                        <div class="icon" aria-hidden="true">
+                            <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+                        </div>
+                        <span class="text">Verified excerpts</span>
+                        <span class="meta">${results.length} sources</span>
                     </div>
                     ${query ? `<p class="selection-panel-query">"${this.escapeHtml(query)}"</p>` : ''}
                     ${contentHtml}

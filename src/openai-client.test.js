@@ -708,6 +708,13 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'web-fetch',
             'web-fetch',
         ]);
+        expect(result.summaryMessage).toEqual(expect.objectContaining({
+            role: 'system',
+            content: expect.stringContaining('[Research dossier]'),
+        }));
+        expect(result.summaryMessage.content).toContain('Top search results:');
+        expect(result.summaryMessage.content).toContain('Verified source extracts:');
+        expect(result.summaryMessage.content).toContain('Important research facts about https://example.com/tiger');
         expect(memoryService.rememberResearchNote).toHaveBeenCalledTimes(2);
         expect(memoryService.rememberResearchNote.mock.calls[0][1]).toContain('[Research note]');
         expect(memoryService.rememberResearchNote.mock.calls[0][1]).toContain('Query: tigers and cats differences');
