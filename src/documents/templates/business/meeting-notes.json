@@ -5,6 +5,9 @@
   "description": "Structured template for documenting meetings and action items",
   "icon": "📋",
   "tags": ["meeting", "notes", "minutes", "documentation"],
+  "blueprint": "memo",
+  "recommendedFormats": ["docx", "pdf", "html", "md"],
+  "useCases": ["meeting minutes", "decision logs", "action-item capture"],
   
   "variables": [
     {
@@ -104,5 +107,11 @@
       "extract-action-items",
       "grammar-check"
     ]
+  },
+  
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["structured capture", "action items", "clean summary"],
+    "bestFor": ["meeting notes", "internal summaries", "project syncs"]
   }
 }

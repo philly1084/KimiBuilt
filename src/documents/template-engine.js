@@ -223,8 +223,8 @@ class TemplateEngine {
       }
     }
 
-    if (!Array.isArray(template.variables)) {
-      console.error('[TemplateEngine] Template variables must be an array');
+    if (!Array.isArray(template.variables) && (!template.variables || typeof template.variables !== 'object')) {
+      console.error('[TemplateEngine] Template variables must be an array or an object map');
       return false;
     }
 
@@ -265,7 +265,20 @@ class TemplateEngine {
    */
   getTemplateVariables(templateId) {
     const template = this.getTemplate(templateId);
-    return template ? template.variables : [];
+    const rawVariables = template ? template.variables : [];
+
+    if (Array.isArray(rawVariables)) {
+      return rawVariables;
+    }
+
+    if (rawVariables && typeof rawVariables === 'object') {
+      return Object.entries(rawVariables).map(([id, variable]) => ({
+        id,
+        ...(variable || {}),
+      }));
+    }
+
+    return [];
   }
 
   /**

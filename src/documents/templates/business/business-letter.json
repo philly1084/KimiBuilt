@@ -5,6 +5,9 @@
   "description": "Professional formal correspondence for business communication",
   "icon": "📄",
   "tags": ["formal", "correspondence", "professional"],
+  "blueprint": "letter",
+  "recommendedFormats": ["docx", "pdf", "html"],
+  "useCases": ["formal outreach", "partner communication", "customer correspondence"],
   
   "variables": [
     {
@@ -121,6 +124,12 @@
       "make-shorter",
       "make-longer"
     ]
+  },
+  
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["formal structure", "fast drafting", "polished correspondence"],
+    "bestFor": ["letters", "requests", "formal replies"]
   },
   
   "layout": {

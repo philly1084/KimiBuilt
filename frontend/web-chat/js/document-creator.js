@@ -10,6 +10,7 @@ class DocumentCreator {
     this.categories = [];
     this.currentTemplate = null;
     this.modalElement = null;
+    this.planRefreshTimer = null;
     
     this.init();
   }
@@ -205,6 +206,8 @@ class DocumentCreator {
                 </select>
               </div>
             </div>
+
+            <div id="doc-ai-recommendation" class="doc-ai-recommendation hidden"></div>
           </div>
           
           <!-- Progress/Loading -->
@@ -238,6 +241,7 @@ class DocumentCreator {
     
     // Render initial templates
     this.renderTemplates();
+    this.setupAIGenerationAssist();
   }
 
   /**
@@ -275,6 +279,7 @@ class DocumentCreator {
     }
     
     this.modalElement.classList.remove('hidden');
+    this.clearProductionPlan();
     
     // If a template hint was provided, try to find and select it
     if (templateHint) {
@@ -298,6 +303,8 @@ class DocumentCreator {
     if (this.modalElement) {
       this.modalElement.classList.add('hidden');
     }
+    clearTimeout(this.planRefreshTimer);
+    this.clearProductionPlan();
   }
 
   /**
@@ -318,7 +325,154 @@ class DocumentCreator {
     } else if (step === 3) {
       actionBtn.textContent = 'Generate with AI';
       actionBtn.onclick = () => this.generateWithAI();
+      this.refreshProductionPlan(true);
     }
+  }
+
+  setupAIGenerationAssist() {
+    const promptInput = document.getElementById('doc-ai-prompt');
+    const typeSelect = document.getElementById('doc-ai-type');
+    const formatSelect = document.getElementById('doc-ai-format');
+    const toneSelect = document.getElementById('doc-ai-tone');
+    const lengthSelect = document.getElementById('doc-ai-length');
+
+    if (promptInput) {
+      promptInput.addEventListener('input', () => this.scheduleProductionPlanRefresh());
+    }
+
+    [typeSelect, formatSelect, toneSelect, lengthSelect].forEach((element) => {
+      if (element) {
+        element.addEventListener('change', () => this.scheduleProductionPlanRefresh());
+      }
+    });
+  }
+
+  scheduleProductionPlanRefresh() {
+    clearTimeout(this.planRefreshTimer);
+    this.planRefreshTimer = setTimeout(() => {
+      this.refreshProductionPlan();
+    }, 250);
+  }
+
+  async refreshProductionPlan(force = false) {
+    const panel = document.getElementById('doc-ai-recommendation');
+    const step = document.getElementById('doc-step-3');
+    if (!panel || !step || step.classList.contains('hidden')) {
+      return;
+    }
+
+    const prompt = document.getElementById('doc-ai-prompt')?.value?.trim() || '';
+    const documentType = document.getElementById('doc-ai-type')?.value || '';
+    const format = document.getElementById('doc-ai-format')?.value || '';
+    const tone = document.getElementById('doc-ai-tone')?.value || 'professional';
+    const length = document.getElementById('doc-ai-length')?.value || 'medium';
+
+    if (!force && !prompt && !documentType) {
+      this.clearProductionPlan();
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/documents/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          documentType,
+          format,
+          tone,
+          length,
+          limit: 3,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to build document plan');
+      }
+
+      const data = await response.json();
+      this.renderProductionPlan(data.plan || null);
+    } catch (error) {
+      console.error('[DocumentCreator] Failed to build production plan:', error);
+      this.clearProductionPlan();
+    }
+  }
+
+  renderProductionPlan(plan) {
+    const panel = document.getElementById('doc-ai-recommendation');
+    if (!panel || !plan) {
+      this.clearProductionPlan();
+      return;
+    }
+
+    const recommendedTemplates = Array.isArray(plan.recommendedTemplates) ? plan.recommendedTemplates : [];
+    const outline = Array.isArray(plan.outline) ? plan.outline : [];
+    const outlineMarkup = outline.slice(0, 4).map((item) => {
+      const label = item.title || item.heading || `Step ${item.index || ''}`.trim();
+      const detail = item.purpose || '';
+      return `
+        <div class="doc-plan-outline-item">
+          <strong>${label}</strong>
+          <span>${detail}</span>
+        </div>
+      `;
+    }).join('');
+    const templateMarkup = recommendedTemplates.map((template) => `
+      <button type="button" class="doc-plan-template-chip" onclick="documentCreator.useRecommendedTemplate('${template.id}')">
+        ${template.icon || '📄'} ${template.name}
+      </button>
+    `).join('');
+    const formatButtons = (plan.recommendedFormats || []).map((entry) => `
+      <button type="button" class="doc-plan-format-chip${entry === plan.recommendedFormat ? ' is-active' : ''}" onclick="documentCreator.applyRecommendedFormat('${entry}')">
+        ${entry.toUpperCase()}
+      </button>
+    `).join('');
+
+    panel.innerHTML = `
+      <div class="doc-plan-header">
+        <div>
+          <div class="doc-plan-eyebrow">Production Plan</div>
+          <h5>${plan.titleSuggestion || 'Suggested plan'}</h5>
+        </div>
+        <span class="doc-plan-pipeline">${plan.pipeline || 'document'}</span>
+      </div>
+      <p class="doc-plan-summary">${plan.blueprint?.goal || ''}</p>
+      <div class="doc-plan-meta">
+        <span><strong>Blueprint:</strong> ${plan.blueprint?.label || plan.inferredType || 'document'}</span>
+        <span><strong>Suggested format:</strong> ${String(plan.recommendedFormat || '').toUpperCase()}</span>
+      </div>
+      <div class="doc-plan-format-row">${formatButtons}</div>
+      <div class="doc-plan-outline">${outlineMarkup}</div>
+      ${templateMarkup ? `<div class="doc-plan-templates"><span>Start from template:</span>${templateMarkup}</div>` : ''}
+    `;
+    panel.classList.remove('hidden');
+  }
+
+  clearProductionPlan() {
+    clearTimeout(this.planRefreshTimer);
+    const panel = document.getElementById('doc-ai-recommendation');
+    if (!panel) {
+      return;
+    }
+
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+  }
+
+  applyRecommendedFormat(format) {
+    const formatSelect = document.getElementById('doc-ai-format');
+    if (formatSelect) {
+      formatSelect.value = format;
+      this.scheduleProductionPlanRefresh();
+    }
+  }
+
+  useRecommendedTemplate(templateId) {
+    if (!templateId) {
+      return;
+    }
+
+    this.selectTemplate(templateId);
   }
 
   /**
@@ -513,10 +667,14 @@ class DocumentCreator {
     const container = document.getElementById('doc-format-options');
     if (!container || !this.currentTemplate) return;
     
-    const formats = this.currentTemplate.formats || ['docx'];
+    const formats = Array.from(new Set([
+      ...(Array.isArray(this.currentTemplate.formats) ? this.currentTemplate.formats : []),
+      ...(Array.isArray(this.currentTemplate.recommendedFormats) ? this.currentTemplate.recommendedFormats : []),
+    ]));
     const formatLabels = { docx: 'Word', pdf: 'PDF', html: 'HTML', md: 'Markdown', pptx: 'PowerPoint' };
+    const availableFormats = formats.length > 0 ? formats : ['docx'];
     
-    container.innerHTML = formats.map((format, index) => `
+    container.innerHTML = availableFormats.map((format, index) => `
       <label class="doc-format-option">
         <input type="radio" name="doc-format" value="${format}" ${index === 0 ? 'checked' : ''}>
         <span class="doc-format-label">${formatLabels[format] || format.toUpperCase()}</span>
@@ -1090,6 +1248,128 @@ const documentCreatorStyles = `
   border-radius: 6px;
   background: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+.doc-ai-recommendation {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+}
+
+.doc-plan-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-plan-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+
+.doc-plan-header h5 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.doc-plan-pipeline {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.doc-plan-summary {
+  margin: 10px 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.doc-plan-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.doc-plan-format-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.doc-plan-format-chip,
+.doc-plan-template-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.doc-plan-format-chip:hover,
+.doc-plan-template-chip:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.doc-plan-format-chip.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.doc-plan-outline {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.doc-plan-outline-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.doc-plan-outline-item strong {
+  font-size: 13px;
+}
+
+.doc-plan-outline-item span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.doc-plan-templates {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.doc-plan-templates span {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .doc-loading {

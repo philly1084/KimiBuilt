@@ -5,6 +5,9 @@
   "description": "Decision-ready brief with headline findings, metrics, risks, and next moves.",
   "icon": "📌",
   "tags": ["brief", "executive", "board", "summary", "decision"],
+  "blueprint": "executive-brief",
+  "recommendedFormats": ["pdf", "docx", "html", "md"],
+  "useCases": ["board update", "executive summary", "decision brief"],
   "variables": [
     {
       "id": "title",
@@ -86,5 +89,10 @@
       "extract-risks",
       "executive-tone"
     ]
+  },
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["headline summary", "decision framing", "risk visibility"],
+    "bestFor": ["executive briefs", "board briefs", "leadership updates"]
   }
 }

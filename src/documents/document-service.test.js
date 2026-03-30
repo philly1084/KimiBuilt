@@ -93,6 +93,40 @@ describe('DocumentService', () => {
     expect(String(document.content)).toContain('Website Slides');
   });
 
+  test('renders template-driven website slides as html presentation decks', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.generateFromTemplate('website-slides-storyboard', {
+      title: 'Launch Storyboard',
+      subtitle: 'Narrative launch site',
+      slides: [
+        {
+          kicker: 'Hero',
+          title: 'Design moves at the speed of thought',
+          content: 'A visual-first opening scene for the launch.',
+          imagePrompt: 'Immersive product hero',
+        },
+        {
+          kicker: 'Proof',
+          title: 'Built for teams shipping every day',
+          bullets: ['Narrative-first scenes', 'Visual rhythm', 'Strong CTA'],
+        },
+      ],
+    }, 'html', {
+      theme: 'product',
+    });
+
+    expect(document.mimeType).toBe('text/html');
+    expect(document.filename).toMatch(/\.html$/);
+    expect(String(document.content)).toContain('presentation-deck');
+    expect(String(document.content)).toContain('Launch Storyboard');
+    expect(String(document.content)).toContain('Design moves at the speed of thought');
+  });
+
   test('discovers premium built-in templates for briefs, data stories, and decks', async () => {
     const service = new DocumentService({
       responses: {
@@ -108,5 +142,67 @@ describe('DocumentService', () => {
       'data-story-report',
       'website-slides-storyboard',
     ]));
+  });
+
+  test('recommends pitch-deck workflow for investor prompts', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const recommendation = service.recommendDocumentWorkflow({
+      prompt: 'Create an investor pitch deck for our AI workflow startup',
+      format: 'pptx',
+    });
+
+    expect(recommendation.inferredType).toBe('pitch-deck');
+    expect(recommendation.pipeline).toBe('presentation');
+    expect(recommendation.recommendedFormat).toBe('pptx');
+    expect(recommendation.recommendedTemplates.map((template) => template.id)).toContain('pitch-deck-story');
+  });
+
+  test('keeps html-capable storyboard templates in recommendations for website slides', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const recommendation = service.recommendDocumentWorkflow({
+      prompt: 'Build website slides for our product launch story',
+      documentType: 'website-slides',
+      format: 'html',
+    });
+
+    expect(recommendation.recommendedFormat).toBe('html');
+    expect(recommendation.recommendedTemplates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'website-slides-storyboard',
+        formats: expect.arrayContaining(['html', 'pptx']),
+      }),
+    ]));
+  });
+
+  test('builds a website-slide production plan with slide outline items', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const plan = service.buildDocumentPlan({
+      prompt: 'Build website slides for our product launch story',
+      documentType: 'website-slides',
+      format: 'html',
+    });
+
+    expect(plan.inferredType).toBe('website-slides');
+    expect(plan.outlineType).toBe('slides');
+    expect(plan.recommendedFormat).toBe('html');
+    expect(plan.outline[0]).toEqual(expect.objectContaining({
+      layout: 'title',
+      title: 'Title Slide',
+    }));
   });
 });

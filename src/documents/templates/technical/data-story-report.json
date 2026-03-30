@@ -5,6 +5,9 @@
   "description": "Analytical report template for trends, comparisons, and recommendations grounded in metrics.",
   "icon": "📈",
   "tags": ["data", "analytics", "report", "chart", "insights"],
+  "blueprint": "data-story",
+  "recommendedFormats": ["pdf", "docx", "html", "md"],
+  "useCases": ["analytics report", "trend review", "insight memo"],
   "variables": [
     {
       "id": "title",
@@ -71,5 +74,10 @@
       "executive-summary",
       "technical-tone"
     ]
+  },
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["trend explanation", "metric storytelling", "chart-friendly structure"],
+    "bestFor": ["data stories", "analytics summaries", "insight reports"]
   }
 }

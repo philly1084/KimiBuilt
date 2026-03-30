@@ -5,6 +5,9 @@
   "description": "Storyboard deck for premium web-style narrative slides with visual beats and concise copy.",
   "icon": "🖥️",
   "tags": ["website slides", "storyboard", "creative", "narrative", "slides"],
+  "blueprint": "website-slides",
+  "recommendedFormats": ["html", "pptx"],
+  "useCases": ["website narrative", "launch story", "creative storyboard"],
   "variables": [
     {
       "id": "title",
@@ -76,7 +79,7 @@
       ]
     }
   ],
-  "formats": ["pptx"],
+  "formats": ["pptx", "html"],
   "aiEnhancement": {
     "enabled": true,
     "features": [
@@ -84,5 +87,10 @@
       "tighten-story-arc",
       "generate-image-prompts"
     ]
+  },
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["cinematic scene pacing", "visual direction", "web-style slide storytelling"],
+    "bestFor": ["website slides", "storyboards", "narrative decks"]
   }
 }

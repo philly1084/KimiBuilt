@@ -76,13 +76,14 @@ class PptxGenerator {
   buildContentFromTemplate(template = {}, variables = {}, options = {}) {
     const slides = this.normalizeTemplateSlides(variables.slides);
     const fallbackTitle = variables.title || template.name || 'Presentation';
+    const defaultTheme = this.resolveTemplateTheme(template, options.theme);
 
     switch (template.id) {
       case 'presentation-image-heavy':
         return {
           title: fallbackTitle,
           subtitle: variables.subtitle || '',
-          theme: options.theme || 'bold',
+          theme: defaultTheme,
           slides: slides.map((slide, index) => ({
             layout: index === 0 ? 'title' : (slide.layout || 'image'),
             title: slide.title || (index === 0 ? fallbackTitle : `Slide ${index + 1}`),
@@ -98,7 +99,7 @@ class PptxGenerator {
         return {
           title: fallbackTitle,
           subtitle: variables.subtitle || '',
-          theme: options.theme || 'executive',
+          theme: defaultTheme,
           slides: slides.length > 0 ? slides.map((slide, index) => ({
             layout: index === 0 ? 'title' : (slide.layout || 'content'),
             title: slide.title || (index === 0 ? fallbackTitle : `Slide ${index + 1}`),
@@ -123,6 +124,33 @@ class PptxGenerator {
           ],
         };
     }
+  }
+
+  resolveTemplateTheme(template = {}, explicitTheme = '') {
+    if (explicitTheme) {
+      return explicitTheme;
+    }
+
+    const blueprint = String(template?.blueprint || '').trim().toLowerCase();
+    const category = String(template?.category || '').trim().toLowerCase();
+
+    if (blueprint === 'website-slides') {
+      return 'bold';
+    }
+
+    if (blueprint === 'pitch-deck') {
+      return 'executive';
+    }
+
+    if (blueprint === 'presentation' && category === 'creative') {
+      return 'bold';
+    }
+
+    if (blueprint === 'presentation') {
+      return 'executive';
+    }
+
+    return category === 'creative' ? 'editorial' : 'executive';
   }
 
   normalizePresentationContent(content = {}, options = {}) {

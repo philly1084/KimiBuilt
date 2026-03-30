@@ -5,7 +5,15 @@
   "description": "Image-heavy presentation with AI-generated visuals",
   "icon": "🎨",
   "tags": ["presentation", "slides", "visual", "images", "ai-art"],
-  "formats": ["pptx"],
+  "blueprint": "website-slides",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["visual storytelling", "image-led deck", "website slide narrative"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["visual rhythm", "image-first storytelling", "high-impact scenes"],
+    "bestFor": ["website slides", "creative decks", "storyboards"]
+  },
   "variables": {
     "title": {
       "type": "text",

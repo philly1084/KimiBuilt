@@ -5,7 +5,15 @@
   "description": "Professional presentation with bullet point slides",
   "icon": "📊",
   "tags": ["presentation", "slides", "business", "powerpoint"],
-  "formats": ["pptx"],
+  "blueprint": "presentation",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["business deck", "team update", "client presentation"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["clear business slides", "bullet storytelling", "presentation-ready structure"],
+    "bestFor": ["presentations", "slides", "briefing decks"]
+  },
   "variables": {
     "title": {
       "type": "text",

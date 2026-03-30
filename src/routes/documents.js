@@ -26,6 +26,22 @@ const aiGenerateSchema = {
   model: { required: false, type: 'string' }
 };
 
+const recommendSchema = {
+  prompt: { required: false, type: 'string' },
+  documentType: { required: false, type: 'string' },
+  format: { required: false, type: 'string' },
+  limit: { required: false, type: 'number' }
+};
+
+const planSchema = {
+  prompt: { required: false, type: 'string' },
+  documentType: { required: false, type: 'string' },
+  format: { required: false, type: 'string' },
+  tone: { required: false, type: 'string' },
+  length: { required: false, type: 'string' },
+  limit: { required: false, type: 'number' }
+};
+
 const expandOutlineSchema = {
   outline: { required: true, type: 'array' },
   title: { required: false, type: 'string' },
@@ -78,13 +94,34 @@ router.get('/templates', async (req, res, next) => {
       description: t.description,
       icon: t.icon,
       tags: t.tags,
-      formats: t.formats
+      formats: documentService.getTemplateAvailableFormats(t),
+      blueprint: t.blueprint || null,
+      recommendedFormats: documentService.getTemplateAvailableFormats(t),
+      useCases: t.useCases || []
     }));
     
     res.json({
       templates: simplified,
       categories: documentService.templateEngine.getCategories(),
       count: simplified.length
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/documents/blueprints
+ * List document production blueprints
+ */
+router.get('/blueprints', async (req, res, next) => {
+  try {
+    const documentService = req.app.locals.documentService;
+    const blueprints = documentService.getBlueprints();
+
+    res.json({
+      blueprints,
+      count: blueprints.length,
     });
   } catch (err) {
     next(err);
@@ -114,9 +151,13 @@ router.get('/templates/:id', async (req, res, next) => {
         description: template.description,
         icon: template.icon,
         tags: template.tags,
-        formats: template.formats,
+        formats: documentService.getTemplateAvailableFormats(template),
+        blueprint: template.blueprint || null,
+        recommendedFormats: documentService.getTemplateAvailableFormats(template),
+        useCases: template.useCases || [],
         variables: template.variables,
         aiEnhancement: template.aiEnhancement,
+        productionProfile: template.productionProfile || null,
         variants: template.variants
       }
     });
@@ -164,6 +205,42 @@ router.get('/formats', (req, res) => {
 });
 
 /**
+ * POST /api/documents/recommend
+ * Recommend blueprint, workflow, format, and templates for a document request
+ */
+router.post('/recommend', validate(recommendSchema), async (req, res, next) => {
+  try {
+    const documentService = req.app.locals.documentService;
+    const recommendation = documentService.recommendDocumentWorkflow(req.body || {});
+
+    res.json({
+      success: true,
+      recommendation,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/documents/plan
+ * Build a deterministic document-production plan for the current request
+ */
+router.post('/plan', validate(planSchema), async (req, res, next) => {
+  try {
+    const documentService = req.app.locals.documentService;
+    const plan = documentService.buildDocumentPlan(req.body || {});
+
+    res.json({
+      success: true,
+      plan,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/documents/generate
  * Generate document from template
  */
@@ -208,6 +285,13 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
     } = req.body;
     
     const documentService = req.app.locals.documentService;
+    const productionPlan = documentService.buildDocumentPlan({
+      prompt,
+      documentType,
+      format,
+      tone,
+      length,
+    });
     
     const document = await documentService.aiGenerate(prompt, {
       documentType,
@@ -228,6 +312,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
         metadata: document.metadata,
         preview: document.preview
       },
+      productionPlan,
       downloadUrl: `/api/documents/${document.id}/download`
     });
   } catch (err) {

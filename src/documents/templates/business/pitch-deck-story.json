@@ -5,6 +5,9 @@
   "description": "Narrative pitch deck template for problem-solution-proof-ask storytelling.",
   "icon": "🚀",
   "tags": ["pitch deck", "investor", "startup", "story", "slides"],
+  "blueprint": "pitch-deck",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["investor deck", "startup pitch", "fundraising story"],
   "variables": [
     {
       "id": "title",
@@ -86,7 +89,7 @@
       ]
     }
   ],
-  "formats": ["pptx"],
+  "formats": ["pptx", "html"],
   "aiEnhancement": {
     "enabled": true,
     "features": [
@@ -94,5 +97,10 @@
       "improve-story-arc",
       "investor-tone"
     ]
+  },
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["story arc", "fundraising flow", "proof-and-ask sequencing"],
+    "bestFor": ["pitch decks", "investor slides", "fundraising narratives"]
   }
 }

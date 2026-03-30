@@ -10,6 +10,11 @@ const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
 const { ensureHtmlDocument } = require('../artifacts/artifact-renderer');
 const { createUniqueFilename } = require('../utils/text');
+const {
+  BLUEPRINTS,
+  normalizeDocumentType,
+  resolveDocumentBlueprint,
+} = require('./document-design-blueprints');
 
 class DocumentService {
   constructor(openaiClient) {
@@ -390,6 +395,272 @@ class DocumentService {
     return this.templateEngine.getTemplate(templateId);
   }
 
+  getBlueprints() {
+    return Object.values(BLUEPRINTS).map((blueprint) => ({
+      ...blueprint,
+      pipeline: this.getPipelineForBlueprint(blueprint.id),
+      recommendedFormats: this.getRecommendedFormatsForBlueprint(blueprint.id),
+    }));
+  }
+
+  getRecommendedFormatsForBlueprint(documentType = 'document') {
+    const normalizedType = normalizeDocumentType(documentType);
+
+    if (normalizedType === 'website-slides') {
+      return ['html', 'pptx'];
+    }
+
+    if (normalizedType === 'presentation' || normalizedType === 'pitch-deck') {
+      return ['pptx', 'html'];
+    }
+
+    if (normalizedType === 'report' || normalizedType === 'data-story' || normalizedType === 'executive-brief') {
+      return ['pdf', 'docx', 'html', 'md'];
+    }
+
+    return ['docx', 'pdf', 'html', 'md'];
+  }
+
+  getPipelineForBlueprint(documentType = '', format = '') {
+    const normalizedType = normalizeDocumentType(documentType);
+    const normalizedFormat = String(format || '').trim().toLowerCase();
+
+    if (normalizedFormat === 'pptx' || normalizedType === 'presentation' || normalizedType === 'pitch-deck' || normalizedType === 'website-slides') {
+      return 'presentation';
+    }
+
+    return 'document';
+  }
+
+  inferDocumentTypeFromPrompt(prompt = '') {
+    const normalized = String(prompt || '').trim().toLowerCase();
+    if (!normalized) {
+      return 'document';
+    }
+
+    if (/\bwebsite\b[\s\S]{0,30}\b(slides|deck|storyboard|narrative)\b/.test(normalized)
+      || /\b(slides|storyboard)\b[\s\S]{0,30}\bwebsite\b/.test(normalized)) {
+      return 'website-slides';
+    }
+
+    if (/\b(pitch deck|investor deck|fundraising deck)\b/.test(normalized)) {
+      return 'pitch-deck';
+    }
+
+    if (/\b(executive brief|board brief|board update)\b/.test(normalized)) {
+      return 'executive-brief';
+    }
+
+    if (/\b(data story|analytics report|insight report)\b/.test(normalized)) {
+      return 'data-story';
+    }
+
+    if (/\breport\b/.test(normalized)) {
+      return 'report';
+    }
+
+    if (/\bproposal\b/.test(normalized)) {
+      return 'proposal';
+    }
+
+    if (/\bmemo\b/.test(normalized)) {
+      return 'memo';
+    }
+
+    if (/\bletter\b/.test(normalized)) {
+      return 'letter';
+    }
+
+    if (/\b(presentation|slides|deck)\b/.test(normalized)) {
+      return 'presentation';
+    }
+
+    return 'document';
+  }
+
+  scoreTemplateForWorkflow(template = {}, blueprintId = 'document', prompt = '') {
+    const normalizedPrompt = String(prompt || '').trim().toLowerCase();
+    const tags = Array.isArray(template.tags) ? template.tags.map((tag) => String(tag || '').toLowerCase()) : [];
+    const haystack = [
+      template.id,
+      template.name,
+      template.description,
+      template.category,
+      ...tags,
+      template.blueprint,
+      ...(Array.isArray(template.useCases) ? template.useCases : []),
+    ]
+      .map((entry) => String(entry || '').toLowerCase())
+      .join(' ');
+
+    let score = 0;
+    const blueprint = resolveDocumentBlueprint(blueprintId);
+
+    if (template.blueprint === blueprintId) {
+      score += 30;
+    }
+
+    if (haystack.includes(blueprintId)) {
+      score += 18;
+    }
+
+    if (haystack.includes(blueprint.label.toLowerCase())) {
+      score += 12;
+    }
+
+    if (blueprintId === 'pitch-deck' && /(pitch|investor|fundraising|startup)/.test(haystack)) {
+      score += 16;
+    }
+
+    if (blueprintId === 'website-slides' && /(website|storyboard|creative|narrative)/.test(haystack)) {
+      score += 16;
+    }
+
+    if ((blueprintId === 'report' || blueprintId === 'data-story') && /(report|data|analytics|insight|technical)/.test(haystack)) {
+      score += 14;
+    }
+
+    if (blueprintId === 'executive-brief' && /(executive|brief|board|summary)/.test(haystack)) {
+      score += 14;
+    }
+
+    if (normalizedPrompt) {
+      const promptTerms = Array.from(new Set(
+        normalizedPrompt
+          .split(/[^a-z0-9]+/)
+          .map((term) => term.trim())
+          .filter((term) => term.length > 3),
+      ));
+      score += promptTerms.reduce((sum, term) => sum + (haystack.includes(term) ? 2 : 0), 0);
+    }
+
+    return score;
+  }
+
+  recommendDocumentWorkflow({ prompt = '', documentType = '', format = '', limit = 4 } = {}) {
+    const inferredType = normalizeDocumentType(documentType || this.inferDocumentTypeFromPrompt(prompt));
+    const blueprint = resolveDocumentBlueprint(inferredType);
+    const recommendedFormats = this.getRecommendedFormatsForBlueprint(inferredType);
+    const normalizedFormat = String(format || '').trim().toLowerCase();
+    const recommendedFormat = recommendedFormats.includes(normalizedFormat)
+      ? normalizedFormat
+      : recommendedFormats[0];
+    const pipeline = this.getPipelineForBlueprint(inferredType, recommendedFormat);
+    const scoredTemplates = this.templateEngine.getTemplates()
+      .map((template) => ({
+        ...template,
+        score: this.scoreTemplateForWorkflow(template, inferredType, prompt),
+      }))
+      .filter((template) => template.score > 0);
+
+    const compatibleTemplates = scoredTemplates.filter((template) => (
+      this.getTemplateAvailableFormats(template).includes(recommendedFormat)
+    ));
+
+    const templatePool = compatibleTemplates.length > 0
+      ? compatibleTemplates
+      : scoredTemplates;
+
+    const recommendedTemplates = templatePool
+      .sort((a, b) => b.score - a.score || String(a.name || '').localeCompare(String(b.name || '')))
+      .slice(0, Math.max(1, Number(limit) || 4))
+      .map((template) => ({
+        id: template.id,
+        name: template.name,
+        category: template.category,
+        description: template.description,
+        icon: template.icon,
+        formats: this.getTemplateAvailableFormats(template),
+        blueprint: template.blueprint || null,
+        useCases: template.useCases || [],
+        score: template.score,
+      }));
+
+    return {
+      requestedType: String(documentType || '').trim() || null,
+      inferredType,
+      blueprint: {
+        id: blueprint.id,
+        label: blueprint.label,
+        goal: blueprint.goal,
+        narrative: blueprint.narrative,
+      },
+      pipeline,
+      recommendedFormat,
+      recommendedFormats,
+      recommendedTemplates,
+      checklist: [...blueprint.requiredElements],
+      structurePatterns: [...blueprint.structurePatterns],
+      nextAction: pipeline === 'presentation'
+        ? 'Start with a narrative slide outline, then generate the deck.'
+        : 'Start with a strong title, summary, and section structure before generating the file.',
+    };
+  }
+
+  derivePlanTitle(prompt = '', blueprint = {}) {
+    const normalizedPrompt = String(prompt || '').replace(/\s+/g, ' ').trim();
+    if (!normalizedPrompt) {
+      return blueprint?.label ? blueprint.label.replace(/\b\w/g, (char) => char.toUpperCase()) : 'Document Plan';
+    }
+
+    const candidate = normalizedPrompt
+      .replace(/^(create|build|make|write|draft|prepare|generate)\s+/i, '')
+      .replace(/[.?!].*$/, '')
+      .trim();
+
+    if (!candidate) {
+      return blueprint?.label ? blueprint.label.replace(/\b\w/g, (char) => char.toUpperCase()) : 'Document Plan';
+    }
+
+    return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+  }
+
+  buildPlanItemsFromBlueprint(blueprint, pipeline = 'document') {
+    const elements = Array.isArray(blueprint?.requiredElements) ? blueprint.requiredElements : [];
+
+    if (pipeline === 'presentation') {
+      return [
+        {
+          index: 1,
+          layout: 'title',
+          title: 'Title Slide',
+          purpose: 'Open with the core promise or framing for the presentation.',
+        },
+        ...elements.map((element, index) => ({
+          index: index + 2,
+          layout: /proof|metric|traction|chart|data/i.test(element) ? 'chart' : (/product|feature|reveal|hero/i.test(element) ? 'image' : 'content'),
+          title: element,
+          purpose: `Cover ${String(element || '').toLowerCase()}.`,
+        })),
+      ];
+    }
+
+    return elements.map((element, index) => ({
+      index: index + 1,
+      heading: element,
+      purpose: `Address ${String(element || '').toLowerCase()} clearly and concretely.`,
+      suggestedBlocks: /metric|signal|trend|chart|data/i.test(element)
+        ? ['summary', 'stats', 'chart']
+        : (/risk|warning/i.test(element) ? ['summary', 'callout', 'bullets'] : ['summary', 'paragraphs']),
+    }));
+  }
+
+  buildDocumentPlan({ prompt = '', documentType = '', format = '', tone = 'professional', length = 'medium', limit = 4 } = {}) {
+    const recommendation = this.recommendDocumentWorkflow({ prompt, documentType, format, limit });
+    const blueprint = resolveDocumentBlueprint(recommendation.inferredType);
+    const title = this.derivePlanTitle(prompt, blueprint);
+    const outlineType = recommendation.pipeline === 'presentation' ? 'slides' : 'sections';
+
+    return {
+      ...recommendation,
+      tone,
+      length,
+      titleSuggestion: title,
+      outlineType,
+      outline: this.buildPlanItemsFromBlueprint(blueprint, recommendation.pipeline),
+    };
+  }
+
   /**
    * Get supported document formats
    * @returns {Array} List of formats with metadata
@@ -464,6 +735,13 @@ class DocumentService {
 
   async renderDocument({ format, template = null, content = null, title = 'document', options = {}, rawText = '' }) {
     const normalizedFormat = String(format || 'docx').toLowerCase();
+
+    if (template && this.shouldRenderTemplateAsPresentation(template, normalizedFormat)) {
+      const presentationContent = this.templateToPresentationContent(template, options);
+      if (normalizedFormat === 'html') {
+        return this.renderPresentationDeck(presentationContent, options);
+      }
+    }
 
     if (normalizedFormat === 'html' || normalizedFormat === 'md' || normalizedFormat === 'markdown') {
       const structuredContent = content || this.templateToContent(template);
@@ -632,6 +910,17 @@ class DocumentService {
     };
   }
 
+  templateToPresentationContent(template = {}, options = {}) {
+    const values = template?.values || template?.variables || {};
+    return this.generators.pptx.buildContentFromTemplate(template, values, options);
+  }
+
+  getTemplateAvailableFormats(template = {}) {
+    const formats = Array.isArray(template.formats) ? template.formats : [];
+    const recommendedFormats = Array.isArray(template.recommendedFormats) ? template.recommendedFormats : [];
+    return Array.from(new Set([...formats, ...recommendedFormats].filter(Boolean)));
+  }
+
   escapeHtml(value = '') {
     return String(value)
       .replace(/&/g, '&amp;')
@@ -706,10 +995,17 @@ class DocumentService {
   }
 
   shouldUsePresentationPipeline(documentType = '', format = '') {
-    const normalizedType = String(documentType || '').trim().toLowerCase();
+    return this.getPipelineForBlueprint(documentType, format) === 'presentation';
+  }
+
+  shouldRenderTemplateAsPresentation(template = {}, format = '') {
     const normalizedFormat = String(format || '').trim().toLowerCase();
-    return normalizedFormat === 'pptx'
-      || (normalizedFormat === 'html' && /(presentation|slides|deck|pitch)/.test(normalizedType));
+    if (normalizedFormat !== 'html') {
+      return false;
+    }
+
+    const blueprintId = normalizeDocumentType(template?.blueprint || template?.id || '');
+    return this.getPipelineForBlueprint(blueprintId, normalizedFormat) === 'presentation';
   }
 
   inferSlideCount(length = '') {
