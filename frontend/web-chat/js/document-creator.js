@@ -100,6 +100,9 @@ class DocumentCreator {
               <button class="doc-category-btn" data-category="creative" onclick="documentCreator.selectCategory('creative')">
                 Creative
               </button>
+              <button class="doc-category-btn" data-category="technical" onclick="documentCreator.selectCategory('technical')">
+                Technical
+              </button>
             </div>
             
             <div id="doc-templates-grid" class="doc-templates-grid">
@@ -152,6 +155,8 @@ class DocumentCreator {
                   <option value="">Auto-detect</option>
                   <option value="proposal">Proposal</option>
                   <option value="report">Report</option>
+                  <option value="executive-brief">Executive Brief</option>
+                  <option value="data-story">Data Story</option>
                   <option value="letter">Letter</option>
                   <option value="memo">Memo</option>
                   <option value="presentation">Presentation</option>

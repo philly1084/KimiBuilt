@@ -1,0 +1,88 @@
+{
+  "id": "website-slides-storyboard",
+  "name": "Website Slides Storyboard",
+  "category": "creative",
+  "description": "Storyboard deck for premium web-style narrative slides with visual beats and concise copy.",
+  "icon": "🖥️",
+  "tags": ["website slides", "storyboard", "creative", "narrative", "slides"],
+  "variables": [
+    {
+      "id": "title",
+      "label": "Storyboard Title",
+      "type": "text",
+      "required": true,
+      "placeholder": "Future of Product Design"
+    },
+    {
+      "id": "subtitle",
+      "label": "Subtitle",
+      "type": "text",
+      "required": false,
+      "placeholder": "A cinematic web narrative"
+    },
+    {
+      "id": "slides",
+      "label": "Scenes",
+      "type": "array",
+      "required": true,
+      "description": "Describe each website slide as a scene.",
+      "itemFields": {
+        "kicker": {
+          "type": "text",
+          "label": "Kicker",
+          "required": false,
+          "placeholder": "Hero"
+        },
+        "title": {
+          "type": "text",
+          "label": "Scene Title",
+          "required": true,
+          "placeholder": "Design moves at the speed of thought"
+        },
+        "content": {
+          "type": "textarea",
+          "label": "Scene Copy",
+          "required": false,
+          "placeholder": "Two or three short sentences of high-impact web copy."
+        },
+        "bullets": {
+          "type": "textarea",
+          "label": "Support Bullets",
+          "required": false
+        },
+        "imagePrompt": {
+          "type": "textarea",
+          "label": "Visual Direction",
+          "required": false,
+          "placeholder": "Immersive editorial web visual, bright ivory, coral accent, dramatic crop, premium product feel."
+        }
+      },
+      "default": [
+        {
+          "kicker": "Hero",
+          "title": "Design moves at the speed of thought",
+          "content": "A bold opening statement with a visual-first scene.",
+          "imagePrompt": "Immersive landing page hero, layered typography, cinematic crop, coral and ink palette."
+        },
+        {
+          "kicker": "Proof",
+          "title": "Built for teams shipping every day",
+          "bullets": [
+            "Narrative-first slide structure",
+            "Strong visual rhythm",
+            "Clear CTA at the end"
+          ]
+        }
+      ]
+    }
+  ],
+  "formats": ["pptx"],
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "improve-visual-copy",
+      "tighten-story-arc",
+      "generate-image-prompts"
+    ]
+  }
+}

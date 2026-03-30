@@ -2,20 +2,33 @@
  * Template Engine - Manages document templates
  */
 
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsPromises = fs.promises;
 const path = require('path');
 const { glob } = require('glob');
 
-// Load built-in templates dynamically (only existing ones)
+function collectBuiltInTemplateFiles(directoryPath) {
+  if (!fs.existsSync(directoryPath)) {
+    return [];
+  }
+
+  const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const fullPath = path.join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      return collectBuiltInTemplateFiles(fullPath);
+    }
+
+    return entry.isFile() && entry.name.endsWith('.json')
+      ? [fullPath]
+      : [];
+  });
+}
+
 function loadBuiltInTemplates() {
   const templates = [];
-  const templateFiles = [
-    './templates/business/business-letter.json',
-    './templates/business/meeting-notes.json',
-    './templates/business/presentation.json',
-    './templates/creative/presentation-visual.json',
-    './templates/personal/resume-modern.json'
-  ];
+  const templatesRoot = path.join(__dirname, 'templates');
+  const templateFiles = collectBuiltInTemplateFiles(templatesRoot);
   
   for (const file of templateFiles) {
     try {
@@ -56,7 +69,7 @@ class TemplateEngine {
       
       for (const file of files) {
         const filePath = path.join(templatesDir, file);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = await fsPromises.readFile(filePath, 'utf-8');
         const template = JSON.parse(content);
         
         if (this.validateTemplate(template)) {

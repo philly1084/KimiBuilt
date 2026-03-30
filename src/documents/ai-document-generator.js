@@ -2,6 +2,12 @@
  * AI Document Generator - Uses OpenAI to generate document content
  */
 
+const {
+  normalizeDocumentType,
+  resolveDocumentBlueprint,
+  renderBlueprintPrompt,
+} = require('./document-design-blueprints');
+
 class AIDocumentGenerator {
   constructor(openaiClient) {
     this.openai = openaiClient;
@@ -259,10 +265,12 @@ Return JSON:
    * @returns {string} System prompt
    */
   buildSystemPrompt(options = {}) {
-    const documentType = options.documentType || 'document';
+    const normalizedDocumentType = normalizeDocumentType(options.documentType || 'document');
+    const documentType = normalizedDocumentType || 'document';
     const tone = options.tone || 'professional';
     const length = options.length || 'medium';
     const language = options.language || 'en';
+    const blueprint = resolveDocumentBlueprint(documentType);
 
     const lengthGuidance = {
       short: 'Keep content concise (100-200 words per section)',
@@ -280,64 +288,65 @@ Return JSON:
       informative: 'Focus on clear, factual presentation of information'
     };
 
-    return `You are an expert document writer specializing in ${documentType}s.
-
-WRITING STYLE:
-- Tone: ${toneGuidance[tone] || toneGuidance.professional}
-- Length: ${lengthGuidance[length] || lengthGuidance.medium}
-${language !== 'en' ? `- Language: Write in ${language}` : ''}
-
-OUTPUT FORMAT:
-Return a JSON object with this exact structure:
-{
-  "title": "Document Title",
-  "subtitle": "Optional subtitle",
-  "theme": "editorial|executive|product|bold",
-  "sections": [
-    {
-      "heading": "Section Heading",
-      "content": "Section content with proper paragraphs...",
-      "level": 1,
-      "bullets": ["Optional concise bullet", "Optional concise bullet"],
-      "callout": {
-        "title": "Optional callout heading",
-        "body": "Optional high-signal note or warning",
-        "tone": "note|highlight|warning"
-      },
-      "stats": [
-        { "label": "Metric", "value": "Value", "detail": "Optional context" }
-      ],
-      "table": {
-        "caption": "Optional table caption",
-        "headers": ["Column A", "Column B"],
-        "rows": [["Value 1", "Value 2"]]
-      },
-      "chart": {
-        "title": "Optional chart title",
-        "type": "bar|line|comparison",
-        "summary": "Optional chart takeaway",
-        "series": [
-          { "label": "Series label", "value": 42 }
-        ]
-      }
-    }
-  ],
-  "metadata": {
-    "wordCount": 1234,
-    "estimatedPages": 5,
-    "keywords": ["keyword1", "keyword2"]
-  }
-}
-
-GUIDELINES:
-- Create comprehensive, well-structured content
-- Use appropriate formatting (paragraphs, lists, emphasis)
-- Include specific details and examples
-- Maintain consistency throughout
-- Ensure professional quality suitable for business use
-- Write the actual content, not placeholders
-- When a section benefits from metrics, tables, or a chart, populate the matching structured field instead of burying everything in prose
-- Only include bullets, stats, tables, charts, or callouts when they strengthen the document`;
+    return [
+      `<role>You are an expert document writer specializing in ${blueprint.label} outputs.</role>`,
+      '<writing_style>',
+      `- Tone: ${toneGuidance[tone] || toneGuidance.professional}`,
+      `- Length: ${lengthGuidance[length] || lengthGuidance.medium}`,
+      language !== 'en' ? `- Language: Write in ${language}` : null,
+      '</writing_style>',
+      renderBlueprintPrompt(blueprint),
+      '<output_contract>',
+      'Return a JSON object with this exact structure:',
+      '{',
+      '  "title": "Document Title",',
+      '  "subtitle": "Optional subtitle",',
+      '  "theme": "editorial|executive|product|bold",',
+      '  "sections": [',
+      '    {',
+      '      "heading": "Section Heading",',
+      '      "content": "Section content with proper paragraphs...",',
+      '      "level": 1,',
+      '      "bullets": ["Optional concise bullet", "Optional concise bullet"],',
+      '      "callout": {',
+      '        "title": "Optional callout heading",',
+      '        "body": "Optional high-signal note or warning",',
+      '        "tone": "note|highlight|warning"',
+      '      },',
+      '      "stats": [',
+      '        { "label": "Metric", "value": "Value", "detail": "Optional context" }',
+      '      ],',
+      '      "table": {',
+      '        "caption": "Optional table caption",',
+      '        "headers": ["Column A", "Column B"],',
+      '        "rows": [["Value 1", "Value 2"]]',
+      '      },',
+      '      "chart": {',
+      '        "title": "Optional chart title",',
+      '        "type": "bar|line|comparison",',
+      '        "summary": "Optional chart takeaway",',
+      '        "series": [',
+      '          { "label": "Series label", "value": 42 }',
+      '        ]',
+      '      }',
+      '    }',
+      '  ],',
+      '  "metadata": {',
+      '    "wordCount": 1234,',
+      '    "estimatedPages": 5,',
+      '    "keywords": ["keyword1", "keyword2"]',
+      '  }',
+      '}',
+      '</output_contract>',
+      '<rules>',
+      '- Write the actual content, not placeholders.',
+      '- Create comprehensive, well-structured content with concrete detail.',
+      '- Use paragraphs for explanation and structured fields for scan speed.',
+      '- When a section benefits from metrics, tables, or a chart, populate the matching structured field instead of burying everything in prose.',
+      '- Only include bullets, stats, tables, charts, or callouts when they strengthen the document.',
+      '- Do not output markdown fences, commentary, or any text outside the JSON object.',
+      '</rules>',
+    ].filter(Boolean).join('\n');
   }
 
   /**
@@ -423,66 +432,72 @@ GUIDELINES:
     const theme = options.theme || options.style || 'editorial';
     const includeImages = options.includeImages !== false;
     const includeCharts = options.includeCharts !== false;
+    const blueprint = resolveDocumentBlueprint(options.documentType || 'presentation');
 
-    const prompt = `Create a presentation about: ${topic}
-
-Requirements:
-- Create exactly ${slideCount} slides
-- Tone: ${tone}
-- Audience: ${audience}
-- Theme/style: ${theme}
-- Include a compelling title slide
-- Structure content logically with clear progression
-- Each slide should have a clear title and key bullet points (3-5 bullets)
-${includeImages ? '- For key slides, suggest an image description that would enhance the visual impact' : ''}
-${includeCharts ? '- Use chart slides when comparison or trend data helps the story; provide explicit chart series data' : ''}
-
-Return JSON with this structure:
-{
-  "title": "Presentation Title",
-  "subtitle": "Subtitle or tagline",
-  "theme": "editorial|executive|product|bold",
-  "slides": [
-    {
-      "layout": "title|content|section|image|two-column|chart",
-      "kicker": "Optional slide eyebrow",
-      "title": "Slide Title",
-      "subtitle": "Optional supporting line",
-      "content": "Main content text (for content slides)",
-      "bullets": ["Point 1", "Point 2", "Point 3"],
-      "stats": [
-        { "label": "Metric", "value": "42%", "detail": "Optional context" }
-      ],
-      "columns": [
-        {
-          "heading": "Optional column heading",
-          "content": "Optional column content",
-          "bullets": ["Optional", "Column bullets"]
-        }
-      ],
-      "chart": {
-        "title": "Optional chart title",
-        "type": "bar|line|comparison",
-        "summary": "Takeaway from the chart",
-        "series": [
-          { "label": "Label", "value": 42 }
-        ]
-      },
-      "imagePrompt": "Description for AI image generation (optional, for visual slides)"
-    }
-  ]
-}
-
-Guidelines:
-- First slide should always have "title" layout
-- Use "section" layout for major topic dividers
-- Use "image" layout for slides that benefit from visuals
-- Use "content" or "bullets" layout for information slides
-- Use "two-column" for comparisons, before/after, or parallel tracks
-- Use "chart" only when you can provide explicit series data
-- Keep bullet points concise (10-15 words max)
-- Image prompts should be detailed and descriptive for DALL-E generation
-- Slides should feel presentation-ready, not like a memo split into pages`;
+    const prompt = [
+      `<task>Create a ${blueprint.label} about: ${topic}</task>`,
+      '<requirements>',
+      `- Create exactly ${slideCount} slides.`,
+      `- Tone: ${tone}.`,
+      `- Audience: ${audience}.`,
+      `- Theme/style: ${theme}.`,
+      '- Include a compelling title slide.',
+      '- Maintain visible narrative progression from slide to slide.',
+      '- Keep each slide focused on one dominant idea.',
+      '- Use 3-5 concise bullets only when bullets improve scanning.',
+      includeImages ? '- For visual or high-emotion slides, add a strong imagePrompt.' : null,
+      includeCharts ? '- Use chart slides when comparison or trend data helps the story, and provide explicit chart series values.' : null,
+      '</requirements>',
+      renderBlueprintPrompt(blueprint),
+      '<output_contract>',
+      'Return JSON with this structure:',
+      '{',
+      '  "title": "Presentation Title",',
+      '  "subtitle": "Subtitle or tagline",',
+      '  "theme": "editorial|executive|product|bold",',
+      '  "slides": [',
+      '    {',
+      '      "layout": "title|content|section|image|two-column|chart",',
+      '      "kicker": "Optional slide eyebrow",',
+      '      "title": "Slide Title",',
+      '      "subtitle": "Optional supporting line",',
+      '      "content": "Main content text (for content slides)",',
+      '      "bullets": ["Point 1", "Point 2", "Point 3"],',
+      '      "stats": [',
+      '        { "label": "Metric", "value": "42%", "detail": "Optional context" }',
+      '      ],',
+      '      "columns": [',
+      '        {',
+      '          "heading": "Optional column heading",',
+      '          "content": "Optional column content",',
+      '          "bullets": ["Optional", "Column bullets"]',
+      '        }',
+      '      ],',
+      '      "chart": {',
+      '        "title": "Optional chart title",',
+      '        "type": "bar|line|comparison",',
+      '        "summary": "Takeaway from the chart",',
+      '        "series": [',
+      '          { "label": "Label", "value": 42 }',
+      '        ]',
+      '      },',
+      '      "imagePrompt": "Description for AI image generation (optional, for visual slides)"',
+      '    }',
+      '  ]',
+      '}',
+      '</output_contract>',
+      '<rules>',
+      '- First slide must use the "title" layout.',
+      '- Use "section" layout for major narrative pivots.',
+      '- Use "image" layout for slides that benefit from visuals.',
+      '- Use "content" layout for explanation slides and "two-column" for comparisons or parallel tracks.',
+      '- Use "chart" only when you can provide explicit series data.',
+      '- Keep bullet points concise, roughly 10-15 words max.',
+      '- Image prompts should be vivid, specific, and visually directive.',
+      '- Slides should feel presentation-ready, not like a memo split into pages.',
+      '- Do not output markdown fences, prose commentary, or anything outside the JSON object.',
+      '</rules>',
+    ].filter(Boolean).join('\n');
 
     try {
       const result = await this.requestJson({

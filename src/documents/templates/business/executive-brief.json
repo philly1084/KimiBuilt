@@ -1,0 +1,90 @@
+{
+  "id": "executive-brief",
+  "name": "Executive Brief",
+  "category": "business",
+  "description": "Decision-ready brief with headline findings, metrics, risks, and next moves.",
+  "icon": "📌",
+  "tags": ["brief", "executive", "board", "summary", "decision"],
+  "variables": [
+    {
+      "id": "title",
+      "label": "Brief Title",
+      "type": "text",
+      "required": true,
+      "placeholder": "Q2 Expansion Decision Brief"
+    },
+    {
+      "id": "subtitle",
+      "label": "Subtitle",
+      "type": "text",
+      "required": false,
+      "placeholder": "North America Growth Review"
+    },
+    {
+      "id": "audience",
+      "label": "Audience",
+      "type": "text",
+      "required": false,
+      "placeholder": "Executive Team"
+    },
+    {
+      "id": "headline_summary",
+      "label": "Headline Summary",
+      "type": "textarea",
+      "required": true,
+      "rows": 3,
+      "placeholder": "One short paragraph that states the situation, the recommendation, and why it matters."
+    },
+    {
+      "id": "key_metrics",
+      "label": "Key Metrics",
+      "type": "textarea",
+      "required": false,
+      "rows": 5,
+      "placeholder": "Revenue growth: 18%\nCAC payback: 7 months\nPipeline coverage: 2.3x",
+      "hint": "List one metric per line."
+    },
+    {
+      "id": "current_state",
+      "label": "Current State",
+      "type": "richtext",
+      "required": true,
+      "rows": 6,
+      "placeholder": "Summarize the current position, trend, or operating context."
+    },
+    {
+      "id": "recommendation",
+      "label": "Recommendation",
+      "type": "richtext",
+      "required": true,
+      "rows": 5,
+      "placeholder": "State the recommended action clearly and directly."
+    },
+    {
+      "id": "risks",
+      "label": "Risks",
+      "type": "textarea",
+      "required": false,
+      "rows": 4,
+      "placeholder": "Risk 1\nRisk 2\nRisk 3"
+    },
+    {
+      "id": "next_steps",
+      "label": "Next Steps",
+      "type": "textarea",
+      "required": false,
+      "rows": 4,
+      "placeholder": "Approve budget by Friday\nAssign launch owner\nReview progress in 30 days"
+    }
+  ],
+  "formats": ["docx", "pdf", "html", "md"],
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "tighten-summary",
+      "improve-recommendation",
+      "extract-risks",
+      "executive-tone"
+    ]
+  }
+}

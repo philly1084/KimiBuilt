@@ -1,0 +1,98 @@
+{
+  "id": "pitch-deck-story",
+  "name": "Pitch Deck Story",
+  "category": "business",
+  "description": "Narrative pitch deck template for problem-solution-proof-ask storytelling.",
+  "icon": "🚀",
+  "tags": ["pitch deck", "investor", "startup", "story", "slides"],
+  "variables": [
+    {
+      "id": "title",
+      "label": "Deck Title",
+      "type": "text",
+      "required": true,
+      "placeholder": "Acme AI"
+    },
+    {
+      "id": "subtitle",
+      "label": "Tagline",
+      "type": "text",
+      "required": false,
+      "placeholder": "The design layer for AI-native teams"
+    },
+    {
+      "id": "author",
+      "label": "Presenter",
+      "type": "text",
+      "required": false,
+      "placeholder": "Founder Name"
+    },
+    {
+      "id": "slides",
+      "label": "Slides",
+      "type": "array",
+      "required": true,
+      "description": "Provide the story slide by slide in JSON array format.",
+      "itemFields": {
+        "kicker": {
+          "type": "text",
+          "label": "Kicker",
+          "required": false,
+          "placeholder": "Problem"
+        },
+        "title": {
+          "type": "text",
+          "label": "Slide Title",
+          "required": true,
+          "placeholder": "Teams are shipping AI into broken design systems"
+        },
+        "bullets": {
+          "type": "textarea",
+          "label": "Bullets",
+          "required": false
+        },
+        "content": {
+          "type": "textarea",
+          "label": "Content",
+          "required": false,
+          "placeholder": "One short paragraph for the presenter-facing storyline."
+        },
+        "imagePrompt": {
+          "type": "textarea",
+          "label": "Image Prompt",
+          "required": false,
+          "placeholder": "Cinematic product visualization, clean black and ivory palette, investor-grade."
+        }
+      },
+      "default": [
+        {
+          "kicker": "Problem",
+          "title": "AI teams are outgrowing patchwork design workflows",
+          "bullets": [
+            "Design systems break under agent-generated output",
+            "Review cycles are too slow for AI shipping velocity",
+            "Teams need structured, governed generation"
+          ]
+        },
+        {
+          "kicker": "Solution",
+          "title": "Acme AI turns prompts into governed product surfaces",
+          "bullets": [
+            "Reusable templates and prompts",
+            "Tool-safe orchestration",
+            "Fast review and deployment loops"
+          ]
+        }
+      ]
+    }
+  ],
+  "formats": ["pptx"],
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "tighten-bullets",
+      "improve-story-arc",
+      "investor-tone"
+    ]
+  }
+}

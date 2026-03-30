@@ -1,0 +1,75 @@
+{
+  "id": "data-story-report",
+  "name": "Data Story Report",
+  "category": "technical",
+  "description": "Analytical report template for trends, comparisons, and recommendations grounded in metrics.",
+  "icon": "📈",
+  "tags": ["data", "analytics", "report", "chart", "insights"],
+  "variables": [
+    {
+      "id": "title",
+      "label": "Report Title",
+      "type": "text",
+      "required": true,
+      "placeholder": "Product Usage Trend Review"
+    },
+    {
+      "id": "timeframe",
+      "label": "Timeframe",
+      "type": "text",
+      "required": false,
+      "placeholder": "January to March 2026"
+    },
+    {
+      "id": "headline_insight",
+      "label": "Headline Insight",
+      "type": "textarea",
+      "required": true,
+      "rows": 3,
+      "placeholder": "Summarize the single most important takeaway."
+    },
+    {
+      "id": "data_points",
+      "label": "Key Data Points",
+      "type": "textarea",
+      "required": false,
+      "rows": 6,
+      "placeholder": "Jan: 12000\nFeb: 15800\nMar: 19400",
+      "hint": "Use one metric or observation per line."
+    },
+    {
+      "id": "drivers",
+      "label": "Primary Drivers",
+      "type": "richtext",
+      "required": true,
+      "rows": 5,
+      "placeholder": "Explain what is causing the observed trend."
+    },
+    {
+      "id": "comparisons",
+      "label": "Comparisons",
+      "type": "textarea",
+      "required": false,
+      "rows": 5,
+      "placeholder": "Enterprise vs SMB\nPaid vs Free\nNA vs EMEA"
+    },
+    {
+      "id": "recommendations",
+      "label": "Recommendations",
+      "type": "textarea",
+      "required": true,
+      "rows": 5,
+      "placeholder": "Double down on onboarding\nFix drop-off after activation\nRun pricing test"
+    }
+  ],
+  "formats": ["docx", "pdf", "html", "md"],
+  "aiEnhancement": {
+    "enabled": true,
+    "features": [
+      "extract-trends",
+      "recommend-chart-structure",
+      "executive-summary",
+      "technical-tone"
+    ]
+  }
+}

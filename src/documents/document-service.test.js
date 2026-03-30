@@ -92,4 +92,21 @@ describe('DocumentService', () => {
     expect(String(document.content)).toContain('presentation-deck');
     expect(String(document.content)).toContain('Website Slides');
   });
+
+  test('discovers premium built-in templates for briefs, data stories, and decks', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const templateIds = (await service.getTemplates()).map((template) => template.id);
+
+    expect(templateIds).toEqual(expect.arrayContaining([
+      'executive-brief',
+      'pitch-deck-story',
+      'data-story-report',
+      'website-slides-storyboard',
+    ]));
+  });
 });
