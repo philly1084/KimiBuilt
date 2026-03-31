@@ -66,6 +66,44 @@ function normalizeOpenAIApiMode(mode = '') {
     return 'auto';
 }
 
+function inferProviderFamily({
+    baseURL = config.openai.baseURL,
+    model = '',
+} = {}) {
+    const normalizedModel = String(model || '').trim().toLowerCase();
+
+    if (normalizedModel.includes('gemini')) {
+        return 'gemini';
+    }
+
+    try {
+        const parsed = new URL(String(baseURL || 'https://api.openai.com/v1'));
+        const hostname = String(parsed.hostname || '').toLowerCase();
+
+        if (/(^|\.)openai\.com$/.test(hostname)) {
+            return 'openai';
+        }
+
+        if (hostname.includes('groq')) {
+            return 'groq';
+        }
+
+        if (hostname.includes('googleapis.com')
+            || hostname.includes('generativelanguage')
+            || hostname.includes('vertex')) {
+            return 'gemini';
+        }
+    } catch (_error) {
+        // Fall through to model-based inference.
+    }
+
+    if (normalizedModel.includes('groq')) {
+        return 'groq';
+    }
+
+    return 'generic';
+}
+
 function resolveOpenAIApiMode({
     baseURL = config.openai.baseURL,
     requestedMode = config.openai.apiMode,
@@ -86,6 +124,20 @@ function resolveOpenAIApiMode({
 
 function shouldUseResponsesAPI(options = {}) {
     return resolveOpenAIApiMode(options) === 'responses';
+}
+
+function shouldSendReasoningEffort({
+    baseURL = config.openai.baseURL,
+    model = '',
+    api = 'chat',
+} = {}) {
+    const provider = inferProviderFamily({ baseURL, model });
+
+    if (api === 'chat' && ['gemini', 'groq'].includes(provider)) {
+        return false;
+    }
+
+    return true;
 }
 
 const AUTO_TOOL_ALLOWLIST = new Set([
@@ -1983,12 +2035,16 @@ function buildToolExecutionContext(toolManager, context = {}) {
 }
 
 function normalizeToolCall(toolCall = {}) {
+    const rawArguments = toolCall.function?.arguments;
+
     return {
         id: toolCall.id,
         type: toolCall.type || 'function',
         function: {
             name: toolCall.function?.name,
-            arguments: toolCall.function?.arguments || '{}',
+            arguments: typeof rawArguments === 'string'
+                ? rawArguments
+                : JSON.stringify(rawArguments || {}),
         },
     };
 }
@@ -2004,6 +2060,17 @@ function isTerminalFinishReason(finishReason = null) {
 function parseToolArguments(rawArguments = '{}') {
     if (!rawArguments) {
         return {};
+    }
+
+    if (typeof rawArguments === 'object') {
+        return rawArguments;
+    }
+
+    if (typeof rawArguments !== 'string') {
+        return {
+            __parseError: `Invalid tool arguments type: ${typeof rawArguments}`,
+            raw: String(rawArguments),
+        };
     }
 
     try {
@@ -2483,6 +2550,10 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     }
 
     const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
+    const chatReasoningParams = normalizedReasoningEffort
+        && shouldSendReasoningEffort({ model, api: 'chat' })
+        ? { reasoning_effort: normalizedReasoningEffort }
+        : {};
     const prompt = getLastUserText(messages);
     const workingMessages = [...messages];
     let finalResponse = null;
@@ -2518,7 +2589,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             model,
             messages: workingMessages,
             stream: false,
-            ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
+            ...chatReasoningParams,
         });
 
         if (toolEvents.length > 0) {
@@ -2541,7 +2612,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             tools: remainingTools.map((entry) => entry.chatDefinition),
             tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt }) : 'auto',
             stream: false,
-            ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
+            ...chatReasoningParams,
         });
 
         const assistantMessage = finalResponse.choices[0]?.message || {};
@@ -2590,7 +2661,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         model,
         messages: workingMessages,
         stream: false,
-        ...(normalizedReasoningEffort ? { reasoning_effort: normalizedReasoningEffort } : {}),
+        ...chatReasoningParams,
     });
 
     if (toolEvents.length > 0) {
@@ -2918,7 +2989,10 @@ async function createResponse({
             messages,
             stream,
         };
-        if (normalizedReasoningEffort) {
+        if (normalizedReasoningEffort && shouldSendReasoningEffort({
+            model: params.model,
+            api: 'chat',
+        })) {
             chatParams.reasoning_effort = normalizedReasoningEffort;
         }
         const response = await openai.chat.completions.create(chatParams);
@@ -3003,11 +3077,14 @@ module.exports = {
         normalizeMessageContent,
         normalizeModelResponse,
         normalizeToolResultForModel,
+        inferProviderFamily,
+        parseToolArguments,
         resolveOpenAIApiMode,
         runDeterministicToolPreflight,
         runDirectRequiredToolAction,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,
+        shouldSendReasoningEffort,
         shouldAutoUseTool,
         shouldUseResponsesAPI,
         promptHasExplicitSshIntent,

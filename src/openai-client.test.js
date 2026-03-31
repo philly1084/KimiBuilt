@@ -372,6 +372,49 @@ describe('openai-client automatic tool orchestration helpers', () => {
         })).toBe(true);
     });
 
+    test('infers provider family from model and host for compatibility handling', () => {
+        expect(__testUtils.inferProviderFamily({
+            baseURL: 'https://api.groq.com/openai/v1',
+            model: 'llama-3.3-70b-versatile',
+        })).toBe('groq');
+        expect(__testUtils.inferProviderFamily({
+            baseURL: 'https://gateway.internal/v1',
+            model: 'gemini-2.5-pro',
+        })).toBe('gemini');
+        expect(__testUtils.inferProviderFamily({
+            baseURL: 'https://api.openai.com/v1',
+            model: 'gpt-4o',
+        })).toBe('openai');
+    });
+
+    test('skips chat reasoning_effort for Gemini and Groq providers', () => {
+        expect(__testUtils.shouldSendReasoningEffort({
+            baseURL: 'https://api.groq.com/openai/v1',
+            model: 'llama-3.3-70b-versatile',
+            api: 'chat',
+        })).toBe(false);
+        expect(__testUtils.shouldSendReasoningEffort({
+            baseURL: 'https://gateway.internal/v1',
+            model: 'gemini-2.5-pro',
+            api: 'chat',
+        })).toBe(false);
+        expect(__testUtils.shouldSendReasoningEffort({
+            baseURL: 'https://api.openai.com/v1',
+            model: 'gpt-4o',
+            api: 'chat',
+        })).toBe(true);
+    });
+
+    test('accepts object-shaped tool arguments from provider tool calls', () => {
+        expect(__testUtils.parseToolArguments({
+            host: '77.42.44.98',
+            command: 'hostname',
+        })).toEqual({
+            host: '77.42.44.98',
+            command: 'hostname',
+        });
+    });
+
     test('sanitizes union schema types into a single tool-compatible type', () => {
         expect(__testUtils.sanitizeToolSchema({
             type: 'object',
