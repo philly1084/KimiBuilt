@@ -469,17 +469,7 @@ function normalizeMessageContent(content) {
 
     if (Array.isArray(content)) {
         return content
-            .map((item) => {
-                if (typeof item === 'string') {
-                    return item;
-                }
-
-                if (item?.type === 'text') {
-                    return item.text || '';
-                }
-
-                return item?.text || '';
-            })
+            .map((item) => normalizeMessageContent(item))
             .join('');
     }
 
@@ -488,12 +478,32 @@ function normalizeMessageContent(content) {
             return content.text;
         }
 
+        if (typeof content.output_text === 'string') {
+            return content.output_text;
+        }
+
         if (typeof content.value === 'string') {
             return content.value;
         }
 
         if (typeof content.content === 'string') {
             return content.content;
+        }
+
+        if (typeof content.message === 'string') {
+            return content.message;
+        }
+
+        if (typeof content.reasoning_content === 'string') {
+            return content.reasoning_content;
+        }
+
+        if (typeof content.reasoning === 'string') {
+            return content.reasoning;
+        }
+
+        if (typeof content.refusal === 'string') {
+            return content.refusal;
         }
 
         if (Array.isArray(content.content)) {
@@ -506,6 +516,14 @@ function normalizeMessageContent(content) {
 
         if (Array.isArray(content.items)) {
             return normalizeMessageContent(content.items);
+        }
+
+        if (Array.isArray(content.output)) {
+            return normalizeMessageContent(content.output);
+        }
+
+        if (Array.isArray(content.data)) {
+            return normalizeMessageContent(content.data);
         }
     }
 
@@ -2758,6 +2776,15 @@ function getModelResponseText(response) {
 
 function normalizeChatResponse(response) {
     const outputText = getChatCompletionText(response);
+
+    if (!String(outputText || '').trim() && (response?.choices?.length || response?.candidates?.length)) {
+        console.warn(`[OpenAI] Empty chat completion text after normalization. Shape=${JSON.stringify({
+            responseKeys: response && typeof response === 'object' ? Object.keys(response).slice(0, 20) : [],
+            choiceKeys: response?.choices?.[0] && typeof response.choices[0] === 'object' ? Object.keys(response.choices[0]).slice(0, 20) : [],
+            messageKeys: response?.choices?.[0]?.message && typeof response.choices[0].message === 'object' ? Object.keys(response.choices[0].message).slice(0, 20) : [],
+            candidateKeys: response?.candidates?.[0] && typeof response.candidates[0] === 'object' ? Object.keys(response.candidates[0]).slice(0, 20) : [],
+        })}`);
+    }
 
     return {
         id: response.id,

@@ -1745,13 +1745,18 @@ function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
     return lines.filter(Boolean).join('\n');
 }
 
+function buildVerifiedToolFindingsText(toolEvents = []) {
+    return (Array.isArray(toolEvents) ? toolEvents : [])
+        .slice(-12)
+        .map((event) => summarizeToolEventForUser(event))
+        .filter(Boolean)
+        .join('\n');
+}
+
 function buildCompactToolSynthesisPrompt({ objective = '', taskType = 'chat', toolEvents = [] } = {}) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
     const researchDossier = buildResearchDossierFromToolEvents({ objective, toolEvents: events });
-    const conciseFindings = events
-        .slice(-8)
-        .map((event) => summarizeToolEventForUser(event))
-        .filter(Boolean);
+    const conciseFindings = buildVerifiedToolFindingsText(events);
 
     return [
         'Write the final user-facing answer using only these verified tool results.',
@@ -1770,7 +1775,7 @@ function buildCompactToolSynthesisPrompt({ objective = '', taskType = 'chat', to
             ]
             : []),
         'Verified findings:',
-        ...conciseFindings,
+        conciseFindings || '(none)',
     ].filter(Boolean).join('\n');
 }
 
@@ -3595,11 +3600,7 @@ class ConversationOrchestrator extends EventEmitter {
                 ]
                 : []),
             'Verified tool results:',
-            JSON.stringify(toolEvents.map((event) => ({
-                tool: event.toolCall?.function?.name,
-                reason: event.reason || '',
-                result: event.result,
-            })), null, 2),
+            buildVerifiedToolFindingsText(toolEvents) || '(none)',
         ].join('\n');
 
         const response = recoverEmptyModelResponse(await this.requestResponse({
@@ -3725,11 +3726,7 @@ class ConversationOrchestrator extends EventEmitter {
                 ]
                 : []),
             'Verified tool results:',
-            JSON.stringify(toolEvents.map((event) => ({
-                tool: event.toolCall?.function?.name,
-                reason: event.reason || '',
-                result: event.result,
-            })), null, 2),
+            buildVerifiedToolFindingsText(toolEvents) || '(none)',
         ].join('\n');
 
         let response = await this.requestResponse({

@@ -1317,6 +1317,19 @@ describe('openai-client automatic tool orchestration helpers', () => {
         })).toBe('Candidate answer');
     });
 
+    test('extracts chat content from array items that use content and value keys instead of text', () => {
+        expect(__testUtils.getChatCompletionText({
+            choices: [{
+                message: {
+                    content: [
+                        { type: 'output_text', content: 'Hello ' },
+                        { type: 'output_text', value: 'world' },
+                    ],
+                },
+            }],
+        })).toBe('Hello world');
+    });
+
     test('extracts responses text from both output_text and text content items', () => {
         expect(__testUtils.getResponseApiText({
             output: [{

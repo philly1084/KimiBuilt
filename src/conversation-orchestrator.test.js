@@ -452,6 +452,47 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('tool synthesis prompt uses compact verified findings instead of raw tool result json blobs', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Compact synthesis answer', 'resp_compact_prompt')),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        const largeStdout = `${'A'.repeat(16000)} docker missing`;
+
+        await orchestrator.buildFinalResponse({
+            input: 'Check the remote host.',
+            objective: 'Check the remote host.',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                    },
+                },
+                reason: 'Inspect Docker availability.',
+                result: {
+                    success: true,
+                    data: {
+                        stdout: largeStdout,
+                        host: '10.0.0.5:22',
+                    },
+                },
+            }],
+        });
+
+        const prompt = llmClient.createResponse.mock.calls[0][0].input;
+        expect(prompt).toContain('Verified tool results:');
+        expect(prompt).toContain('- remote-command: succeeded');
+        expect(prompt).not.toContain(`"stdout": "${'A'.repeat(200)}`);
+        expect(prompt.length).toBeLessThan(6000);
+    });
+
     test('recovers missing file-write content from recent assistant html when the planner omits it', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Saved the HTML file.', 'resp_file_write')),
