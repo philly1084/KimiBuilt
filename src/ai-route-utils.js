@@ -436,6 +436,7 @@ function extractRequestedSshCommand(text = '') {
     }
     const normalized = prompt.toLowerCase();
     const hasInspectionIntent = /\b(check|inspect|verify|diagnose|debug|troubleshoot|status|state|health|healthy|look at|show|list|see what'?s wrong)\b/.test(normalized);
+    const hasReportIntent = /\b(report|summary|overview)\b/.test(normalized);
 
     const quotedPatterns = [
         /\b(?:run|execute)\s+`([^`]+)`/i,
@@ -452,6 +453,14 @@ function extractRequestedSshCommand(text = '') {
 
     if (/\b(?:check|inspect|verify|look at)\b[\s\S]{0,40}\b(?:health|status)\b/i.test(prompt)
         || /\bhealth check\b/i.test(prompt)) {
+        return 'hostname && uptime && (df -h / || true) && (free -m || true)';
+    }
+
+    if ((hasInspectionIntent && hasReportIntent)
+        || /\bhealth report\b/i.test(prompt)
+        || /\bserver state\b/i.test(prompt)
+        || /\bstate report\b/i.test(prompt)
+        || /\bhealth summary\b/i.test(prompt)) {
         return 'hostname && uptime && (df -h / || true) && (free -m || true)';
     }
 
@@ -638,6 +647,7 @@ function getPreferredRemoteToolId(toolManager = null) {
 
 function resolveSshRequestContext(text = '', session = null) {
     const prompt = String(text || '').trim();
+    const normalizedPrompt = prompt.toLowerCase();
     const explicitIntent = promptHasExplicitSshIntent(prompt);
     const explicitTarget = extractExplicitSshTarget(prompt);
     const configuredTarget = getConfiguredSshTarget();
@@ -658,7 +668,11 @@ function resolveSshRequestContext(text = '', session = null) {
     const effectivePrompt = continuation
         ? `SSH into ${formatSshTarget(target)} and ${prompt}`
         : prompt;
-    const command = extractRequestedSshCommand(effectivePrompt);
+    const retryLikeContinuation = continuation
+        && /\b(try again|retry|rerun|re-run|recheck)\b/.test(normalizedPrompt);
+    const previousCommand = String(session?.metadata?.remoteWorkingState?.lastCommand || '').trim();
+    const command = extractRequestedSshCommand(effectivePrompt)
+        || (retryLikeContinuation && previousCommand ? previousCommand : null);
 
     return {
         explicitIntent,

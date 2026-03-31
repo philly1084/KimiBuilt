@@ -348,6 +348,93 @@ describe('ai-route-utils', () => {
         expect(sshContext.directParams).toBeNull();
     });
 
+    test('resolveSshRequestContext infers a direct baseline command for health report phrasing', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const sshContext = resolveSshRequestContext('can you remote into the server and get a health report');
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.command).toBe('hostname && uptime && (df -h / || true) && (free -m || true)');
+        expect(sshContext.directParams).toEqual({
+            host: '10.0.0.5',
+            username: 'ubuntu',
+            port: 22,
+            command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+        });
+    });
+
+    test('resolveSshRequestContext infers a direct baseline command for server state phrasing', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const sshContext = resolveSshRequestContext('do a remote command and tell me the server state');
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.command).toBe('hostname && uptime && (df -h / || true) && (free -m || true)');
+        expect(sshContext.directParams).toEqual({
+            host: '10.0.0.5',
+            username: 'ubuntu',
+            port: 22,
+            command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+        });
+    });
+
+    test('resolveSshRequestContext reuses the previous remote command for retry-style continuation prompts', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const sshContext = resolveSshRequestContext(
+            'try again to remote command',
+            {
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '10.0.0.5',
+                        username: 'ubuntu',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        target: {
+                            host: '10.0.0.5',
+                            username: 'ubuntu',
+                            port: 22,
+                        },
+                        lastCommand: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+                    },
+                },
+            },
+        );
+
+        expect(sshContext.continuation).toBe(true);
+        expect(sshContext.command).toBe('hostname && uptime && (df -h / || true) && (free -m || true)');
+        expect(sshContext.directParams).toEqual({
+            host: '10.0.0.5',
+            username: 'ubuntu',
+            port: 22,
+            command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+        });
+    });
+
     test('resolveSshRequestContext does not keep generic go-ahead sticky without fresh remote state', () => {
         const sshContext = resolveSshRequestContext(
             'go ahead',

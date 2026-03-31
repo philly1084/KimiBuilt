@@ -703,6 +703,7 @@ function extractRequestedSshCommand(prompt = '') {
     }
     const normalized = text.toLowerCase();
     const hasInspectionIntent = /\b(check|inspect|verify|diagnose|debug|troubleshoot|status|state|health|healthy|look at|show|list|see what'?s wrong)\b/.test(normalized);
+    const hasReportIntent = /\b(report|summary|overview)\b/.test(normalized);
 
     const quotedCommandPatterns = [
         /\b(?:run|execute)\s+`([^`]+)`/i,
@@ -719,6 +720,14 @@ function extractRequestedSshCommand(prompt = '') {
 
     if (/\b(?:check|inspect|verify|look at)\b[\s\S]{0,40}\b(?:health|status)\b/i.test(text)
         || /\bhealth check\b/i.test(text)) {
+        return 'hostname && uptime && (df -h / || true) && (free -m || true)';
+    }
+
+    if ((hasInspectionIntent && hasReportIntent)
+        || /\bhealth report\b/i.test(text)
+        || /\bserver state\b/i.test(text)
+        || /\bstate report\b/i.test(text)
+        || /\bhealth summary\b/i.test(text)) {
         return 'hostname && uptime && (df -h / || true) && (free -m || true)';
     }
 
