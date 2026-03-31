@@ -2,6 +2,7 @@
  * PDF Document Generator
  * Uses pdfmake library for client/server PDF generation
  */
+const { resolveDocumentTheme } = require('../document-design-engine');
 
 class PdfGenerator {
   constructor() {
@@ -71,7 +72,14 @@ class PdfGenerator {
           metadata: {
             format: 'pdf',
             title: content.title,
-            sections: content.sections?.length || 0
+            sections: content.sections?.length || 0,
+            design: options.designPlan
+              ? {
+                blueprint: options.designPlan.blueprint?.id,
+                theme: options.designPlan.theme?.id,
+                outlineItems: options.designPlan.outline?.length || 0,
+              }
+              : undefined,
           }
         });
       });
@@ -190,94 +198,199 @@ class PdfGenerator {
    * @returns {Object} pdfmake document definition
    */
   buildContentDefinition(content, options = {}) {
+    const designPlan = options.designPlan || {};
+    const theme = resolveDocumentTheme(designPlan?.theme?.id || content.theme || 'editorial');
     const docContent = [];
 
-    // Title
-    if (content.title) {
-      docContent.push({
-        text: content.title,
-        style: 'title'
-      });
+    docContent.push(this.buildHeroCard(content, designPlan, theme));
+
+    if (Array.isArray(designPlan.insightCards) && designPlan.insightCards.length > 0) {
+      docContent.push(this.buildInsightCardTable(designPlan.insightCards, theme));
     }
 
-    // Table of Contents
-    if (options.includeTableOfContents && content.sections?.length > 2) {
+    if ((options.includeTableOfContents || designPlan?.pdf?.showOutline) && Array.isArray(designPlan.outline) && designPlan.outline.length > 0) {
       docContent.push(
-        { text: 'Table of Contents', style: 'heading1' },
-        ...content.sections.map(section => ({
-          text: section.heading,
-          margin: [section.level * 20, 2, 0, 2],
-          fontSize: 11
-        })),
-        { text: '', margin: [0, 20, 0, 0] }
+        { text: 'Document Flow', style: 'eyebrow' },
+        {
+          ol: designPlan.outline.map((item) => `${item.heading} (${item.layout})`),
+          margin: [0, 0, 0, 18],
+          color: theme.text,
+        }
       );
     }
 
     // Sections
     if (content.sections) {
-      for (const section of content.sections) {
-        // Section heading
-        if (section.heading) {
-          const styleName = `heading${Math.min(section.level || 1, 3)}`;
-          docContent.push({
-            text: section.heading,
-            style: styleName
-          });
-        }
-
-        docContent.push(...this.buildStructuredSection(section));
+      for (let index = 0; index < content.sections.length; index += 1) {
+        const section = content.sections[index];
+        const sectionPlan = Array.isArray(designPlan.sections) ? designPlan.sections[index] || {} : {};
+        docContent.push(this.buildSectionCard(section, sectionPlan, theme));
       }
     }
 
     return {
       pageSize: 'A4',
-      pageMargins: [40, 60, 40, 60],
+      pageMargins: designPlan?.pdf?.pageMargins || [46, 56, 46, 50],
       
       defaultStyle: {
         font: 'Roboto',
         fontSize: 11,
-        lineHeight: 1.3
+        lineHeight: 1.42,
+        color: theme.text,
       },
 
       styles: {
         title: {
-          fontSize: 24,
+          fontSize: 28,
           bold: true,
-          margin: [0, 0, 0, 20],
-          alignment: 'center'
+          color: theme.text,
+          margin: [0, 0, 0, 10],
         },
         heading1: {
           fontSize: 18,
           bold: true,
-          margin: [0, 20, 0, 10]
+          color: theme.text,
+          margin: [0, 12, 0, 8]
         },
         heading2: {
           fontSize: 14,
           bold: true,
-          margin: [0, 15, 0, 8]
+          color: theme.text,
+          margin: [0, 10, 0, 6]
         },
         heading3: {
           fontSize: 12,
           bold: true,
-          margin: [0, 10, 0, 5]
+          color: theme.text,
+          margin: [0, 8, 0, 5]
+        },
+        eyebrow: {
+          fontSize: 9,
+          bold: true,
+          color: theme.accent,
+          margin: [0, 0, 0, 6]
         },
         paragraph: {
           margin: [0, 0, 0, 10]
-        }
+        },
       },
 
       content: docContent,
 
       footer: options.includePageNumbers ? (currentPage, pageCount) => ({
-        text: `Page ${currentPage} of ${pageCount}`,
-        alignment: 'center',
-        fontSize: 9,
-        margin: [0, 20, 0, 0]
+        margin: [46, 10, 46, 0],
+        columns: [
+          { text: `${content.title || 'Document'} - ${designPlan?.blueprint?.label || 'document'}`, fontSize: 9, color: theme.muted },
+          { text: `Page ${currentPage} of ${pageCount}`, alignment: 'right', fontSize: 9, color: theme.muted }
+        ]
       }) : undefined
     };
   }
 
-  buildStructuredSection(section = {}) {
+  buildHeroCard(content = {}, designPlan = {}, theme) {
+    return {
+      table: {
+        widths: ['*', 176],
+        body: [[
+          {
+            stack: [
+              { text: designPlan?.hero?.eyebrow || designPlan?.blueprint?.label || 'Document', style: 'eyebrow' },
+              { text: content.title || designPlan?.title || 'Document', style: 'title' },
+              ...(content.subtitle ? [{ text: content.subtitle, color: theme.muted, margin: [0, 0, 0, 10] }] : []),
+              { text: designPlan?.hero?.narrative || '', style: 'paragraph' }
+            ],
+            fillColor: theme.panel,
+            margin: [18, 18, 18, 18],
+            border: [false, false, false, false]
+          },
+          {
+            stack: [
+              { text: 'Design Lens', style: 'eyebrow' },
+              { text: designPlan?.hero?.summary || '', bold: true, color: theme.text, margin: [0, 0, 0, 8] },
+              { text: designPlan?.blueprint?.goal || '', color: theme.muted },
+            ],
+            fillColor: theme.panelAlt,
+            margin: [14, 18, 14, 18],
+            border: [false, false, false, false]
+          }
+        ]]
+      },
+      layout: this.createCardLayout(theme.border),
+      margin: [0, 0, 0, 18]
+    };
+  }
+
+  buildInsightCardTable(cards = [], theme) {
+    const columns = cards.slice(0, 4).map((card) => ({
+      table: {
+        widths: ['*'],
+        body: [[{
+          stack: [
+            { text: card.label || 'Metric', style: 'eyebrow' },
+            { text: card.value || '', fontSize: 16, bold: true, color: theme.text, margin: [0, 6, 0, 6] },
+            { text: card.detail || '', color: theme.muted, fontSize: 9.5 }
+          ],
+          fillColor: theme.panel,
+          margin: [12, 12, 12, 12],
+          border: [false, false, false, false]
+        }]]
+      },
+      layout: this.createCardLayout(theme.border)
+    }));
+
+    return {
+      columns,
+      columnGap: 10,
+      margin: [0, 0, 0, 18]
+    };
+  }
+
+  buildSectionCard(section = {}, sectionPlan = {}, theme) {
+    const nodes = [];
+    const styleName = `heading${Math.min(section.level || 1, 3)}`;
+
+    if (section.heading) {
+      nodes.push({
+        columns: [
+          {
+            width: 44,
+            stack: [
+              { text: sectionPlan.number || '', fontSize: 20, bold: true, color: theme.accent },
+              { text: sectionPlan.layout || 'narrative', fontSize: 8, color: theme.muted }
+            ]
+          },
+          {
+            width: '*',
+            stack: [
+              { text: section.heading, style: styleName },
+            ]
+          }
+        ],
+        columnGap: 8
+      });
+    }
+
+    nodes.push(...this.buildStructuredSection(section, {
+      theme,
+    }));
+
+    return {
+      table: {
+        widths: ['*'],
+        body: [[{
+          stack: nodes,
+          fillColor: theme.page,
+          margin: [16, 14, 16, 14],
+          border: [false, false, false, false]
+        }]]
+      },
+      layout: this.createCardLayout(theme.border),
+      margin: [0, 0, 0, 14]
+    };
+  }
+
+  buildStructuredSection(section = {}, options = {}) {
+    const theme = resolveDocumentTheme(options?.theme?.id || options?.theme || 'editorial');
     const nodes = [];
 
     if (section.content) {
@@ -303,17 +416,17 @@ class PdfGenerator {
             ]
           }]]
         },
-        layout: this.createCardLayout ? this.createCardLayout('#E5E7EB') : 'lightHorizontalLines',
+        layout: this.createCardLayout(this.getCalloutBorder(callout.tone, theme)),
         margin: [0, 10, 0, 14]
       });
     }
 
     if (Array.isArray(section.stats) && section.stats.length > 0) {
-      nodes.push(this.buildStatsTable(section.stats));
+      nodes.push(this.buildStatsTable(section.stats, theme));
     }
 
     if (section.table?.headers?.length || section.table?.rows?.length) {
-      nodes.push(this.buildDataTable(section.table.headers || [], section.table.rows || [], section.table.caption || ''));
+      nodes.push(this.buildDataTable(section.table.headers || [], section.table.rows || [], section.table.caption || '', theme));
     }
 
     if (section.chart?.series?.length) {
@@ -326,10 +439,24 @@ class PdfGenerator {
       nodes.push(this.buildDataTable(
         ['Label', 'Value'],
         section.chart.series.map((point) => [point.label || '', String(point.value ?? '')]),
+        '',
+        theme
       ));
     }
 
     return nodes;
+  }
+
+  getCalloutBorder(tone = 'note', theme) {
+    if (tone === 'warning') {
+      return theme.warning;
+    }
+
+    if (tone === 'highlight') {
+      return theme.success;
+    }
+
+    return theme.accent;
   }
 
   normalizeCallout(callout) {
@@ -341,32 +468,34 @@ class PdfGenerator {
       return {
         title: '',
         body: callout,
+        tone: 'note',
       };
     }
 
     return {
       title: callout.title || '',
       body: callout.body || callout.content || callout.text || '',
+      tone: callout.tone || 'note',
     };
   }
 
-  buildStatsTable(stats = []) {
+  buildStatsTable(stats = [], theme) {
     const rows = stats.map((stat) => [
-      { text: stat.label || 'Metric', bold: true },
+      { text: stat.label || 'Metric', bold: true, color: theme.text },
       { text: stat.value || '' },
-      { text: stat.detail || '' }
+      { text: stat.detail || '', color: theme.muted }
     ]);
 
-    return this.buildDataTable(['Metric', 'Value', 'Context'], rows);
+    return this.buildDataTable(['Metric', 'Value', 'Context'], rows, '', theme);
   }
 
-  buildDataTable(headers = [], rows = [], caption = '') {
+  buildDataTable(headers = [], rows = [], caption = '', theme = resolveDocumentTheme('editorial')) {
     const safeHeaders = Array.isArray(headers) ? headers : [];
     const safeRows = Array.isArray(rows) ? rows : [];
 
     return {
       stack: [
-        ...(caption ? [{ text: caption, style: 'paragraph', color: '#64748B' }] : []),
+        ...(caption ? [{ text: caption, style: 'paragraph', color: theme.muted }] : []),
         {
           table: {
             headerRows: safeHeaders.length > 0 ? 1 : 0,
@@ -374,7 +503,7 @@ class PdfGenerator {
               ? safeHeaders.map(() => '*')
               : (safeRows[0] || ['']).map(() => '*'),
             body: [
-              ...(safeHeaders.length > 0 ? [safeHeaders.map((header) => ({ text: header, bold: true, fillColor: '#F8FAFC' }))] : []),
+              ...(safeHeaders.length > 0 ? [safeHeaders.map((header) => ({ text: header, bold: true, fillColor: theme.panelAlt, color: theme.text }))] : []),
               ...safeRows.map((row) => row.map((cell) => ({ text: String(cell ?? '') }))),
             ]
           },

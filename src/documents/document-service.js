@@ -15,6 +15,10 @@ const {
   normalizeDocumentType,
   resolveDocumentBlueprint,
 } = require('./document-design-blueprints');
+const {
+  buildDocumentDesignPlan,
+  resolveDocumentTheme,
+} = require('./document-design-engine');
 
 class DocumentService {
   constructor(openaiClient) {
@@ -79,6 +83,13 @@ class DocumentService {
    */
   async aiGenerate(prompt, options = {}) {
     const format = String(options.format || 'docx').toLowerCase();
+    const designPlan = options.designPlan || this.buildDocumentPlan({
+      prompt,
+      documentType: options.documentType,
+      format,
+      tone: options.tone || 'professional',
+      length: options.length || 'medium',
+    });
 
     if (this.shouldUsePresentationPipeline(options.documentType, format)) {
       return this.generatePresentation(prompt, {
@@ -88,14 +99,20 @@ class DocumentService {
     }
 
     // Generate structured content using AI
-    const content = await this.aiGenerator.generate(prompt, options);
+    const content = await this.aiGenerator.generate(prompt, {
+      ...options,
+      designPlan,
+    });
 
     // Generate document from content
     const document = await this.renderDocument({
       format,
       content,
       title: content.title || 'document',
-      options,
+      options: {
+        ...options,
+        designPlan,
+      },
     });
 
     return this.storeDocument({
@@ -109,6 +126,7 @@ class DocumentService {
         generatedAt: new Date().toISOString(),
         aiGenerated: true,
         prompt,
+        designPlan,
         ...content.metadata,
         ...document.metadata
       },
@@ -735,6 +753,16 @@ class DocumentService {
 
   async renderDocument({ format, template = null, content = null, title = 'document', options = {}, rawText = '' }) {
     const normalizedFormat = String(format || 'docx').toLowerCase();
+    const structuredContent = content || this.templateToContent(template, options);
+    const designPlan = buildDocumentDesignPlan({
+      content: structuredContent,
+      format: normalizedFormat,
+      tone: options.tone || 'professional',
+      length: options.length || 'medium',
+      documentType: options.documentType || structuredContent.documentType || template?.blueprint || template?.id || 'document',
+      requestedPlan: options.designPlan || null,
+      theme: options.theme || structuredContent.theme || '',
+    });
 
     if (template && this.shouldRenderTemplateAsPresentation(template, normalizedFormat)) {
       const presentationContent = this.templateToPresentationContent(template, options);
@@ -744,8 +772,7 @@ class DocumentService {
     }
 
     if (normalizedFormat === 'html' || normalizedFormat === 'md' || normalizedFormat === 'markdown') {
-      const structuredContent = content || this.templateToContent(template);
-      const rendered = this.renderTextDocument(structuredContent, normalizedFormat);
+      const rendered = this.renderTextDocument(structuredContent, normalizedFormat, designPlan);
       return {
         content: rendered.content,
         mimeType: rendered.mimeType,
@@ -753,6 +780,11 @@ class DocumentService {
           format: normalizedFormat === 'markdown' ? 'md' : normalizedFormat,
           title: structuredContent.title || title,
           sections: structuredContent.sections?.length || 0,
+          design: {
+            blueprint: designPlan.blueprint.id,
+            theme: designPlan.theme.id,
+            outlineItems: designPlan.outline.length,
+          },
         },
       };
     }
@@ -760,6 +792,13 @@ class DocumentService {
     const generator = this.generators[normalizedFormat];
     if (!generator) {
       throw new Error(`Unsupported format: ${format}`);
+    }
+
+    if ((content || template) && typeof generator.generateFromContent === 'function' && normalizedFormat === 'pdf') {
+      return generator.generateFromContent(structuredContent, {
+        ...options,
+        designPlan,
+      });
     }
 
     if (content && typeof generator.generateFromContent === 'function') {
@@ -777,22 +816,47 @@ class DocumentService {
     throw new Error(`Unsupported format: ${format}`);
   }
 
-  renderTextDocument(content, format) {
-    const title = content?.title || 'Document';
-    const subtitle = content?.subtitle ? `<p class="document-subtitle">${this.escapeHtml(content.subtitle)}</p>` : '';
+  renderTextDocument(content, format, designPlan = null) {
+    const plan = designPlan || buildDocumentDesignPlan({ content, format });
+    const title = plan.title || content?.title || 'Document';
+    const subtitle = plan.subtitle ? `<p class="document-subtitle">${this.escapeHtml(plan.subtitle)}</p>` : '';
     const sections = Array.isArray(content?.sections) ? content.sections : [];
     const normalizedFormat = format === 'markdown' ? 'md' : format;
 
     if (normalizedFormat === 'html') {
       const body = [
-        `<div class="document-shell document-theme-${this.escapeHtml(content?.theme || 'editorial')}">`,
-        `<header class="document-header"><h1>${this.escapeHtml(title)}</h1>${subtitle}</header>`,
-        ...sections.map((section) => this.renderSectionHtml(section)),
+        `<div class="document-shell document-theme-${this.escapeHtml(plan.theme.id)}">`,
+        `<header class="document-hero">`,
+        `<div class="document-hero-copy">`,
+        `<p class="document-eyebrow">${this.escapeHtml(plan.hero.eyebrow)}</p>`,
+        `<h1>${this.escapeHtml(title)}</h1>`,
+        subtitle,
+        `<p class="document-hero-narrative">${this.escapeHtml(plan.hero.narrative)}</p>`,
+        `</div>`,
+        `<aside class="document-summary-panel">`,
+        `<span class="summary-panel-label">Production Lens</span>`,
+        `<strong>${this.escapeHtml(plan.hero.summary)}</strong>`,
+        `<p>${this.escapeHtml(plan.blueprint.goal)}</p>`,
+        `</aside>`,
+        `</header>`,
+        plan.insightCards.length > 0 ? `<section class="document-insight-strip">${plan.insightCards.map((card) => `
+          <article class="insight-card">
+            <span>${this.escapeHtml(card.label)}</span>
+            <strong>${this.escapeHtml(card.value)}</strong>
+            <p>${this.escapeHtml(card.detail)}</p>
+          </article>
+        `).join('')}</section>` : '',
+        plan.outline.length > 0 ? `<nav class="document-outline"><div class="document-outline-header"><span>Plan</span><strong>Structured flow</strong></div><ol>${plan.outline.map((item) => `
+          <li><a href="#${this.escapeHtml(`section-${item.index}`)}"><span>${this.escapeHtml(item.number)}</span><strong>${this.escapeHtml(item.heading)}</strong><em>${this.escapeHtml(item.layout)}</em></a></li>
+        `).join('')}</ol></nav>` : '',
+        `<main class="document-flow">`,
+        ...sections.map((section, index) => this.renderSectionHtml(section, plan.sections[index])),
+        `</main>`,
         '</div>',
       ].join('\n');
 
       return {
-        content: ensureHtmlDocument(`${this.renderDocumentStyles()}${body}`, title),
+        content: ensureHtmlDocument(`${this.renderDocumentStyles(plan.theme)}${body}`, title),
         mimeType: 'text/html',
       };
     }
@@ -811,7 +875,7 @@ class DocumentService {
     };
   }
 
-  renderSectionHtml(section = {}) {
+  renderSectionHtml(section = {}, sectionPlan = {}) {
     const level = Math.min(Math.max(Number(section.level) || 1, 1), 6);
     const heading = section.heading ? `<h${level + 1}>${this.escapeHtml(section.heading)}</h${level + 1}>` : '';
     const blocks = [
@@ -822,7 +886,18 @@ class DocumentService {
       this.renderTableHtml(section.table),
       this.renderChartHtml(section.chart),
     ].filter(Boolean).join('\n');
-    return `${heading}\n${blocks}`.trim();
+    return `
+      <section class="document-section layout-${this.escapeHtml(sectionPlan.layout || 'narrative')}" id="${this.escapeHtml(sectionPlan.anchor || '')}">
+        <div class="section-chrome">
+          <span class="section-number">${this.escapeHtml(sectionPlan.number || '')}</span>
+          <span class="section-layout">${this.escapeHtml(sectionPlan.layout || 'narrative')}</span>
+        </div>
+        <div class="section-content">
+          ${heading}
+          ${blocks}
+        </div>
+      </section>
+    `.trim();
   }
 
   renderSectionMarkdown(section = {}) {
@@ -894,8 +969,120 @@ class DocumentService {
     }).join('\n');
   }
 
-  templateToContent(template = {}) {
+  templateToContent(template = {}, options = {}) {
     const values = template?.values || template?.variables || {};
+    const blueprintId = normalizeDocumentType(template?.blueprint || template?.id || options.documentType || 'document');
+
+    if (blueprintId === 'letter') {
+      return {
+        title: values.subject || template?.name || 'Business Letter',
+        subtitle: [values.date, values.recipient_name, values.company_name].filter(Boolean).join(' | '),
+        theme: options.theme || 'executive',
+        documentType: blueprintId,
+        sections: [
+          {
+            heading: 'Purpose',
+            content: String(values.body || ''),
+            level: 1,
+            callout: values.subject
+              ? {
+                title: 'Subject',
+                body: String(values.subject),
+                tone: 'highlight',
+              }
+              : null,
+          },
+          {
+            heading: 'Correspondence Details',
+            content: [
+              values.sender_name ? `From: ${values.sender_name}${values.sender_title ? `, ${values.sender_title}` : ''}` : '',
+              values.recipient_name ? `To: ${values.recipient_name}${values.recipient_title ? `, ${values.recipient_title}` : ''}` : '',
+              values.company_name ? `Company: ${values.company_name}` : '',
+              values.closing ? `Closing: ${values.closing}` : '',
+            ].filter(Boolean).join('\n'),
+            level: 1,
+          },
+        ].filter((section) => section.content || section.callout),
+      };
+    }
+
+    if (blueprintId === 'executive-brief') {
+      return {
+        title: values.title || template?.name || 'Executive Brief',
+        subtitle: [values.subtitle, values.audience].filter(Boolean).join(' | '),
+        theme: options.theme || 'executive',
+        documentType: blueprintId,
+        sections: [
+          {
+            heading: 'Headline Summary',
+            content: String(values.headline_summary || ''),
+            level: 1,
+            stats: this.parseMetricLines(values.key_metrics),
+          },
+          {
+            heading: 'Current State',
+            content: String(values.current_state || ''),
+            level: 1,
+          },
+          {
+            heading: 'Recommendation',
+            content: String(values.recommendation || ''),
+            level: 1,
+            callout: values.risks
+              ? {
+                title: 'Key Risks',
+                body: String(values.risks).split('\n').map((line) => line.trim()).filter(Boolean).join(' | '),
+                tone: 'warning',
+              }
+              : null,
+            bullets: this.parseLineList(values.next_steps),
+          },
+        ].filter((section) => section.content || section.stats?.length || section.bullets?.length || section.callout),
+      };
+    }
+
+    if (blueprintId === 'data-story') {
+      const series = this.parseSeriesLines(values.data_points);
+      return {
+        title: values.title || template?.name || 'Data Story Report',
+        subtitle: values.timeframe || '',
+        theme: options.theme || 'editorial',
+        documentType: blueprintId,
+        sections: [
+          {
+            heading: 'Topline Insight',
+            content: String(values.headline_insight || ''),
+            level: 1,
+            chart: series.length > 0
+              ? {
+                title: 'Trend Snapshot',
+                type: 'comparison',
+                summary: values.timeframe ? `Observed across ${values.timeframe}.` : '',
+                series,
+              }
+              : null,
+          },
+          {
+            heading: 'Primary Drivers',
+            content: String(values.drivers || ''),
+            level: 1,
+          },
+          {
+            heading: 'Comparisons',
+            content: '',
+            level: 1,
+            bullets: this.parseLineList(values.comparisons),
+          },
+          {
+            heading: 'Recommendations',
+            content: '',
+            level: 1,
+            bullets: this.parseLineList(values.recommendations),
+          },
+        ].filter((section) => section.content || section.chart || section.bullets?.length),
+      };
+    }
+
     const sections = Object.entries(values)
       .filter(([, value]) => value != null && String(value).trim())
       .map(([key, value]) => ({
@@ -905,9 +1092,49 @@ class DocumentService {
       }));
 
     return {
-      title: template?.name || 'Document',
+      title: values.title || template?.name || 'Document',
+      subtitle: values.subtitle || '',
+      theme: options.theme || 'editorial',
+      documentType: blueprintId,
       sections,
     };
+  }
+
+  parseLineList(value = '') {
+    return String(value || '')
+      .split('\n')
+      .map((line) => line.replace(/^[-*]\s*/, '').trim())
+      .filter(Boolean);
+  }
+
+  parseMetricLines(value = '') {
+    return this.parseLineList(value).map((line) => {
+      const [label, ...rest] = line.split(':');
+      if (rest.length === 0) {
+        return { label: line, value: '', detail: '' };
+      }
+      return {
+        label: String(label || '').trim(),
+        value: String(rest.shift() || '').trim(),
+        detail: rest.join(':').trim(),
+      };
+    });
+  }
+
+  parseSeriesLines(value = '') {
+    return this.parseLineList(value).map((line) => {
+      const [label, ...rest] = line.split(':');
+      if (rest.length === 0) {
+        return null;
+      }
+
+      const rawValue = rest.join(':').trim();
+      const numeric = Number(String(rawValue).replace(/[^0-9.-]/g, ''));
+      return {
+        label: String(label || '').trim(),
+        value: Number.isFinite(numeric) ? numeric : rawValue,
+      };
+    }).filter(Boolean);
   }
 
   templateToPresentationContent(template = {}, options = {}) {
@@ -1194,77 +1421,72 @@ class DocumentService {
   }
 
   getPresentationTheme(theme = 'editorial') {
-    const normalized = String(theme || '').trim().toLowerCase();
-    const themes = {
-      editorial: {
-        id: 'editorial',
-        background: '#f7f3ee',
-        panel: '#fffaf5',
-        text: '#1e293b',
-        muted: '#52606d',
-        accent: '#d94841',
-        accentSoft: '#f7d9d4',
-      },
-      executive: {
-        id: 'executive',
-        background: '#f8fafc',
-        panel: '#ffffff',
-        text: '#0f172a',
-        muted: '#475569',
-        accent: '#2563eb',
-        accentSoft: '#dbeafe',
-      },
-      product: {
-        id: 'product',
-        background: '#0f172a',
-        panel: '#111f3b',
-        text: '#f8fafc',
-        muted: '#cbd5e1',
-        accent: '#22c55e',
-        accentSoft: '#163f2c',
-      },
-      bold: {
-        id: 'bold',
-        background: '#1f2937',
-        panel: '#111827',
-        text: '#f9fafb',
-        muted: '#d1d5db',
-        accent: '#f59e0b',
-        accentSoft: '#4b2d00',
-      },
-    };
-
-    return themes[normalized] || themes.editorial;
+    return resolveDocumentTheme(theme);
   }
 
-  renderDocumentStyles() {
+  renderDocumentStyles(theme) {
     return `
       <style>
-        body { background: #eef2f7; color: #17202a; font-family: "Aptos", "Segoe UI", sans-serif; margin: 0; }
-        .document-shell { max-width: 920px; margin: 0 auto; padding: 56px 40px 72px; background: #fff; }
-        .document-header { margin-bottom: 32px; }
-        .document-header h1 { font-size: 2.6rem; line-height: 1.05; margin: 0 0 10px; }
-        .document-subtitle { color: #5b6776; font-size: 1.05rem; margin: 0; }
-        h2, h3, h4, h5, h6 { color: #132238; margin-top: 2rem; }
-        p { line-height: 1.7; }
-        .document-callout { border-left: 4px solid #d94841; background: #fff6f5; padding: 14px 16px; margin: 18px 0; border-radius: 0 14px 14px 0; }
+        :root {
+          --doc-bg: ${theme.background};
+          --doc-page: ${theme.page};
+          --doc-panel: ${theme.panel};
+          --doc-panel-alt: ${theme.panelAlt};
+          --doc-text: ${theme.text};
+          --doc-muted: ${theme.muted};
+          --doc-accent: ${theme.accent};
+          --doc-accent-soft: ${theme.accentSoft};
+          --doc-border: ${theme.border};
+          --doc-chart-start: ${theme.chartStart};
+          --doc-chart-end: ${theme.chartEnd};
+        }
+        body { background: radial-gradient(circle at top, var(--doc-accent-soft), var(--doc-bg) 42%); color: var(--doc-text); font-family: "Aptos", "Segoe UI", sans-serif; margin: 0; }
+        .document-shell { max-width: 1040px; margin: 0 auto; padding: 36px 24px 72px; }
+        .document-hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 28px; padding: 30px; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.10); }
+        .document-eyebrow, .section-layout, .summary-panel-label, .insight-card span { color: var(--doc-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.78rem; font-weight: 700; }
+        .document-hero h1 { font-size: clamp(2.4rem, 5vw, 4.6rem); line-height: 0.94; margin: 0; max-width: 11ch; }
+        .document-subtitle, .document-hero-narrative, .summary-panel-label + strong + p, .insight-card p, .document-outline em, .document-stat p { color: var(--doc-muted); }
+        .document-subtitle { font-size: 1.05rem; margin: 12px 0 0; }
+        .document-hero-narrative { font-size: 1rem; line-height: 1.7; max-width: 54ch; margin: 16px 0 0; }
+        .document-summary-panel { border-radius: 22px; background: linear-gradient(180deg, var(--doc-panel-alt), var(--doc-panel)); padding: 18px; border: 1px solid var(--doc-border); display: flex; flex-direction: column; gap: 10px; }
+        .document-summary-panel strong { font-size: 1.1rem; }
+        .document-insight-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: 18px 0; }
+        .insight-card { border-radius: 20px; background: rgba(255,255,255,0.72); border: 1px solid var(--doc-border); padding: 18px; backdrop-filter: blur(8px); }
+        .insight-card strong { display: block; font-size: 1.3rem; margin-top: 8px; }
+        .document-outline { background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 22px; padding: 22px; margin: 14px 0 20px; }
+        .document-outline-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+        .document-outline-header span { color: var(--doc-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.78rem; font-weight: 700; }
+        .document-outline ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+        .document-outline a { display: grid; grid-template-columns: 42px 1fr auto; gap: 14px; align-items: baseline; text-decoration: none; color: inherit; padding: 10px 12px; border-radius: 14px; }
+        .document-outline a:hover { background: var(--doc-panel); }
+        .document-flow { display: grid; gap: 18px; }
+        .document-section { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 18px; background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 24px; padding: 24px; }
+        .section-chrome { display: flex; flex-direction: column; gap: 8px; }
+        .section-number { font-size: 2rem; line-height: 1; font-weight: 800; color: var(--doc-accent); }
+        .section-content h2, .section-content h3, .section-content h4, .section-content h5, .section-content h6 { color: var(--doc-text); margin-top: 0; }
+        p { line-height: 1.75; }
+        ul, ol { padding-left: 1.25rem; }
+        .document-callout { border-left: 4px solid var(--doc-accent); background: var(--doc-panel); padding: 16px 18px; margin: 18px 0; border-radius: 0 16px 16px 0; }
         .document-callout p { margin: 6px 0 0; }
         .document-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin: 22px 0; }
-        .document-stat { border: 1px solid #dbe2ea; border-radius: 16px; padding: 16px; background: #fbfdff; }
-        .document-stat span { display: block; color: #5b6776; font-size: 0.86rem; text-transform: uppercase; letter-spacing: 0.08em; }
+        .document-stat { border: 1px solid var(--doc-border); border-radius: 16px; padding: 16px; background: var(--doc-panel); }
+        .document-stat span { display: block; color: var(--doc-muted); font-size: 0.86rem; text-transform: uppercase; letter-spacing: 0.08em; }
         .document-stat strong { display: block; font-size: 1.5rem; margin-top: 8px; }
-        .document-stat p { color: #5b6776; margin: 8px 0 0; }
         .document-table-wrap { margin: 20px 0; }
-        .document-table-caption { font-size: 0.92rem; color: #5b6776; margin-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; }
-        th, td { padding: 12px 14px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-        th { background: #f8fafc; color: #132238; }
+        .document-table-caption { font-size: 0.92rem; color: var(--doc-muted); margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; background: var(--doc-panel); }
+        th, td { padding: 12px 14px; border-bottom: 1px solid var(--doc-border); text-align: left; }
+        th { background: var(--doc-panel-alt); color: var(--doc-text); }
         .document-chart { margin: 24px 0; }
         .chart-stack { display: grid; gap: 10px; }
         .chart-row { display: grid; grid-template-columns: 140px 1fr 64px; gap: 12px; align-items: center; }
         .chart-label, .chart-value { font-size: 0.92rem; }
-        .chart-bar { background: #e2e8f0; border-radius: 999px; height: 12px; overflow: hidden; }
-        .chart-bar span { display: block; height: 100%; background: linear-gradient(90deg, #d94841, #f97316); border-radius: 999px; }
+        .chart-bar { background: var(--doc-border); border-radius: 999px; height: 12px; overflow: hidden; }
+        .chart-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--doc-chart-start), var(--doc-chart-end)); border-radius: 999px; }
+        @media (max-width: 860px) {
+          .document-hero, .document-section { grid-template-columns: 1fr; }
+          .document-outline a, .chart-row { grid-template-columns: 1fr; }
+        }
       </style>
     `;
   }

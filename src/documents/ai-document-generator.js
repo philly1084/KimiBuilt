@@ -271,6 +271,7 @@ Return JSON:
     const length = options.length || 'medium';
     const language = options.language || 'en';
     const blueprint = resolveDocumentBlueprint(documentType);
+    const planPrompt = this.renderDesignPlanPrompt(options.designPlan);
 
     const lengthGuidance = {
       short: 'Keep content concise (100-200 words per section)',
@@ -296,6 +297,7 @@ Return JSON:
       language !== 'en' ? `- Language: Write in ${language}` : null,
       '</writing_style>',
       renderBlueprintPrompt(blueprint),
+      planPrompt,
       '<output_contract>',
       'Return a JSON object with this exact structure:',
       '{',
@@ -347,6 +349,28 @@ Return JSON:
       '- Do not output markdown fences, commentary, or any text outside the JSON object.',
       '</rules>',
     ].filter(Boolean).join('\n');
+  }
+
+  renderDesignPlanPrompt(designPlan = null) {
+    if (!designPlan || typeof designPlan !== 'object') {
+      return '';
+    }
+
+    const outline = Array.isArray(designPlan.outline) ? designPlan.outline : [];
+    const lines = [
+      '<production_plan>',
+      designPlan.titleSuggestion ? `Title suggestion: ${designPlan.titleSuggestion}` : null,
+      designPlan.outlineType ? `Outline type: ${designPlan.outlineType}` : null,
+      outline.length > 0 ? 'Planned structure:' : null,
+      ...outline.map((item) => {
+        const label = item.title || item.heading || `Section ${item.index || ''}`.trim();
+        const detail = item.purpose || item.layout || '';
+        return `- ${label}${detail ? ` :: ${detail}` : ''}`;
+      }),
+      '</production_plan>',
+    ];
+
+    return lines.filter(Boolean).join('\n');
   }
 
   /**

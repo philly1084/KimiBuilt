@@ -18,7 +18,59 @@ describe('DocumentService', () => {
     expect(document.filename).toMatch(/\.html$/);
     expect(document.filename).toMatch(/-[a-z0-9]{4,}\.html$/);
     expect(String(document.content)).toContain('<!DOCTYPE html>');
-    expect(String(document.content)).toContain('Business Letter');
+    expect(String(document.content)).toContain('document-hero');
+    expect(String(document.content)).toContain('Production Lens');
+  });
+
+  test('routes pdf generation through the shared document design plan', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    jest.spyOn(service.generators.pdf, 'generateFromContent').mockResolvedValue({
+      buffer: Buffer.from('pdf-bytes'),
+      metadata: {
+        format: 'pdf',
+        design: {
+          blueprint: 'executive-brief',
+          theme: 'executive',
+          outlineItems: 3,
+        },
+      },
+    });
+
+    const document = await service.generateFromTemplate('executive-brief', {
+      title: 'Q2 Decision Brief',
+      subtitle: 'Expansion review',
+      audience: 'Leadership',
+      headline_summary: 'Approve the expansion plan.',
+      current_state: 'Pipeline is ahead of target.',
+      recommendation: 'Fund the launch and assign an owner.',
+      key_metrics: 'Revenue growth: 18%\nCAC payback: 7 months',
+      next_steps: 'Approve budget\nAssign owner',
+    }, 'pdf', {
+      tone: 'professional',
+      length: 'medium',
+    });
+
+    expect(service.generators.pdf.generateFromContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Q2 Decision Brief',
+        documentType: 'executive-brief',
+      }),
+      expect.objectContaining({
+        designPlan: expect.objectContaining({
+          blueprint: expect.objectContaining({ id: 'executive-brief' }),
+          theme: expect.objectContaining({ id: 'executive' }),
+        }),
+      }),
+    );
+    expect(document.metadata.design).toEqual(expect.objectContaining({
+      blueprint: 'executive-brief',
+      theme: 'executive',
+    }));
   });
 
   test('stores generated presentations for later download', async () => {

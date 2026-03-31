@@ -299,6 +299,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       length,
       format,
       model,
+      designPlan: productionPlan,
       ...options
     });
     
