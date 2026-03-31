@@ -866,8 +866,14 @@ const Sidebar = (function() {
                     const page = Storage.getPage(pageId);
                     if (page) {
                         const newPage = Storage.createPage(page.title + ' (Copy)');
-                        newPage.blocks = JSON.parse(JSON.stringify(page.blocks));
+                        newPage.blocks = Storage.cloneBlocksWithFreshIds(page.blocks);
                         newPage.icon = page.icon;
+                        newPage.cover = page.cover || null;
+                        newPage.properties = Array.isArray(page.properties)
+                            ? JSON.parse(JSON.stringify(page.properties))
+                            : [];
+                        newPage.defaultModel = page.defaultModel || null;
+                        newPage.parentId = page.parentId || null;
                         Storage.updatePage(newPage.id, newPage);
                         refreshPageTree();
                         loadPage(newPage.id);
@@ -1445,11 +1451,7 @@ const Sidebar = (function() {
             // Save the imported page
             const newPage = Storage.createPage(page.title || 'Imported Page');
             newPage.icon = page.icon || '📄';
-            newPage.blocks = page.blocks.map(b => ({
-                ...b,
-                id: Storage.generateBlockId(),
-                createdAt: Date.now()
-            }));
+            newPage.blocks = Storage.cloneBlocksWithFreshIds(page.blocks);
             
             Storage.updatePage(newPage.id, newPage);
             refreshPageTree();
@@ -1612,11 +1614,7 @@ const Sidebar = (function() {
                     // Save the imported page
                     const newPage = Storage.createPage(page.title || 'Imported PDF');
                     newPage.icon = '📄';
-                    newPage.blocks = page.blocks.map(b => ({
-                        ...b,
-                        id: Storage.generateBlockId(),
-                        createdAt: Date.now()
-                    }));
+                    newPage.blocks = Storage.cloneBlocksWithFreshIds(page.blocks);
                     
                     Storage.updatePage(newPage.id, newPage);
                     refreshPageTree();

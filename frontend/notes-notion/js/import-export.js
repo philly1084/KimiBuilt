@@ -1685,7 +1685,7 @@ const ImportExport = (function() {
             // Our native format
             page.title = data.title || '';
             page.icon = data.icon || '';
-            page.blocks = data.blocks.map(b => ({ ...b, id: Storage.generateBlockId() }));
+            page.blocks = Storage.cloneBlocksWithFreshIds(data.blocks);
         } else if (Array.isArray(data)) {
             // Array of pages
             throw new Error('Array format not supported. Please import a single page.');

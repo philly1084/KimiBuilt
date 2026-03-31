@@ -244,6 +244,12 @@ const Selection = (function() {
             selectedBlockId = null;
         }
     }
+
+    function resetState() {
+        deselectAll();
+        hideAllPopups();
+        endDrag();
+    }
     
     /**
      * Get currently selected block ID
@@ -847,6 +853,7 @@ const Selection = (function() {
         init,
         selectBlock,
         deselectAll,
+        resetState,
         getSelectedBlockId,
         setupDragAndDrop,
         showContextMenu,

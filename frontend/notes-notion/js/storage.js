@@ -268,6 +268,45 @@ const Storage = (function() {
         }));
         return clone;
     }
+
+    function cloneBlockWithFreshIds(block) {
+        if (!block || typeof block !== 'object') return block;
+
+        return {
+            ...JSON.parse(JSON.stringify(block)),
+            id: generateBlockId(),
+            createdAt: Date.now(),
+            children: Array.isArray(block.children)
+                ? block.children.map(cloneBlockWithFreshIds)
+                : [],
+        };
+    }
+
+    function cloneBlocksWithFreshIds(blocks = []) {
+        return Array.isArray(blocks) ? blocks.map(cloneBlockWithFreshIds) : [];
+    }
+
+    function ensureUniqueBlockIds(blocks = [], seenIds = new Set()) {
+        let mutated = false;
+
+        blocks.forEach((block) => {
+            if (!block || typeof block !== 'object') return;
+
+            const nextId = typeof block.id === 'string' ? block.id.trim() : '';
+            if (!nextId || seenIds.has(nextId)) {
+                block.id = generateBlockId();
+                mutated = true;
+            }
+
+            seenIds.add(block.id);
+
+            if (Array.isArray(block.children) && block.children.length > 0) {
+                mutated = ensureUniqueBlockIds(block.children, seenIds) || mutated;
+            }
+        });
+
+        return mutated;
+    }
     
     /**
      * Load all data from localStorage
@@ -288,17 +327,27 @@ const Storage = (function() {
             const data = localStorage.getItem(STORAGE_KEY);
             if (data) {
                 const parsed = JSON.parse(data);
+                let didNormalize = false;
                 // Ensure all pages have defaultModel property
                 if (parsed.pages) {
                     parsed.pages.forEach(page => {
                         if (!('defaultModel' in page)) {
                             page.defaultModel = null;
+                            didNormalize = true;
                         }
+                        didNormalize = ensureUniqueBlockIds(page.blocks || []) || didNormalize;
                     });
                 }
                 // Ensure trash exists
                 if (!parsed.trash) {
                     parsed.trash = [];
+                    didNormalize = true;
+                }
+                parsed.trash.forEach(page => {
+                    didNormalize = ensureUniqueBlockIds(page.blocks || []) || didNormalize;
+                });
+                if (didNormalize) {
+                    saveAll(parsed);
                 }
                 return parsed;
             }
@@ -740,6 +789,7 @@ const Storage = (function() {
     return {
         generateId,
         generateBlockId,
+        cloneBlocksWithFreshIds,
         loadAll,
         saveAll,
         getStorageStatus,

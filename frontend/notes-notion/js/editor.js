@@ -914,6 +914,7 @@ const Editor = (function() {
             ...page,
             blocks: normalizeBlocks(page.blocks || []),
         };
+        window.Selection?.resetState?.();
         editorContainer.innerHTML = '';
         
         // Save initial state to history
@@ -1477,11 +1478,8 @@ const Editor = (function() {
         const location = findBlockLocation(blockId);
         if (!location) return;
 
-        const newBlock = {
-            ...JSON.parse(JSON.stringify(location.block)),
-            id: Storage.generateBlockId(),
-            createdAt: Date.now()
-        };
+        const [newBlock] = Storage.cloneBlocksWithFreshIds([location.block]);
+        if (!newBlock) return;
         
         location.siblings.splice(location.index + 1, 0, newBlock);
         
@@ -1867,12 +1865,7 @@ const Editor = (function() {
 
         saveToHistory();
 
-        const normalizedBlocks = blocks.map((block) => ({
-            ...JSON.parse(JSON.stringify(block)),
-            id: block.id || Storage.generateBlockId(),
-            children: normalizeBlocks(block.children || []),
-            createdAt: block.createdAt || Date.now(),
-        }));
+        const normalizedBlocks = normalizeBlocks(Storage.cloneBlocksWithFreshIds(blocks));
 
         location.siblings.splice(location.index, 1, ...normalizedBlocks);
 
@@ -1890,15 +1883,7 @@ const Editor = (function() {
 
         saveToHistory();
 
-        const normalizedBlocks = blocks.map((block) => ({
-            ...JSON.parse(JSON.stringify(block)),
-            id: block.id || Storage.generateBlockId(),
-            children: normalizeBlocks(block.children || []),
-            formatting: block.formatting || {},
-            color: block.color || null,
-            textColor: block.textColor || null,
-            createdAt: block.createdAt || Date.now(),
-        }));
+        const normalizedBlocks = normalizeBlocks(Storage.cloneBlocksWithFreshIds(blocks));
 
         const siblings = location ? location.siblings : currentPage.blocks;
         const index = location ? location.index + 1 : siblings.length;
@@ -1918,15 +1903,7 @@ const Editor = (function() {
 
         saveToHistory();
 
-        const normalizedBlocks = blocks.map((block) => ({
-            ...JSON.parse(JSON.stringify(block)),
-            id: block.id || Storage.generateBlockId(),
-            children: normalizeBlocks(block.children || []),
-            formatting: block.formatting || {},
-            color: block.color || null,
-            textColor: block.textColor || null,
-            createdAt: block.createdAt || Date.now(),
-        }));
+        const normalizedBlocks = normalizeBlocks(Storage.cloneBlocksWithFreshIds(blocks));
 
         const siblings = location ? location.siblings : currentPage.blocks;
         const index = location ? location.index : 0;
