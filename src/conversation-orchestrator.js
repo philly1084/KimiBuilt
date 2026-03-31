@@ -1745,6 +1745,35 @@ function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
     return lines.filter(Boolean).join('\n');
 }
 
+function buildCompactToolSynthesisPrompt({ objective = '', taskType = 'chat', toolEvents = [] } = {}) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const researchDossier = buildResearchDossierFromToolEvents({ objective, toolEvents: events });
+    const conciseFindings = events
+        .slice(-8)
+        .map((event) => summarizeToolEventForUser(event))
+        .filter(Boolean);
+
+    return [
+        'Write the final user-facing answer using only these verified tool results.',
+        'Return plain text only.',
+        'If a tool failed, state the exact failure plainly.',
+        `Task type: ${taskType}`,
+        '',
+        'User request:',
+        objective || '(empty)',
+        '',
+        ...(researchDossier
+            ? [
+                'Research dossier:',
+                researchDossier,
+                '',
+            ]
+            : []),
+        'Verified findings:',
+        ...conciseFindings,
+    ].filter(Boolean).join('\n');
+}
+
 function recoverEmptyModelResponse(response = null, {
     objective = '',
     toolEvents = [],
@@ -3703,7 +3732,7 @@ class ConversationOrchestrator extends EventEmitter {
             })), null, 2),
         ].join('\n');
 
-        const response = recoverEmptyModelResponse(await this.requestResponse({
+        let response = await this.requestResponse({
             input: synthesisPrompt,
             instructions: runtimeInstructions,
             contextMessages,
@@ -3712,7 +3741,26 @@ class ConversationOrchestrator extends EventEmitter {
             model,
             reasoningEffort,
             enableAutomaticToolCalls: false,
-        }), {
+        });
+
+        if (!extractResponseText(response).trim()) {
+            response = await this.requestResponse({
+                input: buildCompactToolSynthesisPrompt({
+                    objective,
+                    taskType,
+                    toolEvents,
+                }),
+                instructions: 'Return plain user-facing text only.',
+                contextMessages: [],
+                recentMessages: [],
+                stream: false,
+                model,
+                reasoningEffort,
+                enableAutomaticToolCalls: false,
+            });
+        }
+
+        response = recoverEmptyModelResponse(response, {
             objective,
             toolEvents,
             executionProfile,

@@ -152,6 +152,18 @@ function extractResponseContentText(content, depth = 0) {
         return extractResponseContentText(content.message, depth + 1);
     }
 
+    if (typeof content.reasoning_content === 'string') {
+        return extractResponseContentText(content.reasoning_content, depth + 1);
+    }
+
+    if (typeof content.reasoning === 'string') {
+        return extractResponseContentText(content.reasoning, depth + 1);
+    }
+
+    if (typeof content.refusal === 'string') {
+        return extractResponseContentText(content.refusal, depth + 1);
+    }
+
     if (typeof content.value === 'string') {
         return extractResponseContentText(content.value, depth + 1);
     }
@@ -166,6 +178,9 @@ function extractResponseContentText(content, depth = 0) {
         'result',
         'value',
         'message',
+        'reasoning_content',
+        'reasoning',
+        'refusal',
     ];
     for (const key of nestedKeys) {
         if (content[key] == null) {

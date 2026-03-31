@@ -158,6 +158,16 @@ describe('ArtifactService', () => {
         })).toBe('Hello world');
     });
 
+    test('extractResponseText recovers provider text from reasoning-style fields', () => {
+        expect(extractResponseText({
+            choices: [{
+                message: {
+                    reasoning_content: 'Reasoning surfaced as final text',
+                },
+            }],
+        })).toBe('Reasoning surfaced as final text');
+    });
+
     test('resolveCompletedResponseText recovers the final answer when streaming deltas were missing', () => {
         const response = {
             output: [

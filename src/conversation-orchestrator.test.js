@@ -362,6 +362,58 @@ describe('ConversationOrchestrator', () => {
         expect(text).not.toContain('Based on the verified tool results');
     });
 
+    test('tool synthesis retries with a compact prompt before falling back to backend placeholder text', async () => {
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce({
+                    id: 'resp_empty_tool_synthesis',
+                    model: 'gpt-test',
+                    choices: [{ message: {} }],
+                    metadata: {},
+                })
+                .mockResolvedValueOnce(buildResponse('The remote host is reachable, but Docker is not installed.', 'resp_compact_retry')),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        const response = await orchestrator.buildFinalResponse({
+            input: 'Check the remote host.',
+            objective: 'Check the remote host.',
+            contextMessages: ['Remembered context that should not be needed for the retry.'],
+            recentMessages: [{ role: 'assistant', content: 'Earlier transcript' }],
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'remote-command',
+                    },
+                },
+                reason: 'Check the host for Docker availability.',
+                result: {
+                    success: true,
+                    data: {
+                        stdout: 'docker: command not found',
+                        host: '10.0.0.5:22',
+                    },
+                },
+            }],
+        });
+
+        const text = response.output[0].content[0].text;
+        expect(text).toBe('The remote host is reachable, but Docker is not installed.');
+        expect(text).not.toContain('Based on the verified tool results');
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(llmClient.createResponse.mock.calls[1][0]).toEqual(expect.objectContaining({
+            instructions: 'Return plain user-facing text only.',
+            contextMessages: [],
+            recentMessages: [],
+        }));
+    });
+
     test('tool synthesis prompt explicitly forbids wrapped JSON answers', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Plain tool synthesis answer', 'resp_tool_synthesis_prompt')),
