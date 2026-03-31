@@ -2790,6 +2790,8 @@ function normalizeModelResponse(response) {
 async function* normalizeChatCompletionsStream(stream) {
     let responseId = null;
     let model = null;
+    let created = null;
+    let outputText = '';
 
     for await (const chunk of stream) {
         if (!responseId && chunk.id) {
@@ -2798,11 +2800,15 @@ async function* normalizeChatCompletionsStream(stream) {
         if (!model && chunk.model) {
             model = chunk.model;
         }
+        if (!created && chunk.created) {
+            created = chunk.created;
+        }
 
         const delta = chunk.choices[0]?.delta?.content || '';
         const finishReason = chunk.choices[0]?.finish_reason;
 
         if (delta) {
+            outputText += delta;
             yield {
                 type: 'response.output_text.delta',
                 delta,
@@ -2812,12 +2818,18 @@ async function* normalizeChatCompletionsStream(stream) {
         if (isTerminalFinishReason(finishReason)) {
             yield {
                 type: 'response.completed',
-                response: {
+                response: normalizeChatResponse({
                     id: responseId,
+                    created,
                     model,
-                    output: [],
-                    metadata: {},
-                },
+                    choices: [{
+                        message: {
+                            role: 'assistant',
+                            content: outputText,
+                        },
+                        finish_reason: finishReason,
+                    }],
+                }),
             };
         }
     }
@@ -3075,6 +3087,7 @@ module.exports = {
         getChatCompletionText,
         normalizeOpenAIApiMode,
         normalizeMessageContent,
+        normalizeChatCompletionsStream,
         normalizeModelResponse,
         normalizeToolResultForModel,
         inferProviderFamily,

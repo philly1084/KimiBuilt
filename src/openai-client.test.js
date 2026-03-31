@@ -1329,4 +1329,77 @@ describe('openai-client automatic tool orchestration helpers', () => {
             }],
         })).toBe('Hello world');
     });
+
+    test('normalizes streamed chat completions into a populated final response', async () => {
+        async function* streamChunks() {
+            yield {
+                id: 'chatcmpl-groq-1',
+                object: 'chat.completion.chunk',
+                created: 1710000000,
+                model: 'llama-3.3-70b-versatile',
+                choices: [{
+                    index: 0,
+                    delta: { content: 'Hello ' },
+                    finish_reason: null,
+                }],
+            };
+            yield {
+                id: 'chatcmpl-groq-1',
+                object: 'chat.completion.chunk',
+                created: 1710000000,
+                model: 'llama-3.3-70b-versatile',
+                choices: [{
+                    index: 0,
+                    delta: { content: 'world' },
+                    finish_reason: null,
+                }],
+            };
+            yield {
+                id: 'chatcmpl-groq-1',
+                object: 'chat.completion.chunk',
+                created: 1710000000,
+                model: 'llama-3.3-70b-versatile',
+                choices: [{
+                    index: 0,
+                    delta: {},
+                    finish_reason: 'stop',
+                }],
+            };
+        }
+
+        const events = [];
+        for await (const event of __testUtils.normalizeChatCompletionsStream(streamChunks())) {
+            events.push(event);
+        }
+
+        expect(events).toEqual([
+            {
+                type: 'response.output_text.delta',
+                delta: 'Hello ',
+            },
+            {
+                type: 'response.output_text.delta',
+                delta: 'world',
+            },
+            {
+                type: 'response.completed',
+                response: {
+                    id: 'chatcmpl-groq-1',
+                    object: 'response',
+                    created: 1710000000,
+                    model: 'llama-3.3-70b-versatile',
+                    output: [{
+                        type: 'message',
+                        role: 'assistant',
+                        content: [{
+                            type: 'text',
+                            text: 'Hello world',
+                        }],
+                    }],
+                    session_id: undefined,
+                    metadata: {},
+                },
+            },
+        ]);
+    });
 });
