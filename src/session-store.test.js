@@ -1,4 +1,7 @@
 const { SessionStore } = require('./session-store');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
 
 describe('SessionStore recent message continuity', () => {
     test('does not inject a default business agent into new sessions', async () => {
@@ -82,5 +85,86 @@ describe('SessionStore recent message continuity', () => {
 
         expect(ids).toEqual(expect.arrayContaining(['owned-a', 'legacy']));
         expect(ids).not.toContain('owned-b');
+    });
+
+    test('listMessages returns the full persisted transcript, not just the recent continuity window', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' });
+
+        const transcript = Array.from({ length: 30 }, (_, index) => ({
+            role: index % 2 === 0 ? 'user' : 'assistant',
+            content: `message-${index + 1}`,
+            timestamp: new Date(Date.UTC(2026, 0, 1, 0, index, 0)).toISOString(),
+        }));
+
+        await store.appendMessages(session.id, transcript);
+
+        const listed = await store.listMessages(session.id, 100);
+        const recent = await store.getRecentMessages(session.id);
+
+        expect(listed).toHaveLength(30);
+        expect(listed[0]).toEqual(expect.objectContaining({ content: 'message-1' }));
+        expect(listed[29]).toEqual(expect.objectContaining({ content: 'message-30' }));
+        expect(recent).toHaveLength(24);
+        expect(recent[0]).toEqual(expect.objectContaining({ content: 'message-7' }));
+    });
+
+    test('preserves long html content in transcript persistence while trimming only recent continuity', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' });
+        const html = `<html><body>${'A'.repeat(6000)}</body></html>`;
+
+        await store.appendMessages(session.id, [
+            { role: 'assistant', content: html },
+        ]);
+
+        const listed = await store.listMessages(session.id, 10);
+        const recent = await store.getRecentMessages(session.id, 10);
+
+        expect(listed[0].content).toBe(html);
+        expect(recent[0].content.length).toBeLessThan(html.length);
+        expect(recent[0].content).toContain('[truncated');
+    });
+
+    test('persists fallback sessions and messages to disk across store instances', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-session-store-'));
+        const storagePath = path.join(tempDir, 'sessions.json');
+
+        try {
+            const store = new SessionStore();
+            store.initialized = true;
+            store.usePostgres = false;
+            store.fallbackStoragePath = storagePath;
+            store.fallbackLoaded = true;
+
+            const session = await store.create({ mode: 'chat' }, 'persisted-session');
+            await store.appendMessages(session.id, [
+                { role: 'user', content: 'Build me a page' },
+                { role: 'assistant', content: '<!DOCTYPE html><html><body>Saved</body></html>' },
+            ]);
+            await store.recordResponse(session.id, 'resp_123');
+
+            const reloaded = new SessionStore();
+            reloaded.fallbackStoragePath = storagePath;
+            await reloaded.initialize();
+
+            const loadedSession = await reloaded.get('persisted-session');
+            const loadedMessages = await reloaded.listMessages('persisted-session', 10);
+
+            expect(loadedSession).toEqual(expect.objectContaining({
+                id: 'persisted-session',
+                previousResponseId: 'resp_123',
+            }));
+            expect(loadedMessages).toHaveLength(2);
+            expect(loadedMessages[1]).toEqual(expect.objectContaining({
+                content: '<!DOCTYPE html><html><body>Saved</body></html>',
+            }));
+        } finally {
+            await fs.rm(tempDir, { recursive: true, force: true });
+        }
     });
 });

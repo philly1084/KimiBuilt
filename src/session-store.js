@@ -1,5 +1,8 @@
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs/promises');
+const path = require('path');
 const { postgres } = require('./postgres');
+const { config } = require('./config');
 const { stripNullCharacters } = require('./utils/text');
 
 const MAX_RECENT_MESSAGES = 24;
@@ -8,8 +11,11 @@ const MAX_RECENT_MESSAGE_LENGTH = 4000;
 class SessionStore {
     constructor() {
         this.sessions = new Map();
+        this.sessionMessages = new Map();
         this.initialized = false;
         this.usePostgres = false;
+        this.fallbackStoragePath = path.join(config.persistence.dataDir, 'sessions.json');
+        this.fallbackLoaded = false;
     }
 
     trimRecentMessageContent(content = '') {
@@ -26,7 +32,7 @@ class SessionStore {
         return `${value.slice(0, MAX_RECENT_MESSAGE_LENGTH)}\n...[truncated ${hiddenCharacters} chars]`;
     }
 
-    normalizeRecentMessages(messages = []) {
+    normalizeTranscriptMessages(messages = []) {
         if (!Array.isArray(messages)) {
             return [];
         }
@@ -36,7 +42,7 @@ class SessionStore {
                 const role = ['user', 'assistant', 'system', 'tool'].includes(entry?.role)
                     ? entry.role
                     : null;
-                const content = this.trimRecentMessageContent(entry?.content || '');
+                const content = stripNullCharacters(entry?.content || '').trim();
                 const timestamp = entry?.timestamp || new Date().toISOString();
 
                 if (!role || !content) {
@@ -49,7 +55,15 @@ class SessionStore {
                     timestamp,
                 };
             })
-            .filter(Boolean)
+            .filter(Boolean);
+    }
+
+    normalizeRecentMessages(messages = []) {
+        return this.normalizeTranscriptMessages(messages)
+            .map((entry) => ({
+                ...entry,
+                content: this.trimRecentMessageContent(entry.content || ''),
+            }))
             .slice(-MAX_RECENT_MESSAGES);
     }
 
@@ -126,6 +140,79 @@ class SessionStore {
         };
     }
 
+    async loadFallbackState() {
+        if (this.fallbackLoaded) {
+            return;
+        }
+
+        this.fallbackLoaded = true;
+
+        try {
+            const raw = await fs.readFile(this.fallbackStoragePath, 'utf8');
+            const parsed = JSON.parse(raw);
+            const sessions = Array.isArray(parsed?.sessions) ? parsed.sessions : [];
+            const messages = Array.isArray(parsed?.messages) ? parsed.messages : [];
+
+            this.sessions = new Map(
+                sessions
+                    .map((session) => {
+                        if (!session?.id) {
+                            return null;
+                        }
+
+                        return [
+                            session.id,
+                            {
+                                ...session,
+                                metadata: this.normalizeMetadata(session.metadata || {}),
+                            },
+                        ];
+                    })
+                    .filter(Boolean),
+            );
+
+            this.sessionMessages = new Map(
+                messages
+                    .map((entry) => {
+                        const sessionId = entry?.[0];
+                        if (!sessionId) {
+                            return null;
+                        }
+
+                        return [
+                            sessionId,
+                            this.normalizeTranscriptMessages(entry?.[1] || []),
+                        ];
+                    })
+                    .filter(Boolean),
+            );
+        } catch (error) {
+            if (error.code !== 'ENOENT') {
+                console.warn('[SessionStore] Failed to load file-backed sessions:', error.message);
+            }
+        }
+    }
+
+    async persistFallbackState() {
+        if (this.usePostgres) {
+            return;
+        }
+
+        const payload = {
+            version: 1,
+            savedAt: new Date().toISOString(),
+            sessions: Array.from(this.sessions.values()),
+            messages: Array.from(this.sessionMessages.entries()),
+        };
+
+        const directory = path.dirname(this.fallbackStoragePath);
+        const tempPath = `${this.fallbackStoragePath}.tmp`;
+
+        await fs.mkdir(directory, { recursive: true });
+        await fs.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+        await fs.rename(tempPath, this.fallbackStoragePath);
+    }
+
     async initialize() {
         if (this.initialized) return;
 
@@ -134,11 +221,13 @@ class SessionStore {
             if (this.usePostgres) {
                 console.log('[SessionStore] Using Postgres-backed sessions');
             } else {
-                console.warn('[SessionStore] Postgres not configured, using in-memory sessions');
+                console.warn(`[SessionStore] Postgres not configured, using file-backed sessions at ${this.fallbackStoragePath}`);
+                await this.loadFallbackState();
             }
         } catch (err) {
             this.usePostgres = false;
-            console.error('[SessionStore] Postgres init failed, using in-memory sessions:', err.message);
+            console.error('[SessionStore] Postgres init failed, using file-backed sessions:', err.message);
+            await this.loadFallbackState();
         }
 
         this.initialized = true;
@@ -160,6 +249,10 @@ class SessionStore {
 
         if (!this.usePostgres) {
             this.sessions.set(id, session);
+            if (!this.sessionMessages.has(id)) {
+                this.sessionMessages.set(id, []);
+            }
+            await this.persistFallbackState();
             return session;
         }
 
@@ -269,6 +362,7 @@ class SessionStore {
             };
 
             this.sessions.set(id, next);
+            await this.persistFallbackState();
             return next;
         }
 
@@ -333,18 +427,15 @@ class SessionStore {
                 .reverse();
         }
 
-        const recentMessages = Array.isArray(session?.metadata?.recentMessages)
-            ? session.metadata.recentMessages
-            : [];
-
-        return this.normalizeRecentMessages(recentMessages).slice(-Math.max(0, limit));
+        const transcript = this.sessionMessages.get(sessionId) || [];
+        return this.normalizeRecentMessages(transcript.slice(-Math.max(0, limit)));
     }
 
     async appendMessages(id, messages = []) {
         await this.initialize();
 
-        const normalizedMessages = this.normalizeRecentMessages(messages);
-        if (normalizedMessages.length === 0) {
+        const transcriptMessages = this.normalizeTranscriptMessages(messages);
+        if (transcriptMessages.length === 0) {
             return this.get(id);
         }
 
@@ -354,7 +445,7 @@ class SessionStore {
                 return null;
             }
 
-            for (const message of normalizedMessages) {
+            for (const message of transcriptMessages) {
                 await postgres.query(
                     `
                         INSERT INTO session_messages (id, session_id, role, content, created_at)
@@ -370,21 +461,6 @@ class SessionStore {
                 );
             }
 
-            await postgres.query(
-                `
-                    DELETE FROM session_messages
-                    WHERE session_id = $1
-                    AND id IN (
-                        SELECT id
-                        FROM session_messages
-                        WHERE session_id = $1
-                        ORDER BY created_at DESC
-                        OFFSET $2
-                    )
-                `,
-                [id, MAX_RECENT_MESSAGES],
-            );
-
             return current;
         }
 
@@ -393,14 +469,17 @@ class SessionStore {
             return null;
         }
 
-        const existingMessages = await this.getRecentMessages(current);
-        const recentMessages = [...existingMessages, ...normalizedMessages].slice(-MAX_RECENT_MESSAGES);
+        const existingMessages = this.sessionMessages.get(id) || [];
+        const nextMessages = [...existingMessages, ...transcriptMessages];
+        this.sessionMessages.set(id, nextMessages);
 
-        return this.update(id, {
+        const updated = await this.update(id, {
             metadata: {
-                recentMessages,
+                recentMessages: this.normalizeRecentMessages(nextMessages),
             },
         });
+        await this.persistFallbackState();
+        return updated;
     }
 
     async recordResponse(id, responseId) {
@@ -414,6 +493,7 @@ class SessionStore {
             session.messageCount += 1;
             session.updatedAt = new Date().toISOString();
             this.sessions.set(id, session);
+            await this.persistFallbackState();
             return session;
         }
 
@@ -436,7 +516,10 @@ class SessionStore {
         await this.initialize();
 
         if (!this.usePostgres) {
-            return this.sessions.delete(id);
+            this.sessionMessages.delete(id);
+            const deleted = this.sessions.delete(id);
+            await this.persistFallbackState();
+            return deleted;
         }
 
         const result = await postgres.query('DELETE FROM sessions WHERE id = $1', [id]);
@@ -484,7 +567,32 @@ class SessionStore {
             return [];
         }
 
-        return this.getRecentMessages(session, limit);
+        const normalizedLimit = Math.max(0, limit);
+
+        if (this.usePostgres) {
+            const result = await postgres.query(
+                `
+                    SELECT role, content, created_at
+                    FROM session_messages
+                    WHERE session_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                `,
+                [session.id, normalizedLimit],
+            );
+
+            return result.rows
+                .map((row) => ({
+                    role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
+                    content: stripNullCharacters(row?.content || '').trim(),
+                    timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
+                }))
+                .filter((row) => row.role && row.content)
+                .reverse();
+        }
+
+        const transcript = this.sessionMessages.get(session.id) || [];
+        return transcript.slice(-normalizedLimit);
     }
 
     async healthCheck() {

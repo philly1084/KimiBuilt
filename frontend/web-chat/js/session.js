@@ -98,8 +98,9 @@ class SessionManager extends EventTarget {
             if (response.ok) {
                 const data = await response.json();
                 const storedSessions = new Map(this.sessions.map((session) => [session.id, session]));
+                const backendSessions = Array.isArray(data.sessions) ? data.sessions : [];
 
-                this.sessions = (data.sessions || []).map((session) => {
+                this.sessions = backendSessions.map((session) => {
                     const stored = storedSessions.get(session.id);
                     let model;
                     
@@ -122,11 +123,37 @@ class SessionManager extends EventTarget {
                     };
                 });
 
-                for (const sessionId of Array.from(this.sessionMessages.keys())) {
-                    if (!this.sessions.find((session) => session.id === sessionId)) {
+                const knownSessionIds = new Set(this.sessions.map((session) => session.id));
+                for (const [sessionId, storedSession] of storedSessions.entries()) {
+                    if (knownSessionIds.has(sessionId)) {
+                        continue;
+                    }
+
+                    const cachedMessages = this.sessionMessages.get(sessionId) || [];
+                    const shouldPreserveCachedSession = cachedMessages.some((message) => {
+                        if (message.type === 'image' && (message.imageUrl || message.isLoading)) {
+                            return true;
+                        }
+
+                        return Boolean(String(message.content || message.prompt || '').trim());
+                    });
+
+                    if (shouldPreserveCachedSession) {
+                        this.sessions.push({
+                            ...storedSession,
+                            isLocal: true,
+                            recoveredFromCache: true,
+                            updatedAt: storedSession.updatedAt || new Date().toISOString(),
+                        });
+                        knownSessionIds.add(sessionId);
+                    } else if (!this.isLocalSession(sessionId)) {
                         this.sessionMessages.delete(sessionId);
                     }
                 }
+
+                this.sessions.sort((a, b) => {
+                    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+                });
 
                 if (!this.sessions.find((session) => session.id === this.currentSessionId)) {
                     this.currentSessionId = this.sessions[0]?.id || null;

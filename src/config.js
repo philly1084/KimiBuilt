@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 const config = {
     // Server
@@ -44,6 +45,10 @@ const config = {
         user: process.env.POSTGRES_USER || 'kimibuilt',
         password: process.env.POSTGRES_PASSWORD || null,
         ssl: process.env.POSTGRES_SSL === 'true',
+    },
+
+    persistence: {
+        dataDir: process.env.KIMIBUILT_DATA_DIR || path.join(process.cwd(), 'data'),
     },
 
     artifacts: {
