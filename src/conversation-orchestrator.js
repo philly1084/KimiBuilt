@@ -3682,6 +3682,7 @@ class ConversationOrchestrator extends EventEmitter {
             });
         }
 
+        const verifiedToolFindings = buildVerifiedToolFindingsText(toolEvents) || '(none)';
         const synthesisPrompt = [
             'Use the verified tool results below to answer the user.',
             'If a tool failed, state the exact failure plainly.',
@@ -3726,8 +3727,10 @@ class ConversationOrchestrator extends EventEmitter {
                 ]
                 : []),
             'Verified tool results:',
-            buildVerifiedToolFindingsText(toolEvents) || '(none)',
+            verifiedToolFindings,
         ].join('\n');
+
+        console.log(`[ConversationOrchestrator] Tool synthesis request: toolEvents=${toolEvents.length}, autonomyApproved=${autonomyApproved}, findingsChars=${verifiedToolFindings.length}, contextMessages=${contextMessages.length}, recentMessages=${recentMessages.length}`);
 
         let response = await this.requestResponse({
             input: synthesisPrompt,
@@ -3741,6 +3744,7 @@ class ConversationOrchestrator extends EventEmitter {
         });
 
         if (!extractResponseText(response).trim()) {
+            console.warn(`[ConversationOrchestrator] Tool synthesis returned empty output; retrying with compact prompt. toolEvents=${toolEvents.length}, autonomyApproved=${autonomyApproved}`);
             response = await this.requestResponse({
                 input: buildCompactToolSynthesisPrompt({
                     objective,
