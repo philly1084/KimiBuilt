@@ -1,6 +1,7 @@
 const { sessionStore } = require('./session-store');
 const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
+const { getSessionControlState } = require('./runtime-control-state');
 
 const RECENT_TRANSCRIPT_LIMIT = 12;
 const DEFAULT_EXECUTION_PROFILE = 'default';
@@ -133,17 +134,13 @@ function inferExecutionProfile(payload = {}) {
 
     const text = String(payload?.memoryInput || '').trim() || extractRuntimeText(payload?.input || '');
     const normalized = String(text || '').toLowerCase();
+    const controlState = getSessionControlState(payload?.session || { metadata: payload?.metadata || {} });
     const stickyRemoteIntent = ['ssh-execute', 'remote-command'].includes(
-        String(
-            payload?.session?.metadata?.lastToolIntent
-            || payload?.metadata?.lastToolIntent
-            || '',
-        ).trim().toLowerCase(),
+        String(controlState.lastToolIntent || '').trim().toLowerCase(),
     );
     const stickyRemoteTarget = Boolean(
-        payload?.session?.metadata?.lastSshTarget?.host
-        || payload?.session?.metadata?.remoteWorkingState?.target?.host
-        || payload?.metadata?.lastSshTarget?.host,
+        controlState?.lastSshTarget?.host
+        || controlState?.remoteWorkingState?.target?.host,
     );
     const stickyRemoteContext = stickyRemoteIntent || stickyRemoteTarget;
     const pageEditIntent = normalized

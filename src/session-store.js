@@ -4,6 +4,12 @@ const path = require('path');
 const { postgres } = require('./postgres');
 const { config } = require('./config');
 const { stripNullCharacters } = require('./utils/text');
+const {
+    buildLegacyControlMetadata,
+    getSessionControlState,
+    mergeControlState,
+    normalizeRuntimeControlState,
+} = require('./runtime-control-state');
 
 const MAX_RECENT_MESSAGES = 24;
 const MAX_RECENT_MESSAGE_LENGTH = 4000;
@@ -98,6 +104,10 @@ class SessionStore {
         return normalized;
     }
 
+    normalizeControlState(controlState = {}) {
+        return normalizeRuntimeControlState(controlState);
+    }
+
     normalizeOwnerId(ownerId = null) {
         const normalized = String(ownerId || '').trim();
         return normalized || null;
@@ -130,6 +140,13 @@ class SessionStore {
     toSession(row) {
         if (!row) return null;
 
+        const controlState = this.normalizeControlState(
+            row?.control_state
+            || row?.controlState
+            || row?.metadata?.controlState
+            || {},
+        );
+
         return {
             id: row.id,
             previousResponseId: row.previous_response_id,
@@ -137,6 +154,7 @@ class SessionStore {
             updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
             messageCount: row.message_count,
             metadata: row.metadata || {},
+            controlState,
         };
     }
 
@@ -165,6 +183,11 @@ class SessionStore {
                             {
                                 ...session,
                                 metadata: this.normalizeMetadata(session.metadata || {}),
+                                controlState: this.normalizeControlState(
+                                    session.controlState
+                                    || session.metadata?.controlState
+                                    || {},
+                                ),
                             },
                         ];
                     })
@@ -245,6 +268,7 @@ class SessionStore {
             updatedAt: now,
             messageCount: 0,
             metadata: this.normalizeMetadata(metadata),
+            controlState: this.normalizeControlState(metadata?.controlState || {}),
         };
 
         if (!this.usePostgres) {
@@ -275,7 +299,22 @@ class SessionStore {
             ],
         );
 
-        return this.toSession(result.rows[0]);
+        await postgres.query(
+            `
+                INSERT INTO session_runtime_state (session_id, state)
+                VALUES ($1, $2::jsonb)
+                ON CONFLICT (session_id) DO NOTHING
+            `,
+            [
+                id,
+                JSON.stringify(session.controlState || {}),
+            ],
+        );
+
+        return this.toSession({
+            ...result.rows[0],
+            control_state: session.controlState,
+        });
     }
 
     async get(id) {
@@ -285,7 +324,16 @@ class SessionStore {
             return this.sessions.get(id) || null;
         }
 
-        const result = await postgres.query('SELECT * FROM sessions WHERE id = $1', [id]);
+        const result = await postgres.query(
+            `
+                SELECT sessions.*, session_runtime_state.state AS control_state
+                FROM sessions
+                LEFT JOIN session_runtime_state
+                    ON session_runtime_state.session_id = sessions.id
+                WHERE sessions.id = $1
+            `,
+            [id],
+        );
         return this.toSession(result.rows[0]);
     }
 
@@ -358,6 +406,12 @@ class SessionStore {
                         ...updates.metadata,
                     })
                     : session.metadata,
+                controlState: updates.controlState
+                    ? this.normalizeControlState(mergeControlState(
+                        session.controlState || {},
+                        updates.controlState,
+                    ))
+                    : this.normalizeControlState(session.controlState || {}),
                 updatedAt: new Date().toISOString(),
             };
 
@@ -375,6 +429,12 @@ class SessionStore {
                 ...updates.metadata,
             })
             : current.metadata;
+        const nextControlState = updates.controlState
+            ? this.normalizeControlState(mergeControlState(
+                current.controlState || {},
+                updates.controlState,
+            ))
+            : this.normalizeControlState(current.controlState || {});
 
         const result = await postgres.query(
             `
@@ -394,7 +454,85 @@ class SessionStore {
             ],
         );
 
-        return this.toSession(result.rows[0]);
+        if (updates.controlState) {
+            await postgres.query(
+                `
+                    INSERT INTO session_runtime_state (session_id, state, updated_at)
+                    VALUES ($1, $2::jsonb, NOW())
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET state = $2::jsonb,
+                        updated_at = NOW()
+                `,
+                [
+                    id,
+                    JSON.stringify(nextControlState || {}),
+                ],
+            );
+        }
+
+        return this.toSession({
+            ...result.rows[0],
+            control_state: nextControlState,
+        });
+    }
+
+    async getControlState(sessionOrId) {
+        const session = typeof sessionOrId === 'string'
+            ? await this.get(sessionOrId)
+            : sessionOrId;
+
+        return getSessionControlState(session);
+    }
+
+    async updateControlState(id, controlState = {}) {
+        await this.initialize();
+
+        const current = await this.get(id);
+        if (!current) {
+            return null;
+        }
+
+        const nextControlState = this.normalizeControlState(mergeControlState(
+            current.controlState || {},
+            controlState,
+        ));
+        const legacyMetadata = buildLegacyControlMetadata(nextControlState);
+
+        if (!this.usePostgres) {
+            const session = this.sessions.get(id);
+            const next = {
+                ...session,
+                controlState: nextControlState,
+                metadata: this.normalizeMetadata({
+                    ...(session?.metadata || {}),
+                    ...legacyMetadata,
+                }),
+                updatedAt: new Date().toISOString(),
+            };
+            this.sessions.set(id, next);
+            await this.persistFallbackState();
+            return nextControlState;
+        }
+
+        await postgres.query(
+            `
+                INSERT INTO session_runtime_state (session_id, state, updated_at)
+                VALUES ($1, $2::jsonb, NOW())
+                ON CONFLICT (session_id) DO UPDATE
+                SET state = $2::jsonb,
+                    updated_at = NOW()
+            `,
+            [
+                id,
+                JSON.stringify(nextControlState || {}),
+            ],
+        );
+
+        await this.update(id, {
+            metadata: legacyMetadata,
+        });
+
+        return nextControlState;
     }
 
     async getRecentMessages(sessionOrId, limit = MAX_RECENT_MESSAGES) {
@@ -548,15 +686,25 @@ class SessionStore {
         const result = ownerId
             ? await postgres.query(
                 `
-                    SELECT *
+                    SELECT sessions.*, session_runtime_state.state AS control_state
                     FROM sessions
-                    WHERE COALESCE(metadata->>'ownerId', '') = ''
-                       OR metadata->>'ownerId' = $1
-                    ORDER BY updated_at DESC
+                    LEFT JOIN session_runtime_state
+                        ON session_runtime_state.session_id = sessions.id
+                    WHERE COALESCE(sessions.metadata->>'ownerId', '') = ''
+                       OR sessions.metadata->>'ownerId' = $1
+                    ORDER BY sessions.updated_at DESC
                 `,
                 [ownerId],
             )
-            : await postgres.query('SELECT * FROM sessions ORDER BY updated_at DESC');
+            : await postgres.query(
+                `
+                    SELECT sessions.*, session_runtime_state.state AS control_state
+                    FROM sessions
+                    LEFT JOIN session_runtime_state
+                        ON session_runtime_state.session_id = sessions.id
+                    ORDER BY sessions.updated_at DESC
+                `,
+            );
 
         return result.rows.map((row) => this.toSession(row));
     }

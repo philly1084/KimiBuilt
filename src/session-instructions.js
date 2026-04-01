@@ -1,5 +1,6 @@
 const { isDefaultBusinessAgentProfile } = require('./business-agent');
 const { buildProjectMemoryInstructions } = require('./project-memory');
+const { getSessionControlState } = require('./runtime-control-state');
 
 function formatRemoteTarget(target = {}) {
     if (!target?.host) {
@@ -21,7 +22,8 @@ function oneLinePreview(value = '', limit = 180) {
 }
 
 function buildRemoteWorkingStateInstructions(session = null) {
-    const remote = session?.metadata?.remoteWorkingState;
+    const controlState = getSessionControlState(session);
+    const remote = controlState.remoteWorkingState;
     if (!remote || typeof remote !== 'object') {
         return '';
     }
@@ -31,7 +33,7 @@ function buildRemoteWorkingStateInstructions(session = null) {
         'Reuse these verified remote facts for follow-up SSH or server work.',
     ];
 
-    const targetLabel = formatRemoteTarget(remote.target || session?.metadata?.lastSshTarget || {});
+    const targetLabel = formatRemoteTarget(remote.target || controlState.lastSshTarget || {});
     if (targetLabel) {
         lines.push(`- Target: ${targetLabel}`);
     }

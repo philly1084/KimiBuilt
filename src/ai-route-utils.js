@@ -2,6 +2,7 @@ const { artifactService } = require('./artifacts/artifact-service');
 const { normalizeFormat } = require('./artifacts/constants');
 const { buildSessionInstructions } = require('./session-instructions');
 const { config } = require('./config');
+const { getSessionControlState } = require('./runtime-control-state');
 const settingsController = require('./routes/admin/settings.controller');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -514,7 +515,7 @@ function isSshHostnameResolutionFailure(error = '') {
 }
 
 function hasRecentRemoteWorkingState(session = null) {
-    const remoteWorkingState = session?.metadata?.remoteWorkingState;
+    const remoteWorkingState = getSessionControlState(session).remoteWorkingState;
     if (!remoteWorkingState || typeof remoteWorkingState !== 'object') {
         return false;
     }
@@ -648,17 +649,18 @@ function getPreferredRemoteToolId(toolManager = null) {
 function resolveSshRequestContext(text = '', session = null) {
     const prompt = String(text || '').trim();
     const normalizedPrompt = prompt.toLowerCase();
+    const controlState = getSessionControlState(session);
     const explicitIntent = promptHasExplicitSshIntent(prompt);
     const explicitTarget = extractExplicitSshTarget(prompt);
     const configuredTarget = getConfiguredSshTarget();
-    const sessionTarget = session?.metadata?.lastSshTarget || null;
+    const sessionTarget = controlState.lastSshTarget || null;
     const target = explicitTarget
         || (sessionTarget?.host && !isSuspiciousSshTargetHost(sessionTarget.host)
             ? sessionTarget
             : null)
         || configuredTarget
         || sessionTarget;
-    const stickySsh = isRemoteCommandToolId(session?.metadata?.lastToolIntent);
+    const stickySsh = isRemoteCommandToolId(controlState.lastToolIntent);
     const continuation = !explicitIntent
         && stickySsh
         && target?.host
@@ -670,7 +672,7 @@ function resolveSshRequestContext(text = '', session = null) {
         : prompt;
     const retryLikeContinuation = continuation
         && /\b(try again|retry|rerun|re-run|recheck)\b/.test(normalizedPrompt);
-    const previousCommand = String(session?.metadata?.remoteWorkingState?.lastCommand || '').trim();
+    const previousCommand = String(controlState?.remoteWorkingState?.lastCommand || '').trim();
     const command = extractRequestedSshCommand(effectivePrompt)
         || (retryLikeContinuation && previousCommand ? previousCommand : null);
 

@@ -86,6 +86,264 @@ describe('ConversationOrchestrator', () => {
         expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-1', 'Plain answer');
     });
 
+    test('uses a deterministic remote health workflow for health report prompts without model synthesis', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (toolId === 'remote-command' ? { id: toolId } : null)),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: 'Hostname: ubuntu-32gb-fsn1-2\nArchitecture: aarch64\nOS: Ubuntu 24.04.4 LTS\n19:29:25 up 9 days',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: '/dev/sda1 301G 13G 276G 5% /\nMem: 32000 3300 14000 8 12000 27000',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-health', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'can you remote into the server and get a health report',
+            sessionId: 'session-health',
+            stream: false,
+        });
+
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).not.toHaveBeenCalled();
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(2);
+        expect(result.trace.runtimeMode).toBe('deterministic-remote-health');
+        expect(result.output).toContain('Server Health Report');
+        expect(result.output).toContain('System Information');
+        expect(result.output).toContain('Disk And Memory');
+        expect(sessionStore.update).toHaveBeenCalledWith('session-health', expect.objectContaining({
+            metadata: expect.objectContaining({
+                controlState: expect.objectContaining({
+                    workflow: expect.objectContaining({
+                        type: 'remote-health-report',
+                        status: 'completed',
+                    }),
+                }),
+            }),
+        }));
+    });
+
+    test('retries the stored deterministic remote health workflow without planner or synthesis', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const storedSteps = [
+            {
+                tool: 'remote-command',
+                reason: 'Collect system information for the remote server.',
+                params: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    command: "hostname && uname -m && (test -f /etc/os-release && sed -n '1,6p' /etc/os-release || true) && uptime",
+                },
+            },
+            {
+                tool: 'remote-command',
+                reason: 'Collect disk and memory information for the remote server.',
+                params: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    command: 'df -h / && free -m',
+                },
+            },
+        ];
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (toolId === 'remote-command' ? { id: toolId } : null)),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'retry-system-info', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'retry-disk-memory', stderr: '', host: '10.0.0.5:22' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({
+                id: 'session-retry-health',
+                metadata: {
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '10.0.0.5',
+                        username: 'ubuntu',
+                        port: 22,
+                    },
+                    remoteWorkingState: {
+                        lastUpdated: new Date().toISOString(),
+                        lastCommand: 'df -h / && free -m',
+                    },
+                    controlState: {
+                        workflow: {
+                            type: 'remote-health-report',
+                            steps: storedSteps,
+                        },
+                    },
+                },
+            }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'try again to remote command',
+            sessionId: 'session-retry-health',
+            stream: false,
+        });
+
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).not.toHaveBeenCalled();
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            1,
+            'remote-command',
+            storedSteps[0].params,
+            expect.objectContaining({ sessionId: 'session-retry-health' }),
+        );
+        expect(toolManager.executeTool).toHaveBeenNthCalledWith(
+            2,
+            'remote-command',
+            storedSteps[1].params,
+            expect.objectContaining({ sessionId: 'session-retry-health' }),
+        );
+        expect(result.trace.runtimeMode).toBe('deterministic-remote-health');
+        expect(result.output).toContain('retry-system-info');
+        expect(result.output).toContain('retry-disk-memory');
+    });
+
+    test('deterministic remote health workflow ignores autonomy mode and still bypasses model synthesis', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (toolId === 'remote-command' ? { id: toolId } : null)),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'system-info', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'disk-memory', stderr: '', host: '10.0.0.5:22' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-auto-health', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'can you remote into the server and do a health report',
+            sessionId: 'session-auto-health',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).not.toHaveBeenCalled();
+        expect(result.trace.runtimeMode).toBe('deterministic-remote-health');
+        expect(result.output).toContain('Summary: Remote health inspection completed successfully.');
+    });
+
     test('passes reasoning effort into final response synthesis', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Synthesized answer', 'resp_reasoning')),

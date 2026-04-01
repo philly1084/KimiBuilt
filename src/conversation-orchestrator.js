@@ -16,6 +16,11 @@ const {
     buildProjectMemoryUpdate,
     mergeProjectMemory,
 } = require('./project-memory');
+const {
+    buildLegacyControlMetadata,
+    getSessionControlState,
+    mergeControlState,
+} = require('./runtime-control-state');
 const { stripNullCharacters } = require('./utils/text');
 const {
     DEFAULT_EXECUTION_PROFILE,
@@ -1779,6 +1784,172 @@ function buildCompactToolSynthesisPrompt({ objective = '', taskType = 'chat', to
     ].filter(Boolean).join('\n');
 }
 
+function isRemoteHealthWorkflowIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const mentionsRemoteTarget = /\b(remote|server|host|machine|ssh)\b/.test(normalized);
+    const looksLikeClusterHealth = /\b(k3s|k8s|kubernetes|kubectl|cluster|pod|deployment|namespace|ingress|service)\b/.test(normalized);
+    const asksForHealthReport = /\bhealth report\b/.test(normalized)
+        || /\bhealth summary\b/.test(normalized)
+        || /\bstatus report\b/.test(normalized)
+        || /\bserver state\b/.test(normalized)
+        || (/\b(health|status|state)\b/.test(normalized) && /\b(report|summary|overview)\b/.test(normalized));
+
+    return mentionsRemoteTarget && asksForHealthReport && !looksLikeClusterHealth;
+}
+
+function isRemoteRetryWorkflowIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(try again|retry|rerun|re-run|recheck)\b/.test(normalized)
+        && /\b(remote|server|host|ssh|command)\b/.test(normalized);
+}
+
+function buildRemoteHealthWorkflowSteps(target = {}, toolId = 'remote-command') {
+    const sharedParams = {
+        host: target.host,
+        ...(target.username ? { username: target.username } : {}),
+        ...(target.port ? { port: target.port } : {}),
+    };
+
+    return [
+        {
+            tool: toolId,
+            reason: 'Collect system information for the remote server.',
+            params: {
+                ...sharedParams,
+                command: "hostname && uname -m && (test -f /etc/os-release && sed -n '1,6p' /etc/os-release || true) && uptime",
+            },
+        },
+        {
+            tool: toolId,
+            reason: 'Collect disk and memory information for the remote server.',
+            params: {
+                ...sharedParams,
+                command: 'df -h / && free -m',
+            },
+        },
+    ];
+}
+
+function buildDeterministicRemoteWorkflow({ objective = '', session = null, toolPolicy = {} } = {}) {
+    const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+    if (!remoteToolId) {
+        return null;
+    }
+
+    const sshContext = resolveSshRequestContext(objective, session);
+    const target = sshContext.target;
+    if (!target?.host) {
+        return null;
+    }
+
+    const storedWorkflow = getSessionControlState(session).workflow;
+    if (isRemoteRetryWorkflowIntent(objective)
+        && storedWorkflow?.type === 'remote-health-report'
+        && Array.isArray(storedWorkflow.steps)
+        && storedWorkflow.steps.length > 0) {
+        return {
+            type: 'remote-health-report',
+            runtimeMode: 'deterministic-remote-health',
+            source: 'stored-retry',
+            steps: storedWorkflow.steps.map((step) => ({
+                tool: canonicalizeRemoteToolId(step?.tool || remoteToolId),
+                reason: String(step?.reason || '').trim(),
+                params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
+            })),
+        };
+    }
+
+    if (!isRemoteHealthWorkflowIntent(objective)) {
+        return null;
+    }
+
+    return {
+        type: 'remote-health-report',
+        runtimeMode: 'deterministic-remote-health',
+        source: 'direct-intent',
+        steps: buildRemoteHealthWorkflowSteps(target, remoteToolId),
+    };
+}
+
+function getDeterministicWorkflowStepTitle(step = {}, index = 0) {
+    const reason = String(step?.reason || '').toLowerCase();
+    if (reason.includes('system information')) {
+        return 'System Information';
+    }
+    if (reason.includes('disk and memory')) {
+        return 'Disk And Memory';
+    }
+    return `Remote Command ${index + 1}`;
+}
+
+function buildDeterministicRemoteWorkflowOutput({ workflow = null, toolEvents = [] } = {}) {
+    if (!workflow || workflow.type !== 'remote-health-report') {
+        return buildFallbackSynthesisText({ toolEvents });
+    }
+
+    const sections = ['Server Health Report'];
+    let failures = 0;
+
+    toolEvents.forEach((event, index) => {
+        const title = getDeterministicWorkflowStepTitle(workflow.steps?.[index] || event, index);
+        const result = event?.result || {};
+        const stdout = stripNullCharacters(String(result?.data?.stdout || '')).trim();
+        const stderr = stripNullCharacters(String(result?.data?.stderr || '')).trim();
+        const error = stripNullCharacters(String(result?.error || '')).trim();
+
+        if (result?.success === false) {
+            failures += 1;
+            sections.push(`${title}\n\nError: ${error || 'Unknown remote command failure.'}`);
+            return;
+        }
+
+        if (stdout) {
+            sections.push(`${title}\n\n\`\`\`text\n${stdout}\n\`\`\``);
+        }
+
+        if (stderr) {
+            sections.push(`${title} Warnings\n\n\`\`\`text\n${stderr}\n\`\`\``);
+        }
+    });
+
+    sections.push(
+        failures > 0
+            ? `Summary: ${failures} remote health step${failures === 1 ? '' : 's'} failed.`
+            : 'Summary: Remote health inspection completed successfully.',
+    );
+
+    return sections.filter(Boolean).join('\n\n');
+}
+
+function buildDeterministicWorkflowControlState(workflow = null, toolEvents = []) {
+    return {
+        workflow: {
+            type: workflow?.type || 'unknown',
+            version: 1,
+            status: (Array.isArray(toolEvents) ? toolEvents : []).some((event) => event?.result?.success === false)
+                ? 'partial'
+                : 'completed',
+            retryable: true,
+            updatedAt: new Date().toISOString(),
+            steps: Array.isArray(workflow?.steps)
+                ? workflow.steps.map((step) => ({
+                    tool: canonicalizeRemoteToolId(step?.tool || ''),
+                    reason: String(step?.reason || '').trim(),
+                    params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
+                }))
+                : [],
+        },
+    };
+}
+
 function recoverEmptyModelResponse(response = null, {
     objective = '',
     toolEvents = [],
@@ -2298,6 +2469,97 @@ class ConversationOrchestrator extends EventEmitter {
                 }));
             }
 
+            const deterministicWorkflow = buildDeterministicRemoteWorkflow({
+                objective,
+                session,
+                toolPolicy,
+            });
+
+            if (deterministicWorkflow) {
+                runtimeMode = deterministicWorkflow.runtimeMode;
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'planning',
+                    name: 'Deterministic workflow selection',
+                    details: {
+                        workflow: deterministicWorkflow.type,
+                        source: deterministicWorkflow.source,
+                        stepCount: deterministicWorkflow.steps.length,
+                    },
+                }));
+
+                const deterministicExecutionStartedAt = new Date().toISOString();
+                const {
+                    toolEvents: deterministicToolEvents,
+                } = await this.executePlan({
+                    plan: deterministicWorkflow.steps,
+                    toolManager: runtimeToolManager,
+                    sessionId,
+                    executionProfile: resolvedProfile,
+                    toolContext,
+                    objective,
+                    session,
+                    recentMessages: resolvedRecentMessages,
+                    executionTrace,
+                    round: 1,
+                });
+
+                toolEvents = deterministicToolEvents;
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'execution',
+                    name: 'Deterministic workflow execution',
+                    startedAt: deterministicExecutionStartedAt,
+                    endedAt: new Date().toISOString(),
+                    status: deterministicToolEvents.some((event) => event?.result?.success === false) ? 'error' : 'completed',
+                    details: {
+                        workflow: deterministicWorkflow.type,
+                        stepCount: deterministicToolEvents.length,
+                    },
+                }));
+
+                finalResponse = this.withResponseMetadata(buildSyntheticResponse({
+                    output: buildDeterministicRemoteWorkflowOutput({
+                        workflow: deterministicWorkflow,
+                        toolEvents,
+                    }),
+                    responseId: `resp_workflow_${Date.now()}`,
+                    model: model || null,
+                    metadata: {
+                        deterministicWorkflow: true,
+                        workflowType: deterministicWorkflow.type,
+                        toolEvents,
+                    },
+                }), {
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolEvents,
+                    toolPolicy,
+                    autonomyApproved,
+                    executionTrace,
+                });
+
+                traceModelResponse(finalResponse, 'deterministic-workflow', deterministicExecutionStartedAt);
+                output = extractResponseText(finalResponse);
+
+                return this.completeConversationRun({
+                    sessionId,
+                    ownerId,
+                    objective,
+                    taskType,
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolPolicy,
+                    toolEvents,
+                    output,
+                    finalResponse,
+                    startedAt,
+                    metadata,
+                    autonomyApproved,
+                    executionTrace,
+                    stream,
+                    controlStatePatch: buildDeterministicWorkflowControlState(deterministicWorkflow, toolEvents),
+                });
+            }
+
             const executedStepSignatures = [];
             const executedStepSignatureCounts = new Map();
             let round = 0;
@@ -2795,60 +3057,24 @@ class ConversationOrchestrator extends EventEmitter {
                 }));
             }
 
-            await this.persistConversationState({
+            return this.completeConversationRun({
                 sessionId,
                 ownerId,
-                userText: objective,
-                assistantText: output,
-                responseId: finalResponse.id,
-                toolEvents,
-                executionProfile: resolvedProfile,
-                autonomyApproved,
-            });
-
-            const trace = {
-                sessionId,
+                objective,
                 taskType,
                 executionProfile: resolvedProfile,
                 runtimeMode,
-                toolCount: toolEvents.length,
-                tools: toolPolicy.candidateToolIds,
-                duration: Date.now() - startedAt,
-                timestamp: new Date().toISOString(),
+                toolPolicy,
+                toolEvents,
+                output,
+                finalResponse,
+                startedAt,
+                metadata,
                 autonomyApproved,
                 executionTrace,
-            };
-
-            this.emit('task:complete', {
-                task: { type: taskType, objective },
-                sessionId,
-                timestamp: Date.now(),
-                result: {
-                    success: true,
-                    output,
-                    responseId: finalResponse.id,
-                    trace,
-                    duration: trace.duration,
-                },
+                stream,
+                controlStatePatch: {},
             });
-
-            if (stream) {
-                return {
-                    success: true,
-                    sessionId,
-                    response: createSyntheticStream(finalResponse),
-                    output,
-                    trace,
-                };
-            }
-
-            return {
-                success: true,
-                sessionId,
-                output,
-                response: finalResponse,
-                trace,
-            };
         } catch (error) {
             this.emit('task:error', {
                 task: { type: taskType, objective },
@@ -3879,6 +4105,81 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
+    async completeConversationRun({
+        sessionId,
+        ownerId = null,
+        objective = '',
+        taskType = 'chat',
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        runtimeMode = 'plain',
+        toolPolicy = {},
+        toolEvents = [],
+        output = '',
+        finalResponse = {},
+        startedAt = Date.now(),
+        metadata = {},
+        autonomyApproved = false,
+        executionTrace = [],
+        stream = false,
+        controlStatePatch = {},
+    } = {}) {
+        await this.persistConversationState({
+            sessionId,
+            ownerId,
+            userText: objective,
+            assistantText: output,
+            responseId: finalResponse.id,
+            toolEvents,
+            executionProfile,
+            autonomyApproved,
+            controlStatePatch,
+        });
+
+        const trace = {
+            sessionId,
+            taskType,
+            executionProfile,
+            runtimeMode,
+            toolCount: toolEvents.length,
+            tools: toolPolicy.candidateToolIds,
+            duration: Date.now() - startedAt,
+            timestamp: new Date().toISOString(),
+            autonomyApproved,
+            executionTrace,
+        };
+
+        this.emit('task:complete', {
+            task: { type: taskType, objective },
+            sessionId,
+            timestamp: Date.now(),
+            result: {
+                success: true,
+                output,
+                responseId: finalResponse.id,
+                trace,
+                duration: trace.duration,
+            },
+        });
+
+        if (stream) {
+            return {
+                success: true,
+                sessionId,
+                response: createSyntheticStream(finalResponse),
+                output,
+                trace,
+            };
+        }
+
+        return {
+            success: true,
+            sessionId,
+            output,
+            response: finalResponse,
+            trace,
+        };
+    }
+
     async persistConversationState({
         sessionId,
         ownerId = null,
@@ -3888,6 +4189,7 @@ class ConversationOrchestrator extends EventEmitter {
         toolEvents = [],
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         autonomyApproved = false,
+        controlStatePatch = {},
     }) {
         if (this.sessionStore?.recordResponse) {
             await this.sessionStore.recordResponse(sessionId, responseId);
@@ -3917,6 +4219,21 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);
+        const nextControlState = mergeControlState(
+            controlStatePatch,
+            {
+                ...(sshMetadata || {}),
+                ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                    ? { autonomyApproved }
+                    : {}),
+            },
+        );
+        const legacyControlMetadata = buildLegacyControlMetadata(nextControlState);
+
+        if (this.sessionStore?.updateControlState && Object.keys(nextControlState).length > 0) {
+            await this.sessionStore.updateControlState(sessionId, nextControlState);
+        }
+
         if (this.sessionStore?.update) {
             const currentSession = ownerId && this.sessionStore?.getOwned
                 ? await this.sessionStore.getOwned(sessionId, ownerId)
@@ -3934,7 +4251,7 @@ class ConversationOrchestrator extends EventEmitter {
 
             await this.sessionStore.update(sessionId, {
                 metadata: {
-                    ...(sshMetadata || {}),
+                    ...legacyControlMetadata,
                     ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                         ? { remoteBuildAutonomyApproved: autonomyApproved }
                         : {}),

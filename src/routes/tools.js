@@ -13,6 +13,7 @@ const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { inferExecutionProfile } = require('../runtime-execution');
 const { canonicalizeRemoteToolId, isRemoteCommandToolId, isSuspiciousSshTargetHost } = require('../ai-route-utils');
+const { getSessionControlState } = require('../runtime-control-state');
 const {
   DEFAULT_EXECUTION_PROFILE,
   NOTES_EXECUTION_PROFILE,
@@ -267,9 +268,9 @@ function looksLikeNotesSurface(value = '') {
 }
 
 function hasStickyRemoteSession(session = null) {
-  const metadata = session?.metadata || {};
-  return isRemoteCommandToolId(metadata.lastToolIntent)
-    || Boolean(metadata.lastSshTarget?.host);
+  const controlState = getSessionControlState(session);
+  return isRemoteCommandToolId(controlState.lastToolIntent)
+    || Boolean(controlState.lastSshTarget?.host);
 }
 
 async function resolveToolExecutionProfile(req, requestedSessionId = null) {
@@ -333,6 +334,19 @@ async function updateSessionToolMetadata(sessionId, toolId, params = {}) {
 
   const host = String(params.host || '').trim();
   const safeHost = host && !isSuspiciousSshTargetHost(host) ? host : '';
+
+  if (sessionStore.updateControlState) {
+    await sessionStore.updateControlState(sessionId, {
+      lastToolIntent: canonicalizeRemoteToolId(toolId),
+      ...(safeHost ? {
+        lastSshTarget: {
+          host: safeHost,
+          username: params.username || '',
+          port: params.port || 22,
+        },
+      } : {}),
+    });
+  }
 
   await sessionStore.update(sessionId, {
     metadata: {

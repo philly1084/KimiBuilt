@@ -167,4 +167,63 @@ describe('SessionStore recent message continuity', () => {
             await fs.rm(tempDir, { recursive: true, force: true });
         }
     });
+
+    test('stores runtime control state separately while mirroring legacy metadata fields', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' }, 'runtime-control');
+
+        await store.updateControlState(session.id, {
+            lastToolIntent: 'remote-command',
+            lastSshTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+            remoteWorkingState: {
+                lastCommand: 'uptime',
+                lastCommandSucceeded: true,
+            },
+            workflow: {
+                type: 'remote-health-report',
+                status: 'completed',
+            },
+            autonomyApproved: true,
+        });
+
+        const updated = await store.get(session.id);
+
+        expect(updated.controlState).toEqual(expect.objectContaining({
+            lastToolIntent: 'remote-command',
+            lastSshTarget: expect.objectContaining({
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            }),
+            remoteWorkingState: expect.objectContaining({
+                lastCommand: 'uptime',
+                lastCommandSucceeded: true,
+            }),
+            workflow: expect.objectContaining({
+                type: 'remote-health-report',
+                status: 'completed',
+            }),
+            autonomyApproved: true,
+        }));
+        expect(updated.metadata).toEqual(expect.objectContaining({
+            lastToolIntent: 'remote-command',
+            lastSshTarget: expect.objectContaining({
+                host: '10.0.0.5',
+            }),
+            remoteWorkingState: expect.objectContaining({
+                lastCommand: 'uptime',
+            }),
+            controlState: expect.objectContaining({
+                workflow: expect.objectContaining({
+                    type: 'remote-health-report',
+                }),
+            }),
+        }));
+    });
 });
