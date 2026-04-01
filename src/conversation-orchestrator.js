@@ -476,6 +476,52 @@ function hasAutonomousRemoteApproval(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function isRemoteApprovalOnlyTurn(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const grantsPermission = [
+        /\b(i give you permission|you have permission|permission granted|i approve|approved|you are approved)\b/,
+        /\b(go ahead and use|you can use|use)\b[\s\S]{0,20}\b(remote command|ssh|server access|remote access)\b/,
+        /\b(can use|allowed to use)\b[\s\S]{0,20}\b(remote command|ssh|server access|remote access)\b/,
+    ].some((pattern) => pattern.test(normalized));
+
+    if (!grantsPermission) {
+        return false;
+    }
+
+    return !/\b(health|report|summary|status|state|check|inspect|diagnose|debug|deploy|restart|install|fix|repair|update|change|configure|build|logs?|kubectl|pod|service|ingress)\b/.test(normalized);
+}
+
+function resolveRemoteObjectiveFromSession(rawObjective = '', session = null, recentMessages = []) {
+    if (!isRemoteApprovalOnlyTurn(rawObjective)) {
+        return rawObjective;
+    }
+
+    const controlState = getSessionControlState(session);
+    const storedObjective = String(controlState.lastRemoteObjective || '').trim();
+    if (storedObjective) {
+        return storedObjective;
+    }
+
+    const transcript = Array.isArray(recentMessages) ? [...recentMessages] : [];
+    for (let index = transcript.length - 1; index >= 0; index -= 1) {
+        const message = transcript[index];
+        if (message?.role !== 'user') {
+            continue;
+        }
+
+        const candidate = normalizeMessageText(message.content || '').trim();
+        if (candidate && !isRemoteApprovalOnlyTurn(candidate)) {
+            return candidate;
+        }
+    }
+
+    return rawObjective;
+}
+
 function buildNotesSynthesisInstructions() {
     return [
         'You are editing a Lilly-style block-based notes document.',
@@ -1717,10 +1763,57 @@ function summarizeToolEventForUser(event = {}) {
     ].filter(Boolean).join(' ');
 }
 
+function buildRemoteCommandFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
+    const events = (Array.isArray(toolEvents) ? toolEvents : [])
+        .filter((event) => isRemoteCommandToolId(event?.toolCall?.function?.name || event?.result?.toolId || ''));
+    if (events.length === 0) {
+        return '';
+    }
+
+    const sections = [
+        objective ? `Remote execution summary for: ${truncateText(normalizeInlineText(objective), 240)}` : 'Remote execution summary',
+    ];
+
+    events.slice(0, 6).forEach((event, index) => {
+        const reason = String(event?.reason || '').trim() || `Remote command ${index + 1}`;
+        const result = event?.result || {};
+        const stdout = stripNullCharacters(String(result?.data?.stdout || '')).trim();
+        const stderr = stripNullCharacters(String(result?.data?.stderr || '')).trim();
+        const error = stripNullCharacters(String(result?.error || '')).trim();
+
+        if (result?.success === false) {
+            sections.push(`${reason}\n\nError: ${error || 'Unknown remote command failure.'}`);
+            return;
+        }
+
+        if (stdout) {
+            sections.push(`${reason}\n\n\`\`\`text\n${truncateText(stdout, 2000)}\n\`\`\``);
+        } else if (stderr) {
+            sections.push(`${reason}\n\n\`\`\`text\n${truncateText(stderr, 800)}\n\`\`\``);
+        } else {
+            sections.push(`${reason}\n\nCommand completed successfully.`);
+        }
+    });
+
+    const failures = events.filter((event) => event?.result?.success === false).length;
+    sections.push(
+        failures > 0
+            ? `Summary: ${failures} remote command step${failures === 1 ? '' : 's'} failed.`
+            : 'Summary: Remote commands completed successfully.',
+    );
+
+    return sections.join('\n\n');
+}
+
 function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
     if (events.length === 0) {
         return 'I completed the request, but the final answer could not be synthesized from the model response.';
+    }
+
+    const remoteOnlySummary = buildRemoteCommandFallbackSynthesisText({ objective, toolEvents: events });
+    if (remoteOnlySummary) {
+        return remoteOnlySummary;
     }
 
     const successes = events.filter((event) => event?.result?.success !== false).length;
@@ -1948,6 +2041,11 @@ function buildDeterministicWorkflowControlState(workflow = null, toolEvents = []
                 : [],
         },
     };
+}
+
+function isGenericRemoteFallbackStep(step = {}) {
+    return isRemoteCommandToolId(step?.tool || '')
+        && String(step?.reason || '').trim() === 'Fallback for explicit server or remote-build intent.';
 }
 
 function recoverEmptyModelResponse(response = null, {
@@ -2351,7 +2449,7 @@ class ConversationOrchestrator extends EventEmitter {
         const startedAt = Date.now();
         const setupStartedAt = new Date().toISOString();
         const resolvedProfile = normalizeExecutionProfile(executionProfile);
-        const objective = extractObjective(input, memoryInput);
+        const rawObjective = extractObjective(input, memoryInput);
         const runtimeToolManager = toolManager || this.toolManager;
         let executionTrace = [];
         const session = ownerId && this.sessionStore?.getOrCreateOwned
@@ -2374,6 +2472,9 @@ class ConversationOrchestrator extends EventEmitter {
             : loadRecentMessages !== false && this.sessionStore?.getRecentMessages
                 ? await this.sessionStore.getRecentMessages(sessionId, RECENT_TRANSCRIPT_LIMIT)
                 : [];
+        const objective = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            ? resolveRemoteObjectiveFromSession(rawObjective, session, resolvedRecentMessages)
+            : rawObjective;
 
         const toolPolicy = this.buildToolPolicy({
             objective,
@@ -2543,6 +2644,7 @@ class ConversationOrchestrator extends EventEmitter {
                 return this.completeConversationRun({
                     sessionId,
                     ownerId,
+                    userText: rawObjective,
                     objective,
                     taskType,
                     executionProfile: resolvedProfile,
@@ -2746,6 +2848,24 @@ class ConversationOrchestrator extends EventEmitter {
                 if (autonomyApproved && nextPlan.length > 0) {
                     const remainingToolBudget = Math.max(0, budgetState.maxToolCalls - toolEvents.length);
                     nextPlan = nextPlan.slice(0, remainingToolBudget);
+                }
+
+                if (autonomyApproved
+                    && nextPlan.length > 0
+                    && nextPlan.every((step) => isGenericRemoteFallbackStep(step))
+                    && toolEvents.some((event) => isGenericRemoteFallbackStep({
+                        tool: event?.toolCall?.function?.name || event?.result?.toolId || '',
+                        reason: event?.reason || '',
+                    }))) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'planning',
+                        name: `Stop repeated generic fallback after round ${round}`,
+                        details: {
+                            round,
+                            reason: 'A generic remote fallback step already succeeded earlier in this run.',
+                        },
+                    }));
+                    nextPlan = [];
                 }
 
                 executionTrace.push(createExecutionTraceEntry({
@@ -3060,6 +3180,7 @@ class ConversationOrchestrator extends EventEmitter {
             return this.completeConversationRun({
                 sessionId,
                 ownerId,
+                userText: rawObjective,
                 objective,
                 taskType,
                 executionProfile: resolvedProfile,
@@ -4108,6 +4229,7 @@ class ConversationOrchestrator extends EventEmitter {
     async completeConversationRun({
         sessionId,
         ownerId = null,
+        userText = '',
         objective = '',
         taskType = 'chat',
         executionProfile = DEFAULT_EXECUTION_PROFILE,
@@ -4126,7 +4248,8 @@ class ConversationOrchestrator extends EventEmitter {
         await this.persistConversationState({
             sessionId,
             ownerId,
-            userText: objective,
+            userText: userText || objective,
+            objective,
             assistantText: output,
             responseId: finalResponse.id,
             toolEvents,
@@ -4184,6 +4307,7 @@ class ConversationOrchestrator extends EventEmitter {
         sessionId,
         ownerId = null,
         userText,
+        objective = '',
         assistantText,
         responseId,
         toolEvents = [],
@@ -4223,6 +4347,11 @@ class ConversationOrchestrator extends EventEmitter {
             controlStatePatch,
             {
                 ...(sshMetadata || {}),
+                ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                    && objective
+                    && !isRemoteApprovalOnlyTurn(userText)
+                    ? { lastRemoteObjective: objective }
+                    : {}),
                 ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
                     ? { autonomyApproved }
                     : {}),

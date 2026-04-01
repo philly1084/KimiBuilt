@@ -59,6 +59,11 @@ function normalizeRuntimeControlState(state = {}) {
         normalized.lastToolIntent = lastToolIntent || null;
     }
 
+    if ('lastRemoteObjective' in normalized) {
+        const lastRemoteObjective = String(normalized.lastRemoteObjective || '').trim();
+        normalized.lastRemoteObjective = lastRemoteObjective || null;
+    }
+
     if ('lastSshTarget' in normalized) {
         normalized.lastSshTarget = normalizeRemoteTarget(normalized.lastSshTarget);
     }

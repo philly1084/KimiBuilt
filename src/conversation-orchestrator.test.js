@@ -344,6 +344,90 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toContain('Summary: Remote health inspection completed successfully.');
     });
 
+    test('treats remote permission-grant replies as approval for the previous remote objective', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (toolId === 'remote-command' ? { id: toolId } : null)),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'approved-system-info', stderr: '', host: '10.0.0.5:22' },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: { stdout: 'approved-disk-memory', stderr: '', host: '10.0.0.5:22' },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({
+                id: 'session-approval-health',
+                metadata: {
+                    remoteBuildAutonomyApproved: true,
+                    lastToolIntent: 'remote-command',
+                    lastSshTarget: {
+                        host: '10.0.0.5',
+                        username: 'ubuntu',
+                        port: 22,
+                    },
+                    controlState: {
+                        lastRemoteObjective: 'can you remote into the server and get a health report',
+                    },
+                },
+            }),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'user', content: 'can you remote into the server and get a health report' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'you can use remote command. i give you permission',
+            sessionId: 'session-approval-health',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).not.toHaveBeenCalled();
+        expect(result.trace.runtimeMode).toBe('deterministic-remote-health');
+        expect(result.output).toContain('Server Health Report');
+        expect(result.output).not.toContain('you can use remote command. i give you permission');
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-approval-health', [
+            { role: 'user', content: 'you can use remote command. i give you permission' },
+            expect.objectContaining({ role: 'assistant' }),
+        ]);
+    });
+
     test('passes reasoning effort into final response synthesis', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Synthesized answer', 'resp_reasoning')),
