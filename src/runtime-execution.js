@@ -8,6 +8,24 @@ const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
 
+function isRemotePermissionGrantText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const grantsPermission = [
+        /\b(i give you permission|you have permission|permission granted|i approve|approved)\b/,
+        /\b(go ahead and use|you can use|allowed to use|can use)\b[\s\S]{0,20}\b(remote command|ssh|server access|remote access)\b/,
+    ].some((pattern) => pattern.test(normalized));
+
+    if (!grantsPermission) {
+        return false;
+    }
+
+    return !/\b(health|report|summary|status|state|check|inspect|diagnose|debug|deploy|restart|install|fix|repair|update|change|configure|build|logs?|kubectl|pod|service|ingress)\b/.test(normalized);
+}
+
 function inferRecallProfile(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -180,18 +198,19 @@ function inferExecutionProfile(payload = {}) {
         /\b(current html|index\.html|site html|website html)\b/,
         /\b(game|website|site|app)\b[\s\S]{0,30}\b(live|online|deployment|ingress|domain|dns|tls)\b/,
     ].some((pattern) => pattern.test(normalized));
+    const stickyRemoteApprovalIntent = stickyRemoteContext && isRemotePermissionGrantText(normalized);
 
     if (requestedNotesProfile) {
         if (pageEditIntent) {
             return NOTES_EXECUTION_PROFILE;
         }
 
-        return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent)
+        return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent || stickyRemoteApprovalIntent)
             ? REMOTE_BUILD_EXECUTION_PROFILE
             : NOTES_EXECUTION_PROFILE;
     }
 
-    return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent)
+    return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent || stickyRemoteApprovalIntent)
         ? REMOTE_BUILD_EXECUTION_PROFILE
         : DEFAULT_EXECUTION_PROFILE;
 }

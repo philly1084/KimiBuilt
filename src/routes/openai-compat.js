@@ -30,6 +30,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
+const { getSessionControlState } = require('../runtime-control-state');
 
 const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
@@ -211,6 +212,49 @@ function resolveCompatAssistantText({ response = {}, outputText = '', userText =
         outputText: fallbackText,
         response: applyCompatFallbackToResponse(response, fallbackText),
     };
+}
+
+function isRemotePermissionGrantText(text = '') {
+    const normalized = stripNullCharacters(String(text || '')).trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const grantsPermission = [
+        /\b(i give you permission|you have permission|permission granted|i approve|approved)\b/,
+        /\b(go ahead and use|you can use|allowed to use|can use)\b[\s\S]{0,20}\b(remote command|ssh|server access|remote access)\b/,
+    ].some((pattern) => pattern.test(normalized));
+
+    if (!grantsPermission) {
+        return false;
+    }
+
+    return !/\b(health|report|summary|status|state|check|inspect|diagnose|debug|deploy|restart|install|fix|repair|update|change|configure|build|logs?|kubectl|pod|service|ingress)\b/.test(normalized);
+}
+
+function shouldRetryPlaceholderAsRemoteBuild({ session = null, executionProfile = 'default', outputText = '', response = {}, userText = '' } = {}) {
+    if (executionProfile === 'remote-build') {
+        return false;
+    }
+
+    if (!isFinalSynthesisPlaceholder(outputText)) {
+        return false;
+    }
+
+    if ((response?.metadata?.toolEvents || []).length > 0) {
+        return false;
+    }
+
+    const controlState = getSessionControlState(session);
+    const hasStickyRemoteContext = Boolean(
+        controlState?.lastToolIntent === 'remote-command'
+        || controlState?.lastToolIntent === 'ssh-execute'
+        || controlState?.lastSshTarget?.host
+        || controlState?.remoteWorkingState?.target?.host
+        || controlState?.lastRemoteObjective,
+    );
+
+    return hasStickyRemoteContext && isRemotePermissionGrantText(userText);
 }
 
 function buildArtifactPromptFromTranscript(messages = [], fallbackPrompt = '') {
@@ -435,6 +479,8 @@ router.post('/chat/completions', async (req, res, next) => {
             memoryInput: lastUserText,
             session,
         });
+        const chatControlState = getSessionControlState(session);
+        console.log(`[OpenAICompat] chat/completions routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(chatControlState?.lastToolIntent || chatControlState?.lastSshTarget?.host || chatControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(chatControlState?.lastRemoteObjective || '')}`);
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(lastUserText)
             || inferOutputFormatFromTranscript(messages, session);
@@ -774,6 +820,46 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         response = resolvedCompatResponse.response;
         outputText = resolvedCompatResponse.outputText;
+        if (shouldRetryPlaceholderAsRemoteBuild({
+            session,
+            executionProfile: effectiveExecutionProfile,
+            outputText,
+            response,
+            userText: lastUserText,
+        })) {
+            console.warn(`[OpenAICompat] Retrying placeholder direct response as remote-build. sessionId=${sessionId}`);
+            const retriedExecution = await executeConversationRuntime(req.app, {
+                input: effectiveMessages,
+                sessionId,
+                memoryInput: lastUserText,
+                loadContextMessages: Boolean(lastUserText),
+                loadRecentMessages: shouldInjectRecentMessages(messages),
+                previousResponseId: session.previousResponseId,
+                instructions,
+                stream: false,
+                model,
+                reasoningEffort,
+                toolManager: runtimeToolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/v1/chat/completions',
+                    transport: 'http',
+                    memoryService,
+                    ownerId,
+                },
+                executionProfile: 'remote-build',
+                enableAutomaticToolCalls: true,
+                enableConversationExecutor,
+                taskType,
+                metadata: {
+                    ...requestMetadata,
+                    remoteBuildAutonomyApproved: true,
+                },
+                ownerId,
+            });
+            response = retriedExecution.response;
+            outputText = extractResponseText(response);
+        }
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
@@ -1062,6 +1148,8 @@ router.post('/responses', async (req, res, next) => {
             memoryInput: userInput,
             session,
         });
+        const responsesControlState = getSessionControlState(session);
+        console.log(`[OpenAICompat] responses routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(responsesControlState?.lastToolIntent || responsesControlState?.lastSshTarget?.host || responsesControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(responsesControlState?.lastRemoteObjective || '')}`);
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -1206,6 +1294,46 @@ router.post('/responses', async (req, res, next) => {
         });
         response = resolvedCompatResponse.response;
         outputText = resolvedCompatResponse.outputText;
+        if (shouldRetryPlaceholderAsRemoteBuild({
+            session,
+            executionProfile: effectiveExecutionProfile,
+            outputText,
+            response,
+            userText: userInput,
+        })) {
+            console.warn(`[OpenAICompat] Retrying placeholder direct response as remote-build. sessionId=${sessionId}`);
+            const retriedExecution = await executeConversationRuntime(req.app, {
+                input: runtimeInput,
+                sessionId,
+                memoryInput: userInput,
+                loadContextMessages: Boolean(userInput),
+                loadRecentMessages: typeof input === 'string' || shouldInjectRecentMessages(input),
+                previousResponseId: session.previousResponseId,
+                instructions: fullInstructions,
+                stream: false,
+                model,
+                reasoningEffort,
+                toolManager: runtimeToolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/v1/responses',
+                    transport: 'http',
+                    memoryService,
+                    ownerId,
+                },
+                executionProfile: 'remote-build',
+                enableAutomaticToolCalls: true,
+                enableConversationExecutor,
+                taskType,
+                metadata: {
+                    ...requestMetadata,
+                    remoteBuildAutonomyApproved: true,
+                },
+                ownerId,
+            });
+            response = retriedExecution.response;
+            outputText = extractResponseText(response);
+        }
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
