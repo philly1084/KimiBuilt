@@ -1219,6 +1219,9 @@ const Blocks = (function() {
 
         const hasUnsplashResults = Array.isArray(content.unsplashResults) && content.unsplashResults.length > 0;
         const hasArtifactResults = Array.isArray(content.artifactResults) && content.artifactResults.length > 0;
+        if (!content.imageAssetId && typeof content.imageUrl === 'string' && content.imageUrl.startsWith('asset://')) {
+            content.imageAssetId = content.imageUrl.slice('asset://'.length) || null;
+        }
         const hasAssetRef = Boolean(content.imageAssetId);
         const hasDirectImageUrl = Boolean(content.imageUrl);
         const hasRenderableImage = hasAssetRef || hasDirectImageUrl;
@@ -1231,6 +1234,33 @@ const Blocks = (function() {
         const assetRef = content.imageAssetId ? `asset://${content.imageAssetId}` : content.imageUrl;
         const displayImageUrl = content._resolvedImageUrl || (assetRef && !String(assetRef).startsWith('asset://') ? assetRef : null);
 
+        if (content.status === 'done'
+            && !hasAssetRef
+            && hasDirectImageUrl
+            && /^https?:\/\//i.test(String(content.imageUrl || ''))
+            && !content._assetPersisting
+            && window.Storage?.saveImageAsset) {
+            content._assetPersisting = true;
+            persistAIImageSelection(content, content.imageUrl)
+                .then((persistedImage) => {
+                    content._assetPersisting = false;
+                    if (!persistedImage.imageAssetId) {
+                        return;
+                    }
+
+                    content.imageUrl = persistedImage.imageUrl;
+                    content.imageAssetId = persistedImage.imageAssetId;
+                    content._resolvedImageUrl = persistedImage.resolvedImageUrl;
+                    wrapper.innerHTML = '';
+                    wrapper.appendChild(renderAIImageBlock(block, isEditable));
+                    window.Editor?.savePage?.();
+                })
+                .catch((error) => {
+                    content._assetPersisting = false;
+                    console.warn('Failed to persist AI image asset:', error.message);
+                });
+        }
+
         if (content.source === 'unsplash'
             && content.prompt
             && !hasRenderableImage
@@ -1241,13 +1271,17 @@ const Blocks = (function() {
             content.status = 'generating';
 
             window.API.searchUnsplash(content.prompt, { perPage: 1 })
-                .then((result) => {
+                .then(async (result) => {
                     const firstPhoto = Array.isArray(result?.results) ? result.results[0] : null;
                     if (!firstPhoto?.urls?.regular) {
                         content.status = 'error';
                         content.errorMessage = `No Unsplash images found for "${content.prompt}".`;
                     } else {
-                        content.imageUrl = firstPhoto.urls.regular;
+                        const persistedImage = await persistAIImageSelection(content, firstPhoto.urls.regular);
+                        content.imageUrl = persistedImage.imageUrl;
+                        content.imageAssetId = persistedImage.imageAssetId;
+                        content._resolvedImageUrl = persistedImage.resolvedImageUrl;
+                        content.downloadUrl = firstPhoto.links?.download || firstPhoto.links?.html || firstPhoto.urls.regular;
                         content.status = 'done';
                         content.source = 'unsplash';
                         content.selectedUnsplashId = firstPhoto.id || null;
@@ -1383,8 +1417,11 @@ const Blocks = (function() {
                         <button class="unsplash-select-btn">Select</button>
                     `;
 
-                    overlay.querySelector('.unsplash-select-btn').addEventListener('click', () => {
-                        content.imageUrl = previewUrl;
+                    overlay.querySelector('.unsplash-select-btn').addEventListener('click', async () => {
+                        const persistedImage = await persistAIImageSelection(content, previewUrl);
+                        content.imageUrl = persistedImage.imageUrl;
+                        content.imageAssetId = persistedImage.imageAssetId;
+                        content._resolvedImageUrl = persistedImage.resolvedImageUrl;
                         content.downloadUrl = item.downloadUrl || previewUrl;
                         content.status = 'done';
                         content.source = 'artifact';
@@ -1424,8 +1461,12 @@ const Blocks = (function() {
                         <button class="unsplash-select-btn">Select</button>
                     `;
 
-                    overlay.querySelector('.unsplash-select-btn').addEventListener('click', () => {
-                        content.imageUrl = photo.urls.regular;
+                    overlay.querySelector('.unsplash-select-btn').addEventListener('click', async () => {
+                        const persistedImage = await persistAIImageSelection(content, photo.urls.regular);
+                        content.imageUrl = persistedImage.imageUrl;
+                        content.imageAssetId = persistedImage.imageAssetId;
+                        content._resolvedImageUrl = persistedImage.resolvedImageUrl;
+                        content.downloadUrl = photo.links?.download || photo.links?.html || photo.urls.regular;
                         content.status = 'done';
                         content.source = 'unsplash';
                         content.selectedUnsplashId = photo.id;
@@ -2663,6 +2704,37 @@ const Blocks = (function() {
         }, 0);
 
         return wrapper;
+    }
+
+    async function persistAIImageSelection(content = {}, sourceUrl = '') {
+        const normalizedSourceUrl = String(sourceUrl || '').trim();
+        if (!normalizedSourceUrl) {
+            return {
+                imageUrl: null,
+                imageAssetId: null,
+                resolvedImageUrl: null,
+            };
+        }
+
+        if (!window.Storage?.saveImageAsset) {
+            return {
+                imageUrl: normalizedSourceUrl,
+                imageAssetId: content.imageAssetId || null,
+                resolvedImageUrl: normalizedSourceUrl,
+            };
+        }
+
+        const assetUrl = await window.Storage.saveImageAsset(normalizedSourceUrl);
+        const storedImageUrl = assetUrl || normalizedSourceUrl;
+        const isStoredAsset = String(storedImageUrl).startsWith('asset://');
+
+        return {
+            imageUrl: storedImageUrl,
+            imageAssetId: isStoredAsset
+                ? String(storedImageUrl).slice('asset://'.length)
+                : (content.imageAssetId || null),
+            resolvedImageUrl: isStoredAsset ? normalizedSourceUrl : storedImageUrl,
+        };
     }
 
     function askAIFromDiagram(block, diagramType, currentCode = '', customPrompt = '') {
