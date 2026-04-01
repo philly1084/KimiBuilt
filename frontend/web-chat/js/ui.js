@@ -2112,6 +2112,14 @@ class UIHelpers {
             const modeClass = session.mode || 'chat';
             const timeAgo = sessionManager.formatTimestamp(session.updatedAt);
             const messageCount = sessionManager.getMessages(session.id)?.length || 0;
+            const workloadSummary = session.workloadSummary || { queued: 0, running: 0, failed: 0 };
+            const workloadBadge = workloadSummary.running > 0
+                ? `${workloadSummary.running} running`
+                : workloadSummary.queued > 0
+                    ? `${workloadSummary.queued} queued`
+                    : workloadSummary.failed > 0
+                        ? `${workloadSummary.failed} failed`
+                        : '';
             
             return `
                 <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}" role="button" tabindex="0" aria-label="${this.escapeHtmlAttr(session.title || 'New Chat')}" title="${this.escapeHtmlAttr(session.title || 'New Chat')}">
@@ -2119,7 +2127,10 @@ class UIHelpers {
                         <i data-lucide="${modeIcon}" class="w-4 h-4 text-white"></i>
                     </div>
                     <div class="session-info sidebar-session-info">
-                        <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
+                        <div class="session-title-row">
+                            <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
+                            ${workloadBadge ? `<span class="session-workload-badge">${this.escapeHtml(workloadBadge)}</span>` : ''}
+                        </div>
                         <div class="session-meta">
                             ${timeAgo} | ${messageCount} message${messageCount !== 1 ? 's' : ''}
                         </div>

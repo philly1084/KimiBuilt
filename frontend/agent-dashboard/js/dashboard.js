@@ -19,6 +19,9 @@ class Dashboard {
             selectedToolId: null,
             logs: [],
             traces: [],
+            workloads: [],
+            runs: [],
+            selectedRun: null,
             settings: {},
             tokenAnalysis: null,
             stats: {
@@ -99,6 +102,10 @@ class Dashboard {
         
         document.getElementById('exportLogsBtn')?.addEventListener('click', () => {
             this.exportLogs();
+        });
+
+        document.getElementById('refreshWorkloadsBtn')?.addEventListener('click', () => {
+            this.loadWorkloads();
         });
         
         // Log filters
@@ -367,6 +374,7 @@ class Dashboard {
             models: 'Models',
             tokens: 'Token Analyzer',
             logs: 'Logs',
+            workloads: 'Workloads',
             skills: 'Tools',
             traces: 'Traces',
             settings: 'Settings'
@@ -406,6 +414,9 @@ class Dashboard {
 
             // Load health
             await this.loadSystemHealth();
+
+            // Load workload tracking
+            await this.loadWorkloads();
             
         } catch (error) {
             console.error('Error loading initial data:', error);
@@ -426,6 +437,9 @@ class Dashboard {
                 break;
             case 'logs':
                 await this.loadLogs();
+                break;
+            case 'workloads':
+                await this.loadWorkloads();
                 break;
             case 'traces':
                 await this.loadTraces();
@@ -593,6 +607,40 @@ class Dashboard {
             this.renderTraces(this.getMockTraces());
         }
     }
+
+    async loadWorkloads() {
+        try {
+            const [workloadsResponse, runsResponse] = await Promise.all([
+                apiClient.getAdminWorkloads(100),
+                apiClient.getAdminRuns(150),
+            ]);
+            const workloads = this.unwrapApiPayload(workloadsResponse, []).map((workload) => this.normalizeAdminWorkload(workload));
+            const runs = this.unwrapApiPayload(runsResponse, []).map((run) => this.normalizeAdminRun(run, workloads));
+
+            this.state.workloads = workloads;
+            this.state.runs = runs;
+
+            if (this.state.selectedRun?.id) {
+                const nextSelectedRun = runs.find((run) => run.id === this.state.selectedRun.id) || null;
+                this.state.selectedRun = nextSelectedRun;
+            }
+
+            if (!this.state.selectedRun && runs.length > 0) {
+                this.state.selectedRun = runs[0];
+            }
+
+            this.renderWorkloadSummary(workloads, runs);
+            this.renderAdminWorkloads(workloads);
+            this.renderAdminRuns(runs);
+            this.renderAdminRunDetails(this.state.selectedRun);
+        } catch (error) {
+            console.error('Error loading workloads:', error);
+            this.renderWorkloadSummary([], []);
+            this.renderAdminWorkloads([]);
+            this.renderAdminRuns([]);
+            this.renderAdminRunDetails(null, error);
+        }
+    }
     
     /**
      * Load settings
@@ -674,7 +722,35 @@ class Dashboard {
      * Setup WebSocket connection
      */
     setupWebSocket() {
-        console.info('Admin dashboard realtime socket is not configured; using polling.');
+        try {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            this.ws.addEventListener('open', () => {
+                this.updateConnectionStatus(true);
+                this.ws.send(JSON.stringify({ type: 'admin_subscribe' }));
+            });
+
+            this.ws.addEventListener('message', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this.handleWebSocketMessage(data);
+                } catch (error) {
+                    console.warn('Failed to parse admin websocket message:', error);
+                }
+            });
+
+            this.ws.addEventListener('close', () => {
+                this.updateConnectionStatus(false);
+                this.scheduleReconnect();
+            });
+
+            this.ws.addEventListener('error', () => {
+                this.updateConnectionStatus(false);
+            });
+        } catch (error) {
+            console.warn('Admin websocket unavailable, falling back to polling:', error);
+        }
     }
     
     /**
@@ -682,14 +758,35 @@ class Dashboard {
      */
     handleWebSocketMessage(data) {
         switch (data.type) {
+            case 'admin_connected':
+                this.updateConnectionStatus(true);
+                break;
+            case 'log_event':
             case 'log':
-                this.addRealtimeLog(data.payload);
+                if (this.state.currentView === 'logs' && !this.state.logsPaused) {
+                    this.loadLogs();
+                }
                 break;
+            case 'stats_update':
             case 'stats':
-                this.updateStats(data.payload);
+                this.loadStats();
                 break;
+            case 'task_event':
             case 'trace':
-                this.updateTrace(data.payload);
+                if (this.state.currentView === 'traces') {
+                    this.loadTraces();
+                }
+                break;
+            case 'workload_queued':
+            case 'workload_started':
+            case 'workload_completed':
+            case 'workload_failed':
+            case 'workload_updated':
+                this.loadWorkloads();
+                if (data.type === 'workload_failed') {
+                    const title = data?.data?.workload?.title || data?.data?.workloadId || 'workload';
+                    this.showToast(`Deferred job failed: ${title}`, 'error');
+                }
                 break;
         }
     }
@@ -702,6 +799,8 @@ class Dashboard {
         
         this.reconnectInterval = setInterval(() => {
             if (this.ws?.readyState === WebSocket.CLOSED) {
+                clearInterval(this.reconnectInterval);
+                this.reconnectInterval = null;
                 this.setupWebSocket();
             }
         }, 5000);
@@ -723,6 +822,9 @@ class Dashboard {
             
             if (this.state.currentView === 'logs' && !this.state.logsPaused) {
                 await this.loadLogs();
+            }
+            if (this.state.currentView === 'workloads') {
+                await this.loadWorkloads();
             }
         }, 30000);
     }
@@ -919,6 +1021,151 @@ class Dashboard {
         if (traces.length > 0 && !this.state.selectedTrace) {
             this.selectTrace(traces[0].id);
         }
+    }
+
+    renderWorkloadSummary(workloads = [], runs = []) {
+        const counts = runs.reduce((summary, run) => {
+            if (run.status === 'queued') summary.queued += 1;
+            if (run.status === 'running') summary.running += 1;
+            if (run.status === 'failed') summary.failed += 1;
+            return summary;
+        }, { queued: 0, running: 0, failed: 0 });
+
+        const setText = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = String(value);
+            }
+        };
+
+        setText('workloadTotalCount', workloads.length);
+        setText('workloadQueuedCount', counts.queued);
+        setText('workloadRunningCount', counts.running);
+        setText('workloadFailedCount', counts.failed);
+        setText('workloadsBadge', counts.running + counts.queued);
+    }
+
+    renderAdminWorkloads(workloads = []) {
+        const tbody = document.getElementById('adminWorkloadsTableBody');
+        if (!tbody) return;
+
+        if (!workloads.length) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="empty-state">No deferred workloads are persisted yet.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = workloads.map((workload) => `
+            <tr>
+                <td>
+                    <div>${this.escapeHtml(workload.title)}</div>
+                    <div class="workload-trigger">${this.escapeHtml(this.truncate(workload.prompt || '', 72))}</div>
+                </td>
+                <td>${this.escapeHtml(workload.sessionId)}</td>
+                <td><span class="workload-trigger">${this.escapeHtml(this.describeAdminTrigger(workload.trigger))}</span></td>
+                <td><span class="status-badge ${workload.enabled ? 'healthy' : 'warning'}">${workload.enabled ? 'active' : 'paused'}</span></td>
+                <td class="col-tokens">${Number(workload.workloadSummary?.queued || 0)}</td>
+                <td class="col-tokens">${Number(workload.workloadSummary?.running || 0)}</td>
+                <td class="col-tokens">${Number(workload.workloadSummary?.failed || 0)}</td>
+            </tr>
+        `).join('');
+    }
+
+    renderAdminRuns(runs = []) {
+        const tbody = document.getElementById('adminRunsTableBody');
+        if (!tbody) return;
+
+        if (!runs.length) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="empty-state">No workload runs have been recorded yet.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = runs.map((run) => `
+            <tr class="workload-run-row ${this.state.selectedRun?.id === run.id ? 'selected' : ''}" onclick="dashboard.selectAdminRun('${run.id}')">
+                <td>${this.escapeHtml(run.id)}</td>
+                <td>${this.escapeHtml(run.workloadTitle || run.workloadId)}</td>
+                <td><span class="status-badge ${this.getRunStatusClass(run.status)}">${this.escapeHtml(run.status)}</span></td>
+                <td>${this.escapeHtml(run.reason || 'manual')}</td>
+                <td>${this.escapeHtml(this.formatDate(run.scheduledFor))}</td>
+                <td>${this.escapeHtml(this.formatDate(run.startedAt))}</td>
+                <td>${this.escapeHtml(this.formatDate(run.finishedAt))}</td>
+            </tr>
+        `).join('');
+    }
+
+    renderAdminRunDetails(run = null, error = null) {
+        const container = document.getElementById('adminRunDetails');
+        if (!container) return;
+
+        if (error) {
+            container.innerHTML = `<p class="empty-state">Failed to load run details: ${this.escapeHtml(error.message || 'unknown error')}</p>`;
+            return;
+        }
+
+        if (!run) {
+            container.innerHTML = '<p class="empty-state">Select a run to inspect lifecycle details.</p>';
+            return;
+        }
+
+        const metadata = this.stringifyAdminPayload(run.metadata);
+        const errorPayload = this.stringifyAdminPayload(run.error);
+        const tracePayload = this.stringifyAdminPayload(run.trace);
+
+        container.innerHTML = `
+            <div>
+                <div class="workload-detail-title">${this.escapeHtml(run.workloadTitle || run.workloadId)}</div>
+                <div class="workload-detail-subtitle">${this.escapeHtml(run.id)} | ${this.escapeHtml(run.reason || 'manual')} | ${this.escapeHtml(this.formatRunStageLabel(run.stageIndex))}</div>
+            </div>
+            <div class="workload-detail-grid">
+                <div class="workload-detail-item">
+                    <span class="workload-detail-label">Status</span>
+                    <span class="workload-detail-value"><span class="status-badge ${this.getRunStatusClass(run.status)}">${this.escapeHtml(run.status)}</span></span>
+                </div>
+                <div class="workload-detail-item">
+                    <span class="workload-detail-label">Session</span>
+                    <span class="workload-detail-value">${this.escapeHtml(run.sessionId || '-')}</span>
+                </div>
+                <div class="workload-detail-item">
+                    <span class="workload-detail-label">Scheduled</span>
+                    <span class="workload-detail-value">${this.escapeHtml(this.formatDate(run.scheduledFor))}</span>
+                </div>
+                <div class="workload-detail-item">
+                    <span class="workload-detail-label">Started</span>
+                    <span class="workload-detail-value">${this.escapeHtml(this.formatDate(run.startedAt))}</span>
+                </div>
+                <div class="workload-detail-item">
+                    <span class="workload-detail-label">Finished</span>
+                    <span class="workload-detail-value">${this.escapeHtml(this.formatDate(run.finishedAt))}</span>
+                </div>
+                <div class="workload-detail-item">
+                    <span class="workload-detail-label">Response ID</span>
+                    <span class="workload-detail-value">${this.escapeHtml(run.responseId || '-')}</span>
+                </div>
+            </div>
+            <div class="workload-detail-block">
+                <h4>Prompt</h4>
+                <div class="workload-detail-code">${this.escapeHtml(run.prompt || '')}</div>
+            </div>
+            <div class="workload-detail-block">
+                <h4>Metadata</h4>
+                <div class="workload-detail-code">${this.escapeHtml(metadata)}</div>
+            </div>
+            <div class="workload-detail-block">
+                <h4>Error</h4>
+                <div class="workload-detail-code">${this.escapeHtml(errorPayload)}</div>
+            </div>
+            <div class="workload-detail-block">
+                <h4>Trace</h4>
+                <div class="workload-detail-code">${this.escapeHtml(tracePayload)}</div>
+            </div>
+        `;
     }
     
     /**
@@ -1124,6 +1371,26 @@ class Dashboard {
             document.querySelectorAll('.trace-item').forEach(item => {
                 item.classList.toggle('active', item.dataset.id === id);
             });
+        }
+    }
+
+    async selectAdminRun(id) {
+        const existing = this.state.runs.find((run) => run.id === id) || null;
+        this.state.selectedRun = existing;
+        this.renderAdminRuns(this.state.runs);
+        this.renderAdminRunDetails(existing);
+
+        try {
+            const response = await apiClient.getAdminRun(id);
+            const detailedRun = this.normalizeAdminRun(this.unwrapApiPayload(response, existing || {}), this.state.workloads);
+            this.state.selectedRun = detailedRun;
+            this.renderAdminRuns(this.state.runs);
+            this.renderAdminRunDetails(detailedRun);
+        } catch (error) {
+            console.error('Error loading run details:', error);
+            if (!existing) {
+                this.renderAdminRunDetails(null, error);
+            }
         }
     }
     
@@ -1667,6 +1934,88 @@ class Dashboard {
                 values: Array.isArray(requestChart.values) ? requestChart.values : [],
             },
         };
+    }
+
+    normalizeAdminWorkload(workload = {}) {
+        return {
+            ...workload,
+            enabled: workload.enabled !== false,
+            workloadSummary: workload.workloadSummary || {
+                queued: 0,
+                running: 0,
+                failed: 0,
+            },
+        };
+    }
+
+    normalizeAdminRun(run = {}, workloads = this.state.workloads) {
+        const workloadMap = new Map((workloads || []).map((workload) => [workload.id, workload]));
+        const linkedWorkload = run.workload || workloadMap.get(run.workloadId) || null;
+
+        return {
+            ...run,
+            workloadTitle: linkedWorkload?.title || run.workloadTitle || '',
+            workloadId: run.workloadId || linkedWorkload?.id || '',
+            status: String(run.status || 'queued').toLowerCase(),
+            reason: run.reason || 'manual',
+            stageIndex: Number.isFinite(Number(run.stageIndex)) ? Number(run.stageIndex) : -1,
+            metadata: run.metadata || {},
+            error: run.error || null,
+            trace: run.trace || null,
+        };
+    }
+
+    describeAdminTrigger(trigger = {}) {
+        if (!trigger || trigger.type === 'manual') {
+            return 'manual';
+        }
+        if (trigger.type === 'once') {
+            return `once @ ${this.formatDate(trigger.runAt)}`;
+        }
+        if (trigger.type === 'cron') {
+            return `${trigger.expression || 'cron'} (${trigger.timezone || 'UTC'})`;
+        }
+        return trigger.type || 'manual';
+    }
+
+    getRunStatusClass(status = '') {
+        switch (String(status || '').toLowerCase()) {
+            case 'completed':
+                return 'healthy';
+            case 'running':
+                return 'info';
+            case 'queued':
+                return 'warning';
+            case 'failed':
+            case 'cancelled':
+                return 'error';
+            default:
+                return 'neutral';
+        }
+    }
+
+    formatRunStageLabel(stageIndex) {
+        const normalized = Number(stageIndex);
+        if (!Number.isFinite(normalized) || normalized < 0) {
+            return 'base run';
+        }
+        return `stage ${normalized + 1}`;
+    }
+
+    stringifyAdminPayload(value) {
+        if (value == null || value === '') {
+            return '(none)';
+        }
+
+        if (typeof value === 'string') {
+            return value;
+        }
+
+        try {
+            return JSON.stringify(value, null, 2);
+        } catch (_error) {
+            return String(value);
+        }
     }
 
     renderRequestChart(chart = {}) {

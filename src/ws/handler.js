@@ -25,13 +25,18 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
+const {
+    broadcastToAdmins,
+    broadcastToSession,
+    registerAdminConnection,
+    registerSessionConnection,
+    unregisterAdminConnection,
+    unregisterSessionConnection,
+} = require('../realtime-hub');
 
 // Admin dashboard event emitter
 const EventEmitter = require('events');
 const adminEvents = new EventEmitter();
-
-// Store admin dashboard connections
-const adminConnections = new Set();
 
 async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
@@ -84,6 +89,8 @@ function setupWebSocket(wss, app = null) {
                 return;
             }
             ws.user = authState.user;
+        } else {
+            ws.user = { username: 'anonymous', role: 'open' };
         }
 
         console.log('[WS] Client connected');
@@ -94,6 +101,28 @@ function setupWebSocket(wss, app = null) {
                 const { type, payload } = msg;
                 let { sessionId } = msg;
                 const ownerId = String(ws.user?.username || '').trim() || null;
+
+                if (type === 'session_subscribe') {
+                    registerSessionConnection(ws, payload?.sessionId || sessionId);
+                    ws.send(JSON.stringify({ type: 'session_subscribed', sessionId: payload?.sessionId || sessionId }));
+                    return;
+                }
+
+                if (type === 'session_unsubscribe') {
+                    unregisterSessionConnection(ws, payload?.sessionId || sessionId);
+                    ws.send(JSON.stringify({ type: 'session_unsubscribed', sessionId: payload?.sessionId || sessionId }));
+                    return;
+                }
+
+                if (type === 'admin_subscribe') {
+                    handleAdminSubscribe(ws);
+                    return;
+                }
+
+                if (type === 'admin_unsubscribe') {
+                    handleAdminUnsubscribe(ws);
+                    return;
+                }
 
                 let session;
                 if (!sessionId) {
@@ -114,19 +143,16 @@ function setupWebSocket(wss, app = null) {
 
                 switch (type) {
                     case 'chat':
+                        registerSessionConnection(ws, sessionId);
                         await handleChat(ws, session, payload, app?.locals?.toolManager || null, ownerId);
                         break;
                     case 'canvas':
+                        registerSessionConnection(ws, sessionId);
                         await handleCanvas(ws, session, payload, ownerId);
                         break;
                     case 'notation':
+                        registerSessionConnection(ws, sessionId);
                         await handleNotation(ws, session, payload, ownerId);
-                        break;
-                    case 'admin_subscribe':
-                        handleAdminSubscribe(ws);
-                        break;
-                    case 'admin_unsubscribe':
-                        handleAdminUnsubscribe(ws);
                         break;
                     default:
                         ws.send(JSON.stringify({ type: 'error', message: `Unknown type: ${type}` }));
@@ -139,6 +165,8 @@ function setupWebSocket(wss, app = null) {
 
         ws.on('close', () => {
             console.log('[WS] Client disconnected');
+            unregisterAdminConnection(ws);
+            unregisterSessionConnection(ws);
         });
     });
 }
@@ -583,7 +611,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
 
 // Admin WebSocket handlers
 function handleAdminSubscribe(ws) {
-    adminConnections.add(ws);
+    registerAdminConnection(ws);
     ws.isAdmin = true;
     
     // Send initial stats
@@ -592,23 +620,13 @@ function handleAdminSubscribe(ws) {
         timestamp: new Date().toISOString()
     }));
     
-    console.log(`[WS] Admin client subscribed. Total: ${adminConnections.size}`);
+    console.log('[WS] Admin client subscribed.');
 }
 
 function handleAdminUnsubscribe(ws) {
-    adminConnections.delete(ws);
+    unregisterAdminConnection(ws);
     ws.isAdmin = false;
-    console.log(`[WS] Admin client unsubscribed. Total: ${adminConnections.size}`);
-}
-
-// Broadcast to all admin connections
-function broadcastToAdmins(data) {
-    const message = JSON.stringify(data);
-    adminConnections.forEach(ws => {
-        if (ws.readyState === 1) { // WebSocket.OPEN
-            ws.send(message);
-        }
-    });
+    console.log('[WS] Admin client unsubscribed.');
 }
 
 // Admin event helpers
@@ -640,6 +658,7 @@ function emitStatsUpdate(stats) {
 module.exports = { 
     setupWebSocket,
     adminEvents,
+    broadcastToSession,
     broadcastToAdmins,
     emitTaskEvent,
     emitLogEvent,

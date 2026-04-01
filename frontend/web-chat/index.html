@@ -482,6 +482,9 @@
                     <button id="search-btn" class="btn-icon p-2 rounded-lg hidden sm:flex" title="Search messages (Ctrl+K)" onclick="app.openSearch()" aria-label="Search messages (Ctrl+K)">
                         <i data-lucide="search" class="w-5 h-5" aria-hidden="true"></i>
                     </button>
+                    <button id="workloads-btn" class="btn-icon p-2 rounded-lg hidden sm:flex" title="Agent workloads" aria-label="Agent workloads">
+                        <i data-lucide="calendar-clock" class="w-5 h-5" aria-hidden="true"></i>
+                    </button>
                     <button id="export-chat-btn" class="btn-icon p-2 rounded-lg hidden sm:flex" title="Export conversation" onclick="uiHelpers.openExportModal()" aria-label="Export conversation (Ctrl+E)">
                         <i data-lucide="download" class="w-5 h-5" aria-hidden="true"></i>
                     </button>
@@ -490,6 +493,23 @@
                     </button>
                 </div>
             </header>
+
+            <section id="workloads-panel" class="workloads-panel hidden border-b border-border px-6 py-4 bg-bg-secondary/60">
+                <div class="workloads-panel__header">
+                    <div>
+                        <h2 class="workloads-panel__title">Agent Workloads</h2>
+                        <p class="workloads-panel__subtitle">Schedule work for later, run recurring tasks, and chain follow-ups.</p>
+                    </div>
+                    <div class="workloads-panel__actions">
+                        <button id="refresh-workloads-btn" class="btn-icon p-2 rounded-lg" title="Refresh workloads" aria-label="Refresh workloads">
+                            <i data-lucide="refresh-cw" class="w-4 h-4" aria-hidden="true"></i>
+                        </button>
+                        <button id="new-workload-btn" class="btn-primary px-3 py-2 rounded-lg text-sm" aria-label="Create workload">New workload</button>
+                    </div>
+                </div>
+                <div id="workloads-empty" class="workloads-empty text-sm text-text-secondary">Open a conversation to manage workloads.</div>
+                <div id="workloads-list" class="workloads-list"></div>
+            </section>
             
             <!-- Typing Indicator (Fixed below header) -->
             <div id="typing-indicator" class="typing-indicator-container hidden" aria-hidden="true">
@@ -615,6 +635,100 @@
     
     <!-- Toast Container -->
     <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+    <div id="workload-modal" class="modal hidden" aria-hidden="true">
+        <div class="modal-overlay" data-close-workload-modal="true"></div>
+        <div class="modal-content export-modal-content">
+            <div class="modal-header">
+                <h2 id="workload-modal-title">Create workload</h2>
+                <button class="btn-icon" id="close-workload-modal-btn" aria-label="Close workload modal">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="modal-body workload-form">
+                <label class="modal-label" for="workload-title-input">Title</label>
+                <input id="workload-title-input" class="modal-input" type="text" placeholder="Daily standup summary">
+
+                <label class="modal-label" for="workload-prompt-input">Prompt</label>
+                <textarea id="workload-prompt-input" class="modal-textarea" rows="4" placeholder="Review the latest conversation artifacts and summarize blockers."></textarea>
+
+                <div class="workload-form__grid">
+                    <div>
+                        <label class="modal-label" for="workload-trigger-type">Trigger</label>
+                        <select id="workload-trigger-type" class="modal-input">
+                            <option value="manual">Manual</option>
+                            <option value="once">Run once later</option>
+                            <option value="cron">Recurring cron</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="modal-label" for="workload-callable-slug">Callable slug</label>
+                        <input id="workload-callable-slug" class="modal-input" type="text" placeholder="daily-brief-agent">
+                    </div>
+                </div>
+
+                <div id="workload-once-row" class="workload-form__grid hidden">
+                    <div>
+                        <label class="modal-label" for="workload-run-at">Run at</label>
+                        <input id="workload-run-at" class="modal-input" type="datetime-local">
+                    </div>
+                </div>
+
+                <div id="workload-cron-row" class="workload-form__grid hidden">
+                    <div>
+                        <label class="modal-label" for="workload-cron-expression">Cron expression</label>
+                        <input id="workload-cron-expression" class="modal-input" type="text" placeholder="0 9 * * 1-5">
+                    </div>
+                    <div>
+                        <label class="modal-label" for="workload-timezone">Timezone</label>
+                        <input id="workload-timezone" class="modal-input" type="text" placeholder="America/Halifax">
+                    </div>
+                </div>
+
+                <div class="workload-form__grid">
+                    <div>
+                        <label class="modal-label" for="workload-profile">Execution profile</label>
+                        <select id="workload-profile" class="modal-input">
+                            <option value="default">default</option>
+                            <option value="notes">notes</option>
+                            <option value="remote-build">remote-build</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="modal-label" for="workload-tool-ids">Tool allowlist</label>
+                        <input id="workload-tool-ids" class="modal-input" type="text" placeholder="web-search,web-fetch">
+                    </div>
+                </div>
+
+                <div class="workload-form__grid">
+                    <div>
+                        <label class="modal-label" for="workload-max-rounds">Max rounds</label>
+                        <input id="workload-max-rounds" class="modal-input" type="number" min="1" value="3">
+                    </div>
+                    <div>
+                        <label class="modal-label" for="workload-max-tool-calls">Max tool calls</label>
+                        <input id="workload-max-tool-calls" class="modal-input" type="number" min="1" value="10">
+                    </div>
+                    <div>
+                        <label class="modal-label" for="workload-max-duration">Max duration (ms)</label>
+                        <input id="workload-max-duration" class="modal-input" type="number" min="1000" step="1000" value="120000">
+                    </div>
+                </div>
+
+                <label class="workload-checkbox">
+                    <input id="workload-allow-side-effects" type="checkbox">
+                    <span>Allow side-effecting tools if explicitly listed</span>
+                </label>
+
+                <label class="modal-label" for="workload-stages-json">Follow-up stages JSON</label>
+                <textarea id="workload-stages-json" class="modal-textarea" rows="5" placeholder='[{"when":"on_failure","delayMs":60000,"prompt":"Retry with a shorter summary."}]'></textarea>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-workload-btn" class="btn-secondary px-4 py-2 rounded-lg">Cancel</button>
+                <button id="save-workload-btn" class="btn-primary px-4 py-2 rounded-lg">Save workload</button>
+            </div>
+        </div>
+    </div>
     
     <!-- Loading Overlay (for initial connection) -->
     <div id="loading-overlay" class="loading-overlay hidden" role="dialog" aria-label="Loading">

@@ -174,7 +174,8 @@ class ApiClient {
             errorData = { message: response.statusText };
         }
         
-        const error = new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        const normalizedMessage = errorData?.message || errorData?.error?.message || errorData?.error || `HTTP ${response.status}: ${response.statusText}`;
+        const error = new Error(normalizedMessage);
         error.status = response.status;
         error.statusText = response.statusText;
         error.data = errorData;
@@ -464,6 +465,27 @@ class ApiClient {
      */
     async getTrace(id) {
         return this.get(`/api/admin/traces/${id}`);
+    }
+
+    /**
+     * Get deferred agent workloads
+     */
+    async getAdminWorkloads(limit = 100) {
+        return this.get('/api/admin/workloads', { limit });
+    }
+
+    /**
+     * Get deferred workload runs
+     */
+    async getAdminRuns(limit = 100) {
+        return this.get('/api/admin/runs', { limit });
+    }
+
+    /**
+     * Get a single deferred workload run
+     */
+    async getAdminRun(id) {
+        return this.get(`/api/admin/runs/${id}`);
     }
     
     /**

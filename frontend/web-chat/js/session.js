@@ -118,6 +118,11 @@ class SessionManager extends EventTarget {
                         title: stored?.title || 'New Chat',
                         createdAt: session.createdAt,
                         updatedAt: session.updatedAt,
+                        workloadSummary: session.workloadSummary || stored?.workloadSummary || {
+                            queued: 0,
+                            running: 0,
+                            failed: 0,
+                        },
                         isLocal: false,
                         version: this.version,
                     };
@@ -295,6 +300,11 @@ class SessionManager extends EventTarget {
             title: 'New Chat',
             createdAt,
             updatedAt,
+            workloadSummary: {
+                queued: 0,
+                running: 0,
+                failed: 0,
+            },
             isLocal,
             version: this.version
         };
@@ -418,6 +428,11 @@ class SessionManager extends EventTarget {
                 title: 'New Chat',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
+                workloadSummary: {
+                    queued: 0,
+                    running: 0,
+                    failed: 0,
+                },
                 isLocal: false,
                 version: this.version,
             });

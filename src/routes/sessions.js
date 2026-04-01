@@ -27,7 +27,22 @@ router.get('/', async (req, res, next) => {
         const sessions = await sessionStore.list({
             ownerId: getRequestOwnerId(req),
         });
-        res.json({ sessions, count: sessions.length });
+        const workloadService = req.app?.locals?.agentWorkloadService;
+        const summaries = workloadService?.isAvailable?.()
+            ? await workloadService.getSessionSummaries(
+                sessions.map((session) => session.id),
+                getRequestOwnerId(req),
+            )
+            : {};
+        const enrichedSessions = sessions.map((session) => ({
+            ...session,
+            workloadSummary: summaries[session.id] || {
+                queued: 0,
+                running: 0,
+                failed: 0,
+            },
+        }));
+        res.json({ sessions: enrichedSessions, count: enrichedSessions.length });
     } catch (err) {
         next(err);
     }

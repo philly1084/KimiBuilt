@@ -1164,6 +1164,127 @@ class OpenAIAPIClient extends EventTarget {
         };
     }
 
+    async getSessionWorkloads(sessionId) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/workloads`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+        });
+
+        if (response.status === 503) {
+            return { available: false, workloads: [] };
+        }
+        if (!response.ok) {
+            throw new Error(`Failed to load workloads: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return {
+            available: true,
+            workloads: data.workloads || [],
+        };
+    }
+
+    async createSessionWorkload(sessionId, payload = {}) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/workloads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to create workload: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async updateWorkload(workloadId, payload = {}) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/workloads/${encodeURIComponent(workloadId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to update workload: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async deleteWorkload(workloadId) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/workloads/${encodeURIComponent(workloadId)}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+        });
+
+        if (!response.ok && response.status !== 204) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to delete workload: HTTP ${response.status}`);
+        }
+    }
+
+    async runWorkload(workloadId) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/workloads/${encodeURIComponent(workloadId)}/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({}),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to run workload: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async pauseWorkload(workloadId) {
+        return this.postWorkloadAction(workloadId, 'pause');
+    }
+
+    async resumeWorkload(workloadId) {
+        return this.postWorkloadAction(workloadId, 'resume');
+    }
+
+    async getWorkloadRuns(workloadId, limit = 10) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/workloads/${encodeURIComponent(workloadId)}/runs?limit=${encodeURIComponent(limit)}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to load workload runs: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.runs || [];
+    }
+
+    async postWorkloadAction(workloadId, action) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/workloads/${encodeURIComponent(workloadId)}/${action}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({}),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error?.error?.message || `Failed to ${action} workload: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
     // ============================================
     // Utility Methods
     // ============================================

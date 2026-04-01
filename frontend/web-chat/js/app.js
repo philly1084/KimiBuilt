@@ -12,6 +12,33 @@ class ChatApp {
         this.charCounter = document.getElementById('char-counter');
         this.currentSessionInfo = document.getElementById('current-session-info');
         this.typingIndicator = document.getElementById('typing-indicator');
+        this.workloadsBtn = document.getElementById('workloads-btn');
+        this.workloadsPanel = document.getElementById('workloads-panel');
+        this.workloadsEmpty = document.getElementById('workloads-empty');
+        this.workloadsList = document.getElementById('workloads-list');
+        this.refreshWorkloadsBtn = document.getElementById('refresh-workloads-btn');
+        this.newWorkloadBtn = document.getElementById('new-workload-btn');
+        this.workloadModal = document.getElementById('workload-modal');
+        this.workloadModalTitle = document.getElementById('workload-modal-title');
+        this.workloadTitleInput = document.getElementById('workload-title-input');
+        this.workloadPromptInput = document.getElementById('workload-prompt-input');
+        this.workloadTriggerType = document.getElementById('workload-trigger-type');
+        this.workloadCallableSlug = document.getElementById('workload-callable-slug');
+        this.workloadRunAt = document.getElementById('workload-run-at');
+        this.workloadCronExpression = document.getElementById('workload-cron-expression');
+        this.workloadTimezone = document.getElementById('workload-timezone');
+        this.workloadProfile = document.getElementById('workload-profile');
+        this.workloadToolIds = document.getElementById('workload-tool-ids');
+        this.workloadMaxRounds = document.getElementById('workload-max-rounds');
+        this.workloadMaxToolCalls = document.getElementById('workload-max-tool-calls');
+        this.workloadMaxDuration = document.getElementById('workload-max-duration');
+        this.workloadAllowSideEffects = document.getElementById('workload-allow-side-effects');
+        this.workloadStagesJson = document.getElementById('workload-stages-json');
+        this.workloadOnceRow = document.getElementById('workload-once-row');
+        this.workloadCronRow = document.getElementById('workload-cron-row');
+        this.saveWorkloadBtn = document.getElementById('save-workload-btn');
+        this.cancelWorkloadBtn = document.getElementById('cancel-workload-btn');
+        this.closeWorkloadModalBtn = document.getElementById('close-workload-modal-btn');
         
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
@@ -29,6 +56,16 @@ class ChatApp {
         
         // Abort controller for current stream
         this.currentAbortController = null;
+        this.workloadsOpen = false;
+        this.workloadsAvailable = true;
+        this.currentSessionWorkloads = [];
+        this.workloadRunsById = new Map();
+        this.editingWorkload = null;
+        this.workloadSocket = null;
+        this.workloadSocketReconnectTimer = null;
+        this.subscribedWorkloadSessionId = null;
+        this.isRefreshingSessionSummaries = false;
+        this.isLoadingWorkloads = false;
         
         this.init();
     }
@@ -62,6 +99,8 @@ class ChatApp {
         
         // Load sessions
         await this.loadSessions();
+
+        this.connectWorkloadSocket();
         
         // Initialize Lucide icons
         uiHelpers.reinitializeIcons();
@@ -132,6 +171,44 @@ class ChatApp {
         document.getElementById('sidebar-overlay')?.addEventListener('click', () => {
             uiHelpers.closeSidebar();
         });
+
+        this.workloadsBtn?.addEventListener('click', () => {
+            this.toggleWorkloadsPanel();
+        });
+        this.refreshWorkloadsBtn?.addEventListener('click', () => {
+            this.loadSessionWorkloads(sessionManager.currentSessionId, { force: true });
+        });
+        this.newWorkloadBtn?.addEventListener('click', () => {
+            this.openWorkloadModal();
+        });
+        this.workloadTriggerType?.addEventListener('change', () => {
+            this.updateWorkloadTriggerFields();
+        });
+        this.saveWorkloadBtn?.addEventListener('click', () => {
+            this.saveWorkload();
+        });
+        this.cancelWorkloadBtn?.addEventListener('click', () => {
+            this.closeWorkloadModal();
+        });
+        this.closeWorkloadModalBtn?.addEventListener('click', () => {
+            this.closeWorkloadModal();
+        });
+        this.workloadModal?.addEventListener('click', (event) => {
+            if (event.target?.dataset?.closeWorkloadModal === 'true') {
+                this.closeWorkloadModal();
+            }
+        });
+        this.workloadsList?.addEventListener('click', (event) => {
+            const actionNode = event.target.closest('[data-workload-action]');
+            if (!actionNode) {
+                return;
+            }
+
+            this.handleWorkloadAction(
+                actionNode.dataset.workloadAction,
+                actionNode.dataset.workloadId,
+            );
+        });
         
         // Window resize
         window.addEventListener('resize', () => {
@@ -167,17 +244,22 @@ class ChatApp {
         // Session events
         sessionManager.addEventListener('sessionsChanged', (e) => {
             uiHelpers.renderSessionsList(e.detail.sessions, sessionManager.currentSessionId);
+            this.renderWorkloadsPanel();
         });
         
         sessionManager.addEventListener('sessionCreated', (e) => {
             uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
             this.loadSessionMessages(e.detail.session.id);
+            this.subscribeToSessionUpdates(e.detail.session.id);
+            this.loadSessionWorkloads(e.detail.session.id);
             this.updateSessionInfo();
         });
         
         sessionManager.addEventListener('sessionSwitched', (e) => {
             this.loadSessionMessages(e.detail.sessionId)
                 .finally(() => {
+                    this.subscribeToSessionUpdates(e.detail.sessionId);
+                    this.loadSessionWorkloads(e.detail.sessionId);
                     this.updateSessionInfo();
                     uiHelpers.closeSidebar();
                 });
@@ -186,9 +268,15 @@ class ChatApp {
         sessionManager.addEventListener('sessionDeleted', (e) => {
             if (e.detail.newCurrentSessionId) {
                 this.loadSessionMessages(e.detail.newCurrentSessionId);
+                this.subscribeToSessionUpdates(e.detail.newCurrentSessionId);
+                this.loadSessionWorkloads(e.detail.newCurrentSessionId);
             } else {
                 uiHelpers.clearMessages();
                 uiHelpers.showWelcomeMessage();
+                this.subscribeToSessionUpdates(null);
+                this.currentSessionWorkloads = [];
+                this.workloadRunsById.clear();
+                this.renderWorkloadsPanel();
             }
             this.updateSessionInfo();
         });
@@ -196,6 +284,11 @@ class ChatApp {
         sessionManager.addEventListener('messagesCleared', () => {
             uiHelpers.clearMessages();
             uiHelpers.showWelcomeMessage();
+        });
+
+        sessionManager.addEventListener('sessionPromoted', (e) => {
+            this.subscribeToSessionUpdates(e.detail.sessionId);
+            this.loadSessionWorkloads(e.detail.sessionId);
         });
     }
 
@@ -278,6 +371,8 @@ class ChatApp {
                 uiHelpers.closeShortcutsModal();
             } else if (modalId === 'image-lightbox') {
                 uiHelpers.closeImageLightbox();
+            } else if (modalId === 'workload-modal') {
+                this.closeWorkloadModal();
             } else {
                 // Generic modal close
                 lastModal.classList.add('hidden');
@@ -337,6 +432,10 @@ class ChatApp {
             // If we have a current session, load its messages
             if (sessionManager.currentSessionId) {
                 await this.loadSessionMessages(sessionManager.currentSessionId);
+                await this.loadSessionWorkloads(sessionManager.currentSessionId);
+                this.subscribeToSessionUpdates(sessionManager.currentSessionId);
+            } else {
+                this.renderWorkloadsPanel();
             }
             
             this.updateSessionInfo();
@@ -344,6 +443,7 @@ class ChatApp {
             console.error('Failed to load sessions:', error);
             // Show empty state
             uiHelpers.renderSessionsList([], null);
+            this.renderWorkloadsPanel();
         }
     }
 
@@ -352,6 +452,7 @@ class ChatApp {
             await sessionManager.createSession('chat');
             uiHelpers.hideWelcomeMessage();
             uiHelpers.clearMessages();
+            this.loadSessionWorkloads(sessionManager.currentSessionId);
             this.messageInput?.focus();
             uiHelpers.showToast('New conversation started', 'success');
         } catch (error) {
@@ -362,6 +463,55 @@ class ChatApp {
     async loadSessionMessages(sessionId) {
         const messages = await sessionManager.loadSessionMessagesFromBackend(sessionId);
         this.renderMessages(messages);
+    }
+
+    async loadSessionWorkloads(sessionId, options = {}) {
+        if (!sessionId) {
+            this.workloadsAvailable = true;
+            this.currentSessionWorkloads = [];
+            this.workloadRunsById.clear();
+            this.renderWorkloadsPanel();
+            return [];
+        }
+
+        if (this.isLoadingWorkloads && !options.force) {
+            return this.currentSessionWorkloads;
+        }
+
+        this.isLoadingWorkloads = true;
+        try {
+            const result = await apiClient.getSessionWorkloads(sessionId);
+            this.workloadsAvailable = result.available !== false;
+            this.currentSessionWorkloads = Array.isArray(result.workloads) ? result.workloads : [];
+            this.workloadRunsById = new Map();
+
+            if (this.workloadsAvailable && this.currentSessionWorkloads.length > 0) {
+                const runs = await Promise.all(this.currentSessionWorkloads.map((workload) =>
+                    apiClient.getWorkloadRuns(workload.id, 6)
+                        .then((items) => [workload.id, items])
+                        .catch((error) => {
+                            console.warn('Failed to load workload runs:', error);
+                            return [workload.id, []];
+                        })));
+
+                runs.forEach(([workloadId, items]) => {
+                    this.workloadRunsById.set(workloadId, items);
+                });
+            }
+
+            this.renderWorkloadsPanel();
+            return this.currentSessionWorkloads;
+        } catch (error) {
+            console.error('Failed to load workloads:', error);
+            this.workloadsAvailable = true;
+            this.currentSessionWorkloads = [];
+            this.workloadRunsById.clear();
+            this.renderWorkloadsPanel();
+            uiHelpers.showToast(error.message || 'Failed to load workloads', 'error');
+            return [];
+        } finally {
+            this.isLoadingWorkloads = false;
+        }
     }
 
     renderMessages(messages) {
@@ -416,6 +566,438 @@ class ChatApp {
             `;
         } else {
             this.currentSessionInfo.textContent = 'No active session';
+        }
+    }
+
+    toggleWorkloadsPanel() {
+        this.workloadsOpen = !this.workloadsOpen;
+        this.workloadsPanel?.classList.toggle('hidden', !this.workloadsOpen);
+
+        if (this.workloadsOpen) {
+            this.loadSessionWorkloads(sessionManager.currentSessionId, { force: true });
+        }
+    }
+
+    renderWorkloadsPanel() {
+        if (!this.workloadsPanel || !this.workloadsEmpty || !this.workloadsList) {
+            return;
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+        if (this.refreshWorkloadsBtn) {
+            this.refreshWorkloadsBtn.disabled = !sessionId || !this.workloadsAvailable;
+        }
+        if (this.newWorkloadBtn) {
+            this.newWorkloadBtn.disabled = !sessionId || !this.workloadsAvailable;
+        }
+
+        if (!sessionId) {
+            this.workloadsEmpty.textContent = 'Open a conversation to manage workloads.';
+            this.workloadsEmpty.classList.remove('hidden');
+            this.workloadsList.innerHTML = '';
+            return;
+        }
+
+        if (!this.workloadsAvailable) {
+            this.workloadsEmpty.textContent = 'Deferred workloads require Postgres-backed persistence.';
+            this.workloadsEmpty.classList.remove('hidden');
+            this.workloadsList.innerHTML = '';
+            return;
+        }
+
+        if (this.currentSessionWorkloads.length === 0) {
+            this.workloadsEmpty.textContent = 'No workloads yet for this conversation.';
+            this.workloadsEmpty.classList.remove('hidden');
+            this.workloadsList.innerHTML = '';
+            return;
+        }
+
+        this.workloadsEmpty.classList.add('hidden');
+        this.workloadsList.innerHTML = this.currentSessionWorkloads
+            .map((workload) => this.renderWorkloadCard(workload))
+            .join('');
+        uiHelpers.reinitializeIcons(this.workloadsList);
+    }
+
+    renderWorkloadCard(workload) {
+        const runs = this.workloadRunsById.get(workload.id) || [];
+        const summary = workload.workloadSummary || {};
+        const runsMarkup = runs.length === 0
+            ? '<div class="workload-run-empty">No runs yet.</div>'
+            : runs.map((run) => `
+                <div class="workload-run">
+                    <span class="workload-run__status workload-run__status--${uiHelpers.escapeHtml(run.status || 'queued')}">${uiHelpers.escapeHtml(this.formatRunStatus(run.status))}</span>
+                    <span class="workload-run__meta">${uiHelpers.escapeHtml(this.describeRun(run))}</span>
+                </div>
+            `).join('');
+
+        return `
+            <article class="workload-card" data-workload-id="${uiHelpers.escapeHtmlAttr(workload.id)}">
+                <div class="workload-card__header">
+                    <div>
+                        <div class="workload-card__title-row">
+                            <h3 class="workload-card__title">${uiHelpers.escapeHtml(workload.title || 'Untitled workload')}</h3>
+                            <span class="workload-card__badge ${workload.enabled === false ? 'is-paused' : ''}">${workload.enabled === false ? 'Paused' : 'Active'}</span>
+                        </div>
+                        <div class="workload-card__meta">${uiHelpers.escapeHtml(this.describeTrigger(workload.trigger))}</div>
+                        ${workload.callableSlug ? `<div class="workload-card__meta">Callable: <code>${uiHelpers.escapeHtml(workload.callableSlug)}</code></div>` : ''}
+                    </div>
+                    <div class="workload-card__actions">
+                        <button class="btn-secondary px-3 py-2 rounded-lg text-sm" data-workload-action="run" data-workload-id="${uiHelpers.escapeHtmlAttr(workload.id)}">Run now</button>
+                        <button class="btn-secondary px-3 py-2 rounded-lg text-sm" data-workload-action="edit" data-workload-id="${uiHelpers.escapeHtmlAttr(workload.id)}">Edit</button>
+                        <button class="btn-secondary px-3 py-2 rounded-lg text-sm" data-workload-action="${workload.enabled === false ? 'resume' : 'pause'}" data-workload-id="${uiHelpers.escapeHtmlAttr(workload.id)}">${workload.enabled === false ? 'Resume' : 'Pause'}</button>
+                        <button class="btn-icon danger p-2 rounded-lg" data-workload-action="delete" data-workload-id="${uiHelpers.escapeHtmlAttr(workload.id)}" aria-label="Delete workload">
+                            <i data-lucide="trash-2" class="w-4 h-4" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+                <p class="workload-card__prompt">${uiHelpers.escapeHtml(this.truncateWorkloadText(workload.prompt, 220))}</p>
+                <div class="workload-card__summary">
+                    <span>Queued ${Number(summary.queued || 0)}</span>
+                    <span>Running ${Number(summary.running || 0)}</span>
+                    <span>Failed ${Number(summary.failed || 0)}</span>
+                    <span>Stages ${Array.isArray(workload.stages) ? workload.stages.length : 0}</span>
+                </div>
+                <div class="workload-runs">${runsMarkup}</div>
+            </article>
+        `;
+    }
+
+    truncateWorkloadText(text, limit = 220) {
+        const normalized = String(text || '').trim().replace(/\s+/g, ' ');
+        if (normalized.length <= limit) {
+            return normalized;
+        }
+
+        return `${normalized.slice(0, limit - 3)}...`;
+    }
+
+    describeTrigger(trigger = {}) {
+        if (!trigger || trigger.type === 'manual') {
+            return 'Manual';
+        }
+
+        if (trigger.type === 'once') {
+            return `Once at ${this.formatDateTime(trigger.runAt)}`;
+        }
+
+        if (trigger.type === 'cron') {
+            return `Cron ${trigger.expression || ''} (${trigger.timezone || 'UTC'})`;
+        }
+
+        return 'Manual';
+    }
+
+    describeRun(run = {}) {
+        const stage = Number.isFinite(Number(run.stageIndex)) && Number(run.stageIndex) >= 0
+            ? `stage ${Number(run.stageIndex) + 1}`
+            : 'base run';
+        const at = run.finishedAt || run.startedAt || run.scheduledFor;
+        return `${stage} | ${run.reason || 'manual'} | ${this.formatDateTime(at)}`;
+    }
+
+    formatRunStatus(status = '') {
+        const normalized = String(status || '').trim().toLowerCase();
+        if (!normalized) {
+            return 'Queued';
+        }
+
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    }
+
+    formatDateTime(value) {
+        if (!value) {
+            return 'now';
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return String(value);
+        }
+
+        return date.toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    openWorkloadModal(existing = null) {
+        if (!sessionManager.currentSessionId) {
+            uiHelpers.showToast('Open a conversation first', 'info');
+            return;
+        }
+
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        this.editingWorkload = existing;
+        this.workloadModalTitle.textContent = existing ? 'Edit workload' : 'Create workload';
+        this.workloadTitleInput.value = existing?.title || '';
+        this.workloadPromptInput.value = existing?.prompt || '';
+        this.workloadTriggerType.value = existing?.trigger?.type || 'manual';
+        this.workloadCallableSlug.value = existing?.callableSlug || '';
+        this.workloadRunAt.value = existing?.trigger?.type === 'once' ? this.toDatetimeLocal(existing?.trigger?.runAt) : '';
+        this.workloadCronExpression.value = existing?.trigger?.type === 'cron' ? (existing?.trigger?.expression || '') : '';
+        this.workloadTimezone.value = existing?.trigger?.type === 'cron'
+            ? (existing?.trigger?.timezone || timezone)
+            : timezone;
+        this.workloadProfile.value = existing?.policy?.executionProfile || 'default';
+        this.workloadToolIds.value = Array.isArray(existing?.policy?.toolIds)
+            ? existing.policy.toolIds.join(', ')
+            : '';
+        this.workloadMaxRounds.value = existing?.policy?.maxRounds || 3;
+        this.workloadMaxToolCalls.value = existing?.policy?.maxToolCalls || 10;
+        this.workloadMaxDuration.value = existing?.policy?.maxDurationMs || 120000;
+        this.workloadAllowSideEffects.checked = existing?.policy?.allowSideEffects === true;
+        this.workloadStagesJson.value = JSON.stringify(existing?.stages || [], null, 2);
+        this.updateWorkloadTriggerFields();
+        this.workloadModal.classList.remove('hidden');
+        this.workloadModal.setAttribute('aria-hidden', 'false');
+        uiHelpers.trapFocus(this.workloadModal);
+        this.workloadTitleInput?.focus();
+    }
+
+    closeWorkloadModal() {
+        this.editingWorkload = null;
+        this.workloadModal?.classList.add('hidden');
+        this.workloadModal?.setAttribute('aria-hidden', 'true');
+    }
+
+    updateWorkloadTriggerFields() {
+        const triggerType = this.workloadTriggerType?.value || 'manual';
+        this.workloadOnceRow?.classList.toggle('hidden', triggerType !== 'once');
+        this.workloadCronRow?.classList.toggle('hidden', triggerType !== 'cron');
+    }
+
+    toDatetimeLocal(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+
+        const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+        return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+    }
+
+    readWorkloadForm() {
+        const triggerType = this.workloadTriggerType.value;
+        const payload = {
+            title: this.workloadTitleInput.value.trim(),
+            prompt: this.workloadPromptInput.value.trim(),
+            callableSlug: this.workloadCallableSlug.value.trim() || null,
+            trigger: { type: triggerType },
+            policy: {
+                executionProfile: this.workloadProfile.value,
+                toolIds: this.workloadToolIds.value
+                    .split(',')
+                    .map((value) => value.trim())
+                    .filter(Boolean),
+                maxRounds: Number(this.workloadMaxRounds.value || 3),
+                maxToolCalls: Number(this.workloadMaxToolCalls.value || 10),
+                maxDurationMs: Number(this.workloadMaxDuration.value || 120000),
+                allowSideEffects: this.workloadAllowSideEffects.checked,
+            },
+            stages: [],
+        };
+
+        if (triggerType === 'once') {
+            if (!this.workloadRunAt.value) {
+                throw new Error('Run time is required for one-time workloads');
+            }
+            payload.trigger.runAt = new Date(this.workloadRunAt.value).toISOString();
+        }
+
+        if (triggerType === 'cron') {
+            payload.trigger.expression = this.workloadCronExpression.value.trim();
+            payload.trigger.timezone = this.workloadTimezone.value.trim() || 'UTC';
+        }
+
+        const stagesValue = this.workloadStagesJson.value.trim();
+        if (stagesValue) {
+            payload.stages = JSON.parse(stagesValue);
+        }
+
+        return payload;
+    }
+
+    async saveWorkload() {
+        try {
+            const sessionId = sessionManager.currentSessionId;
+            if (!sessionId) {
+                throw new Error('Open a conversation first');
+            }
+
+            const payload = this.readWorkloadForm();
+            if (this.editingWorkload?.id) {
+                await apiClient.updateWorkload(this.editingWorkload.id, payload);
+                uiHelpers.showToast('Workload updated', 'success');
+            } else {
+                await apiClient.createSessionWorkload(sessionId, payload);
+                uiHelpers.showToast('Workload created', 'success');
+            }
+
+            this.closeWorkloadModal();
+            await this.refreshSessionWorkloadState(sessionId);
+        } catch (error) {
+            console.error('Failed to save workload:', error);
+            uiHelpers.showToast(error.message || 'Failed to save workload', 'error');
+        }
+    }
+
+    async handleWorkloadAction(action, workloadId) {
+        const workload = this.currentSessionWorkloads.find((item) => item.id === workloadId) || null;
+
+        try {
+            switch (action) {
+                case 'run':
+                    await apiClient.runWorkload(workloadId);
+                    uiHelpers.showToast('Workload queued', 'success');
+                    break;
+                case 'pause':
+                    await apiClient.pauseWorkload(workloadId);
+                    uiHelpers.showToast('Workload paused', 'success');
+                    break;
+                case 'resume':
+                    await apiClient.resumeWorkload(workloadId);
+                    uiHelpers.showToast('Workload resumed', 'success');
+                    break;
+                case 'edit':
+                    this.openWorkloadModal(workload);
+                    return;
+                case 'delete':
+                    if (!confirm('Delete this workload and cancel queued runs?')) {
+                        return;
+                    }
+                    await apiClient.deleteWorkload(workloadId);
+                    uiHelpers.showToast('Workload deleted', 'success');
+                    break;
+                default:
+                    return;
+            }
+
+            await this.refreshSessionWorkloadState(sessionManager.currentSessionId);
+        } catch (error) {
+            console.error('Workload action failed:', error);
+            uiHelpers.showToast(error.message || 'Workload action failed', 'error');
+        }
+    }
+
+    async refreshSessionWorkloadState(sessionId) {
+        if (!sessionId) {
+            return;
+        }
+
+        await this.loadSessionWorkloads(sessionId, { force: true });
+        await this.refreshSessionSummaries();
+
+        if (sessionManager.currentSessionId === sessionId) {
+            await this.loadSessionMessages(sessionId);
+        }
+    }
+
+    async refreshSessionSummaries() {
+        if (this.isRefreshingSessionSummaries) {
+            return;
+        }
+
+        this.isRefreshingSessionSummaries = true;
+        try {
+            await sessionManager.loadSessions();
+        } catch (error) {
+            console.warn('Failed to refresh session summaries:', error);
+        } finally {
+            this.isRefreshingSessionSummaries = false;
+        }
+    }
+
+    connectWorkloadSocket() {
+        if (this.workloadSocket && (
+            this.workloadSocket.readyState === WebSocket.OPEN
+            || this.workloadSocket.readyState === WebSocket.CONNECTING
+        )) {
+            return;
+        }
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        this.workloadSocket = new WebSocket(wsUrl);
+
+        this.workloadSocket.addEventListener('open', () => {
+            this.subscribeToSessionUpdates(sessionManager.currentSessionId);
+        });
+        this.workloadSocket.addEventListener('message', (event) => {
+            this.handleWorkloadSocketMessage(event.data);
+        });
+        this.workloadSocket.addEventListener('close', () => {
+            this.workloadSocket = null;
+            this.subscribedWorkloadSessionId = null;
+            clearTimeout(this.workloadSocketReconnectTimer);
+            this.workloadSocketReconnectTimer = setTimeout(() => {
+                this.connectWorkloadSocket();
+            }, 3000);
+        });
+        this.workloadSocket.addEventListener('error', (error) => {
+            console.warn('Workload socket error:', error);
+        });
+    }
+
+    subscribeToSessionUpdates(sessionId) {
+        if (!this.workloadSocket || this.workloadSocket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        if (this.subscribedWorkloadSessionId && this.subscribedWorkloadSessionId !== sessionId) {
+            this.workloadSocket.send(JSON.stringify({
+                type: 'session_unsubscribe',
+                sessionId: this.subscribedWorkloadSessionId,
+                payload: { sessionId: this.subscribedWorkloadSessionId },
+            }));
+        }
+
+        this.subscribedWorkloadSessionId = sessionId || null;
+        if (!sessionId) {
+            return;
+        }
+
+        this.workloadSocket.send(JSON.stringify({
+            type: 'session_subscribe',
+            sessionId,
+            payload: { sessionId },
+        }));
+    }
+
+    handleWorkloadSocketMessage(rawData) {
+        let payload;
+        try {
+            payload = JSON.parse(rawData);
+        } catch (_error) {
+            return;
+        }
+
+        if ([
+            'workload_queued',
+            'workload_started',
+            'workload_completed',
+            'workload_failed',
+            'workload_updated',
+        ].includes(payload?.type)) {
+            this.handleWorkloadEvent(payload).catch((error) => {
+                console.warn('Failed to process workload event:', error);
+            });
+        }
+    }
+
+    async handleWorkloadEvent(event) {
+        const sessionId = event?.sessionId || event?.data?.sessionId || null;
+        if (!sessionId) {
+            return;
+        }
+
+        await this.refreshSessionSummaries();
+
+        if (sessionManager.currentSessionId === sessionId) {
+            await this.loadSessionMessages(sessionId);
+            await this.loadSessionWorkloads(sessionId, { force: true });
         }
     }
 
@@ -1532,11 +2114,18 @@ class ChatApp {
         }
 
         const currentSessionId = sessionManager.currentSessionId;
+        const didChangeSession = currentSessionId !== sessionId;
         if (currentSessionId !== sessionId) {
             sessionManager.promoteSessionId(currentSessionId, sessionId);
         }
 
         apiClient.setSessionId(sessionId);
+        if (this.subscribedWorkloadSessionId !== sessionId) {
+            this.subscribeToSessionUpdates(sessionId);
+        }
+        if (didChangeSession || this.currentSessionWorkloads.length === 0) {
+            this.loadSessionWorkloads(sessionId);
+        }
     }
 
     handleDelta(content) {

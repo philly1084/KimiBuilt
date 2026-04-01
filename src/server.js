@@ -26,11 +26,15 @@ const unsplashRouter = require('./routes/unsplash');
 const adminRouter = require('./routes/admin');
 const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
+const workloadsRouter = require('./routes/workloads');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
 const { getAuthenticatedUser, getSafeReturnTo, requireAuth } = require('./auth/service');
 const { ConversationOrchestrator } = require('./conversation-orchestrator');
+const { ConversationRunService } = require('./conversation-run-service');
+const { AgentWorkloadService } = require('./workloads/service');
+const { AgentWorkloadRunner } = require('./workloads/runner');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -209,6 +213,7 @@ app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/tools', toolsRouter);
+app.use('/api', workloadsRouter);
 
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -307,6 +312,19 @@ async function start() {
         console.log('[Boot] Conversation orchestrator ready');
 
         app.locals.conversationOrchestrator = conversationOrchestrator;
+        app.locals.conversationRunService = new ConversationRunService({
+            app,
+            sessionStore,
+            memoryService,
+        });
+        app.locals.agentWorkloadService = new AgentWorkloadService({
+            sessionStore,
+            conversationRunService: app.locals.conversationRunService,
+        });
+        app.locals.agentWorkloadRunner = new AgentWorkloadRunner({
+            workloadService: app.locals.agentWorkloadService,
+        });
+        app.locals.agentWorkloadRunner.start();
         app.locals.dashboardController = new DashboardController(conversationOrchestrator);
         setDashboardController(app.locals.dashboardController);
         startupState.ready = true;

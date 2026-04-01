@@ -2176,6 +2176,109 @@ select.form-control,
     color: var(--bg-primary);
 }
 
+.workload-dashboard-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+}
+
+.workload-run-row {
+    cursor: pointer;
+}
+
+.workload-run-row.selected {
+    background-color: rgba(88, 166, 255, 0.12);
+}
+
+.workload-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+}
+
+.workload-run-detail {
+    display: grid;
+    gap: var(--space-md);
+}
+
+.workload-detail-title {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.workload-detail-subtitle {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+}
+
+.workload-detail-grid {
+    display: grid;
+    gap: var(--space-sm);
+}
+
+.workload-detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--border-secondary);
+}
+
+.workload-detail-label {
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.workload-detail-value {
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    text-align: right;
+    word-break: break-word;
+}
+
+.workload-detail-block {
+    padding: var(--space-md);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-tertiary);
+}
+
+.workload-detail-block h4 {
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-sm);
+    color: var(--text-primary);
+}
+
+.workload-detail-code {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.status-badge.neutral {
+    background-color: rgba(110, 118, 129, 0.15);
+    color: var(--text-secondary);
+}
+
+.status-badge.neutral::before {
+    background-color: var(--text-secondary);
+}
+
+.status-badge.info {
+    background-color: rgba(31, 111, 235, 0.15);
+    color: var(--info-light);
+}
+
+.status-badge.info::before {
+    background-color: var(--info-light);
+}
+
 .trace-header {
     display: flex;
     align-items: center;

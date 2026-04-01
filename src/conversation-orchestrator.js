@@ -2101,6 +2101,15 @@ function getRemoteBuildAutonomyExtensionBudget() {
     };
 }
 
+function normalizePositiveBudget(value, fallback) {
+    const normalized = Number(value);
+    if (Number.isFinite(normalized) && normalized > 0) {
+        return normalized;
+    }
+
+    return fallback;
+}
+
 function countUniqueExecutedStepSignatures(toolEvents = []) {
     const signatures = new Set();
 
@@ -2445,6 +2454,8 @@ class ConversationOrchestrator extends EventEmitter {
         metadata = {},
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         memoryInput = '',
+        requestedToolIds = [],
+        toolBudget = null,
     } = {}) {
         const startedAt = Date.now();
         const setupStartedAt = new Date().toISOString();
@@ -2482,6 +2493,7 @@ class ConversationOrchestrator extends EventEmitter {
             session,
             executionProfile: resolvedProfile,
             toolManager: runtimeToolManager,
+            requestedToolIds,
         });
 
         this.emit('task:start', {
@@ -2532,10 +2544,20 @@ class ConversationOrchestrator extends EventEmitter {
         const autonomyBudget = getRemoteBuildAutonomyBudget();
         const autonomyExtensionBudget = getRemoteBuildAutonomyExtensionBudget();
         const allowsDeterministicResearchFollowup = !autonomyApproved && hasExplicitWebResearchIntentText(objective);
+        const hasCustomToolBudget = Number.isFinite(Number(toolBudget?.maxDurationMs)) && Number(toolBudget.maxDurationMs) > 0;
         const budgetState = {
-            maxRounds: autonomyApproved ? autonomyBudget.maxRounds : (allowsDeterministicResearchFollowup ? 2 : 1),
-            maxToolCalls: autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS,
-            autonomyDeadline: autonomyApproved ? startedAt + autonomyBudget.maxDurationMs : startedAt,
+            maxRounds: normalizePositiveBudget(
+                toolBudget?.maxRounds,
+                autonomyApproved ? autonomyBudget.maxRounds : (allowsDeterministicResearchFollowup ? 2 : 1),
+            ),
+            maxToolCalls: normalizePositiveBudget(
+                toolBudget?.maxToolCalls,
+                autonomyApproved ? autonomyBudget.maxToolCalls : MAX_PLAN_STEPS,
+            ),
+            autonomyDeadline: startedAt + normalizePositiveBudget(
+                toolBudget?.maxDurationMs,
+                autonomyApproved ? autonomyBudget.maxDurationMs : 1000,
+            ),
             extensionsUsed: 0,
         };
 
@@ -2691,7 +2713,7 @@ class ConversationOrchestrator extends EventEmitter {
                                 toolCalls: toolEvents.length,
                                 maxToolCalls: budgetState.maxToolCalls,
                                 elapsedMs: Date.now() - startedAt,
-                                maxDurationMs: autonomyApproved ? Math.max(0, budgetState.autonomyDeadline - startedAt) : 0,
+                                maxDurationMs: (autonomyApproved || hasCustomToolBudget) ? Math.max(0, budgetState.autonomyDeadline - startedAt) : 0,
                                 extensionsUsed: budgetState.extensionsUsed,
                                 maxExtensions: autonomyExtensionBudget.maxUses || 0,
                             },
@@ -2700,7 +2722,7 @@ class ConversationOrchestrator extends EventEmitter {
                     }
                 }
 
-                if (autonomyApproved && Date.now() >= budgetState.autonomyDeadline) {
+                if ((autonomyApproved || hasCustomToolBudget) && Date.now() >= budgetState.autonomyDeadline) {
                     const extended = maybeExtendAutonomyBudget({
                         autonomyApproved,
                         reason: 'time-limit-before-round',
@@ -2761,7 +2783,7 @@ class ConversationOrchestrator extends EventEmitter {
                             toolCalls: toolEvents.length,
                             maxToolCalls: budgetState.maxToolCalls,
                             elapsedMs: Date.now() - startedAt,
-                            maxDurationMs: autonomyApproved ? Math.max(0, budgetState.autonomyDeadline - startedAt) : 0,
+                            maxDurationMs: (autonomyApproved || hasCustomToolBudget) ? Math.max(0, budgetState.autonomyDeadline - startedAt) : 0,
                             extensionsUsed: budgetState.extensionsUsed,
                             maxExtensions: autonomyExtensionBudget.maxUses || 0,
                         },
@@ -2888,7 +2910,7 @@ class ConversationOrchestrator extends EventEmitter {
                     break;
                 }
 
-                if (autonomyApproved && Date.now() >= budgetState.autonomyDeadline) {
+                if ((autonomyApproved || hasCustomToolBudget) && Date.now() >= budgetState.autonomyDeadline) {
                     const extended = maybeExtendAutonomyBudget({
                         autonomyApproved,
                         reason: 'time-limit-after-planning',
@@ -2940,7 +2962,7 @@ class ConversationOrchestrator extends EventEmitter {
                     objective,
                     session,
                     recentMessages: resolvedRecentMessages,
-                    autonomyDeadline: autonomyApproved ? budgetState.autonomyDeadline : null,
+                    autonomyDeadline: (autonomyApproved || hasCustomToolBudget) ? budgetState.autonomyDeadline : null,
                     executionTrace,
                     round,
                 });
@@ -3212,9 +3234,22 @@ class ConversationOrchestrator extends EventEmitter {
         }
     }
 
-    buildToolPolicy({ objective = '', instructions = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, toolManager = null }) {
-        const allowedToolIds = (PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE])
+    buildToolPolicy({
+        objective = '',
+        instructions = '',
+        session = null,
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        toolManager = null,
+        requestedToolIds = [],
+    }) {
+        const baseAllowedToolIds = (PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE])
             .filter((toolId) => toolManager?.getTool?.(toolId));
+        const requested = Array.isArray(requestedToolIds)
+            ? requestedToolIds.map((toolId) => String(toolId || '').trim()).filter(Boolean)
+            : [];
+        const allowedToolIds = requested.length > 0
+            ? baseAllowedToolIds.filter((toolId) => requested.includes(toolId))
+            : baseAllowedToolIds;
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
         const candidates = new Set();
         const remoteToolId = getPreferredRemoteToolId({ allowedToolIds });

@@ -84,6 +84,19 @@
                             <span>Logs</span>
                             <span class="badge" id="logsBadge">0</span>
                         </li>
+                        <li class="nav-item" data-view="workloads">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2"/>
+                                <path d="M16 2v4"/>
+                                <path d="M8 2v4"/>
+                                <path d="M3 10h18"/>
+                                <path d="M8 14h3"/>
+                                <path d="M13 14h3"/>
+                                <path d="M8 18h3"/>
+                            </svg>
+                            <span>Workloads</span>
+                            <span class="badge" id="workloadsBadge">0</span>
+                        </li>
                     </ul>
                 </div>
                 
@@ -640,6 +653,144 @@
                                 <button class="btn btn-sm btn-ghost" id="logsPrevPage" disabled>Previous</button>
                                 <span class="page-info">Page <span id="currentPage">1</span> of <span id="totalPages">1</span></span>
                                 <button class="btn btn-sm btn-ghost" id="logsNextPage">Next</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Workloads View -->
+                <section class="view" id="workloadsView">
+                    <div class="page-actions">
+                        <button class="btn btn-primary" id="refreshWorkloadsBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6"/>
+                                <path d="M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0114.13-3.36L23 10"/>
+                                <path d="M20.49 15a9 9 0 01-14.13 3.36L1 14"/>
+                            </svg>
+                            Refresh Workloads
+                        </button>
+                    </div>
+
+                    <div class="stats-grid workload-summary-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon primary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="4" width="18" height="18" rx="2"/>
+                                    <path d="M3 10h18"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="workloadTotalCount">0</span>
+                                <span class="stat-label">Definitions</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2v20"/>
+                                    <path d="M5 12h14"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="workloadQueuedCount">0</span>
+                                <span class="stat-label">Queued</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2v4"/>
+                                    <path d="M12 18v4"/>
+                                    <path d="M4.93 4.93l2.83 2.83"/>
+                                    <path d="M16.24 16.24l2.83 2.83"/>
+                                    <path d="M2 12h4"/>
+                                    <path d="M18 12h4"/>
+                                    <path d="M4.93 19.07l2.83-2.83"/>
+                                    <path d="M16.24 7.76l2.83-2.83"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="workloadRunningCount">0</span>
+                                <span class="stat-label">Running</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon danger">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <line x1="15" y1="9" x2="9" y2="15"/>
+                                    <line x1="9" y1="9" x2="15" y2="15"/>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <span class="stat-value" id="workloadFailedCount">0</span>
+                                <span class="stat-label">Failed</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid workload-dashboard-grid">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Workload Definitions</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-wrapper">
+                                    <table class="logs-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Title</th>
+                                                <th>Session</th>
+                                                <th>Trigger</th>
+                                                <th>Status</th>
+                                                <th>Queued</th>
+                                                <th>Running</th>
+                                                <th>Failed</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="adminWorkloadsTableBody">
+                                            <!-- Populated by JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Run Detail</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="workload-run-detail" id="adminRunDetails">
+                                    <p class="empty-state">Select a run to inspect lifecycle details.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <h3>Recent Runs</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-wrapper">
+                                <table class="logs-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Run</th>
+                                            <th>Workload</th>
+                                            <th>Status</th>
+                                            <th>Reason</th>
+                                            <th>Scheduled</th>
+                                            <th>Started</th>
+                                            <th>Finished</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="adminRunsTableBody">
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
