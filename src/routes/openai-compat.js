@@ -32,6 +32,7 @@ const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
+const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
 
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
@@ -84,6 +85,132 @@ function inferOutputFormatFromTranscript(messages = [], session = null) {
     }
 
     return inferOutputFormatFromSession(lastUserText, session);
+}
+
+function isFinalSynthesisPlaceholder(text = '') {
+    const normalized = stripNullCharacters(String(text || '')).trim();
+    return !normalized || normalized === FINAL_SYNTHESIS_PLACEHOLDER;
+}
+
+function summarizeCompatToolEvent(event = {}) {
+    const toolName = String(event?.toolCall?.function?.name || event?.result?.toolId || 'tool').trim();
+    const success = event?.result?.success !== false;
+    const stdout = stripNullCharacters(String(event?.result?.data?.stdout || '')).trim();
+    const stderr = stripNullCharacters(String(event?.result?.data?.stderr || '')).trim();
+    const error = stripNullCharacters(String(event?.result?.error || '')).trim();
+    const preview = stdout || stderr || error;
+
+    if (!success) {
+        return [
+            `- ${toolName}: failed.`,
+            error ? `Error: ${error}` : '',
+            !error && stderr ? `Details: ${stderr}` : '',
+        ].filter(Boolean).join(' ');
+    }
+
+    return [
+        `- ${toolName}: succeeded.`,
+        preview ? `Output: ${preview.slice(0, 600)}` : '',
+    ].filter(Boolean).join(' ');
+}
+
+function buildCompatToolFallbackText({ userText = '', toolEvents = [] } = {}) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    if (events.length === 0) {
+        return FINAL_SYNTHESIS_PLACEHOLDER;
+    }
+
+    return [
+        'Verified tool results:',
+        userText ? `Request: ${stripNullCharacters(String(userText || '')).trim()}` : '',
+        ...events.slice(0, 8).map((event) => summarizeCompatToolEvent(event)),
+    ].filter(Boolean).join('\n');
+}
+
+function applyCompatFallbackToResponse(response = {}, text = '') {
+    const normalizedText = stripNullCharacters(String(text || '')).trim();
+    const metadata = response?.metadata && typeof response.metadata === 'object'
+        ? response.metadata
+        : {};
+
+    const normalizedOutput = Array.isArray(response?.output) && response.output.length > 0
+        ? response.output.map((item, index) => {
+            if (index !== 0) {
+                return item;
+            }
+
+            return {
+                ...item,
+                content: [{
+                    type: 'output_text',
+                    text: normalizedText,
+                }],
+            };
+        })
+        : [{
+            id: `msg_${response?.id || 'compat_fallback'}`,
+            type: 'message',
+            role: 'assistant',
+            content: [{
+                type: 'output_text',
+                text: normalizedText,
+            }],
+        }];
+
+    const normalizedChoices = Array.isArray(response?.choices) && response.choices.length > 0
+        ? response.choices.map((choice, index) => {
+            if (index !== 0) {
+                return choice;
+            }
+
+            return {
+                ...choice,
+                message: {
+                    ...(choice?.message || {}),
+                    role: 'assistant',
+                    content: normalizedText,
+                },
+            };
+        })
+        : [{
+            index: 0,
+            message: {
+                role: 'assistant',
+                content: normalizedText,
+            },
+            finish_reason: 'stop',
+        }];
+
+    return {
+        ...response,
+        output_text: normalizedText,
+        output: normalizedOutput,
+        choices: normalizedChoices,
+        metadata: {
+            ...metadata,
+            compatToolFallbackApplied: true,
+        },
+    };
+}
+
+function resolveCompatAssistantText({ response = {}, outputText = '', userText = '' } = {}) {
+    const toolEvents = response?.metadata?.toolEvents || [];
+    if (toolEvents.length === 0 || !isFinalSynthesisPlaceholder(outputText)) {
+        return {
+            outputText,
+            response,
+        };
+    }
+
+    const fallbackText = buildCompatToolFallbackText({
+        userText,
+        toolEvents,
+    });
+
+    return {
+        outputText: fallbackText,
+        response: applyCompatFallbackToResponse(response, fallbackText),
+    };
 }
 
 function buildArtifactPromptFromTranscript(messages = [], fallbackPrompt = '') {
@@ -529,9 +656,14 @@ router.post('/chat/completions', async (req, res, next) => {
 
                 if (event.type === 'response.completed') {
                     const completedText = resolveCompletedResponseText(fullText, event.response);
-                    const missingDelta = getMissingCompletionDelta(fullText, completedText);
+                    const resolvedCompletion = resolveCompatAssistantText({
+                        response: event.response,
+                        outputText: completedText,
+                        userText: lastUserText,
+                    });
+                    const missingDelta = getMissingCompletionDelta(fullText, resolvedCompletion.outputText);
                     if (missingDelta) {
-                        fullText = completedText;
+                        fullText = resolvedCompletion.outputText;
                         res.write(`data: ${JSON.stringify({
                             id: `chatcmpl-${sessionId}-${chunkIndex}`,
                             object: 'chat.completion.chunk',
@@ -541,19 +673,19 @@ router.post('/chat/completions', async (req, res, next) => {
                         })}\n\n`);
                         chunkIndex += 1;
                     } else {
-                        fullText = completedText;
+                        fullText = resolvedCompletion.outputText;
                     }
 
-                    const toolEvents = event.response?.metadata?.toolEvents || [];
+                    const toolEvents = resolvedCompletion.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
-                        await sessionStore.recordResponse(sessionId, event.response.id);
+                        await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
                         memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
                         await sessionStore.appendMessages(sessionId, [
                             { role: 'user', content: lastUserText },
                             { role: 'assistant', content: fullText },
                         ]);
                     }
-                    const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
+                    const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
@@ -565,7 +697,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         content: fullText,
                         prompt: artifactPrompt,
                         title: 'chat-output',
-                        responseId: event.response.id,
+                        responseId: resolvedCompletion.response.id,
                         artifactIds: artifact_ids,
                         model,
                         reasoningEffort,
@@ -577,11 +709,11 @@ router.post('/chat/completions', async (req, res, next) => {
                         artifacts,
                     }, ownerId);
                     completeRuntimeTask(runtimeTask?.id, {
-                        responseId: event.response.id,
+                        responseId: resolvedCompletion.response.id,
                         output: fullText,
-                        model: event.response.model || model || null,
+                        model: resolvedCompletion.response.model || model || null,
                         duration: Date.now() - startedAt,
-                        metadata: event.response?.metadata || {},
+                        metadata: resolvedCompletion.response?.metadata || {},
                     });
                     res.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
@@ -630,11 +762,18 @@ router.post('/chat/completions', async (req, res, next) => {
             metadata: requestMetadata,
             ownerId,
         });
-        const response = execution.response;
+        let response = execution.response;
         if (!execution.handledPersistence) {
             await sessionStore.recordResponse(sessionId, response.id);
         }
-        const outputText = extractResponseText(response);
+        let outputText = extractResponseText(response);
+        const resolvedCompatResponse = resolveCompatAssistantText({
+            response,
+            outputText,
+            userText: lastUserText,
+        });
+        response = resolvedCompatResponse.response;
+        outputText = resolvedCompatResponse.outputText;
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
@@ -968,23 +1107,28 @@ router.post('/responses', async (req, res, next) => {
 
                 if (event.type === 'response.completed') {
                     const completedText = resolveCompletedResponseText(fullText, event.response);
-                    const missingDelta = getMissingCompletionDelta(fullText, completedText);
+                    const resolvedCompletion = resolveCompatAssistantText({
+                        response: event.response,
+                        outputText: completedText,
+                        userText: userInput,
+                    });
+                    const missingDelta = getMissingCompletionDelta(fullText, resolvedCompletion.outputText);
                     if (missingDelta) {
-                        fullText = completedText;
+                        fullText = resolvedCompletion.outputText;
                         res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: missingDelta })}\n\n`);
                     } else {
-                        fullText = completedText;
+                        fullText = resolvedCompletion.outputText;
                     }
 
                     if (!execution.handledPersistence) {
-                        await sessionStore.recordResponse(sessionId, event.response.id);
+                        await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
                         memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
                         await sessionStore.appendMessages(sessionId, [
                             { role: 'user', content: userInput },
                             { role: 'assistant', content: fullText },
                         ]);
                     }
-                    const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
+                    const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
@@ -996,7 +1140,7 @@ router.post('/responses', async (req, res, next) => {
                         content: fullText,
                         prompt: artifactPrompt,
                         title: 'response-output',
-                        responseId: event.response.id,
+                        responseId: resolvedCompletion.response.id,
                         artifactIds: artifact_ids,
                         model,
                         reasoningEffort,
@@ -1004,17 +1148,17 @@ router.post('/responses', async (req, res, next) => {
                     await updateSessionProjectMemory(sessionId, {
                         userText: userInput,
                         assistantText: fullText,
-                        toolEvents: event.response?.metadata?.toolEvents || [],
+                        toolEvents: resolvedCompletion.response?.metadata?.toolEvents || [],
                         artifacts,
                     }, ownerId);
                     completeRuntimeTask(runtimeTask?.id, {
-                        responseId: event.response.id,
+                        responseId: resolvedCompletion.response.id,
                         output: fullText,
-                        model: event.response.model || model || null,
+                        model: resolvedCompletion.response.model || model || null,
                         duration: Date.now() - startedAt,
-                        metadata: event.response?.metadata || {},
+                        metadata: resolvedCompletion.response?.metadata || {},
                     });
-                    res.write(`data: ${JSON.stringify({ type: 'response.completed', response: event.response, session_id: sessionId, artifacts })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ type: 'response.completed', response: resolvedCompletion.response, session_id: sessionId, artifacts })}\n\n`);
                 }
             }
 
@@ -1050,11 +1194,18 @@ router.post('/responses', async (req, res, next) => {
             metadata: requestMetadata,
             ownerId,
         });
-        const response = execution.response;
+        let response = execution.response;
         if (!execution.handledPersistence) {
             await sessionStore.recordResponse(sessionId, response.id);
         }
-        const outputText = extractResponseText(response);
+        let outputText = extractResponseText(response);
+        const resolvedCompatResponse = resolveCompatAssistantText({
+            response,
+            outputText,
+            userText: userInput,
+        });
+        response = resolvedCompatResponse.response;
+        outputText = resolvedCompatResponse.outputText;
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
             await sessionStore.appendMessages(sessionId, [
