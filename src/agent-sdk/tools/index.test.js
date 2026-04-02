@@ -59,4 +59,49 @@ describe('ToolManager image tools', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('file-write requires a `content` string');
   });
+
+  test('creates a workload from structured cron fields when request is omitted', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-1',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create_from_scenario',
+      prompt: 'summarize blockers from this conversation',
+      trigger: {
+        type: 'cron',
+        expression: '5 23 * * *',
+        timezone: 'America/Halifax',
+      },
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'America/Halifax',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      title: 'Summarize Blockers From This Conversation',
+      prompt: 'summarize blockers from this conversation',
+      trigger: {
+        type: 'cron',
+        expression: '5 23 * * *',
+        timezone: 'America/Halifax',
+      },
+      metadata: expect.objectContaining({
+        createdFromScenario: true,
+        scenarioFallback: 'structured_payload',
+      }),
+    }), 'user-1');
+    expect(result.data.message).toContain('Every day at 11:05 PM');
+  });
 });

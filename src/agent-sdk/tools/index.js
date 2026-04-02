@@ -9,7 +9,10 @@ const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
-const { summarizeTrigger } = require('../../workloads/natural-language');
+const {
+  deriveWorkloadTitle,
+  summarizeTrigger,
+} = require('../../workloads/natural-language');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -157,6 +160,37 @@ function resolveSessionWorkloadService(context = {}) {
     service,
     ownerId,
     sessionId,
+  };
+}
+
+function buildStructuredWorkloadFallback(params = {}, context = {}) {
+  const prompt = String(params.prompt || '').trim();
+  if (!prompt) {
+    return null;
+  }
+
+  const metadata = params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
+    ? { ...params.metadata }
+    : {};
+
+  return {
+    title: String(params.title || '').trim() || deriveWorkloadTitle(prompt),
+    prompt,
+    callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
+      ? params.callableSlug
+      : undefined,
+    mode: params.mode,
+    enabled: params.enabled,
+    trigger: params.trigger,
+    policy: params.policy,
+    stages: Array.isArray(params.stages) ? params.stages : undefined,
+    metadata: {
+      ...metadata,
+      createdFromScenario: true,
+      scenarioRequest: metadata.scenarioRequest || null,
+      scenarioFallback: 'structured_payload',
+    },
+    timezone: params.timezone || context?.timezone,
   };
 }
 
@@ -729,7 +763,23 @@ class ToolManager {
             if (action === 'create_from_scenario') {
               const request = String(params.request || params.scenario || params.description || '').trim();
               if (!request) {
-                throw new Error('agent-workload create_from_scenario requires a `request` string.');
+                const fallbackPayload = buildStructuredWorkloadFallback(params, context);
+                if (!fallbackPayload) {
+                  throw new Error('agent-workload create_from_scenario requires a `request` string or a structured `prompt` payload.');
+                }
+
+                const workload = await service.createWorkload({
+                  ...fallbackPayload,
+                  sessionId,
+                }, ownerId);
+
+                return {
+                  action,
+                  sessionId,
+                  workload,
+                  scenario: null,
+                  message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
+                };
               }
 
               const created = await service.createWorkloadFromScenario(sessionId, ownerId, request, {
