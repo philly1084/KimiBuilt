@@ -646,11 +646,23 @@
                 </button>
             </div>
             <div class="modal-body workload-form">
+                <div id="workload-form-error" class="workload-form__error hidden" role="alert"></div>
+                <div class="workload-builder">
+                    <label class="modal-label" for="workload-scenario-input">Describe the scenario</label>
+                    <textarea id="workload-scenario-input" class="modal-textarea" rows="3" placeholder="Every weekday at 8:30 AM, review the latest repo activity and summarize blockers."></textarea>
+                    <div class="workload-builder__actions">
+                        <button id="workload-scenario-build-btn" type="button" class="btn-secondary px-4 py-2 rounded-lg">Build setup from description</button>
+                    </div>
+                    <p class="workload-form__hint">Describe what should happen and when. The setup will be filled in for you.</p>
+                </div>
+
                 <label class="modal-label" for="workload-title-input">Title</label>
                 <input id="workload-title-input" class="modal-input" type="text" placeholder="Daily standup summary">
+                <p class="workload-form__hint">Use a short name you will recognize later in the session and admin dashboard.</p>
 
                 <label class="modal-label" for="workload-prompt-input">Prompt</label>
                 <textarea id="workload-prompt-input" class="modal-textarea" rows="4" placeholder="Review the latest conversation artifacts and summarize blockers."></textarea>
+                <p class="workload-form__hint">Write the task exactly the way you want the agent to execute it later.</p>
 
                 <div class="workload-form__grid">
                     <div>
@@ -666,6 +678,7 @@
                         <input id="workload-callable-slug" class="modal-input" type="text" placeholder="daily-brief-agent">
                     </div>
                 </div>
+                <p id="workload-trigger-help" class="workload-form__hint">Manual workloads stay idle until you trigger them.</p>
 
                 <div id="workload-once-row" class="workload-form__grid hidden">
                     <div>
@@ -674,54 +687,71 @@
                     </div>
                 </div>
 
-                <div id="workload-cron-row" class="workload-form__grid hidden">
-                    <div>
-                        <label class="modal-label" for="workload-cron-expression">Cron expression</label>
-                        <input id="workload-cron-expression" class="modal-input" type="text" placeholder="0 9 * * 1-5">
+                <div id="workload-cron-row" class="hidden">
+                    <div class="workload-preset-table">
+                        <div class="workload-preset-table__header">
+                            <h3 class="workload-preset-table__title">Recurring schedule presets</h3>
+                            <p class="workload-form__hint">Pick a normal schedule description. Cron stays in the background unless you need a custom pattern.</p>
+                        </div>
+                        <div id="workload-preset-grid" class="workload-preset-grid"></div>
+                        <div id="workload-preset-summary" class="workload-preset-summary hidden"></div>
                     </div>
-                    <div>
-                        <label class="modal-label" for="workload-timezone">Timezone</label>
-                        <input id="workload-timezone" class="modal-input" type="text" placeholder="America/Halifax">
+                    <div class="workload-form__grid">
+                        <div>
+                            <label class="modal-label" for="workload-cron-expression">Custom cron expression</label>
+                            <input id="workload-cron-expression" class="modal-input" type="text" placeholder="5 23 * * *">
+                        </div>
+                        <div>
+                            <label class="modal-label" for="workload-timezone">Timezone</label>
+                            <input id="workload-timezone" class="modal-input" type="text" placeholder="America/Halifax">
+                        </div>
                     </div>
+                    <p class="workload-form__hint">Only use custom cron if the preset table or plain-language builder does not cover your schedule.</p>
                 </div>
 
-                <div class="workload-form__grid">
-                    <div>
-                        <label class="modal-label" for="workload-profile">Execution profile</label>
-                        <select id="workload-profile" class="modal-input">
-                            <option value="default">default</option>
-                            <option value="notes">notes</option>
-                            <option value="remote-build">remote-build</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="modal-label" for="workload-tool-ids">Tool allowlist</label>
-                        <input id="workload-tool-ids" class="modal-input" type="text" placeholder="web-search,web-fetch">
-                    </div>
-                </div>
+                <details class="workload-form__advanced">
+                    <summary>Advanced controls</summary>
+                    <div class="workload-form__advanced-body">
+                        <div class="workload-form__grid">
+                            <div>
+                                <label class="modal-label" for="workload-profile">Execution profile</label>
+                                <select id="workload-profile" class="modal-input">
+                                    <option value="default">default</option>
+                                    <option value="notes">notes</option>
+                                    <option value="remote-build">remote-build</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="modal-label" for="workload-tool-ids">Tool allowlist</label>
+                                <input id="workload-tool-ids" class="modal-input" type="text" placeholder="web-search,web-fetch">
+                            </div>
+                        </div>
 
-                <div class="workload-form__grid">
-                    <div>
-                        <label class="modal-label" for="workload-max-rounds">Max rounds</label>
-                        <input id="workload-max-rounds" class="modal-input" type="number" min="1" value="3">
-                    </div>
-                    <div>
-                        <label class="modal-label" for="workload-max-tool-calls">Max tool calls</label>
-                        <input id="workload-max-tool-calls" class="modal-input" type="number" min="1" value="10">
-                    </div>
-                    <div>
-                        <label class="modal-label" for="workload-max-duration">Max duration (ms)</label>
-                        <input id="workload-max-duration" class="modal-input" type="number" min="1000" step="1000" value="120000">
-                    </div>
-                </div>
+                        <div class="workload-form__grid">
+                            <div>
+                                <label class="modal-label" for="workload-max-rounds">Max rounds</label>
+                                <input id="workload-max-rounds" class="modal-input" type="number" min="1" value="3">
+                            </div>
+                            <div>
+                                <label class="modal-label" for="workload-max-tool-calls">Max tool calls</label>
+                                <input id="workload-max-tool-calls" class="modal-input" type="number" min="1" value="10">
+                            </div>
+                            <div>
+                                <label class="modal-label" for="workload-max-duration">Max duration (ms)</label>
+                                <input id="workload-max-duration" class="modal-input" type="number" min="1000" step="1000" value="120000">
+                            </div>
+                        </div>
 
-                <label class="workload-checkbox">
-                    <input id="workload-allow-side-effects" type="checkbox">
-                    <span>Allow side-effecting tools if explicitly listed</span>
-                </label>
+                        <label class="workload-checkbox">
+                            <input id="workload-allow-side-effects" type="checkbox">
+                            <span>Allow side-effecting tools if explicitly listed</span>
+                        </label>
 
-                <label class="modal-label" for="workload-stages-json">Follow-up stages JSON</label>
-                <textarea id="workload-stages-json" class="modal-textarea" rows="5" placeholder='[{"when":"on_failure","delayMs":60000,"prompt":"Retry with a shorter summary."}]'></textarea>
+                        <label class="modal-label" for="workload-stages-json">Follow-up stages JSON</label>
+                        <textarea id="workload-stages-json" class="modal-textarea" rows="5" placeholder='[{"when":"on_failure","delayMs":60000,"prompt":"Retry with a shorter summary."}]'></textarea>
+                        <p class="workload-form__hint">Optional. Leave this blank unless you want success or failure follow-ups.</p>
+                    </div>
+                </details>
             </div>
             <div class="modal-footer">
                 <button id="cancel-workload-btn" class="btn-secondary px-4 py-2 rounded-lg">Cancel</button>

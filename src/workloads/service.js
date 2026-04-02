@@ -20,7 +20,7 @@ class AgentWorkloadService {
     }
 
     isAvailable() {
-        return this.store.isAvailable();
+        return this.store.isAvailable() && this.sessionStore?.isPersistent?.() === true;
     }
 
     async createWorkload(payload = {}, ownerId = null) {
@@ -191,8 +191,8 @@ class AgentWorkloadService {
             : null;
         const prompt = stage?.prompt || run.prompt || workload.prompt;
         const startedMessage = `Deferred workload "${workload.title}" started${stage ? ` (stage ${run.stageIndex + 1})` : ''}.`;
-        await this.conversationRunService.appendSyntheticMessage(workload.sessionId, 'system', startedMessage);
-        await this.store.addRunEvent(run.id, 'started', { workerId, stageIndex: run.stageIndex });
+        await this.appendSyntheticMessageSafe(workload.sessionId, 'system', startedMessage);
+        await this.addRunEventSafe(run.id, 'started', { workerId, stageIndex: run.stageIndex });
         await this.emitWorkloadUpdate('workload_started', workload.sessionId, {
             workloadId: workload.id,
             runId: run.id,
@@ -223,13 +223,13 @@ class AgentWorkloadService {
                 responseId: result.response?.id || null,
                 trace: result.execution?.trace || result.response?.metadata?.executionTrace || {},
             });
-            await this.store.addRunEvent(run.id, 'completed', {
+            await this.addRunEventSafe(run.id, 'completed', {
                 responseId: result.response?.id || null,
             });
             await this.scheduleFollowupStage(workload, run, true);
             await this.ensureNextScheduledRun(workload, run);
 
-            await this.conversationRunService.appendSyntheticMessage(
+            await this.appendSyntheticMessageSafe(
                 workload.sessionId,
                 'system',
                 `Deferred workload "${workload.title}" completed${stage ? ` (stage ${run.stageIndex + 1})` : ''}.`,
@@ -247,12 +247,12 @@ class AgentWorkloadService {
                     message: error.message,
                 },
             });
-            await this.store.addRunEvent(run.id, 'failed', {
+            await this.addRunEventSafe(run.id, 'failed', {
                 error: error.message,
             });
             await this.scheduleFollowupStage(workload, run, false);
             await this.ensureNextScheduledRun(workload, run);
-            await this.conversationRunService.appendSyntheticMessage(
+            await this.appendSyntheticMessageSafe(
                 workload.sessionId,
                 'system',
                 `Deferred workload "${workload.title}" failed${stage ? ` (stage ${run.stageIndex + 1})` : ''}: ${error.message}`,
@@ -366,11 +366,11 @@ class AgentWorkloadService {
         });
 
         if (followupRun) {
-            await this.store.addRunEvent(run.id, 'followup-enqueued', {
+            await this.addRunEventSafe(run.id, 'followup-enqueued', {
                 followupRunId: followupRun.id,
                 stageIndex: nextIndex,
             });
-            await this.conversationRunService.appendSyntheticMessage(
+            await this.appendSyntheticMessageSafe(
                 workload.sessionId,
                 'system',
                 `Deferred workload "${workload.title}" scheduled a follow-up stage ${nextIndex + 1}.`,
@@ -403,11 +403,11 @@ class AgentWorkloadService {
     }
 
     async onRunQueued(workload, run, source = 'scheduled') {
-        await this.store.addRunEvent(run.id, 'queued', {
+        await this.addRunEventSafe(run.id, 'queued', {
             source,
             scheduledFor: run.scheduledFor,
         });
-        await this.conversationRunService.appendSyntheticMessage(
+        await this.appendSyntheticMessageSafe(
             workload.sessionId,
             'system',
             `Deferred workload "${workload.title}" queued for ${run.scheduledFor}.`,
@@ -428,8 +428,28 @@ class AgentWorkloadService {
             timestamp: new Date().toISOString(),
         };
 
-        broadcastToSession(sessionId, payload);
-        broadcastToAdmins(payload);
+        try {
+            broadcastToSession(sessionId, payload);
+            broadcastToAdmins(payload);
+        } catch (error) {
+            console.warn(`[Workloads] Failed to broadcast ${type}:`, error.message);
+        }
+    }
+
+    async addRunEventSafe(runId, eventType, payload = {}) {
+        try {
+            await this.store.addRunEvent(runId, eventType, payload);
+        } catch (error) {
+            console.warn(`[Workloads] Failed to record run event '${eventType}' for ${runId}:`, error.message);
+        }
+    }
+
+    async appendSyntheticMessageSafe(sessionId, role, content) {
+        try {
+            await this.conversationRunService.appendSyntheticMessage(sessionId, role, content);
+        } catch (error) {
+            console.warn(`[Workloads] Failed to append synthetic message for session ${sessionId}:`, error.message);
+        }
     }
 }
 

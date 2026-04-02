@@ -94,6 +94,10 @@ class UIHelpers {
     }
 
     checkStorageAvailability() {
+        if (window.sessionManager?.storageAvailable != null) {
+            return window.sessionManager.storageAvailable === true;
+        }
+
         try {
             const key = '__webchat_ui_storage_test__';
             localStorage.setItem(key, '1');
@@ -105,6 +109,9 @@ class UIHelpers {
     }
 
     storageGet(key) {
+        if (window.sessionManager?.safeStorageGet) {
+            return window.sessionManager.safeStorageGet(key);
+        }
         if (!this.storageAvailable) return null;
         try {
             return localStorage.getItem(key);
@@ -115,6 +122,9 @@ class UIHelpers {
     }
 
     storageSet(key, value) {
+        if (window.sessionManager?.safeStorageSet) {
+            return window.sessionManager.safeStorageSet(key, value);
+        }
         if (!this.storageAvailable) return false;
         try {
             localStorage.setItem(key, value);
@@ -126,6 +136,9 @@ class UIHelpers {
     }
 
     storageRemove(key) {
+        if (window.sessionManager?.safeStorageRemove) {
+            return window.sessionManager.safeStorageRemove(key);
+        }
         if (!this.storageAvailable) return false;
         try {
             localStorage.removeItem(key);

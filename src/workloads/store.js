@@ -83,42 +83,46 @@ class WorkloadStore {
         await this.ensureAvailable();
 
         const id = uuidv4();
-        const result = await postgres.query(
-            `
-                INSERT INTO agent_workloads (
+        try {
+            const result = await postgres.query(
+                `
+                    INSERT INTO agent_workloads (
+                        id,
+                        owner_id,
+                        session_id,
+                        title,
+                        mode,
+                        prompt,
+                        enabled,
+                        callable_slug,
+                        trigger,
+                        policy,
+                        stages,
+                        metadata
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)
+                    RETURNING *
+                `,
+                [
                     id,
-                    owner_id,
-                    session_id,
-                    title,
-                    mode,
-                    prompt,
-                    enabled,
-                    callable_slug,
-                    trigger,
-                    policy,
-                    stages,
-                    metadata
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)
-                RETURNING *
-            `,
-            [
-                id,
-                input.ownerId,
-                input.sessionId,
-                input.title,
-                input.mode,
-                input.prompt,
-                input.enabled !== false,
-                input.callableSlug || null,
-                JSON.stringify(input.trigger || {}),
-                JSON.stringify(input.policy || {}),
-                JSON.stringify(input.stages || []),
-                JSON.stringify(input.metadata || {}),
-            ],
-        );
+                    input.ownerId,
+                    input.sessionId,
+                    input.title,
+                    input.mode,
+                    input.prompt,
+                    input.enabled !== false,
+                    input.callableSlug || null,
+                    JSON.stringify(input.trigger || {}),
+                    JSON.stringify(input.policy || {}),
+                    JSON.stringify(input.stages || []),
+                    JSON.stringify(input.metadata || {}),
+                ],
+            );
 
-        return this.mapWorkload(result.rows[0]);
+            return this.mapWorkload(result.rows[0]);
+        } catch (error) {
+            throw this.normalizePersistenceError(error, 'create workload');
+        }
     }
 
     async updateWorkload(id, ownerId, updates = {}) {
@@ -128,39 +132,43 @@ class WorkloadStore {
             return null;
         }
 
-        const result = await postgres.query(
-            `
-                UPDATE agent_workloads
-                SET title = $3,
-                    mode = $4,
-                    prompt = $5,
-                    enabled = $6,
-                    callable_slug = $7,
-                    trigger = $8::jsonb,
-                    policy = $9::jsonb,
-                    stages = $10::jsonb,
-                    metadata = $11::jsonb,
-                    updated_at = NOW()
-                WHERE id = $1
-                  AND owner_id = $2
-                RETURNING *
-            `,
-            [
-                id,
-                ownerId,
-                updates.title ?? current.title,
-                updates.mode ?? current.mode,
-                updates.prompt ?? current.prompt,
-                updates.enabled ?? current.enabled,
-                updates.callableSlug ?? current.callableSlug,
-                JSON.stringify(updates.trigger ?? current.trigger),
-                JSON.stringify(updates.policy ?? current.policy),
-                JSON.stringify(updates.stages ?? current.stages),
-                JSON.stringify(updates.metadata ?? current.metadata ?? {}),
-            ],
-        );
+        try {
+            const result = await postgres.query(
+                `
+                    UPDATE agent_workloads
+                    SET title = $3,
+                        mode = $4,
+                        prompt = $5,
+                        enabled = $6,
+                        callable_slug = $7,
+                        trigger = $8::jsonb,
+                        policy = $9::jsonb,
+                        stages = $10::jsonb,
+                        metadata = $11::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND owner_id = $2
+                    RETURNING *
+                `,
+                [
+                    id,
+                    ownerId,
+                    updates.title ?? current.title,
+                    updates.mode ?? current.mode,
+                    updates.prompt ?? current.prompt,
+                    updates.enabled ?? current.enabled,
+                    updates.callableSlug ?? current.callableSlug,
+                    JSON.stringify(updates.trigger ?? current.trigger),
+                    JSON.stringify(updates.policy ?? current.policy),
+                    JSON.stringify(updates.stages ?? current.stages),
+                    JSON.stringify(updates.metadata ?? current.metadata ?? {}),
+                ],
+            );
 
-        return this.mapWorkload(result.rows[0]);
+            return this.mapWorkload(result.rows[0]);
+        } catch (error) {
+            throw this.normalizePersistenceError(error, 'update workload');
+        }
     }
 
     async deleteWorkload(id, ownerId) {
@@ -323,48 +331,52 @@ class WorkloadStore {
         await this.ensureAvailable();
 
         const id = uuidv4();
-        const result = await postgres.query(
-            `
-                INSERT INTO agent_runs (
+        try {
+            const result = await postgres.query(
+                `
+                    INSERT INTO agent_runs (
+                        id,
+                        workload_id,
+                        owner_id,
+                        session_id,
+                        status,
+                        reason,
+                        scheduled_for,
+                        parent_run_id,
+                        stage_index,
+                        attempt,
+                        idempotency_key,
+                        prompt,
+                        metadata
+                    )
+                    VALUES (
+                        $1, $2, $3, $4,
+                        '${RUN_STATUS.QUEUED}',
+                        $5, $6, $7, $8, $9, $10, $11, $12::jsonb
+                    )
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                    RETURNING *
+                `,
+                [
                     id,
-                    workload_id,
-                    owner_id,
-                    session_id,
-                    status,
+                    workloadId,
+                    ownerId,
+                    sessionId,
                     reason,
-                    scheduled_for,
-                    parent_run_id,
-                    stage_index,
+                    normalizeDate(scheduledFor),
+                    parentRunId,
+                    stageIndex,
                     attempt,
-                    idempotency_key,
+                    idempotencyKey,
                     prompt,
-                    metadata
-                )
-                VALUES (
-                    $1, $2, $3, $4,
-                    '${RUN_STATUS.QUEUED}',
-                    $5, $6, $7, $8, $9, $10, $11, $12::jsonb
-                )
-                ON CONFLICT (idempotency_key) DO NOTHING
-                RETURNING *
-            `,
-            [
-                id,
-                workloadId,
-                ownerId,
-                sessionId,
-                reason,
-                normalizeDate(scheduledFor),
-                parentRunId,
-                stageIndex,
-                attempt,
-                idempotencyKey,
-                prompt,
-                JSON.stringify(metadata || {}),
-            ],
-        );
+                    JSON.stringify(metadata || {}),
+                ],
+            );
 
-        return this.mapRun(result.rows[0]);
+            return this.mapRun(result.rows[0]);
+        } catch (error) {
+            throw this.normalizePersistenceError(error, 'enqueue workload run');
+        }
     }
 
     async claimDueRuns({ workerId, limit = 5, leaseMs = 10 * 60 * 1000 }) {
@@ -523,23 +535,27 @@ class WorkloadStore {
 
     async addRunEvent(runId, eventType, payload = {}) {
         await this.ensureAvailable();
-        await postgres.query(
-            `
-                INSERT INTO agent_run_events (
-                    id,
-                    run_id,
-                    event_type,
-                    payload
-                )
-                VALUES ($1, $2, $3, $4::jsonb)
-            `,
-            [
-                uuidv4(),
-                runId,
-                eventType,
-                JSON.stringify(payload || {}),
-            ],
-        );
+        try {
+            await postgres.query(
+                `
+                    INSERT INTO agent_run_events (
+                        id,
+                        run_id,
+                        event_type,
+                        payload
+                    )
+                    VALUES ($1, $2, $3, $4::jsonb)
+                `,
+                [
+                    uuidv4(),
+                    runId,
+                    eventType,
+                    JSON.stringify(payload || {}),
+                ],
+            );
+        } catch (error) {
+            throw this.normalizePersistenceError(error, 'record workload event');
+        }
     }
 
     async getSessionSummaries(sessionIds = [], ownerId = null) {
@@ -573,6 +589,47 @@ class WorkloadStore {
                 failed: Number(row.failed_count || 0),
             },
         ]));
+    }
+
+    normalizePersistenceError(error, action = 'persist workload data') {
+        if (!error) {
+            return new Error(`Failed to ${action}`);
+        }
+
+        if (error.statusCode || error.type === 'validation') {
+            return error;
+        }
+
+        const pgCode = String(error.code || '').trim();
+        const constraint = String(error.constraint || '').trim();
+        const detail = String(error.detail || '').trim();
+
+        if (pgCode === '23505' && constraint === 'idx_agent_workloads_callable_slug') {
+            const conflict = new Error('That callable slug is already in use. Pick a different slug.');
+            conflict.statusCode = 409;
+            return conflict;
+        }
+
+        if (pgCode === '23503' && (
+            constraint === 'agent_workloads_session_id_fkey'
+            || constraint === 'agent_runs_session_id_fkey'
+        )) {
+            const sessionMismatch = new Error('Deferred workloads need a Postgres-backed conversation session. Start a fresh conversation and try again.');
+            sessionMismatch.statusCode = 503;
+            return sessionMismatch;
+        }
+
+        if (pgCode === '42P01') {
+            const relationMissing = new Error('Deferred workload tables are not ready yet. Restart the server so Postgres migrations can complete.');
+            relationMissing.statusCode = 503;
+            return relationMissing;
+        }
+
+        console.error(`[Workloads] Failed to ${action}:`, error.message, detail || '');
+        const wrapped = new Error(`Failed to ${action}`);
+        wrapped.statusCode = 500;
+        wrapped.cause = error;
+        return wrapped;
     }
 }
 

@@ -15,7 +15,7 @@ function getService(req) {
 function handleUnavailable(res) {
     return res.status(503).json({
         error: {
-            message: 'Deferred workloads require Postgres persistence',
+            message: 'Deferred workloads require an active Postgres-backed session store',
         },
     });
 }

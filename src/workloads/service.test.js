@@ -32,6 +32,7 @@ describe('AgentWorkloadService', () => {
         sessionStore = {
             getOwned: jest.fn(async (sessionId, ownerId) => ({ id: sessionId, ownerId, metadata: {} })),
             get: jest.fn(),
+            isPersistent: jest.fn(() => true),
         };
         conversationRunService = {
             appendSyntheticMessage: jest.fn(),
@@ -98,6 +99,12 @@ describe('AgentWorkloadService', () => {
             'system',
             expect.stringContaining('queued'),
         );
+    });
+
+    test('reports workloads as unavailable when the session store is not Postgres-backed', () => {
+        sessionStore.isPersistent.mockReturnValue(false);
+
+        expect(service.isAvailable()).toBe(false);
     });
 
     test('enqueues the first follow-up stage after a successful base run', async () => {

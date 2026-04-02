@@ -130,9 +130,7 @@ function extractAssistantText(value) {
 
 function isRemoteBuildAutonomyApproved() {
     try {
-        const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
-            ?? window.localStorage?.getItem?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
-            ?? '';
+        const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY) ?? '';
         const normalized = String(stored || '').trim().toLowerCase();
         if (!normalized) {
             return true;
@@ -163,17 +161,16 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     checkStorageAvailability() {
-        try {
-            const key = '__webchat_api_storage_test__';
-            localStorage.setItem(key, '1');
-            localStorage.removeItem(key);
-            return true;
-        } catch (_error) {
-            return false;
+        if (typeof window !== 'undefined' && window.sessionManager?.storageAvailable != null) {
+            return window.sessionManager.storageAvailable === true;
         }
+        return false;
     }
 
     safeStorageGet(key) {
+        if (typeof window !== 'undefined' && window.sessionManager?.safeStorageGet) {
+            return window.sessionManager.safeStorageGet(key);
+        }
         if (!this.storageAvailable) {
             return null;
         }
@@ -187,6 +184,9 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     safeStorageSet(key, value) {
+        if (typeof window !== 'undefined' && window.sessionManager?.safeStorageSet) {
+            return window.sessionManager.safeStorageSet(key, value);
+        }
         if (!this.storageAvailable) {
             return false;
         }
@@ -201,6 +201,9 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     safeStorageRemove(key) {
+        if (typeof window !== 'undefined' && window.sessionManager?.safeStorageRemove) {
+            return window.sessionManager.safeStorageRemove(key);
+        }
         if (!this.storageAvailable) {
             return false;
         }
@@ -1194,7 +1197,7 @@ class OpenAIAPIClient extends EventTarget {
         });
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
+            const error = await this.parseErrorPayload(response);
             throw new Error(error?.error?.message || `Failed to create workload: HTTP ${response.status}`);
         }
 

@@ -20,6 +20,10 @@ class ChatApp {
         this.newWorkloadBtn = document.getElementById('new-workload-btn');
         this.workloadModal = document.getElementById('workload-modal');
         this.workloadModalTitle = document.getElementById('workload-modal-title');
+        this.workloadFormError = document.getElementById('workload-form-error');
+        this.workloadScenarioInput = document.getElementById('workload-scenario-input');
+        this.workloadScenarioBuildBtn = document.getElementById('workload-scenario-build-btn');
+        this.workloadTriggerHelp = document.getElementById('workload-trigger-help');
         this.workloadTitleInput = document.getElementById('workload-title-input');
         this.workloadPromptInput = document.getElementById('workload-prompt-input');
         this.workloadTriggerType = document.getElementById('workload-trigger-type');
@@ -36,6 +40,8 @@ class ChatApp {
         this.workloadStagesJson = document.getElementById('workload-stages-json');
         this.workloadOnceRow = document.getElementById('workload-once-row');
         this.workloadCronRow = document.getElementById('workload-cron-row');
+        this.workloadPresetGrid = document.getElementById('workload-preset-grid');
+        this.workloadPresetSummary = document.getElementById('workload-preset-summary');
         this.saveWorkloadBtn = document.getElementById('save-workload-btn');
         this.cancelWorkloadBtn = document.getElementById('cancel-workload-btn');
         this.closeWorkloadModalBtn = document.getElementById('close-workload-modal-btn');
@@ -66,6 +72,7 @@ class ChatApp {
         this.subscribedWorkloadSessionId = null;
         this.isRefreshingSessionSummaries = false;
         this.isLoadingWorkloads = false;
+        this.isSavingWorkload = false;
         
         this.init();
     }
@@ -181,8 +188,53 @@ class ChatApp {
         this.newWorkloadBtn?.addEventListener('click', () => {
             this.openWorkloadModal();
         });
+        this.workloadScenarioBuildBtn?.addEventListener('click', () => {
+            this.buildWorkloadFromScenario();
+        });
         this.workloadTriggerType?.addEventListener('change', () => {
             this.updateWorkloadTriggerFields();
+            this.clearWorkloadFormError();
+        });
+        [
+            this.workloadScenarioInput,
+            this.workloadTitleInput,
+            this.workloadPromptInput,
+            this.workloadCallableSlug,
+            this.workloadRunAt,
+            this.workloadCronExpression,
+            this.workloadTimezone,
+            this.workloadToolIds,
+            this.workloadStagesJson,
+        ].forEach((field) => {
+            field?.addEventListener('input', () => {
+                this.clearWorkloadFormError();
+            });
+        });
+        this.workloadTimezone?.addEventListener('input', () => {
+            this.renderWorkloadPresetTable(
+                this.workloadCronExpression?.value || '',
+                this.workloadTimezone?.value || 'UTC',
+            );
+        });
+        this.workloadCronExpression?.addEventListener('input', () => {
+            this.renderWorkloadPresetTable(
+                this.workloadCronExpression?.value || '',
+                this.workloadTimezone?.value || 'UTC',
+            );
+        });
+        this.workloadModal?.addEventListener('click', (event) => {
+            const preset = event.target.closest('[data-workload-preset-expression]');
+            if (preset) {
+                this.applyWorkloadPreset({
+                    expression: preset.dataset.workloadPresetExpression || '',
+                    label: preset.dataset.workloadPresetLabel || '',
+                });
+                return;
+            }
+
+            if (event.target?.dataset?.closeWorkloadModal === 'true') {
+                this.closeWorkloadModal();
+            }
         });
         this.saveWorkloadBtn?.addEventListener('click', () => {
             this.saveWorkload();
@@ -192,11 +244,6 @@ class ChatApp {
         });
         this.closeWorkloadModalBtn?.addEventListener('click', () => {
             this.closeWorkloadModal();
-        });
-        this.workloadModal?.addEventListener('click', (event) => {
-            if (event.target?.dataset?.closeWorkloadModal === 'true') {
-                this.closeWorkloadModal();
-            }
         });
         this.workloadsList?.addEventListener('click', (event) => {
             const actionNode = event.target.closest('[data-workload-action]');
@@ -674,18 +721,18 @@ class ChatApp {
 
     describeTrigger(trigger = {}) {
         if (!trigger || trigger.type === 'manual') {
-            return 'Manual';
+            return 'Manual trigger';
         }
 
         if (trigger.type === 'once') {
-            return `Once at ${this.formatDateTime(trigger.runAt)}`;
+            return `Runs once at ${this.formatDateTime(trigger.runAt)}`;
         }
 
         if (trigger.type === 'cron') {
-            return `Cron ${trigger.expression || ''} (${trigger.timezone || 'UTC'})`;
+            return this.translateCronExpression(trigger.expression || '', trigger.timezone || 'UTC');
         }
 
-        return 'Manual';
+        return 'Manual trigger';
     }
 
     describeRun(run = {}) {
@@ -723,6 +770,403 @@ class ChatApp {
         });
     }
 
+    getWorkloadPresetCatalog(timezone = 'UTC') {
+        return [
+            {
+                id: 'daily-morning',
+                expression: '0 9 * * *',
+                label: `Every day at ${this.formatClock(9, 0)}`,
+                description: 'Daily brief or inbox sweep.',
+                timezone,
+            },
+            {
+                id: 'weekday-morning',
+                expression: '0 9 * * 1-5',
+                label: `Every weekday at ${this.formatClock(9, 0)}`,
+                description: 'Good for workday check-ins.',
+                timezone,
+            },
+            {
+                id: 'daily-late-night',
+                expression: '5 23 * * *',
+                label: `Every day at ${this.formatClock(23, 5)}`,
+                description: 'Nightly wrap-up or end-of-day summary.',
+                timezone,
+            },
+            {
+                id: 'friday-wrap-up',
+                expression: '0 16 * * 5',
+                label: `Every Friday at ${this.formatClock(16, 0)}`,
+                description: 'Weekly summary before the weekend.',
+                timezone,
+            },
+        ];
+    }
+
+    formatClock(hour, minute) {
+        const date = new Date();
+        date.setHours(Number(hour) || 0, Number(minute) || 0, 0, 0);
+        return date.toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    translateCronExpression(expression = '', timezone = 'UTC') {
+        const normalized = String(expression || '').trim();
+        const parts = normalized.split(/\s+/).filter(Boolean);
+        if (parts.length !== 5) {
+            return normalized ? `Custom schedule (${normalized})` : 'Custom schedule';
+        }
+
+        const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+        const hourValue = Number(hour);
+        const minuteValue = Number(minute);
+        const hasFixedTime = Number.isInteger(hourValue) && Number.isInteger(minuteValue);
+        const timeLabel = hasFixedTime ? this.formatClock(hourValue, minuteValue) : '';
+        const dayNameMap = {
+            0: 'Sunday',
+            1: 'Monday',
+            2: 'Tuesday',
+            3: 'Wednesday',
+            4: 'Thursday',
+            5: 'Friday',
+            6: 'Saturday',
+            7: 'Sunday',
+        };
+
+        if (hasFixedTime && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+            return `Every day at ${timeLabel}`;
+        }
+
+        if (hasFixedTime && dayOfMonth === '*' && month === '*' && dayOfWeek === '1-5') {
+            return `Every weekday at ${timeLabel}`;
+        }
+
+        if (hasFixedTime && dayOfMonth === '*' && month === '*' && /^\d$/.test(dayOfWeek)) {
+            return `Every ${dayNameMap[Number(dayOfWeek)] || 'week'} at ${timeLabel}`;
+        }
+
+        if (hour === '*' && /^\d+$/.test(minute) && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+            return `Every hour at ${String(minute).padStart(2, '0')} minutes past`;
+        }
+
+        return `Custom cron ${normalized}${timezone ? ` (${timezone})` : ''}`;
+    }
+
+    renderWorkloadPresetTable(selectedExpression = '', timezone = 'UTC') {
+        if (!this.workloadPresetGrid) {
+            return;
+        }
+
+        const normalizedTimezone = String(timezone || '').trim() || 'UTC';
+        const normalizedExpression = String(selectedExpression || '').trim();
+        const presets = this.getWorkloadPresetCatalog(normalizedTimezone);
+
+        this.workloadPresetGrid.innerHTML = presets.map((preset) => `
+            <button
+                type="button"
+                class="workload-preset-card ${preset.expression === normalizedExpression ? 'is-selected' : ''}"
+                data-workload-preset-expression="${uiHelpers.escapeHtmlAttr(preset.expression)}"
+                data-workload-preset-label="${uiHelpers.escapeHtmlAttr(preset.label)}"
+            >
+                <span class="workload-preset-card__label">${uiHelpers.escapeHtml(preset.label)}</span>
+                <span class="workload-preset-card__description">${uiHelpers.escapeHtml(preset.description)}</span>
+            </button>
+        `).join('');
+
+        if (this.workloadPresetSummary) {
+            if (!normalizedExpression) {
+                this.workloadPresetSummary.textContent = '';
+                this.workloadPresetSummary.classList.add('hidden');
+            } else {
+                this.workloadPresetSummary.textContent = this.translateCronExpression(
+                    normalizedExpression,
+                    normalizedTimezone,
+                );
+                this.workloadPresetSummary.classList.remove('hidden');
+            }
+        }
+    }
+
+    applyWorkloadPreset(preset = {}) {
+        this.workloadTriggerType.value = 'cron';
+        this.workloadCronExpression.value = String(preset.expression || '').trim();
+        this.workloadTimezone.value = this.workloadTimezone.value.trim()
+            || Intl.DateTimeFormat().resolvedOptions().timeZone
+            || 'UTC';
+        this.updateWorkloadTriggerFields();
+        this.renderWorkloadPresetTable(
+            this.workloadCronExpression.value,
+            this.workloadTimezone.value,
+        );
+        this.clearWorkloadFormError();
+        this.workloadCronExpression?.focus();
+    }
+
+    buildWorkloadFromScenario() {
+        try {
+            const scenario = this.workloadScenarioInput?.value?.trim() || '';
+            if (!scenario) {
+                throw new Error('Describe the task and when it should run.');
+            }
+
+            const timezone = this.workloadTimezone?.value?.trim()
+                || Intl.DateTimeFormat().resolvedOptions().timeZone
+                || 'UTC';
+            const setup = this.parseScenarioToWorkload(scenario, timezone);
+
+            this.workloadTitleInput.value = setup.title;
+            this.workloadPromptInput.value = setup.prompt;
+            if (!this.workloadCallableSlug.value.trim()) {
+                this.workloadCallableSlug.value = this.slugifyWorkloadValue(setup.title);
+            }
+
+            this.workloadTriggerType.value = setup.trigger.type;
+            this.workloadRunAt.value = setup.trigger.type === 'once'
+                ? this.toDatetimeLocal(setup.trigger.runAt)
+                : '';
+            this.workloadCronExpression.value = setup.trigger.type === 'cron'
+                ? setup.trigger.expression
+                : '';
+            this.workloadTimezone.value = setup.trigger.type === 'cron'
+                ? setup.trigger.timezone
+                : timezone;
+
+            this.updateWorkloadTriggerFields();
+            this.renderWorkloadPresetTable(
+                this.workloadCronExpression.value,
+                this.workloadTimezone.value,
+            );
+            this.clearWorkloadFormError();
+            uiHelpers.showToast(
+                setup.trigger.type === 'manual'
+                    ? 'Task filled in. No schedule phrase detected, so it was left as manual.'
+                    : 'Workload setup filled from your description',
+                'success',
+            );
+        } catch (error) {
+            this.showWorkloadFormError(error.message || 'Could not build workload setup from that description');
+        }
+    }
+
+    parseScenarioToWorkload(scenario = '', timezone = 'UTC') {
+        const normalizedScenario = String(scenario || '').trim();
+        const lowerScenario = normalizedScenario.toLowerCase();
+        const timeInfo = this.extractScenarioTime(normalizedScenario);
+        const taskPrompt = this.extractTaskPromptFromScenario(normalizedScenario) || normalizedScenario;
+        const title = this.deriveWorkloadTitle(taskPrompt);
+
+        let trigger = { type: 'manual' };
+
+        if (/(tomorrow|today|later today|once|one[- ]time)/i.test(lowerScenario)) {
+            trigger = {
+                type: 'once',
+                runAt: this.buildOneTimeRunAt(lowerScenario, timeInfo).toISOString(),
+            };
+        } else if (/(every hour|hourly)/i.test(lowerScenario)) {
+            trigger = {
+                type: 'cron',
+                expression: this.createCronExpression(timeInfo, 'hourly'),
+                timezone,
+            };
+        } else if (/(weekday|weekdays|every workday|each workday)/i.test(lowerScenario)) {
+            trigger = {
+                type: 'cron',
+                expression: this.createCronExpression(timeInfo, 'weekdays'),
+                timezone,
+            };
+        } else {
+            const weekdayMatch = lowerScenario.match(/\b(?:every|each)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/i);
+            if (weekdayMatch) {
+                trigger = {
+                    type: 'cron',
+                    expression: this.createCronExpression(timeInfo, weekdayMatch[1].toLowerCase()),
+                    timezone,
+                };
+            } else if (/(daily|every day|each day|nightly|every night|every evening|every morning)/i.test(lowerScenario)) {
+                trigger = {
+                    type: 'cron',
+                    expression: this.createCronExpression(timeInfo, 'daily'),
+                    timezone,
+                };
+            }
+        }
+
+        return {
+            title,
+            prompt: taskPrompt,
+            trigger,
+        };
+    }
+
+    extractScenarioTime(input = '') {
+        const text = String(input || '').trim();
+        const twelveHourMatch = text.match(/\b(1[0-2]|0?\d)(?::([0-5]\d))?\s*(am|pm)\b/i);
+        if (twelveHourMatch) {
+            const rawHour = Number(twelveHourMatch[1]);
+            const minute = Number(twelveHourMatch[2] || 0);
+            const meridiem = twelveHourMatch[3].toLowerCase();
+            let hour = rawHour % 12;
+            if (meridiem === 'pm') {
+                hour += 12;
+            }
+
+            return {
+                hour,
+                minute,
+            };
+        }
+
+        const twentyFourHourMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+        if (twentyFourHourMatch) {
+            return {
+                hour: Number(twentyFourHourMatch[1]),
+                minute: Number(twentyFourHourMatch[2]),
+            };
+        }
+
+        if (/\bmorning\b/i.test(text)) {
+            return { hour: 9, minute: 0 };
+        }
+        if (/\bafternoon\b/i.test(text)) {
+            return { hour: 14, minute: 0 };
+        }
+        if (/\bevening\b/i.test(text)) {
+            return { hour: 18, minute: 0 };
+        }
+        if (/\bnight\b|\bnightly\b/i.test(text)) {
+            return { hour: 23, minute: 0 };
+        }
+
+        return { hour: 9, minute: 0 };
+    }
+
+    buildOneTimeRunAt(lowerScenario = '', timeInfo = { hour: 9, minute: 0 }) {
+        const now = new Date();
+        const runAt = new Date(now);
+        runAt.setSeconds(0, 0);
+        runAt.setHours(timeInfo.hour, timeInfo.minute, 0, 0);
+
+        if (/\btomorrow\b/i.test(lowerScenario)) {
+            runAt.setDate(runAt.getDate() + 1);
+            return runAt;
+        }
+
+        if (/\blater today\b/i.test(lowerScenario)) {
+            if (runAt <= now) {
+                runAt.setHours(now.getHours() + 1, 0, 0, 0);
+            }
+            return runAt;
+        }
+
+        if (/\btoday\b/i.test(lowerScenario)) {
+            if (runAt <= now) {
+                runAt.setDate(runAt.getDate() + 1);
+            }
+            return runAt;
+        }
+
+        if (runAt <= now) {
+            runAt.setHours(now.getHours() + 1, 0, 0, 0);
+        }
+
+        return runAt;
+    }
+
+    createCronExpression(timeInfo = { hour: 9, minute: 0 }, cadence = 'daily') {
+        const minute = Number(timeInfo.minute || 0);
+        const hour = Number(timeInfo.hour || 0);
+        const weekdayMap = {
+            sunday: '0',
+            monday: '1',
+            tuesday: '2',
+            wednesday: '3',
+            thursday: '4',
+            friday: '5',
+            saturday: '6',
+        };
+
+        if (cadence === 'hourly') {
+            return `${minute} * * * *`;
+        }
+
+        if (cadence === 'weekdays') {
+            return `${minute} ${hour} * * 1-5`;
+        }
+
+        if (weekdayMap[cadence]) {
+            return `${minute} ${hour} * * ${weekdayMap[cadence]}`;
+        }
+
+        return `${minute} ${hour} * * *`;
+    }
+
+    extractTaskPromptFromScenario(scenario = '') {
+        const timeFragment = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|morning|afternoon|evening|night)';
+        const leadingPatterns = [
+            new RegExp(`^(?:every hour|hourly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:every|each)\\s+weekdays?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:every|each)\\s+workdays?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:daily|nightly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:every|each)\\s+day(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:every|each)\\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:once|one[- ]time)(?:\\s+(?:tomorrow|today|later today))?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+            new RegExp(`^(?:tomorrow|today|later today)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+        ];
+        const embeddedPatterns = [
+            new RegExp(`\\b(?:every hour|hourly)(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:every|each)\\s+weekdays?(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:every|each)\\s+workdays?(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:daily|nightly)(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:every|each)\\s+day(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:every|each)\\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:once|one[- ]time)(?:\\s+(?:tomorrow|today|later today))?(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+            new RegExp(`\\b(?:tomorrow|today|later today)(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+        ];
+
+        let taskPrompt = String(scenario || '').trim();
+        leadingPatterns.forEach((pattern) => {
+            taskPrompt = taskPrompt.replace(pattern, '');
+        });
+        embeddedPatterns.forEach((pattern) => {
+            taskPrompt = taskPrompt.replace(pattern, '');
+        });
+
+        return taskPrompt
+            .trim()
+            .replace(/^[,\s-]+/, '')
+            .replace(/[,\s-]+$/, '')
+            .replace(/\s{2,}/g, ' ')
+            || String(scenario || '').trim();
+    }
+
+    deriveWorkloadTitle(prompt = '') {
+        const words = String(prompt || '')
+            .trim()
+            .replace(/[^\w\s-]/g, '')
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 5);
+
+        if (words.length === 0) {
+            return 'New workload';
+        }
+
+        return words
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+    }
+
+    slugifyWorkloadValue(value = '') {
+        return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 64);
+    }
+
     openWorkloadModal(existing = null) {
         if (!sessionManager.currentSessionId) {
             uiHelpers.showToast('Open a conversation first', 'info');
@@ -732,6 +1176,8 @@ class ChatApp {
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         this.editingWorkload = existing;
         this.workloadModalTitle.textContent = existing ? 'Edit workload' : 'Create workload';
+        this.clearWorkloadFormError();
+        this.workloadScenarioInput.value = '';
         this.workloadTitleInput.value = existing?.title || '';
         this.workloadPromptInput.value = existing?.prompt || '';
         this.workloadTriggerType.value = existing?.trigger?.type || 'manual';
@@ -751,6 +1197,10 @@ class ChatApp {
         this.workloadAllowSideEffects.checked = existing?.policy?.allowSideEffects === true;
         this.workloadStagesJson.value = JSON.stringify(existing?.stages || [], null, 2);
         this.updateWorkloadTriggerFields();
+        this.renderWorkloadPresetTable(
+            this.workloadCronExpression.value,
+            this.workloadTimezone.value,
+        );
         this.workloadModal.classList.remove('hidden');
         this.workloadModal.setAttribute('aria-hidden', 'false');
         uiHelpers.trapFocus(this.workloadModal);
@@ -759,6 +1209,7 @@ class ChatApp {
 
     closeWorkloadModal() {
         this.editingWorkload = null;
+        this.clearWorkloadFormError();
         this.workloadModal?.classList.add('hidden');
         this.workloadModal?.setAttribute('aria-hidden', 'true');
     }
@@ -767,6 +1218,30 @@ class ChatApp {
         const triggerType = this.workloadTriggerType?.value || 'manual';
         this.workloadOnceRow?.classList.toggle('hidden', triggerType !== 'once');
         this.workloadCronRow?.classList.toggle('hidden', triggerType !== 'cron');
+        if (triggerType === 'cron') {
+            this.renderWorkloadPresetTable(
+                this.workloadCronExpression?.value || '',
+                this.workloadTimezone?.value || 'UTC',
+            );
+        } else if (this.workloadPresetSummary) {
+            this.workloadPresetSummary.textContent = '';
+            this.workloadPresetSummary.classList.add('hidden');
+        }
+        if (this.workloadTriggerHelp) {
+            this.workloadTriggerHelp.textContent = this.getWorkloadTriggerHelpText(triggerType);
+        }
+    }
+
+    getWorkloadTriggerHelpText(triggerType = 'manual') {
+        if (triggerType === 'once') {
+            return 'Use this for a one-off task you want handled later without staying in the chat.';
+        }
+
+        if (triggerType === 'cron') {
+            return 'Use a recurring schedule for jobs like daily briefs, standups, or periodic checks.';
+        }
+
+        return 'Manual workloads stay idle until you trigger them.';
     }
 
     toDatetimeLocal(value) {
@@ -781,10 +1256,24 @@ class ChatApp {
 
     readWorkloadForm() {
         const triggerType = this.workloadTriggerType.value;
+        const title = this.workloadTitleInput.value.trim();
+        const prompt = this.workloadPromptInput.value.trim();
+        const callableSlug = this.workloadCallableSlug.value.trim().toLowerCase();
+
+        if (!title) {
+            throw new Error('Give the workload a title.');
+        }
+        if (!prompt) {
+            throw new Error('Write the task you want the agent to run.');
+        }
+        if (callableSlug && !/^[a-z0-9][a-z0-9-_]{1,63}$/.test(callableSlug)) {
+            throw new Error('Callable slug must use lowercase letters, numbers, hyphens, or underscores.');
+        }
+
         const payload = {
-            title: this.workloadTitleInput.value.trim(),
-            prompt: this.workloadPromptInput.value.trim(),
-            callableSlug: this.workloadCallableSlug.value.trim() || null,
+            title,
+            prompt,
+            callableSlug: callableSlug || null,
             trigger: { type: triggerType },
             policy: {
                 executionProfile: this.workloadProfile.value,
@@ -810,21 +1299,39 @@ class ChatApp {
         if (triggerType === 'cron') {
             payload.trigger.expression = this.workloadCronExpression.value.trim();
             payload.trigger.timezone = this.workloadTimezone.value.trim() || 'UTC';
+            if (!payload.trigger.expression) {
+                throw new Error('Add a cron expression for recurring workloads.');
+            }
         }
 
         const stagesValue = this.workloadStagesJson.value.trim();
         if (stagesValue) {
-            payload.stages = JSON.parse(stagesValue);
+            try {
+                payload.stages = JSON.parse(stagesValue);
+            } catch (_error) {
+                throw new Error('Follow-up stages must be valid JSON.');
+            }
         }
 
         return payload;
     }
 
     async saveWorkload() {
+        if (this.isSavingWorkload) {
+            return;
+        }
+
         try {
             const sessionId = sessionManager.currentSessionId;
             if (!sessionId) {
                 throw new Error('Open a conversation first');
+            }
+
+            this.isSavingWorkload = true;
+            this.clearWorkloadFormError();
+            if (this.saveWorkloadBtn) {
+                this.saveWorkloadBtn.disabled = true;
+                this.saveWorkloadBtn.textContent = this.editingWorkload?.id ? 'Saving...' : 'Creating...';
             }
 
             const payload = this.readWorkloadForm();
@@ -840,8 +1347,33 @@ class ChatApp {
             await this.refreshSessionWorkloadState(sessionId);
         } catch (error) {
             console.error('Failed to save workload:', error);
+            this.showWorkloadFormError(error.message || 'Failed to save workload');
             uiHelpers.showToast(error.message || 'Failed to save workload', 'error');
+        } finally {
+            this.isSavingWorkload = false;
+            if (this.saveWorkloadBtn) {
+                this.saveWorkloadBtn.disabled = false;
+                this.saveWorkloadBtn.textContent = 'Save workload';
+            }
         }
+    }
+
+    showWorkloadFormError(message) {
+        if (!this.workloadFormError) {
+            return;
+        }
+
+        this.workloadFormError.textContent = message;
+        this.workloadFormError.classList.remove('hidden');
+    }
+
+    clearWorkloadFormError() {
+        if (!this.workloadFormError) {
+            return;
+        }
+
+        this.workloadFormError.textContent = '';
+        this.workloadFormError.classList.add('hidden');
     }
 
     async handleWorkloadAction(action, workloadId) {
