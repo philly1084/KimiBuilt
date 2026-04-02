@@ -196,6 +196,25 @@ function buildStructuredWorkloadFallback(params = {}, context = {}) {
   };
 }
 
+function hasExplicitManualWorkloadIntent(text = '') {
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    /\bmanual\b/,
+    /\bon[- ]demand\b/,
+    /\bwhen i (?:run|trigger|start|launch) it\b/,
+    /\bi(?:'d| would)? trigger it\b/,
+    /\bdo not schedule\b/,
+    /\bdon't schedule\b/,
+    /\bwithout scheduling\b/,
+    /\bnot scheduled\b/,
+    /\bunscheduled\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
 function extractScenarioSource(params = {}) {
   const direct = [
     params.request,
@@ -251,6 +270,33 @@ function buildInferredWorkloadPayload(params = {}, context = {}) {
       scenarioFallback: metadata.scenarioFallback || 'inferred_from_text',
     },
   };
+}
+
+function assertWorkloadSchedulingIntent(params = {}, context = {}) {
+  const scenarioSource = extractScenarioSource(params);
+  const triggerType = String(params.trigger?.type || '').trim().toLowerCase();
+  const explicitManual = hasExplicitManualWorkloadIntent(scenarioSource);
+
+  if (triggerType === 'cron' || triggerType === 'once') {
+    return;
+  }
+
+  if (triggerType === 'manual') {
+    if (!explicitManual) {
+      throw new Error('Manual workload creation needs an explicit manual request. Add a time or recurrence for scheduled work.');
+    }
+    return;
+  }
+
+  if (hasSchedulingCue(scenarioSource)) {
+    return;
+  }
+
+  if (explicitManual) {
+    return;
+  }
+
+  throw new Error('Workload creation needs a schedule. Specify when it should run, or explicitly say it should be manual.');
 }
 
 class ToolManager {
@@ -843,6 +889,8 @@ class ToolManager {
                   throw new Error('agent-workload create_from_scenario requires a `request` string or a structured `prompt` payload.');
                 }
 
+                assertWorkloadSchedulingIntent(fallbackPayload, context);
+
                 const workload = await service.createWorkload({
                   ...fallbackPayload,
                   sessionId,
@@ -857,27 +905,48 @@ class ToolManager {
                 };
               }
 
-              const created = await service.createWorkloadFromScenario(sessionId, ownerId, request, {
-                title: params.title,
-                prompt: params.prompt,
+              const scenario = parseWorkloadScenario(request, {
+                timezone: params.timezone || context?.timezone,
+              });
+              const scenarioPayload = {
+                ...params,
+                title: String(params.title || '').trim() || scenario.title,
+                prompt: String(params.prompt || '').trim() || scenario.prompt,
                 callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
                   ? params.callableSlug
-                  : undefined,
+                  : scenario.callableSlug,
                 mode: params.mode,
                 enabled: params.enabled,
                 timezone: params.timezone || context?.timezone,
-                trigger: params.trigger,
-                policy: params.policy,
+                trigger: params.trigger && typeof params.trigger === 'object'
+                  ? params.trigger
+                  : scenario.trigger,
+                policy: params.policy && typeof params.policy === 'object'
+                  ? params.policy
+                  : scenario.policy,
                 stages: Array.isArray(params.stages) ? params.stages : undefined,
-                metadata: params.metadata,
-              });
+                metadata: {
+                  ...(params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
+                    ? params.metadata
+                    : {}),
+                  createdFromScenario: true,
+                  scenarioRequest: request,
+                },
+              };
+
+              assertWorkloadSchedulingIntent(scenarioPayload, context);
+
+              const workload = await service.createWorkload({
+                ...scenarioPayload,
+                sessionId,
+              }, ownerId);
 
               return {
                 action,
                 sessionId,
-                workload: created.workload,
-                scenario: created.scenario,
-                message: `${created.workload.title} created. ${summarizeTrigger(created.workload.trigger || {})}.`,
+                workload,
+                scenario,
+                message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
               };
             }
 
@@ -887,6 +956,7 @@ class ToolManager {
               )
                 ? buildInferredWorkloadPayload(params, context)
                 : null;
+              assertWorkloadSchedulingIntent(inferredPayload || params, context);
               const workload = await service.createWorkload({
                 ...(inferredPayload || params),
                 sessionId,

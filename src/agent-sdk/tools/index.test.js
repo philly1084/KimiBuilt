@@ -144,4 +144,31 @@ describe('ToolManager image tools', () => {
     }), 'user-1');
     expect(result.data.message).toContain('Every weekday at 8:30 AM');
   });
+
+  test('rejects ambiguous scenario requests instead of silently creating a manual workload', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-3',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create_from_scenario',
+      request: 'Can you run one that',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'America/Halifax',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('needs a schedule');
+    expect(createWorkload).not.toHaveBeenCalled();
+  });
 });
