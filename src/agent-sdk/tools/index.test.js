@@ -104,4 +104,44 @@ describe('ToolManager image tools', () => {
     }), 'user-1');
     expect(result.data.message).toContain('Every day at 11:05 PM');
   });
+
+  test('infers a cron trigger for create when the prompt still contains schedule text', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-2',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create',
+      prompt: 'Every weekday at 8:30 AM review the latest repo activity and summarize blockers.',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'America/Halifax',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      title: 'Review The Latest Repo Activity',
+      prompt: 'Every weekday at 8:30 AM review the latest repo activity and summarize blockers.',
+      trigger: {
+        type: 'cron',
+        expression: '30 8 * * 1-5',
+        timezone: 'America/Halifax',
+      },
+      metadata: expect.objectContaining({
+        createdFromScenario: true,
+        scenarioFallback: 'inferred_from_text',
+      }),
+    }), 'user-1');
+    expect(result.data.message).toContain('Every weekday at 8:30 AM');
+  });
 });

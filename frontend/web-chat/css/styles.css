@@ -2045,6 +2045,9 @@ code[class*="language-"] {
 .workloads-panel {
     display: grid;
     gap: 1rem;
+    align-content: start;
+    max-height: min(65vh, 34rem);
+    overflow: hidden;
 }
 
 .workloads-panel__header {
@@ -2075,6 +2078,9 @@ code[class*="language-"] {
 .workloads-list {
     display: grid;
     gap: 0.75rem;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.25rem;
 }
 
 .workload-card {

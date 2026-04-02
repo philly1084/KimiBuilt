@@ -11,6 +11,8 @@ const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsp
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
 const {
   deriveWorkloadTitle,
+  hasSchedulingCue,
+  parseWorkloadScenario,
   summarizeTrigger,
 } = require('../../workloads/natural-language');
 
@@ -191,6 +193,63 @@ function buildStructuredWorkloadFallback(params = {}, context = {}) {
       scenarioFallback: 'structured_payload',
     },
     timezone: params.timezone || context?.timezone,
+  };
+}
+
+function extractScenarioSource(params = {}) {
+  const direct = [
+    params.request,
+    params.scenario,
+    params.description,
+    params.metadata?.scenarioRequest,
+    params.metadata?.originalRequest,
+  ]
+    .map((value) => String(value || '').trim())
+    .find(Boolean);
+
+  if (direct) {
+    return direct;
+  }
+
+  return [params.title, params.prompt]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join('. ')
+    .trim();
+}
+
+function buildInferredWorkloadPayload(params = {}, context = {}) {
+  const scenarioSource = extractScenarioSource(params);
+  if (!scenarioSource || !hasSchedulingCue(scenarioSource)) {
+    return null;
+  }
+
+  const inferred = parseWorkloadScenario(scenarioSource, {
+    timezone: params.timezone || context?.timezone,
+  });
+  const metadata = params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
+    ? { ...params.metadata }
+    : {};
+
+  return {
+    ...params,
+    title: String(params.title || '').trim() || inferred.title,
+    prompt: String(params.prompt || '').trim() || inferred.prompt,
+    trigger: params.trigger && typeof params.trigger === 'object'
+      ? params.trigger
+      : inferred.trigger,
+    callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
+      ? params.callableSlug
+      : inferred.callableSlug,
+    policy: params.policy && typeof params.policy === 'object'
+      ? params.policy
+      : inferred.policy,
+    metadata: {
+      ...metadata,
+      createdFromScenario: true,
+      scenarioRequest: metadata.scenarioRequest || scenarioSource,
+      scenarioFallback: metadata.scenarioFallback || 'inferred_from_text',
+    },
   };
 }
 
@@ -763,6 +822,22 @@ class ToolManager {
             if (action === 'create_from_scenario') {
               const request = String(params.request || params.scenario || params.description || '').trim();
               if (!request) {
+                const inferredPayload = buildInferredWorkloadPayload(params, context);
+                if (inferredPayload) {
+                  const workload = await service.createWorkload({
+                    ...inferredPayload,
+                    sessionId,
+                  }, ownerId);
+
+                  return {
+                    action,
+                    sessionId,
+                    workload,
+                    scenario: null,
+                    message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
+                  };
+                }
+
                 const fallbackPayload = buildStructuredWorkloadFallback(params, context);
                 if (!fallbackPayload) {
                   throw new Error('agent-workload create_from_scenario requires a `request` string or a structured `prompt` payload.');
@@ -807,8 +882,13 @@ class ToolManager {
             }
 
             if (action === 'create') {
+              const inferredPayload = (
+                !params.trigger || params.trigger.type === 'manual'
+              )
+                ? buildInferredWorkloadPayload(params, context)
+                : null;
               const workload = await service.createWorkload({
-                ...params,
+                ...(inferredPayload || params),
                 sessionId,
               }, ownerId);
               return {
