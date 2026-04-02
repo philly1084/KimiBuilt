@@ -47,6 +47,12 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
+        const requestTimezone = String(
+            req.body?.metadata?.timezone
+            || req.body?.metadata?.timeZone
+            || req.get('x-timezone')
+            || '',
+        ).trim() || null;
 
         let session;
         if (!sessionId) {
@@ -86,6 +92,15 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             stream: false,
             model,
             reasoningEffort,
+            toolContext: {
+                sessionId,
+                route: '/api/notation',
+                transport: 'http',
+                memoryService,
+                ownerId,
+                timezone: requestTimezone,
+                workloadService: req.app.locals.agentWorkloadService,
+            },
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',

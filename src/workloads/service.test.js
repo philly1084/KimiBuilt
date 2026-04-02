@@ -107,6 +107,60 @@ describe('AgentWorkloadService', () => {
         expect(service.isAvailable()).toBe(false);
     });
 
+    test('creates a workload from a plain-language scheduling request', async () => {
+        const workload = {
+            id: 'workload-plain-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Review Repo Activity And Summarize',
+            prompt: 'review repo activity and summarize blockers.',
+            enabled: true,
+            trigger: {
+                type: 'cron',
+                expression: '0 9 * * 1-5',
+                timezone: 'America/Halifax',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+        };
+
+        store.createWorkload.mockResolvedValue(workload);
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-plain-1',
+            workloadId: workload.id,
+            scheduledFor: '2026-04-02T12:00:00.000Z',
+            reason: 'cron',
+            stageIndex: -1,
+        });
+
+        const created = await service.createWorkloadFromScenario(
+            'session-1',
+            'phill',
+            'Every weekday at 9 AM review repo activity and summarize blockers.',
+            { timezone: 'America/Halifax' },
+        );
+
+        expect(store.createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            title: 'Review Repo Activity And Summarize',
+            prompt: 'review repo activity and summarize blockers.',
+            trigger: {
+                type: 'cron',
+                expression: '0 9 * * 1-5',
+                timezone: 'America/Halifax',
+            },
+        }));
+        expect(created.workload).toBe(workload);
+        expect(created.scenario.scheduleDetected).toBe(true);
+    });
+
     test('enqueues the first follow-up stage after a successful base run', async () => {
         const workload = {
             id: 'workload-1',

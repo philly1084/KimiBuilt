@@ -28,6 +28,7 @@ const {
     REMOTE_BUILD_EXECUTION_PROFILE,
     PROFILE_TOOL_ALLOWLISTS,
 } = require('./tool-execution-profiles');
+const { hasWorkloadIntent } = require('./workloads/natural-language');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = 12000;
@@ -49,6 +50,10 @@ const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /operation timed out/i,
     /connection closed by remote host/i,
 ];
+
+function getDefaultWorkloadTimezone() {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
 
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -3266,6 +3271,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSchemaIntent = hasSchemaDesignIntent(prompt);
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
+        const hasWorkloadSetupIntent = hasWorkloadIntent(`${objective || ''}\n${instructions || ''}`);
         const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(objective);
         const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
         const hasInternalArtifactUrl = hasInternalArtifactReference(`${objective || ''}\n${instructions || ''}`);
@@ -3277,6 +3283,9 @@ class ConversationOrchestrator extends EventEmitter {
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+            if (hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
+                candidates.add('agent-workload');
+            }
             [
                 'web-search',
                 'tool-doc-read',
@@ -3340,6 +3349,9 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('file-mkdir');
             }
         } else {
+            if (hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
+                candidates.add('agent-workload');
+            }
             if (remoteToolId && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
                 candidates.add(remoteToolId);
             }
@@ -3436,6 +3448,19 @@ class ConversationOrchestrator extends EventEmitter {
         const researchQuery = extractExplicitWebResearchQuery(objective);
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+        if (toolPolicy.candidateToolIds.includes('agent-workload') && hasWorkloadIntent(objective)) {
+            return {
+                tool: 'agent-workload',
+                reason: 'Explicit later or recurring-agent request should be converted into a persisted workload.',
+                params: {
+                    action: 'create_from_scenario',
+                    request: objective,
+                    timezone: session?.metadata?.timezone
+                        || session?.metadata?.timeZone
+                        || getDefaultWorkloadTimezone(),
+                },
+            };
+        }
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
             && researchQuery) {

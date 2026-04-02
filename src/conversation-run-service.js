@@ -66,6 +66,7 @@ class ConversationRunService {
                 transport: 'worker',
                 memoryService: this.memoryService,
                 ownerId,
+                workloadService: this.app?.locals?.agentWorkloadService,
             },
             executionProfile,
             enableAutomaticToolCalls: true,

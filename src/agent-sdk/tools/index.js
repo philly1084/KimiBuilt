@@ -9,6 +9,7 @@ const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
+const { summarizeTrigger } = require('../../workloads/natural-language');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -131,6 +132,32 @@ function normalizeFileWriteParams(params = {}) {
   }
 
   return normalized;
+}
+
+function normalizeWorkloadAction(value = '') {
+  return String(value || '').trim().toLowerCase() || 'create_from_scenario';
+}
+
+function resolveSessionWorkloadService(context = {}) {
+  const service = context?.workloadService || null;
+  if (!service?.isAvailable?.()) {
+    throw new Error('Deferred workloads are unavailable. This feature requires an active Postgres-backed session store.');
+  }
+
+  const ownerId = String(context?.ownerId || '').trim();
+  const sessionId = String(context?.sessionId || '').trim();
+  if (!ownerId) {
+    throw new Error('Deferred workloads require an authenticated owner context.');
+  }
+  if (!sessionId) {
+    throw new Error('Deferred workloads require an active session context.');
+  }
+
+  return {
+    service,
+    ownerId,
+    sessionId,
+  };
 }
 
 class ToolManager {
@@ -678,12 +705,216 @@ class ToolManager {
       },
     ];
 
+    const workloadTools = [
+      {
+        id: 'agent-workload',
+        name: 'Agent Workload Manager',
+        category: 'system',
+        description: 'Create and manage deferred agent workloads for later, recurring, and follow-up work tied to the current conversation session.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const { service, ownerId, sessionId } = resolveSessionWorkloadService(context);
+            const action = normalizeWorkloadAction(params.action);
+
+            if (action === 'list') {
+              const workloads = await service.listSessionWorkloads(sessionId, ownerId);
+              return {
+                action,
+                sessionId,
+                count: workloads.length,
+                workloads,
+              };
+            }
+
+            if (action === 'create_from_scenario') {
+              const request = String(params.request || params.scenario || params.description || '').trim();
+              if (!request) {
+                throw new Error('agent-workload create_from_scenario requires a `request` string.');
+              }
+
+              const created = await service.createWorkloadFromScenario(sessionId, ownerId, request, {
+                title: params.title,
+                prompt: params.prompt,
+                callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
+                  ? params.callableSlug
+                  : undefined,
+                mode: params.mode,
+                enabled: params.enabled,
+                timezone: params.timezone || context?.timezone,
+                trigger: params.trigger,
+                policy: params.policy,
+                stages: Array.isArray(params.stages) ? params.stages : undefined,
+                metadata: params.metadata,
+              });
+
+              return {
+                action,
+                sessionId,
+                workload: created.workload,
+                scenario: created.scenario,
+                message: `${created.workload.title} created. ${summarizeTrigger(created.workload.trigger || {})}.`,
+              };
+            }
+
+            if (action === 'create') {
+              const workload = await service.createWorkload({
+                ...params,
+                sessionId,
+              }, ownerId);
+              return {
+                action,
+                sessionId,
+                workload,
+                message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
+              };
+            }
+
+            if (action === 'run_now') {
+              const run = await service.runWorkloadNow(
+                params.idOrSlug || params.workloadId || params.callableSlug || '',
+                ownerId,
+                {
+                  reason: 'manual',
+                  metadata: params.metadata || {},
+                },
+              );
+              if (!run) {
+                throw new Error('Workload not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                run,
+                message: `Queued workload run ${run.id} for immediate execution.`,
+              };
+            }
+
+            if (action === 'pause') {
+              const workload = await service.pauseWorkload(
+                params.idOrSlug || params.workloadId || params.callableSlug || '',
+                ownerId,
+              );
+              if (!workload) {
+                throw new Error('Workload not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                workload,
+                message: `${workload.title} paused.`,
+              };
+            }
+
+            if (action === 'resume') {
+              const workload = await service.resumeWorkload(
+                params.idOrSlug || params.workloadId || params.callableSlug || '',
+                ownerId,
+              );
+              if (!workload) {
+                throw new Error('Workload not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                workload,
+                message: `${workload.title} resumed.`,
+              };
+            }
+
+            if (action === 'delete') {
+              const deleted = await service.deleteWorkload(
+                params.idOrSlug || params.workloadId || params.callableSlug || '',
+                ownerId,
+              );
+              if (!deleted) {
+                throw new Error('Workload not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                deleted: true,
+                message: 'Workload deleted.',
+              };
+            }
+
+            if (action === 'list_runs') {
+              const workloadId = params.idOrSlug || params.workloadId || '';
+              const runs = await service.listRunsForWorkload(
+                workloadId,
+                ownerId,
+                Number.isFinite(Number(params.limit))
+                  ? Math.max(1, Math.min(Number(params.limit), 100))
+                  : 20,
+              );
+
+              return {
+                action,
+                sessionId,
+                workloadId,
+                count: runs.length,
+                runs,
+              };
+            }
+
+            throw new Error(`Unsupported agent-workload action: ${action}`);
+          },
+          sideEffects: ['write'],
+          timeout: 15000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['action'],
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['create_from_scenario', 'create', 'list', 'run_now', 'pause', 'resume', 'delete', 'list_runs'],
+            },
+            request: { type: 'string' },
+            scenario: { type: 'string' },
+            description: { type: 'string' },
+            title: { type: 'string' },
+            prompt: { type: 'string' },
+            callableSlug: { type: 'string' },
+            mode: { type: 'string' },
+            enabled: { type: 'boolean' },
+            timezone: { type: 'string' },
+            trigger: { type: 'object' },
+            policy: { type: 'object' },
+            stages: { type: 'array' },
+            metadata: { type: 'object' },
+            idOrSlug: { type: 'string' },
+            workloadId: { type: 'string' },
+            limit: { type: 'integer' },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: [
+            'schedule this for later',
+            'set up a recurring agent',
+            'create a daily workload',
+            'follow up tomorrow',
+            'run every weekday',
+          ],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'clock',
+        },
+      },
+    ];
+
     const systemToolInstances = [
       new GitLocalTool(),
     ];
 
     // Register all system tools
-    [...fileTools, ...codeTools, ...docsTools, ...mediaTools].forEach(def => {
+    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

@@ -22,6 +22,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'file-write',
     'file-search',
     'file-mkdir',
+    'agent-workload',
     'git-safe',
     'tool-doc-read',
     ...PROMOTED_LOCAL_TOOL_IDS,

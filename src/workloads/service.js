@@ -1,6 +1,7 @@
 'use strict';
 
 const { getNextCronRun } = require('./cron-utils');
+const { parseWorkloadScenario } = require('./natural-language');
 const {
     deriveRunIdempotencyKey,
     validateWorkloadPayload,
@@ -40,6 +41,37 @@ class AgentWorkloadService {
             workload,
         });
         return workload;
+    }
+
+    async createWorkloadFromScenario(sessionId, ownerId, request = '', options = {}) {
+        const scenario = parseWorkloadScenario(request, {
+            timezone: options.timezone,
+            now: options.now,
+        });
+        const payload = {
+            sessionId,
+            mode: options.mode || 'chat',
+            title: options.title || scenario.title,
+            prompt: options.prompt || scenario.prompt,
+            enabled: options.enabled !== false,
+            callableSlug: Object.prototype.hasOwnProperty.call(options, 'callableSlug')
+                ? options.callableSlug
+                : null,
+            trigger: options.trigger || scenario.trigger,
+            policy: options.policy || scenario.policy,
+            stages: options.stages || [],
+            metadata: {
+                createdFromScenario: true,
+                scenarioRequest: request,
+                ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
+            },
+        };
+        const workload = await this.createWorkload(payload, ownerId);
+
+        return {
+            workload,
+            scenario,
+        };
     }
 
     async listSessionWorkloads(sessionId, ownerId) {

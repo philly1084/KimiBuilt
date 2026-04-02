@@ -105,6 +105,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         let { sessionId } = req.body;
         const requestedTaskType = resolveConversationTaskType(requestMetadata);
         const ownerId = getRequestOwnerId(req);
+        const requestTimezone = String(
+            requestMetadata?.timezone
+            || requestMetadata?.timeZone
+            || req.get('x-timezone')
+            || '',
+        ).trim() || null;
 
         let session;
         if (!sessionId) {
@@ -279,6 +285,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     transport: 'http',
                     memoryService,
                     ownerId,
+                    timezone: requestTimezone,
+                    workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile,
                 enableAutomaticToolCalls: true,
@@ -371,6 +379,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 transport: 'http',
                 memoryService,
                 ownerId,
+                timezone: requestTimezone,
+                workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile,
             enableAutomaticToolCalls: true,

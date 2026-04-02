@@ -134,6 +134,20 @@ function createToolManager() {
                 },
             },
         }],
+        ['agent-workload', {
+            id: 'agent-workload',
+            name: 'Agent Workload Manager',
+            description: 'Create and manage deferred workloads',
+            inputSchema: {
+                type: 'object',
+                required: ['action'],
+                properties: {
+                    action: { type: 'string' },
+                    request: { type: 'string' },
+                    workloadId: { type: 'string' },
+                },
+            },
+        }],
         ['git-safe', {
             id: 'git-safe',
             name: 'Git Save And Push',
@@ -279,6 +293,7 @@ function createToolManager() {
         ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'], requiresConfirmation: true }],
         ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'], requiresConfirmation: false }],
         ['file-mkdir', { enabled: true, triggerPatterns: ['create folder', 'mkdir'], requiresConfirmation: false }],
+        ['agent-workload', { enabled: true, triggerPatterns: ['schedule this for later', 'daily agent', 'follow up tomorrow'], requiresConfirmation: false }],
         ['git-safe', { enabled: true, triggerPatterns: ['git push', 'commit to github', 'save and push'], requiresConfirmation: true }],
         ['security-scan', { enabled: true, triggerPatterns: ['security check', 'audit code'], requiresConfirmation: false }],
         ['architecture-design', { enabled: true, triggerPatterns: ['design architecture', 'system design'], requiresConfirmation: false }],
@@ -315,6 +330,26 @@ function createToolManager() {
                         stdout: 'deployment.apps/backend configured',
                         stderr: '',
                         host: 'default-host:22',
+                    },
+                };
+            }
+
+            if (id === 'agent-workload') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        action: params.action,
+                        message: 'Daily blockers summary created. Every day at 11:05 PM.',
+                        workload: {
+                            id: 'workload-1',
+                            title: 'Daily blockers summary',
+                            trigger: {
+                                type: 'cron',
+                                expression: '5 23 * * *',
+                                timezone: 'America/Halifax',
+                            },
+                        },
                     },
                 };
             }
@@ -688,6 +723,29 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'git-safe',
             'k3s-deploy',
         ]));
+    });
+
+    test('selects agent-workload for recurring setup requests and forces the tool choice', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Set up a daily agent workload to summarize blockers every day at 11:05 PM.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                workloadService: {
+                    isAvailable: () => true,
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(automaticTools, prompt);
+        const toolChoice = __testUtils.buildAutomaticToolChoice(selectedTools, 'responses', { prompt });
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('agent-workload');
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'agent-workload',
+        });
     });
 
     test('deterministic research preflight fetches top pages and stores distilled notes', async () => {
@@ -1264,6 +1322,34 @@ describe('openai-client automatic tool orchestration helpers', () => {
             role: 'user',
             content: 'Use the same directory as before.',
         });
+    });
+
+    test('runs a direct required workload action for explicit scheduling prompts', async () => {
+        const toolManager = createToolManager();
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'agent-workload',
+            selectedTools: [{ id: 'agent-workload' }],
+            prompt: 'Set up a daily agent workload to summarize blockers every day at 11:05 PM.',
+            toolContext: {
+                timezone: 'America/Halifax',
+                workloadService: {
+                    isAvailable: () => true,
+                },
+            },
+            model: 'gpt-4o',
+        });
+
+        expect(response.output[0].content[0].text).toContain('Every day at 11:05 PM');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'agent-workload',
+            expect.objectContaining({
+                action: 'create_from_scenario',
+                request: 'Set up a daily agent workload to summarize blockers every day at 11:05 PM.',
+                timezone: 'America/Halifax',
+            }),
+            expect.any(Object),
+        );
     });
 
     test('merges route instructions with client-provided system prompts instead of stacking them', () => {

@@ -177,6 +177,12 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     const { message, model = null, artifactIds = [], outputFormat = null, executionProfile = null } = payload;
     const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
+    const requestTimezone = String(
+        payload?.metadata?.timezone
+        || payload?.metadata?.timeZone
+        || payload?.timezone
+        || '',
+    ).trim() || null;
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
@@ -314,6 +320,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 transport: 'ws',
                 memoryService,
                 ownerId,
+                timezone: requestTimezone,
+                workloadService: ws.app.locals.agentWorkloadService,
             },
             executionProfile,
             enableAutomaticToolCalls: true,

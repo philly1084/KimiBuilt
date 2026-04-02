@@ -430,6 +430,12 @@ router.post('/chat/completions', async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
+        const requestTimezone = String(
+            requestMetadata?.timezone
+            || requestMetadata?.timeZone
+            || req.get('x-timezone')
+            || ''
+        ).trim() || null;
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({
@@ -674,6 +680,8 @@ router.post('/chat/completions', async (req, res, next) => {
                     transport: 'http',
                     memoryService,
                     ownerId,
+                    timezone: requestTimezone,
+                    workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
@@ -800,6 +808,8 @@ router.post('/chat/completions', async (req, res, next) => {
                 transport: 'http',
                 memoryService,
                 ownerId,
+                timezone: requestTimezone,
+                workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
@@ -846,6 +856,8 @@ router.post('/chat/completions', async (req, res, next) => {
                     transport: 'http',
                     memoryService,
                     ownerId,
+                    timezone: requestTimezone,
+                    workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: 'remote-build',
                 enableAutomaticToolCalls: true,
@@ -951,6 +963,12 @@ router.post('/responses', async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
+        const requestTimezone = String(
+            requestMetadata?.timezone
+            || requestMetadata?.timeZone
+            || req.get('x-timezone')
+            || ''
+        ).trim() || null;
 
         let sessionId = resolveSessionId(req);
         let session;
@@ -1176,6 +1194,8 @@ router.post('/responses', async (req, res, next) => {
                     transport: 'http',
                     memoryService,
                     ownerId,
+                    timezone: requestTimezone,
+                    workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
@@ -1274,6 +1294,8 @@ router.post('/responses', async (req, res, next) => {
                 transport: 'http',
                 memoryService,
                 ownerId,
+                timezone: requestTimezone,
+                workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
@@ -1320,6 +1342,8 @@ router.post('/responses', async (req, res, next) => {
                     transport: 'http',
                     memoryService,
                     ownerId,
+                    timezone: requestTimezone,
+                    workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: 'remote-build',
                 enableAutomaticToolCalls: true,

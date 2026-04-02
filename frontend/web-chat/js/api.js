@@ -15,6 +15,7 @@ const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
 const WEB_CHAT_TASK_TYPE = 'chat';
 const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
+const USER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 
 // Retry configuration
@@ -373,6 +374,7 @@ class OpenAIAPIClient extends EventTarget {
             metadata: {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
                 enableConversationExecutor: true,
+                timezone: USER_TIMEZONE,
             },
         };
 
@@ -674,6 +676,7 @@ class OpenAIAPIClient extends EventTarget {
             metadata: {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
                 enableConversationExecutor: true,
+                timezone: USER_TIMEZONE,
             },
         };
 

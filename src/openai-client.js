@@ -3,6 +3,10 @@ const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
 const { normalizeReasoningEffort } = require('./ai-route-utils');
 const {
+    hasWorkloadIntent,
+    summarizeTrigger,
+} = require('./workloads/natural-language');
+const {
     PROMOTED_LOCAL_TOOL_IDS,
     getAllowedToolIdsForProfile,
 } = require('./tool-execution-profiles');
@@ -151,6 +155,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-write',
     'file-search',
     'file-mkdir',
+    'agent-workload',
     'git-safe',
     'ssh-execute',
     'remote-command',
@@ -783,10 +788,15 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         options?.executionProfile
         || options?.toolContext?.executionProfile,
     );
+    const workloadService = options?.workloadService || options?.toolContext?.workloadService;
 
     if (toolId === 'k3s-deploy') {
         return hasUsableSshDefaults()
             && (executionProfile === 'remote-build' || /\b(k3s|kubernetes|kubectl|deployment|rollout|manifest|helm)\b/i.test(prompt));
+    }
+
+    if (toolId === 'agent-workload') {
+        return Boolean(workloadService?.isAvailable?.()) && hasWorkloadIntent(prompt);
     }
 
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
@@ -1657,6 +1667,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
     const hasSchemaIntent = /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/i.test(normalizedPrompt);
     const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
+    const hasWorkloadSetupIntent = hasWorkloadIntent(prompt);
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
@@ -1665,6 +1676,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const internalArtifactReference = hasInternalArtifactReference(prompt);
     const shouldPreferRemoteWebsiteSource = Boolean(remoteToolId && remoteWebsiteUpdateIntent && !explicitLocalArtifact);
     const shouldSuppressWebFetchForRemoteWebsite = shouldPreferRemoteWebsiteSource && internalArtifactReference;
+
+    if (hasWorkloadSetupIntent && availableToolIds.has('agent-workload')) {
+        selectedIds.add('agent-workload');
+    }
 
     if (hasWebResearchIntent) {
         selectedIds.add('web-search');
@@ -1785,6 +1800,10 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
 
     if (explicitK3sDeployIntent && explicitGitIntent) {
         return null;
+    }
+
+    if (hasWorkloadIntent(prompt) && availableToolIds.has('agent-workload')) {
+        return 'agent-workload';
     }
 
     if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {
@@ -2259,6 +2278,27 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         return sections.join('\n\n');
     }
 
+    if (toolId === 'agent-workload') {
+        if (!result.success) {
+            return `Workload request failed: ${result.error || 'Unknown error'}`;
+        }
+
+        const data = result?.data || {};
+        if (typeof data.message === 'string' && data.message.trim()) {
+            return data.message;
+        }
+
+        if (data.action === 'list') {
+            return `Found ${Number(data.count || 0)} deferred workloads for this session.`;
+        }
+
+        if (data.workload?.title) {
+            return `${data.workload.title} created. ${summarizeTrigger(data.workload.trigger || {})}.`;
+        }
+
+        return JSON.stringify(data, null, 2);
+    }
+
     return JSON.stringify(result?.data || {}, null, 2);
 }
 
@@ -2294,8 +2334,31 @@ async function runDirectRequiredToolAction({
     toolContext = {},
     model = null,
 }) {
-    if (!['ssh-execute', 'remote-command', 'web-scrape'].includes(requiredToolId)) {
+    if (!['ssh-execute', 'remote-command', 'web-scrape', 'agent-workload'].includes(requiredToolId)) {
         return null;
+    }
+
+    if (requiredToolId === 'agent-workload') {
+        const toolCall = {
+            id: 'direct_required_tool_1',
+            type: 'function',
+            function: {
+                name: requiredToolId,
+                arguments: JSON.stringify({
+                    action: 'create_from_scenario',
+                    request: prompt,
+                    ...(toolContext?.timezone ? { timezone: toolContext.timezone } : {}),
+                }),
+            },
+        };
+
+        const result = await executeAutomaticToolCall(toolManager, toolCall, toolContext);
+        const toolEvent = {
+            toolCall: normalizeToolCall(toolCall),
+            result,
+        };
+
+        return buildDirectToolResponse(toolEvent, model);
     }
 
     const actions = buildDeterministicPreflightActions(selectedTools, prompt)
