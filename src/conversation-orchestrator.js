@@ -528,6 +528,73 @@ function resolveRemoteObjectiveFromSession(rawObjective = '', session = null, re
     return rawObjective;
 }
 
+function isLikelyTranscriptDependentTurn(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const shortTurn = normalized.length <= 120;
+    const referentialCue = [
+        /\b(it|that|this|them|those|same|again|there)\b/,
+        /\b(the commands|what you listed|the one you listed|the ones you listed|what i asked|same task|same thing|that one)\b/,
+        /^(?:do|run|schedule|set up|queue|create|make|get|fetch|check)\s+(?:it|that|this|them|those)\b/,
+        /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/,
+        /\bfrom now\b/,
+    ].some((pattern) => pattern.test(normalized));
+    const openEndedCue = /\b(?:in|at|for|to|on|from|with|about|into|around|using|and|then)\s*$/.test(normalized);
+    const weakStandaloneCue = shortTurn
+        && (
+            /^(?:continue|retry|again|later|tomorrow|same)\b/.test(normalized)
+            || /^(?:do|run|make|schedule|set up|queue|create|get|fetch|check|use)\s*$/.test(normalized)
+        );
+
+    return (shortTurn && referentialCue) || openEndedCue || weakStandaloneCue;
+}
+
+function resolveTranscriptObjectiveFromSession(rawObjective = '', recentMessages = []) {
+    const objective = String(rawObjective || '').trim();
+    if (!isLikelyTranscriptDependentTurn(objective)) {
+        return {
+            objective,
+            usedTranscriptContext: false,
+        };
+    }
+
+    const transcript = Array.isArray(recentMessages) ? [...recentMessages] : [];
+    let priorUserObjective = '';
+    for (let index = transcript.length - 1; index >= 0; index -= 1) {
+        const message = transcript[index];
+        if (message?.role !== 'user') {
+            continue;
+        }
+
+        const candidate = normalizeMessageText(message.content || '').trim();
+        if (!candidate || candidate.toLowerCase() === objective.toLowerCase()) {
+            continue;
+        }
+        if (isLikelyTranscriptDependentTurn(candidate)) {
+            continue;
+        }
+
+        priorUserObjective = truncateText(candidate, 600);
+        break;
+    }
+
+    if (!priorUserObjective) {
+        return {
+            objective,
+            usedTranscriptContext: false,
+        };
+    }
+
+    return {
+        objective: `${priorUserObjective}. ${objective}`.trim(),
+        usedTranscriptContext: true,
+        priorUserObjective,
+    };
+}
+
 function buildNotesSynthesisInstructions() {
     return [
         'You are editing a Lilly-style block-based notes document.',
@@ -2557,8 +2624,8 @@ class ConversationOrchestrator extends EventEmitter {
         const resolvedContextMessages = contextMessages.length > 0
             ? contextMessages
             : loadContextMessages !== false && this.memoryService?.process
-                ? await this.memoryService.process(sessionId, memoryInput || objective, {
-                    profile: inferRecallProfileFromText(memoryInput || objective),
+                ? await this.memoryService.process(sessionId, memoryInput || rawObjective, {
+                    profile: inferRecallProfileFromText(memoryInput || rawObjective),
                     ownerId,
                 })
                 : [];
@@ -2567,13 +2634,21 @@ class ConversationOrchestrator extends EventEmitter {
             : loadRecentMessages !== false && this.sessionStore?.getRecentMessages
                 ? await this.sessionStore.getRecentMessages(sessionId, RECENT_TRANSCRIPT_LIMIT)
                 : [];
-        const objective = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
+        const remoteResolvedObjective = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
             ? resolveRemoteObjectiveFromSession(rawObjective, session, resolvedRecentMessages)
             : rawObjective;
+        const transcriptObjective = resolveTranscriptObjectiveFromSession(remoteResolvedObjective, resolvedRecentMessages);
+        const objective = transcriptObjective.objective;
+        const effectiveInstructions = transcriptObjective.usedTranscriptContext
+            ? [
+                instructions || '',
+                'The current user turn may be abbreviated or cut off. Use the recent transcript to resolve the intended task and continue without asking the user to restate prior context unless the transcript is genuinely insufficient.',
+            ].filter(Boolean).join('\n\n')
+            : instructions;
 
         const toolPolicy = this.buildToolPolicy({
             objective,
-            instructions,
+            instructions: effectiveInstructions,
             session,
             metadata,
             executionProfile: resolvedProfile,
@@ -2900,7 +2975,7 @@ class ConversationOrchestrator extends EventEmitter {
                 if (nextPlan.length === 0 && toolPolicy.candidateToolIds.length > 0) {
                     nextPlan = await this.planToolUse({
                         objective,
-                        instructions,
+                        instructions: effectiveInstructions,
                         contextMessages: resolvedContextMessages,
                         recentMessages: resolvedRecentMessages,
                         session,
@@ -3190,9 +3265,9 @@ class ConversationOrchestrator extends EventEmitter {
 
             const finalResponseStartedAt = new Date().toISOString();
             finalResponse = await this.buildFinalResponse({
-                input,
+                input: transcriptObjective.usedTranscriptContext ? objective : input,
                 objective,
-                instructions,
+                instructions: effectiveInstructions,
                 contextMessages: resolvedContextMessages,
                 recentMessages: resolvedRecentMessages,
                 model,

@@ -86,6 +86,91 @@ describe('ConversationOrchestrator', () => {
         expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-1', 'Plain answer');
     });
 
+    test('expands a truncated follow-up from recent transcript before asking the model for a plain response', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Recovered answer', 'resp_recovered')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn(() => null),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-followup-plain', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'user', content: 'give me a breakdown of the k3s cluster on the server' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'in five minutes from now',
+            sessionId: 'session-followup-plain',
+            stream: false,
+        });
+
+        expect(result.output).toBe('Recovered answer');
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.stringContaining('give me a breakdown of the k3s cluster on the server'),
+            instructions: expect.stringContaining('continue without asking the user to restate prior context'),
+        }));
+    });
+
+    test('does not merge a concise standalone request into prior transcript context', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Pods answer', 'resp_pods')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn(() => null),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-standalone-plain', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'user', content: 'give me a breakdown of the k3s cluster on the server' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'check pods',
+            sessionId: 'session-standalone-plain',
+            stream: false,
+        });
+
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: 'check pods',
+        }));
+        expect(llmClient.createResponse).not.toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.stringContaining('give me a breakdown of the k3s cluster on the server. check pods'),
+        }));
+    });
+
     test('uses a deterministic remote health workflow for health report prompts without model synthesis', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -260,6 +345,87 @@ describe('ConversationOrchestrator', () => {
         expect(result.trace.runtimeMode).toBe('direct-tool');
         expect(result.output).toContain('Every day at 8:00 PM');
         expect(result.output).not.toContain('Server Health Report\n\nSystem Information');
+    });
+
+    test('continues a truncated scheduled follow-up from recent transcript instead of asking for clarification', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'agent-workload'
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn(async (toolId) => {
+                if (toolId === 'agent-workload') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            action: 'create',
+                            message: 'K3s Cluster Breakdown created. Runs once at 2026-04-03T14:52:00.000Z.',
+                            workload: {
+                                id: 'workload-followup-1',
+                                title: 'K3s Cluster Breakdown',
+                                trigger: {
+                                    type: 'once',
+                                    runAt: '2026-04-03T14:52:00.000Z',
+                                },
+                            },
+                        },
+                    };
+                }
+
+                throw new Error(`Unexpected tool execution: ${toolId}`);
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-followup-tool', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'user', content: 'give me a breakdown of the k3s cluster on the server' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'in five minutes from now',
+            sessionId: 'session-followup-tool',
+            stream: false,
+            toolContext: {
+                timezone: 'UTC',
+                now: '2026-04-03T14:47:00.000Z',
+            },
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'agent-workload',
+            expect.objectContaining({
+                action: 'create',
+                prompt: expect.stringContaining('give me a breakdown of the k3s cluster on the server'),
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-03T14:52:00.000Z',
+                },
+            }),
+            expect.any(Object),
+        );
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(result.output).toBe('K3s Cluster Breakdown created. Runs once at 2026-04-03T14:52:00.000Z.');
     });
 
     test('terminates immediately after a successful workload creation instead of replanning', async () => {

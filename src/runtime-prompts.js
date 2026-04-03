@@ -2,6 +2,7 @@ function buildContinuityInstructions(extra = '') {
     return [
         'You are a helpful AI assistant.',
         'Use the recent session transcript as the primary context for follow-up references like "that", "again", "same as before", or "the number from earlier".',
+        'If the current user turn looks abbreviated, referential, or cut off but the recent transcript contains enough context, continue the task instead of asking the user to restate the missing part.',
         'Use recalled memory only as supplemental context.',
         'Do not claim you lack access to prior conversation if session transcript or recalled context is available in the prompt.',
         'Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that.',
