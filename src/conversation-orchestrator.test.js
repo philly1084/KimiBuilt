@@ -262,6 +262,88 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).not.toContain('Server Health Report\n\nSystem Information');
     });
 
+    test('terminates immediately after a successful workload creation instead of replanning', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'remote-command' || toolId === 'agent-workload'
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn(async (toolId) => {
+                if (toolId === 'agent-workload') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            action: 'create',
+                            message: 'Check Remote Time created. Runs once at 2026-04-03T20:05:00.000Z.',
+                            workload: {
+                                id: 'workload-1',
+                                title: 'Check Remote Time',
+                                trigger: {
+                                    type: 'once',
+                                    runAt: '2026-04-03T20:05:00.000Z',
+                                },
+                            },
+                        },
+                    };
+                }
+
+                throw new Error(`Unexpected tool execution: ${toolId}`);
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-workload-terminal', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'can you run a cron later to check the time on the remote host in 5 minutes',
+            sessionId: 'session-workload-terminal',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            toolContext: {
+                timezone: 'America/Halifax',
+                now: '2026-04-03T20:00:00.000Z',
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).not.toHaveBeenCalled();
+        expect(result.output).toBe('Check Remote Time created. Runs once at 2026-04-03T20:05:00.000Z.');
+        expect(result.trace.runtimeMode).toBe('direct-tool');
+    });
+
     test('retries the stored deterministic remote health workflow without planner or synthesis', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

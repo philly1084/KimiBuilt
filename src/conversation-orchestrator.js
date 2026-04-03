@@ -1579,6 +1579,33 @@ function canRecoverFromInvalidRuntimeResponse({ output = '', toolEvents = [], to
     });
 }
 
+function isTerminalWorkloadCreationEvent(event = {}) {
+    const toolName = String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim().toLowerCase();
+    const succeeded = event?.result?.success !== false;
+    const action = String(event?.result?.data?.action || '').trim().toLowerCase();
+    return succeeded
+        && toolName === 'agent-workload'
+        && (action === 'create' || action === 'create_from_scenario')
+        && Boolean(event?.result?.data?.workload || event?.result?.data?.message);
+}
+
+function buildTerminalWorkloadCreationOutput(toolEvents = []) {
+    const terminalEvent = [...(Array.isArray(toolEvents) ? toolEvents : [])]
+        .reverse()
+        .find((event) => isTerminalWorkloadCreationEvent(event));
+    if (!terminalEvent) {
+        return '';
+    }
+
+    const message = String(terminalEvent?.result?.data?.message || '').trim();
+    if (message) {
+        return message;
+    }
+
+    const title = String(terminalEvent?.result?.data?.workload?.title || '').trim();
+    return title ? `${title} created.` : 'Deferred workload created.';
+}
+
 function shouldRepairInvalidRuntimeResponse({ output = '', toolEvents = [], toolPolicy = {} } = {}) {
     return isInvalidRuntimeResponseText(output)
         && Array.isArray(toolPolicy?.candidateToolIds)
@@ -3110,6 +3137,45 @@ class ConversationOrchestrator extends EventEmitter {
                             })),
                         },
                     }));
+                }
+
+                if (roundToolEvents.some((event) => isTerminalWorkloadCreationEvent(event))) {
+                    runtimeMode = runtimeMode || 'direct-tool';
+                    const terminalOutput = buildTerminalWorkloadCreationOutput(roundToolEvents);
+                    finalResponse = this.withResponseMetadata(buildSyntheticResponse({
+                        output: terminalOutput,
+                        responseId: `resp_workload_${Date.now()}`,
+                        model: model || null,
+                        metadata: {
+                            terminalWorkloadCreation: true,
+                            toolEvents,
+                        },
+                    }), {
+                        executionProfile: resolvedProfile,
+                        runtimeMode,
+                        toolEvents,
+                        toolPolicy,
+                        autonomyApproved,
+                        executionTrace,
+                    });
+                    output = extractResponseText(finalResponse);
+                    return this.completeConversationRun({
+                        sessionId,
+                        ownerId,
+                        userText: rawObjective,
+                        objective,
+                        taskType,
+                        executionProfile: resolvedProfile,
+                        runtimeMode,
+                        toolPolicy,
+                        toolEvents,
+                        output,
+                        finalResponse,
+                        startedAt,
+                        metadata,
+                        autonomyApproved,
+                        executionTrace,
+                    });
                 }
 
                 if (!autonomyApproved || blockingRoundFailure || roundToolEvents.length === 0) {
