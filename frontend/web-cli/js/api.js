@@ -48,7 +48,7 @@ class WebCLIAPI {
     }
 
     isLikelyLocalModel(modelId = '') {
-        return /(ollama|llama|mistral|qwen|phi|gemma|deepseek|local)/i.test(String(modelId || ''));
+        return /(ollama|llama|mistral|qwen|phi|gemma|deepseek|deepseak|local)/i.test(String(modelId || ''));
     }
 
     getChatTimeout(modelId = null, stream = true) {

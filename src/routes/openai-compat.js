@@ -373,7 +373,7 @@ function isChatCapableModel(modelId = '') {
     if (!normalizedId) return false;
 
     const looksLikeChatModel = [
-        'gpt', 'claude', 'gemini', 'kimi', 'llama', 'mistral', 'qwen', 'phi', 'ollama', 'antigravity',
+        'gpt', 'claude', 'gemini', 'kimi', 'llama', 'mistral', 'qwen', 'phi', 'ollama', 'antigravity', 'deepseek', 'deepseak',
     ].some((token) => normalizedId.includes(token));
 
     const imageOnly = normalizedId.includes('image') && !normalizedId.includes('vision');

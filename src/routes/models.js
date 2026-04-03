@@ -14,13 +14,23 @@ router.get('/', async (_req, res, next) => {
         
         // Filter to chat/completion models and format response
         const chatModels = models
-            .filter(m => 
-                m.id.includes('gpt') || 
-                m.id.includes('claude') || 
-                m.id.includes('llama') ||
-                m.id.includes('mistral') ||
-                m.id.includes('gemini')
-            )
+            .filter((m) => {
+                const id = String(m.id || '').toLowerCase();
+                return [
+                    'gpt',
+                    'claude',
+                    'gemini',
+                    'kimi',
+                    'llama',
+                    'mistral',
+                    'qwen',
+                    'phi',
+                    'ollama',
+                    'antigravity',
+                    'deepseek',
+                    'deepseak',
+                ].some((token) => id.includes(token));
+            })
             .filter(m => {
                 const id = String(m.id || '').toLowerCase();
                 return ![

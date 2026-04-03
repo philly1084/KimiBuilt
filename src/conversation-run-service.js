@@ -140,6 +140,62 @@ class ConversationRunService {
         };
     }
 
+    async createArtifactFromContent({
+        sessionId,
+        ownerId = null,
+        session = null,
+        content = '',
+        outputFormat = '',
+        message = '',
+        mode = 'chat',
+        model = null,
+        reasoningEffort = null,
+        metadata = {},
+    }) {
+        const resolvedSession = session || (ownerId
+            ? await this.sessionStore.getOwned(sessionId, ownerId)
+            : await this.sessionStore.get(sessionId));
+
+        if (!resolvedSession) {
+            const error = new Error('Session not found');
+            error.statusCode = 404;
+            throw error;
+        }
+
+        const outputText = String(content || '').trim();
+        if (!outputText) {
+            const error = new Error('Artifact stages need source content from a prior stage.');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const runtimeToolManager = await ensureRuntimeToolManager(this.app);
+        const deferredArtifact = await this.maybeGenerateDeferredArtifact({
+            runtimeToolManager,
+            sessionId,
+            ownerId,
+            session: resolvedSession,
+            message: message || `Create a ${outputFormat || 'document'} artifact from the prior stage output.`,
+            mode,
+            responseId: null,
+            outputText,
+            model,
+            reasoningEffort,
+            metadata: {
+                ...metadata,
+                workloadRun: true,
+                outputFormat,
+            },
+        });
+
+        return {
+            outputText,
+            toolEvents: [],
+            artifacts: deferredArtifact.artifacts,
+            artifactMessage: deferredArtifact.artifactMessage,
+        };
+    }
+
     async runStructuredExecution({
         sessionId,
         ownerId = null,
@@ -272,7 +328,8 @@ class ConversationRunService {
             };
         }
 
-        const outputFormat = inferRequestedOutputFormat(message);
+        const outputFormat = String(metadata?.outputFormat || '').trim().toLowerCase()
+            || inferRequestedOutputFormat(message);
         if (!outputFormat || !String(outputText || '').trim()) {
             return {
                 artifacts: [],

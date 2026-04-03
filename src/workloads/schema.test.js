@@ -151,6 +151,48 @@ describe('workload schema', () => {
         }]);
     });
 
+    test('normalizes stage handoff fields for chained routines', () => {
+        const workload = validateWorkloadPayload({
+            sessionId: 'session-1',
+            title: 'Morning routine',
+            prompt: 'Gather cluster facts.',
+            policy: {
+                executionProfile: 'default',
+                toolIds: ['web-search'],
+            },
+            stages: [{
+                when: 'on_success',
+                delayMs: 0,
+                prompt: 'Turn the facts into a review plan.',
+                toolIds: ['file-write'],
+                outputKey: 'plan.v1',
+            }, {
+                when: 'on_success',
+                delayMs: 0,
+                inputFrom: ['plan.v1'],
+                outputFormat: 'pdf',
+            }],
+        }, {
+            ownerId: 'phill',
+            sessionId: 'session-1',
+        });
+
+        expect(workload.stages).toEqual([
+            expect.objectContaining({
+                toolIds: ['file-write'],
+                inputFrom: [],
+                outputKey: 'plan.v1',
+                outputFormat: null,
+            }),
+            expect.objectContaining({
+                toolIds: [],
+                inputFrom: ['plan.v1'],
+                outputKey: null,
+                outputFormat: 'pdf',
+            }),
+        ]);
+    });
+
     test('derives stable idempotency keys', () => {
         const key = deriveRunIdempotencyKey({
             workloadId: 'workload-1',

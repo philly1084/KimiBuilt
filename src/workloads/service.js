@@ -274,6 +274,13 @@ class AgentWorkloadService {
             : null;
         const prompt = stage?.prompt || run.prompt || workload.prompt;
         const execution = stage?.execution || workload.execution || null;
+        const stageInputs = await this.resolveStageInputs(run, stage);
+        const message = this.buildStageMessage(prompt, stageInputs, stage);
+        const stageOutputFormat = String(stage?.outputFormat || '').trim().toLowerCase() || null;
+        const stageToolIds = Array.isArray(stage?.toolIds) && stage.toolIds.length > 0
+            ? stage.toolIds
+            : (workload.policy?.toolIds || []);
+        const artifactOnlyStage = Boolean(stage && stageOutputFormat && !execution && !String(prompt || '').trim());
         const requestedModel = String(
             stage?.metadata?.requestedModel
             || run?.metadata?.requestedModel
@@ -292,7 +299,25 @@ class AgentWorkloadService {
 
         try {
             const session = await this.sessionStore.getOwned(workload.sessionId, workload.ownerId);
-            const result = execution
+            const result = artifactOnlyStage
+                ? await this.conversationRunService.createArtifactFromContent({
+                    sessionId: workload.sessionId,
+                    ownerId: workload.ownerId,
+                    session,
+                    content: this.renderStageInputText(stageInputs, stage),
+                    outputFormat: stageOutputFormat,
+                    message: message || `Create a ${stageOutputFormat} artifact from the prior stage output.`,
+                    mode: workload.mode || 'chat',
+                    model: requestedModel,
+                    metadata: {
+                        taskType: workload.mode || 'chat',
+                        clientSurface: 'workload',
+                        workloadId: workload.id,
+                        runId: run.id,
+                        workloadRun: true,
+                    },
+                })
+                : execution
                 ? await this.conversationRunService.runStructuredExecution({
                     sessionId: workload.sessionId,
                     ownerId: workload.ownerId,
@@ -309,10 +334,10 @@ class AgentWorkloadService {
                     sessionId: workload.sessionId,
                     ownerId: workload.ownerId,
                     session,
-                    message: prompt,
+                    message,
                     model: requestedModel,
                     executionProfile: workload.policy?.executionProfile,
-                    requestedToolIds: workload.policy?.toolIds || [],
+                    requestedToolIds: stageToolIds,
                     policy: workload.policy || {},
                     metadata: {
                         taskType: workload.mode || 'chat',
@@ -320,23 +345,31 @@ class AgentWorkloadService {
                         workloadId: workload.id,
                         runId: run.id,
                         workloadRun: true,
+                        outputFormat: stageOutputFormat,
                         remoteBuildAutonomyApproved: workload.policy?.allowSideEffects === true,
                     },
                 });
+            const completionTrace = result.execution?.trace
+                || result.response?.metadata?.executionTrace
+                || (execution ? {
+                    structuredExecution: true,
+                    toolId: execution.tool,
+                    params: execution.params || {},
+                } : null)
+                || (artifactOnlyStage ? {
+                    artifactOnly: true,
+                    outputFormat: stageOutputFormat,
+                } : {});
 
             const completed = await this.store.completeRun(run.id, workerId, {
                 responseId: result.response?.id || null,
-                trace: result.execution?.trace
-                    || result.response?.metadata?.executionTrace
-                    || (execution ? {
-                        structuredExecution: true,
-                        toolId: execution.tool,
-                        params: execution.params || {},
-                    } : {}),
+                trace: completionTrace,
+                metadata: this.buildCompletedRunMetadata(run, stage, result),
             });
             await this.addRunEventSafe(run.id, 'completed', {
                 responseId: result.response?.id || null,
                 structuredExecution: Boolean(execution),
+                artifactOnly: artifactOnlyStage,
             });
             await this.scheduleFollowupStage(workload, run, true);
             await this.ensureNextScheduledRun(workload, run);
@@ -358,6 +391,13 @@ class AgentWorkloadService {
             const failed = await this.store.failRun(run.id, workerId, {
                 error: {
                     message: error.message,
+                },
+                metadata: {
+                    ...(run.metadata || {}),
+                    lastError: {
+                        message: error.message,
+                        failedAt: new Date().toISOString(),
+                    },
                 },
             });
             await this.addRunEventSafe(run.id, 'failed', {
@@ -466,7 +506,7 @@ class AgentWorkloadService {
             scheduledFor,
             parentRunId: run.id,
             stageIndex: nextIndex,
-            prompt: stage.prompt || workload.prompt,
+            prompt: stage.prompt || '',
             idempotencyKey: deriveRunIdempotencyKey({
                 workloadId: workload.id,
                 scheduledFor: scheduledFor.toISOString(),
@@ -497,6 +537,173 @@ class AgentWorkloadService {
         }
 
         return followupRun;
+    }
+
+    async resolveStageInputs(run, stage = null) {
+        const resolved = {
+            parent: null,
+            named: {},
+        };
+        const requestedKeys = Array.isArray(stage?.inputFrom) ? stage.inputFrom : [];
+        let currentRunId = run?.parentRunId || run?.metadata?.parentRunId || null;
+        let depth = 0;
+
+        while (currentRunId && depth < 20) {
+            const parentRun = await this.store.getRunById(currentRunId);
+            if (!parentRun) {
+                break;
+            }
+
+            const output = this.extractRunOutput(parentRun);
+            if (!resolved.parent && output) {
+                resolved.parent = output;
+            }
+
+            const outputKey = String(parentRun?.metadata?.outputKey || '').trim();
+            if (outputKey && output && !resolved.named[outputKey]) {
+                resolved.named[outputKey] = output;
+            }
+
+            currentRunId = parentRun.parentRunId || parentRun.metadata?.parentRunId || null;
+            depth += 1;
+        }
+
+        if (requestedKeys.length === 0) {
+            return resolved;
+        }
+
+        return {
+            parent: resolved.parent,
+            named: Object.fromEntries(
+                requestedKeys
+                    .filter((key) => resolved.named[key])
+                    .map((key) => [key, resolved.named[key]]),
+            ),
+        };
+    }
+
+    extractRunOutput(run = {}) {
+        const output = run?.metadata?.output;
+        if (!output || typeof output !== 'object') {
+            return null;
+        }
+
+        const text = String(output.text || output.artifactMessage || '').trim();
+        const artifacts = Array.isArray(output.artifacts)
+            ? output.artifacts
+                .filter((artifact) => artifact?.id || artifact?.filename)
+                .map((artifact) => ({
+                    id: artifact.id || null,
+                    filename: artifact.filename || null,
+                    mimeType: artifact.mimeType || null,
+                }))
+            : [];
+
+        if (!text && artifacts.length === 0) {
+            return null;
+        }
+
+        return {
+            text,
+            artifacts,
+        };
+    }
+
+    renderStageInputText(stageInputs = {}, stage = null) {
+        const sections = [];
+        const requestedKeys = Array.isArray(stage?.inputFrom) ? stage.inputFrom : [];
+
+        if (requestedKeys.length > 0) {
+            requestedKeys.forEach((key) => {
+                const entry = stageInputs?.named?.[key];
+                if (entry) {
+                    sections.push(this.formatStageInputSection(key, entry));
+                }
+            });
+        } else if (stageInputs?.parent) {
+            sections.push(this.formatStageInputSection('previous_stage', stageInputs.parent));
+        }
+
+        return sections.filter(Boolean).join('\n\n');
+    }
+
+    formatStageInputSection(label = 'previous_stage', entry = {}) {
+        const parts = [];
+        const text = String(entry?.text || '').trim();
+        const artifacts = Array.isArray(entry?.artifacts) ? entry.artifacts : [];
+
+        if (text) {
+            parts.push(text);
+        }
+        if (artifacts.length > 0) {
+            parts.push(`Artifacts: ${artifacts.map((artifact) => artifact.filename || artifact.id).filter(Boolean).join(', ')}`);
+        }
+
+        if (parts.length === 0) {
+            return '';
+        }
+
+        return `[${label}]\n${parts.join('\n\n')}`;
+    }
+
+    buildStageMessage(prompt = '', stageInputs = {}, stage = null) {
+        const trimmedPrompt = String(prompt || '').trim();
+        const inputText = this.renderStageInputText(stageInputs, stage);
+
+        if (trimmedPrompt && inputText) {
+            return `${trimmedPrompt}\n\nContext from prior stages:\n\n${inputText}`;
+        }
+        if (trimmedPrompt) {
+            return trimmedPrompt;
+        }
+        return inputText;
+    }
+
+    buildCompletedRunMetadata(run = {}, stage = null, result = {}) {
+        const outputKey = String(stage?.outputKey || '').trim() || null;
+        const artifacts = Array.isArray(result?.artifacts)
+            ? result.artifacts
+                .filter((artifact) => artifact?.id || artifact?.filename)
+                .map((artifact) => ({
+                    id: artifact.id || null,
+                    filename: artifact.filename || null,
+                    mimeType: artifact.mimeType || null,
+                }))
+            : [];
+        const outputText = this.truncateStoredOutput(
+            String(result?.outputText || result?.artifactMessage || '').trim(),
+        );
+        const artifactMessage = this.truncateStoredOutput(
+            String(result?.artifactMessage || '').trim(),
+        );
+
+        return {
+            ...(run.metadata || {}),
+            ...(outputKey ? { outputKey } : {}),
+            output: {
+                text: outputText,
+                artifactMessage,
+                artifacts,
+            },
+        };
+    }
+
+    _truncateStoredOutputLegacy(value = '', maxLength = 20000) {
+        const normalized = String(value || '');
+        if (normalized.length <= maxLength) {
+            return normalized;
+        }
+
+        return `${normalized.slice(0, maxLength - 1)}…`;
+    }
+
+    truncateStoredOutput(value = '', maxLength = 20000) {
+        const normalized = String(value || '');
+        if (normalized.length <= maxLength) {
+            return normalized;
+        }
+
+        return `${normalized.slice(0, maxLength - 3)}...`;
     }
 
     async getSessionSummaries(sessionIds = [], ownerId = null) {

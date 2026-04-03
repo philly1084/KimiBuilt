@@ -492,6 +492,7 @@ class WorkloadStore {
                 SET status = '${RUN_STATUS.COMPLETED}',
                     response_id = $3,
                     trace = $4::jsonb,
+                    metadata = $5::jsonb,
                     error = '{}'::jsonb,
                     finished_at = NOW(),
                     claim_expires_at = NULL,
@@ -505,6 +506,7 @@ class WorkloadStore {
                 workerId,
                 payload.responseId || null,
                 JSON.stringify(payload.trace || {}),
+                JSON.stringify(payload.metadata || {}),
             ],
         );
 
@@ -519,6 +521,7 @@ class WorkloadStore {
                 SET status = '${RUN_STATUS.FAILED}',
                     error = $3::jsonb,
                     trace = $4::jsonb,
+                    metadata = $5::jsonb,
                     finished_at = NOW(),
                     claim_expires_at = NULL,
                     updated_at = NOW()
@@ -531,6 +534,7 @@ class WorkloadStore {
                 workerId,
                 JSON.stringify(payload.error || {}),
                 JSON.stringify(payload.trace || {}),
+                JSON.stringify(payload.metadata || {}),
             ],
         );
 

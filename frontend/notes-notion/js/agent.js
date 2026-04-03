@@ -3412,6 +3412,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             'phi',
             'ollama',
             'antigravity',
+            'deepseek',
+            'deepseak',
         ].some((token) => id.includes(token));
 
         const looksUnsupported = [

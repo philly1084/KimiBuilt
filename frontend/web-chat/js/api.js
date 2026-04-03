@@ -891,6 +891,8 @@ class OpenAIAPIClient extends EventTarget {
                 'phi',
                 'ollama',
                 'antigravity',
+                'deepseek',
+                'deepseak',
             ].some((token) => id.includes(token));
 
             const looksUnsupportedForWebChat = [

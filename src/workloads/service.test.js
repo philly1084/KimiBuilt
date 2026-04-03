@@ -487,6 +487,160 @@ describe('AgentWorkloadService', () => {
         }));
     });
 
+    test('passes prior stage output into the next stage and narrows tool usage', async () => {
+        const workload = {
+            id: 'workload-2',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Morning cluster routine',
+            prompt: 'Gather cluster details from the server.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: ['web-search'],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [
+                {
+                    when: 'on_success',
+                    delayMs: 0,
+                    prompt: 'Turn the gathered facts into a concise review plan.',
+                    inputFrom: ['cluster.facts'],
+                    toolIds: ['file-write'],
+                    outputKey: 'cluster.plan',
+                    metadata: {},
+                },
+            ],
+        };
+        const run = {
+            id: 'run-2',
+            workload,
+            stageIndex: 0,
+            scheduledFor: '2026-04-01T09:02:00.000Z',
+            parentRunId: 'run-1',
+            prompt: workload.stages[0].prompt,
+            metadata: {
+                parentRunId: 'run-1',
+            },
+        };
+
+        store.getRunById.mockResolvedValue({
+            id: 'run-1',
+            parentRunId: null,
+            metadata: {
+                outputKey: 'cluster.facts',
+                output: {
+                    text: 'Nodes: 3\nPods: 18\nWarnings: 1 CrashLoopBackOff',
+                    artifacts: [],
+                },
+            },
+        });
+        conversationRunService.runChatTurn.mockResolvedValue({
+            outputText: 'Review plan ready.',
+            response: { id: 'resp-2' },
+            execution: { trace: { steps: 2 } },
+            artifacts: [],
+        });
+        store.completeRun.mockResolvedValue({ id: 'run-2', status: 'completed' });
+        store.enqueueRun.mockResolvedValue(null);
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            message: expect.stringContaining('Turn the gathered facts into a concise review plan.'),
+            requestedToolIds: ['file-write'],
+        }));
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            message: expect.stringContaining('[cluster.facts]'),
+        }));
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            message: expect.stringContaining('CrashLoopBackOff'),
+        }));
+        expect(store.completeRun).toHaveBeenCalledWith('run-2', 'worker-1', expect.objectContaining({
+            metadata: expect.objectContaining({
+                outputKey: 'cluster.plan',
+                output: expect.objectContaining({
+                    text: 'Review plan ready.',
+                }),
+            }),
+        }));
+    });
+
+    test('creates an artifact-only follow-up stage from prior stage output', async () => {
+        const workload = {
+            id: 'workload-3',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Morning report',
+            prompt: 'Gather facts.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [
+                {
+                    when: 'on_success',
+                    delayMs: 0,
+                    inputFrom: ['cluster.plan'],
+                    outputFormat: 'pdf',
+                    metadata: {},
+                },
+            ],
+        };
+        const run = {
+            id: 'run-3',
+            workload,
+            stageIndex: 0,
+            scheduledFor: '2026-04-01T09:05:00.000Z',
+            parentRunId: 'run-2',
+            prompt: '',
+            metadata: {
+                parentRunId: 'run-2',
+            },
+        };
+
+        store.getRunById.mockResolvedValue({
+            id: 'run-2',
+            parentRunId: null,
+            metadata: {
+                outputKey: 'cluster.plan',
+                output: {
+                    text: 'Cluster review plan\n\n- Check nodes\n- Check pods',
+                    artifacts: [],
+                },
+            },
+        });
+        conversationRunService.createArtifactFromContent = jest.fn(async () => ({
+            outputText: 'Cluster review plan\n\n- Check nodes\n- Check pods',
+            artifacts: [{ id: 'artifact-1', filename: 'cluster-report.pdf' }],
+            artifactMessage: 'Created the PDF artifact (cluster-report.pdf).',
+        }));
+        store.completeRun.mockResolvedValue({ id: 'run-3', status: 'completed' });
+        store.enqueueRun.mockResolvedValue(null);
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(conversationRunService.createArtifactFromContent).toHaveBeenCalledWith(expect.objectContaining({
+            outputFormat: 'pdf',
+            content: expect.stringContaining('Cluster review plan'),
+        }));
+        expect(store.completeRun).toHaveBeenCalledWith('run-3', 'worker-1', expect.objectContaining({
+            metadata: expect.objectContaining({
+                output: expect.objectContaining({
+                    artifacts: [{ id: 'artifact-1', filename: 'cluster-report.pdf', mimeType: null }],
+                }),
+            }),
+        }));
+    });
+
     test('schedules the next cron slot after a failed run', async () => {
         const workload = {
             id: 'workload-1',

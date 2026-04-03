@@ -57,7 +57,10 @@ function validateWorkloadPayload(payload = {}, options = {}) {
 
     let stages;
     try {
-        stages = normalizeStages(payload.stages || []);
+        stages = normalizeStages(payload.stages || [], {
+            executionProfile: policy?.executionProfile,
+            allowSideEffects: policy?.allowSideEffects === true,
+        });
     } catch (error) {
         errors.push(error.message);
     }
@@ -199,7 +202,54 @@ function normalizeExecution(execution = null) {
     };
 }
 
-function normalizeStages(stages = []) {
+function normalizeWorkflowKey(value = '', label = 'key') {
+    const normalized = sanitizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(normalized)) {
+        throw new Error(`${label} must start with a letter or number and contain only letters, numbers, dots, underscores, or hyphens`);
+    }
+
+    return normalized;
+}
+
+function normalizeStageInputFrom(inputFrom = [], label = 'inputFrom') {
+    const values = Array.isArray(inputFrom) ? inputFrom : [inputFrom];
+    return Array.from(new Set(values
+        .map((value, index) => normalizeWorkflowKey(value, `${label}[${index}]`))
+        .filter(Boolean)));
+}
+
+function normalizeStageToolIds(toolIds = [], options = {}, label = 'toolIds') {
+    if (!Array.isArray(toolIds)) {
+        throw new Error(`${label} must be an array`);
+    }
+
+    const executionProfile = sanitizeText(options.executionProfile || DEFAULT_EXECUTION_PROFILE) || DEFAULT_EXECUTION_PROFILE;
+    const allowedForProfile = new Set(
+        PROFILE_TOOL_ALLOWLISTS[executionProfile]
+        || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE]
+        || [],
+    );
+    const normalizedToolIds = Array.from(new Set(toolIds
+        .map((toolId) => sanitizeText(toolId))
+        .filter(Boolean)));
+
+    for (const toolId of normalizedToolIds) {
+        if (!allowedForProfile.has(toolId)) {
+            throw new Error(`${label} tool '${toolId}' is not allowed for execution profile '${executionProfile}'`);
+        }
+        if (BLOCKED_AUTONOMOUS_TOOL_IDS.has(toolId) && options.allowSideEffects !== true) {
+            throw new Error(`${label} tool '${toolId}' requires allowSideEffects=true`);
+        }
+    }
+
+    return normalizedToolIds;
+}
+
+function normalizeStages(stages = [], options = {}) {
     if (!Array.isArray(stages)) {
         throw new Error('stages must be an array');
     }
@@ -217,11 +267,36 @@ function normalizeStages(stages = []) {
             throw new Error(`stages[${index}].${error.message}`);
         }
 
+        let toolIds = [];
+        try {
+            toolIds = normalizeStageToolIds(stage.toolIds || stage.tool_ids || [], options, `stages[${index}].toolIds`);
+        } catch (error) {
+            throw new Error(error.message);
+        }
+
+        let inputFrom = [];
+        try {
+            inputFrom = normalizeStageInputFrom(stage.inputFrom || stage.input_from || stage.inputs || [], `stages[${index}].inputFrom`);
+        } catch (error) {
+            throw new Error(error.message);
+        }
+
+        let outputKey = '';
+        try {
+            outputKey = normalizeWorkflowKey(stage.outputKey || stage.output_key || '', `stages[${index}].outputKey`);
+        } catch (error) {
+            throw new Error(error.message);
+        }
+
         return {
             when,
             delayMs: normalizeNonNegativeInteger(stage.delayMs, 0, `stages[${index}].delayMs`),
             prompt: sanitizeText(stage.prompt || ''),
             execution,
+            toolIds,
+            inputFrom,
+            outputKey: outputKey || null,
+            outputFormat: sanitizeText(stage.outputFormat || stage.output_format || '').toLowerCase() || null,
             metadata: normalizeMetadata(stage.metadata || {}),
         };
     });
@@ -294,6 +369,7 @@ module.exports = {
     normalizePolicy,
     normalizeStages,
     normalizeTrigger,
+    normalizeWorkflowKey,
     sanitizeSlug,
     validateWorkloadPayload,
 };

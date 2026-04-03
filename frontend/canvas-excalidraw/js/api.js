@@ -311,6 +311,8 @@ class OpenAICanvasAPI {
                 'phi',
                 'ollama',
                 'antigravity',
+                'deepseek',
+                'deepseak',
             ].some((token) => id.includes(token));
 
             return looksLikeChatModel && !id.includes('image');

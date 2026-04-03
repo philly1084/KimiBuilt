@@ -275,10 +275,11 @@ class CanvasApp {
         try {
             const response = await fetch('/api/models');
             const data = await response.json();
+            const models = Array.isArray(data.data) ? data.data : [];
             
-            if (data.models && data.models.length > 0) {
-                modelSelect.innerHTML = data.models.map(m => 
-                    `<option value="${m.id}" ${m.id === 'gpt-4o' ? 'selected' : ''}>${m.name}</option>`
+            if (models.length > 0) {
+                modelSelect.innerHTML = models.map(m => 
+                    `<option value="${m.id}" ${m.id === 'gpt-4o' ? 'selected' : ''}>${m.name || m.id}</option>`
                 ).join('');
             } else {
                 modelSelect.innerHTML = `

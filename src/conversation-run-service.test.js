@@ -217,4 +217,84 @@ describe('ConversationRunService', () => {
         }]);
         expect(result.artifactMessage).toBe('Created the PDF artifact (penguins.pdf).');
     });
+
+    test('honors an explicit workload output format even when the prompt does not mention it', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            executeTool: jest.fn(),
+            getTool: jest.fn(),
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-2',
+                output: [{
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Cluster plan\n\n- Review node health\n- Review pods' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+        inferRequestedOutputFormat.mockReturnValue(null);
+        maybePrepareImagesForArtifactPrompt.mockResolvedValue({
+            artifactIds: [],
+            artifacts: [],
+            toolEvents: [],
+            imagePrompt: null,
+            resetPreviousResponse: false,
+        });
+        maybeGenerateOutputArtifact.mockResolvedValue([{
+            id: 'artifact-2',
+            filename: 'cluster-plan.pdf',
+        }]);
+        resolveArtifactContextIds.mockReturnValue([]);
+
+        const sessionStore = {
+            getOwned: jest.fn(async () => ({
+                id: 'session-1',
+                previousResponseId: null,
+                metadata: {},
+            })),
+            get: jest.fn(async () => ({
+                id: 'session-1',
+                previousResponseId: null,
+                metadata: {},
+            })),
+            appendMessages: jest.fn(async () => null),
+            update: jest.fn(async () => null),
+            recordResponse: jest.fn(async () => null),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+        };
+        const service = new ConversationRunService({
+            app: { locals: {} },
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await service.runChatTurn({
+            sessionId: 'session-1',
+            ownerId: 'user-1',
+            session: {
+                id: 'session-1',
+                previousResponseId: null,
+                metadata: {},
+            },
+            message: 'Turn the cluster notes into a clean review plan.',
+            metadata: {
+                taskType: 'chat',
+                workloadRun: true,
+                outputFormat: 'pdf',
+            },
+        });
+
+        expect(maybeGenerateOutputArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            outputFormat: 'pdf',
+            content: 'Cluster plan\n\n- Review node health\n- Review pods',
+        }));
+        expect(result.artifactMessage).toBe('Created the PDF artifact (cluster-plan.pdf).');
+    });
 });

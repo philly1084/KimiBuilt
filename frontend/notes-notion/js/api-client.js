@@ -893,6 +893,8 @@ class NotesAPIClient {
                 'phi',
                 'ollama',
                 'antigravity',
+                'deepseek',
+                'deepseak',
             ].some((token) => id.includes(token));
 
             const looksUnsupportedForNotes = [
