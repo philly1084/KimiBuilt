@@ -452,6 +452,11 @@ function extractRequestedSshCommand(text = '') {
         }
     }
 
+    if (/\b(?:check|show|get|display|what(?:'s| is))\b[\s\S]{0,24}\b(?:time|clock)\b/i.test(prompt)
+        || /\b(?:server|host|remote)\s+time\b/i.test(prompt)) {
+        return 'date';
+    }
+
     if (/\b(?:check|inspect|verify|look at)\b[\s\S]{0,40}\b(?:health|status)\b/i.test(prompt)
         || /\bhealth check\b/i.test(prompt)) {
         return 'hostname && uptime && (df -h / || true) && (free -m || true)';

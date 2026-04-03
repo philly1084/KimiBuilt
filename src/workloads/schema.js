@@ -13,6 +13,7 @@ const BLOCKED_AUTONOMOUS_TOOL_IDS = new Set([
     'k3s-deploy',
     'docker-exec',
 ]);
+const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute']);
 
 function sanitizeText(value = '') {
     return String(value || '').trim();
@@ -61,6 +62,13 @@ function validateWorkloadPayload(payload = {}, options = {}) {
         errors.push(error.message);
     }
 
+    let execution;
+    try {
+        execution = normalizeExecution(payload.execution || payload.action || null);
+    } catch (error) {
+        errors.push(error.message);
+    }
+
     if (errors.length > 0) {
         const error = new Error(errors.join('; '));
         error.type = 'validation';
@@ -77,6 +85,7 @@ function validateWorkloadPayload(payload = {}, options = {}) {
         enabled: payload.enabled !== false,
         callableSlug: callableSlug || null,
         trigger,
+        execution,
         policy,
         stages,
         metadata: normalizeMetadata(payload.metadata || {}),
@@ -144,6 +153,52 @@ function normalizePolicy(policy = {}) {
     };
 }
 
+function normalizeExecution(execution = null) {
+    if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
+        return null;
+    }
+
+    const tool = sanitizeText(execution.tool || execution.name || '').toLowerCase();
+    if (!tool) {
+        return null;
+    }
+
+    const normalizedTool = tool === 'ssh-execute' ? 'remote-command' : tool;
+    if (!VALID_EXECUTION_TOOLS.has(tool) && !VALID_EXECUTION_TOOLS.has(normalizedTool)) {
+        throw new Error(`execution.tool must be one of: ${Array.from(VALID_EXECUTION_TOOLS).join(', ')}`);
+    }
+
+    const rawParams = execution.params && typeof execution.params === 'object' && !Array.isArray(execution.params)
+        ? execution.params
+        : {};
+    const command = sanitizeText(rawParams.command || execution.command || '');
+    if (!command) {
+        throw new Error('execution.params.command is required for structured workload execution');
+    }
+
+    const params = {
+        command,
+    };
+    const host = sanitizeText(rawParams.host || execution.host || '');
+    const username = sanitizeText(rawParams.username || execution.username || '');
+    const port = Number(rawParams.port || execution.port || 0);
+
+    if (host) {
+        params.host = host;
+    }
+    if (username) {
+        params.username = username;
+    }
+    if (Number.isFinite(port) && port > 0) {
+        params.port = port;
+    }
+
+    return {
+        tool: normalizedTool,
+        params,
+    };
+}
+
 function normalizeStages(stages = []) {
     if (!Array.isArray(stages)) {
         throw new Error('stages must be an array');
@@ -155,10 +210,18 @@ function normalizeStages(stages = []) {
             throw new Error(`stages[${index}].when must be one of: ${Array.from(VALID_STAGE_CONDITIONS).join(', ')}`);
         }
 
+        let execution = null;
+        try {
+            execution = normalizeExecution(stage.execution || stage.action || null);
+        } catch (error) {
+            throw new Error(`stages[${index}].${error.message}`);
+        }
+
         return {
             when,
             delayMs: normalizeNonNegativeInteger(stage.delayMs, 0, `stages[${index}].delayMs`),
             prompt: sanitizeText(stage.prompt || ''),
+            execution,
             metadata: normalizeMetadata(stage.metadata || {}),
         };
     });

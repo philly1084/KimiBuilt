@@ -36,6 +36,7 @@ class WorkloadStore {
             title: row.title,
             mode: row.mode,
             prompt: row.prompt,
+            execution: row.execution && Object.keys(row.execution).length > 0 ? row.execution : null,
             enabled: row.enabled,
             callableSlug: row.callable_slug,
             trigger: row.trigger || {},
@@ -93,6 +94,7 @@ class WorkloadStore {
                         title,
                         mode,
                         prompt,
+                        execution,
                         enabled,
                         callable_slug,
                         trigger,
@@ -100,7 +102,7 @@ class WorkloadStore {
                         stages,
                         metadata
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb)
                     RETURNING *
                 `,
                 [
@@ -110,6 +112,7 @@ class WorkloadStore {
                     input.title,
                     input.mode,
                     input.prompt,
+                    JSON.stringify(input.execution || {}),
                     input.enabled !== false,
                     input.callableSlug || null,
                     JSON.stringify(input.trigger || {}),
@@ -139,12 +142,13 @@ class WorkloadStore {
                     SET title = $3,
                         mode = $4,
                         prompt = $5,
-                        enabled = $6,
-                        callable_slug = $7,
-                        trigger = $8::jsonb,
-                        policy = $9::jsonb,
-                        stages = $10::jsonb,
-                        metadata = $11::jsonb,
+                        execution = $6::jsonb,
+                        enabled = $7,
+                        callable_slug = $8,
+                        trigger = $9::jsonb,
+                        policy = $10::jsonb,
+                        stages = $11::jsonb,
+                        metadata = $12::jsonb,
                         updated_at = NOW()
                     WHERE id = $1
                       AND owner_id = $2
@@ -156,6 +160,7 @@ class WorkloadStore {
                     updates.title ?? current.title,
                     updates.mode ?? current.mode,
                     updates.prompt ?? current.prompt,
+                    JSON.stringify(updates.execution ?? current.execution ?? {}),
                     updates.enabled ?? current.enabled,
                     updates.callableSlug ?? current.callableSlug,
                     JSON.stringify(updates.trigger ?? current.trigger),

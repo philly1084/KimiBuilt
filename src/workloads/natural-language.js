@@ -22,6 +22,26 @@ function getDefaultTimezone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
+function extractRelativeDelayMs(input = '') {
+    const text = String(input || '').trim();
+    const match = text.match(/\b(?:in|after)\s+(\d+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\b/i);
+    if (!match) {
+        return null;
+    }
+
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount <= 0) {
+        return null;
+    }
+
+    const unit = String(match[2] || '').toLowerCase();
+    if (unit.startsWith('h')) {
+        return amount * 60 * 60 * 1000;
+    }
+
+    return amount * 60 * 1000;
+}
+
 function extractScenarioTime(input = '') {
     const text = String(input || '').trim();
     const twelveHourMatch = text.match(/\b(1[0-2]|0?\d)(?::([0-5]\d))?\s*(am|pm)\b/i);
@@ -63,6 +83,11 @@ function extractScenarioTime(input = '') {
 
 function buildOneTimeRunAt(lowerScenario = '', timeInfo = DEFAULT_TIME_INFO, now = new Date()) {
     const baseNow = now instanceof Date ? new Date(now.getTime()) : new Date(now);
+    const relativeDelayMs = extractRelativeDelayMs(lowerScenario);
+    if (relativeDelayMs != null) {
+        return new Date(baseNow.getTime() + relativeDelayMs);
+    }
+
     const runAt = new Date(baseNow.getTime());
     runAt.setSeconds(0, 0);
     runAt.setHours(timeInfo.hour, timeInfo.minute, 0, 0);
@@ -114,6 +139,7 @@ function createCronExpression(timeInfo = DEFAULT_TIME_INFO, cadence = 'daily') {
 
 function extractTaskPromptFromScenario(scenario = '') {
     const timeFragment = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|morning|afternoon|evening|night)';
+    const relativeDelayFragment = '(?:in|after)\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?)';
     const leadingPatterns = [
         new RegExp(`^(?:every hour|hourly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:every|each)\\s+weekdays?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
@@ -121,6 +147,7 @@ function extractTaskPromptFromScenario(scenario = '') {
         new RegExp(`^(?:daily|nightly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:every\\s+day|everyday|each\\s+day)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:every|each)\\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
+        new RegExp(`^(?:${relativeDelayFragment})[\\s,:-]*`, 'i'),
         new RegExp(`^(?:once|one[- ]time)(?:\\s+(?:tomorrow|today|later today|later))?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:tomorrow|today|later today|later)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
     ];
@@ -131,6 +158,7 @@ function extractTaskPromptFromScenario(scenario = '') {
         new RegExp(`\\b(?:daily|nightly)(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
         new RegExp(`\\b(?:every\\s+day|everyday|each\\s+day)(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
         new RegExp(`\\b(?:every|each)\\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
+        new RegExp(`\\b(?:${relativeDelayFragment})\\b`, 'gi'),
         new RegExp(`\\b(?:once|one[- ]time)(?:\\s+(?:tomorrow|today|later today|later))?(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
         new RegExp(`\\b(?:tomorrow|today|later today|later)(?:\\s+at\\s+${timeFragment})?\\b`, 'gi'),
     ];
@@ -207,6 +235,7 @@ function hasSchedulingCue(text = '') {
         /\btomorrow\b/,
         /\btoday\b/,
         /\blater today\b/,
+        /\b(?:in|after)\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)\b/,
         /\bone[- ]time\b/,
         /\bonce\b/,
         /\bcron\b/,
@@ -221,11 +250,13 @@ function hasWorkloadIntent(text = '') {
         return false;
     }
 
+    const scheduleIntentFragment = '(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|in\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?)|after\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?))';
+
     const hasAutomationLanguage = [
         /\b(set up|schedule|create|make|add|queue|save)\b[\s\S]{0,40}\b(job|workload|automation|follow-?up|task|agent)\b/,
-        /\b(set up|schedule|create|make|add|queue|save)\b[\s\S]{0,60}\b(every|daily|hourly|weekdays?|tomorrow|later today|later|once)\b/,
-        /\b(run|check|review|summarize|follow up|watch)\b[\s\S]{0,40}\b(every|daily|hourly|weekdays?|tomorrow|later today|once)\b/,
-        /\b(remind|follow up|handle|review)\b[\s\S]{0,40}\b(later|tomorrow|daily|every day|everyday|weekdays?)\b/,
+        new RegExp(`\\b(set up|schedule|create|make|add|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
+        new RegExp(`\\b(run|check|review|summarize|follow up|watch)\\b[\\s\\S]{0,40}\\b${scheduleIntentFragment}\\b`),
+        new RegExp(`\\b(remind|follow up|handle|review)\\b[\\s\\S]{0,40}\\b(?:later|tomorrow|daily|every day|everyday|weekdays?|in\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?)|after\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?))\\b`),
         /\b(job|workload|automation|cron|schedule|scheduled|deferred)\b/,
     ].some((pattern) => pattern.test(normalized));
 
@@ -327,7 +358,8 @@ function parseWorkloadScenario(scenario = '', options = {}) {
 
     let trigger = { type: 'manual' };
 
-    if (/\b(tomorrow|today|later today|later|once|one[- ]time)\b/i.test(lowerScenario)) {
+    if (extractRelativeDelayMs(lowerScenario) != null
+        || /\b(tomorrow|today|later today|later|once|one[- ]time)\b/i.test(lowerScenario)) {
         trigger = {
             type: 'once',
             runAt: buildOneTimeRunAt(lowerScenario, timeInfo, now).toISOString(),
@@ -376,6 +408,7 @@ module.exports = {
     buildOneTimeRunAt,
     createCronExpression,
     deriveWorkloadTitle,
+    extractRelativeDelayMs,
     extractScenarioTime,
     extractTaskPromptFromScenario,
     hasSchedulingCue,

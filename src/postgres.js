@@ -120,6 +120,7 @@ class PostgresManager {
                 title TEXT NOT NULL,
                 mode TEXT NOT NULL DEFAULT 'chat',
                 prompt TEXT NOT NULL,
+                execution JSONB NOT NULL DEFAULT '{}'::jsonb,
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 callable_slug TEXT NULL,
                 trigger JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -129,6 +130,11 @@ class PostgresManager {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
+        `);
+
+        await this.query(`
+            ALTER TABLE agent_workloads
+            ADD COLUMN IF NOT EXISTS execution JSONB NOT NULL DEFAULT '{}'::jsonb
         `);
 
         await this.query(`

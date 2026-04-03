@@ -37,6 +37,7 @@ describe('AgentWorkloadService', () => {
         conversationRunService = {
             appendSyntheticMessage: jest.fn(),
             runChatTurn: jest.fn(),
+            runStructuredExecution: jest.fn(),
         };
 
         service = new AgentWorkloadService({
@@ -161,6 +162,66 @@ describe('AgentWorkloadService', () => {
         expect(created.scenario.scheduleDetected).toBe(true);
     });
 
+    test('extracts structured execution when creating a workload from a remote scenario request', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            ownerId: 'phill',
+            metadata: {
+                lastSshTarget: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                },
+            },
+        });
+        store.createWorkload.mockImplementation(async (payload) => ({
+            id: 'workload-remote-created',
+            ...payload,
+        }));
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-remote-created',
+            workloadId: 'workload-remote-created',
+            scheduledFor: '2026-04-02T09:05:00.000Z',
+            reason: 'schedule',
+            stageIndex: -1,
+        });
+
+        const created = await service.createWorkloadFromScenario(
+            'session-1',
+            'phill',
+            'Run `date` on the server in 5 minutes.',
+            {
+                timezone: 'UTC',
+                now: new Date('2026-04-02T09:00:00.000Z'),
+            },
+        );
+
+        expect(store.createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+            execution: {
+                tool: 'remote-command',
+                params: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    command: 'date',
+                },
+            },
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+        }));
+        expect(created.workload.execution).toEqual({
+            tool: 'remote-command',
+            params: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+                command: 'date',
+            },
+        });
+    });
+
     test('enqueues the first follow-up stage after a successful base run', async () => {
         const workload = {
             id: 'workload-1',
@@ -274,6 +335,64 @@ describe('AgentWorkloadService', () => {
             workloadId: 'workload-1',
             reason: 'cron',
             stageIndex: -1,
+        }));
+    });
+
+    test('executes a structured remote command directly when present', async () => {
+        const workload = {
+            id: 'workload-remote-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Check remote time',
+            prompt: 'Run `date` on the server.',
+            execution: {
+                tool: 'remote-command',
+                params: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    command: 'date',
+                },
+            },
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-01T09:05:00.000Z',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+        };
+        const run = {
+            id: 'run-remote-1',
+            workload,
+            stageIndex: -1,
+            scheduledFor: '2026-04-01T09:05:00.000Z',
+            prompt: workload.prompt,
+        };
+
+        conversationRunService.runStructuredExecution.mockResolvedValue({
+            outputText: 'SSH command completed on 10.0.0.5:22.\n\nSTDOUT:\nWed Apr 1 09:05:00 UTC 2026',
+        });
+        store.completeRun.mockResolvedValue({ id: 'run-remote-1', status: 'completed' });
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(conversationRunService.runStructuredExecution).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            execution: workload.execution,
+        }));
+        expect(conversationRunService.runChatTurn).not.toHaveBeenCalled();
+        expect(store.completeRun).toHaveBeenCalledWith('run-remote-1', 'worker-1', expect.objectContaining({
+            trace: expect.objectContaining({
+                structuredExecution: true,
+                toolId: 'remote-command',
+            }),
         }));
     });
 });

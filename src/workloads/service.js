@@ -1,6 +1,7 @@
 'use strict';
 
 const { getNextCronRun } = require('./cron-utils');
+const { extractStructuredExecution } = require('./execution-extractor');
 const { parseWorkloadScenario } = require('./natural-language');
 const {
     deriveRunIdempotencyKey,
@@ -48,11 +49,16 @@ class AgentWorkloadService {
             timezone: options.timezone,
             now: options.now,
         });
+        const session = options.session || await this.sessionStore.getOwned(sessionId, ownerId);
         const payload = {
             sessionId,
             mode: options.mode || 'chat',
             title: options.title || scenario.title,
             prompt: options.prompt || scenario.prompt,
+            execution: options.execution || extractStructuredExecution({
+                request,
+                session,
+            }),
             enabled: options.enabled !== false,
             callableSlug: Object.prototype.hasOwnProperty.call(options, 'callableSlug')
                 ? options.callableSlug
@@ -222,6 +228,7 @@ class AgentWorkloadService {
             ? workload.stages[run.stageIndex] || null
             : null;
         const prompt = stage?.prompt || run.prompt || workload.prompt;
+        const execution = stage?.execution || workload.execution || null;
         const startedMessage = `Deferred workload "${workload.title}" started${stage ? ` (stage ${run.stageIndex + 1})` : ''}.`;
         await this.appendSyntheticMessageSafe(workload.sessionId, 'system', startedMessage);
         await this.addRunEventSafe(run.id, 'started', { workerId, stageIndex: run.stageIndex });
@@ -233,30 +240,51 @@ class AgentWorkloadService {
         });
 
         try {
-            const result = await this.conversationRunService.runChatTurn({
-                sessionId: workload.sessionId,
-                ownerId: workload.ownerId,
-                session: await this.sessionStore.getOwned(workload.sessionId, workload.ownerId),
-                message: prompt,
-                executionProfile: workload.policy?.executionProfile,
-                requestedToolIds: workload.policy?.toolIds || [],
-                policy: workload.policy || {},
-                metadata: {
-                    taskType: workload.mode || 'chat',
-                    clientSurface: 'workload',
-                    workloadId: workload.id,
-                    runId: run.id,
-                    workloadRun: true,
-                    remoteBuildAutonomyApproved: workload.policy?.allowSideEffects === true,
-                },
-            });
+            const session = await this.sessionStore.getOwned(workload.sessionId, workload.ownerId);
+            const result = execution
+                ? await this.conversationRunService.runStructuredExecution({
+                    sessionId: workload.sessionId,
+                    ownerId: workload.ownerId,
+                    session,
+                    execution,
+                    metadata: {
+                        executionProfile: workload.policy?.executionProfile,
+                        prompt,
+                        workloadId: workload.id,
+                        runId: run.id,
+                    },
+                })
+                : await this.conversationRunService.runChatTurn({
+                    sessionId: workload.sessionId,
+                    ownerId: workload.ownerId,
+                    session,
+                    message: prompt,
+                    executionProfile: workload.policy?.executionProfile,
+                    requestedToolIds: workload.policy?.toolIds || [],
+                    policy: workload.policy || {},
+                    metadata: {
+                        taskType: workload.mode || 'chat',
+                        clientSurface: 'workload',
+                        workloadId: workload.id,
+                        runId: run.id,
+                        workloadRun: true,
+                        remoteBuildAutonomyApproved: workload.policy?.allowSideEffects === true,
+                    },
+                });
 
             const completed = await this.store.completeRun(run.id, workerId, {
                 responseId: result.response?.id || null,
-                trace: result.execution?.trace || result.response?.metadata?.executionTrace || {},
+                trace: result.execution?.trace
+                    || result.response?.metadata?.executionTrace
+                    || (execution ? {
+                        structuredExecution: true,
+                        toolId: execution.tool,
+                        params: execution.params || {},
+                    } : {}),
             });
             await this.addRunEventSafe(run.id, 'completed', {
                 responseId: result.response?.id || null,
+                structuredExecution: Boolean(execution),
             });
             await this.scheduleFollowupStage(workload, run, true);
             await this.ensureNextScheduledRun(workload, run);

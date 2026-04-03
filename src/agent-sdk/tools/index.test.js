@@ -131,7 +131,7 @@ describe('ToolManager image tools', () => {
     expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       title: 'Review The Latest Repo Activity',
-      prompt: 'Every weekday at 8:30 AM review the latest repo activity and summarize blockers.',
+      prompt: 'review the latest repo activity and summarize blockers.',
       trigger: {
         type: 'cron',
         expression: '30 8 * * 1-5',
@@ -143,6 +143,58 @@ describe('ToolManager image tools', () => {
       }),
     }), 'user-1');
     expect(result.data.message).toContain('Every weekday at 8:30 AM');
+  });
+
+  test('extracts a structured remote execution from a scheduled server command request', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-remote-1',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create_from_scenario',
+      request: 'Run `date` on the server in 5 minutes.',
+      timezone: 'America/Halifax',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'America/Halifax',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+        sessionStore: {
+          getOwned: jest.fn(async () => ({
+            id: 'session-1',
+            metadata: {
+              lastSshTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+              },
+            },
+          })),
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      execution: {
+        tool: 'remote-command',
+        params: {
+          host: '10.0.0.5',
+          username: 'ubuntu',
+          port: 22,
+          command: 'date',
+        },
+      },
+      trigger: expect.objectContaining({
+        type: 'once',
+      }),
+    }), 'user-1');
   });
 
   test('rejects ambiguous scenario requests instead of silently creating a manual workload', async () => {

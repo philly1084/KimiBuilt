@@ -15,6 +15,7 @@ const {
   parseWorkloadScenario,
   summarizeTrigger,
 } = require('../../workloads/natural-language');
+const { extractStructuredExecution } = require('../../workloads/execution-extractor');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -184,6 +185,7 @@ function buildStructuredWorkloadFallback(params = {}, context = {}) {
     mode: params.mode,
     enabled: params.enabled,
     trigger: params.trigger,
+    execution: params.execution,
     policy: params.policy,
     stages: Array.isArray(params.stages) ? params.stages : undefined,
     metadata: {
@@ -253,10 +255,11 @@ function buildInferredWorkloadPayload(params = {}, context = {}) {
   return {
     ...params,
     title: String(params.title || '').trim() || inferred.title,
-    prompt: String(params.prompt || '').trim() || inferred.prompt,
+    prompt: inferred.prompt,
     trigger: params.trigger && typeof params.trigger === 'object'
       ? params.trigger
       : inferred.trigger,
+    execution: params.execution,
     callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
       ? params.callableSlug
       : inferred.callableSlug,
@@ -297,6 +300,30 @@ function assertWorkloadSchedulingIntent(params = {}, context = {}) {
   }
 
   throw new Error('Workload creation needs a schedule. Specify when it should run, or explicitly say it should be manual.');
+}
+
+function attachStructuredExecution(payload = {}, { request = '', session = null } = {}) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  if (payload.execution && typeof payload.execution === 'object' && !Array.isArray(payload.execution)) {
+    return payload;
+  }
+
+  const extractedExecution = extractStructuredExecution({
+    request: request || extractScenarioSource(payload),
+    session,
+  });
+
+  if (!extractedExecution) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    execution: extractedExecution,
+  };
 }
 
 class ToolManager {
@@ -867,13 +894,19 @@ class ToolManager {
 
             if (action === 'create_from_scenario') {
               const request = String(params.request || params.scenario || params.description || '').trim();
+              const session = service.sessionStore?.getOwned
+                ? await service.sessionStore.getOwned(sessionId, ownerId)
+                : null;
               if (!request) {
                 const inferredPayload = buildInferredWorkloadPayload(params, context);
                 if (inferredPayload) {
-                  const workload = await service.createWorkload({
+                  const workload = await service.createWorkload(attachStructuredExecution({
                     ...inferredPayload,
                     sessionId,
-                  }, ownerId);
+                  }, {
+                    request: extractScenarioSource(inferredPayload),
+                    session,
+                  }), ownerId);
 
                   return {
                     action,
@@ -891,10 +924,13 @@ class ToolManager {
 
                 assertWorkloadSchedulingIntent(fallbackPayload, context);
 
-                const workload = await service.createWorkload({
+                const workload = await service.createWorkload(attachStructuredExecution({
                   ...fallbackPayload,
                   sessionId,
-                }, ownerId);
+                }, {
+                  request: extractScenarioSource(fallbackPayload),
+                  session,
+                }), ownerId);
 
                 return {
                   action,
@@ -921,6 +957,7 @@ class ToolManager {
                 trigger: params.trigger && typeof params.trigger === 'object'
                   ? params.trigger
                   : scenario.trigger,
+                execution: params.execution,
                 policy: params.policy && typeof params.policy === 'object'
                   ? params.policy
                   : scenario.policy,
@@ -936,10 +973,13 @@ class ToolManager {
 
               assertWorkloadSchedulingIntent(scenarioPayload, context);
 
-              const workload = await service.createWorkload({
+              const workload = await service.createWorkload(attachStructuredExecution({
                 ...scenarioPayload,
                 sessionId,
-              }, ownerId);
+              }, {
+                request,
+                session,
+              }), ownerId);
 
               return {
                 action,
@@ -957,10 +997,16 @@ class ToolManager {
                 ? buildInferredWorkloadPayload(params, context)
                 : null;
               assertWorkloadSchedulingIntent(inferredPayload || params, context);
-              const workload = await service.createWorkload({
+              const session = service.sessionStore?.getOwned
+                ? await service.sessionStore.getOwned(sessionId, ownerId)
+                : null;
+              const workload = await service.createWorkload(attachStructuredExecution({
                 ...(inferredPayload || params),
                 sessionId,
-              }, ownerId);
+              }, {
+                request: extractScenarioSource(inferredPayload || params),
+                session,
+              }), ownerId);
               return {
                 action,
                 sessionId,
@@ -1078,6 +1124,7 @@ class ToolManager {
             description: { type: 'string' },
             title: { type: 'string' },
             prompt: { type: 'string' },
+            execution: { type: 'object' },
             callableSlug: { type: 'string' },
             mode: { type: 'string' },
             enabled: { type: 'boolean' },

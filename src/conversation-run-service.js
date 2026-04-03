@@ -4,7 +4,9 @@ const { ensureRuntimeToolManager } = require('./runtime-tool-manager');
 const { executeConversationRuntime } = require('./runtime-execution');
 const {
     buildInstructionsWithArtifacts,
+    canonicalizeRemoteToolId,
     extractSshSessionMetadataFromToolEvents,
+    formatSshToolResult,
 } = require('./ai-route-utils');
 const { extractResponseText } = require('./artifacts/artifact-service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('./project-memory');
@@ -111,6 +113,90 @@ class ConversationRunService {
         return {
             execution,
             response,
+            outputText,
+            toolEvents,
+        };
+    }
+
+    async runStructuredExecution({
+        sessionId,
+        ownerId = null,
+        execution,
+        session = null,
+        metadata = {},
+    }) {
+        const resolvedSession = session || (ownerId
+            ? await this.sessionStore.getOwned(sessionId, ownerId)
+            : await this.sessionStore.get(sessionId));
+
+        if (!resolvedSession) {
+            const error = new Error('Session not found');
+            error.statusCode = 404;
+            throw error;
+        }
+
+        const toolId = canonicalizeRemoteToolId(execution?.tool || '');
+        if (!toolId) {
+            throw new Error('Structured workload execution is missing a tool id');
+        }
+
+        const params = execution?.params && typeof execution.params === 'object'
+            ? { ...execution.params }
+            : {};
+        const runtimeToolManager = await ensureRuntimeToolManager(this.app);
+        const result = await runtimeToolManager.executeTool(toolId, params, {
+            sessionId,
+            route: '/api/workloads',
+            transport: 'worker',
+            memoryService: this.memoryService,
+            ownerId,
+            workloadService: this.app?.locals?.agentWorkloadService,
+            executionProfile: metadata.executionProfile || null,
+        });
+
+        if (result?.success === false) {
+            throw new Error(result.error || `Structured execution via ${toolId} failed`);
+        }
+
+        const toolEvents = [{
+            toolCall: {
+                function: {
+                    name: toolId,
+                    arguments: JSON.stringify(params),
+                },
+            },
+            result,
+        }];
+        const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);
+        if (sshMetadata) {
+            await this.sessionStore.update(sessionId, { metadata: sshMetadata });
+        }
+
+        const outputText = toolId === 'remote-command' || toolId === 'ssh-execute'
+            ? formatSshToolResult(result, {
+                host: params.host || '',
+                username: params.username || null,
+                port: params.port || null,
+            })
+            : JSON.stringify(result.data || {}, null, 2);
+
+        if (outputText) {
+            if (this.memoryService?.rememberResponse) {
+                this.memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+            }
+            await this.sessionStore.appendMessages(sessionId, [
+                { role: 'assistant', content: outputText },
+            ]);
+        }
+
+        await this.updateProjectMemory(sessionId, ownerId, {
+            userText: metadata.prompt || `Deferred execution via ${toolId}`,
+            assistantText: outputText,
+            toolEvents,
+        });
+
+        return {
+            result,
             outputText,
             toolEvents,
         };

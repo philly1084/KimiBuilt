@@ -56,9 +56,24 @@ describe('workload natural language parsing', () => {
         expect(result.prompt).toBe('review the latest repo activity and summarize blockers.');
     });
 
+    test('parses a relative one-time scenario in five minutes', () => {
+        const result = parseWorkloadScenario(
+            'In 5 minutes run `date` on the server.',
+            {
+                timezone: 'UTC',
+                now: new Date('2026-04-01T12:00:00.000Z'),
+            },
+        );
+
+        expect(result.trigger.type).toBe('once');
+        expect(result.trigger.runAt).toBe('2026-04-01T12:05:00.000Z');
+        expect(result.prompt).toBe('run `date` on the server.');
+    });
+
     test('detects explicit workload setup requests', () => {
         expect(hasWorkloadIntent('Set up a daily agent workload to summarize blockers every day at 11:05 PM.')).toBe(true);
         expect(hasWorkloadIntent('Set this up every day at 11:05 PM to summarize blockers.')).toBe(true);
+        expect(hasWorkloadIntent('Run `date` on the server in 5 minutes.')).toBe(true);
         expect(hasWorkloadIntent('Explain what a cron expression is.')).toBe(false);
     });
 

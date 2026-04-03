@@ -78,6 +78,79 @@ describe('workload schema', () => {
         })).toThrow('stages[0].when');
     });
 
+    test('normalizes structured remote execution payloads', () => {
+        const workload = validateWorkloadPayload({
+            sessionId: 'session-1',
+            title: 'Check remote time',
+            prompt: 'Run `date` on the server.',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:00:00.000Z',
+            },
+            execution: {
+                tool: 'remote-command',
+                params: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    command: 'date',
+                },
+            },
+        }, {
+            ownerId: 'phill',
+            sessionId: 'session-1',
+        });
+
+        expect(workload.execution).toEqual({
+            tool: 'remote-command',
+            params: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+                command: 'date',
+            },
+        });
+    });
+
+    test('preserves structured execution on follow-up stages', () => {
+        const workload = validateWorkloadPayload({
+            sessionId: 'session-1',
+            title: 'Check remote time later',
+            prompt: 'Run `date` on the server.',
+            stages: [{
+                when: 'on_success',
+                delayMs: 0,
+                prompt: 'Run `uptime` on the server.',
+                execution: {
+                    tool: 'remote-command',
+                    params: {
+                        host: '10.0.0.5',
+                        username: 'ubuntu',
+                        command: 'uptime',
+                    },
+                },
+            }],
+        }, {
+            ownerId: 'phill',
+            sessionId: 'session-1',
+        });
+
+        expect(workload.stages).toEqual([{
+            when: 'on_success',
+            delayMs: 0,
+            prompt: 'Run `uptime` on the server.',
+            execution: {
+                tool: 'remote-command',
+                params: {
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    command: 'uptime',
+                },
+            },
+            metadata: {},
+        }]);
+    });
+
     test('derives stable idempotency keys', () => {
         const key = deriveRunIdempotencyKey({
             workloadId: 'workload-1',
