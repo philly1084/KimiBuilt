@@ -10,7 +10,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     maybePrepareImagesForArtifactPrompt,
-    shouldDeferArtifactGenerationToWorkload,
+    resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
@@ -29,6 +29,7 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { buildContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
+const WORKLOAD_PREFLIGHT_RECENT_LIMIT = 12;
 
 function normalizeClientNow(value = '') {
     const normalized = String(value || '').trim();
@@ -143,7 +144,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             || req.get('x-client-now')
             || '',
         );
-        const effectiveRequestMetadata = {
+        let effectiveRequestMetadata = {
             ...requestMetadata,
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
@@ -187,9 +188,31 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
-        if (shouldDeferArtifactGenerationToWorkload(message, effectiveOutputFormat)) {
+        const recentMessagesForWorkloadPreflight = effectiveOutputFormat
+            ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
+            : [];
+        const workloadPreflight = resolveDeferredWorkloadPreflight({
+            text: message,
+            recentMessages: recentMessagesForWorkloadPreflight,
+            timezone: requestTimezone,
+            now: requestNow,
+        });
+        if (workloadPreflight.shouldSchedule) {
             effectiveOutputFormat = null;
         }
+        effectiveRequestMetadata = {
+            ...effectiveRequestMetadata,
+            timingDecision: workloadPreflight.shouldSchedule ? 'future' : 'now',
+            ...(workloadPreflight.shouldSchedule && workloadPreflight.scenario
+                ? {
+                    workloadPreflight: {
+                        timing: 'future',
+                        request: workloadPreflight.request,
+                        trigger: workloadPreflight.scenario.trigger,
+                    },
+                }
+                : {}),
+        };
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);
         runtimeTask = startRuntimeTask({
             sessionId,

@@ -1663,7 +1663,7 @@ function buildAutomaticToolDefinitions(toolManager, prompt = '', options = {}) {
         .filter(Boolean);
 }
 
-function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
+function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', options = {}) {
     if (!automaticTools.length) {
         return [];
     }
@@ -1685,7 +1685,16 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
     const hasSchemaIntent = /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/i.test(normalizedPrompt);
     const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
-    const hasWorkloadSetupIntent = hasWorkloadIntent(prompt);
+    const canonicalWorkload = buildCanonicalWorkloadAction({
+        request: prompt,
+    }, {
+        recentMessages: options?.recentMessages || options?.toolContext?.recentMessages || [],
+        timezone: options?.timezone || options?.toolContext?.timezone || null,
+        now: options?.now || options?.toolContext?.now || null,
+    });
+    const hasWorkloadSetupIntent = hasWorkloadIntent(prompt)
+        || canonicalWorkload?.trigger?.type === 'cron'
+        || canonicalWorkload?.trigger?.type === 'once';
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
@@ -2831,7 +2840,7 @@ async function runAutomaticToolLoop(openai, {
 }) {
     const prompt = getLastUserText(messages);
     const automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolContext);
-    const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
+    const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt, { toolContext });
 
     if (selectedTools.length === 0) {
         return null;
@@ -3106,7 +3115,7 @@ async function createResponse({
                     ...effectiveToolContext,
                 };
                 automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolExecutionContext);
-                const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
+                const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt, { toolContext: toolExecutionContext });
                 const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id), toolExecutionContext);
 
                 if (requiredToolId && !selectedTools.some((tool) => tool.id === requiredToolId)) {

@@ -748,6 +748,29 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('selects agent-workload for time-first future prompts without requiring the word schedule', () => {
+        const toolManager = createToolManager();
+        const prompt = 'In 5 minutes can you do some research on ADHD and make a PDF document on it I can review.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                workloadService: {
+                    isAvailable: () => true,
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(automaticTools, prompt);
+        const toolChoice = __testUtils.buildAutomaticToolChoice(selectedTools, 'responses', { prompt });
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('agent-workload');
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'agent-workload',
+        });
+    });
+
     test('deterministic research preflight fetches top pages and stores distilled notes', async () => {
         const memoryService = {
             rememberResearchNote: jest.fn().mockResolvedValue('note-1'),

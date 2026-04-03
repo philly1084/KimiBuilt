@@ -31,6 +31,7 @@ const {
     inferOutputFormatFromSession,
     maybePrepareImagesForArtifactPrompt,
     getPreferredRemoteToolId,
+    resolveDeferredWorkloadPreflight,
     resolveReasoningEffort,
     resolveSshRequestContext,
     resolveArtifactContextIds,
@@ -64,9 +65,62 @@ describe('ai-route-utils', () => {
             'pdf',
         )).toBe(true);
         expect(shouldDeferArtifactGenerationToWorkload(
+            'in 5 minutes can you do some research on adhd and make a pdf document on it I can review',
+            'pdf',
+        )).toBe(true);
+        expect(shouldDeferArtifactGenerationToWorkload(
             'make me a pdf about penguins right now',
             'pdf',
         )).toBe(false);
+        expect(shouldDeferArtifactGenerationToWorkload(
+            'make me a pdf of today\'s news',
+            'pdf',
+        )).toBe(false);
+        expect(shouldDeferArtifactGenerationToWorkload(
+            'make me a pdf about daily adhd traits',
+            'pdf',
+        )).toBe(false);
+    });
+
+    test('resolveDeferredWorkloadPreflight uses transcript context for fragmented future requests', () => {
+        expect(resolveDeferredWorkloadPreflight({
+            text: 'in five minutes from now',
+            recentMessages: [
+                { role: 'user', content: 'do some research on adhd and make a pdf document on it I can review' },
+            ],
+            timezone: 'UTC',
+            now: '2026-04-03T14:47:00.000Z',
+        })).toMatchObject({
+            timing: 'future',
+            shouldSchedule: true,
+            request: expect.stringContaining('do some research on adhd'),
+            scenario: {
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-03T14:52:00.000Z',
+                },
+            },
+        });
+    });
+
+    test('resolveDeferredWorkloadPreflight keeps future timing when the schedule came in a prior user turn', () => {
+        expect(resolveDeferredWorkloadPreflight({
+            text: 'do some research on adhd and make a pdf document on it I can review',
+            recentMessages: [
+                { role: 'user', content: 'in five minutes from now' },
+            ],
+            timezone: 'UTC',
+            now: '2026-04-03T14:47:00.000Z',
+        })).toMatchObject({
+            timing: 'future',
+            shouldSchedule: true,
+            scenario: {
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-03T14:52:00.000Z',
+                },
+            },
+        });
     });
 
     test('generateOutputArtifactFromPrompt requires a user prompt', async () => {

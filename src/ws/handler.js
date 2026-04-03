@@ -8,7 +8,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     maybePrepareImagesForArtifactPrompt,
-    shouldDeferArtifactGenerationToWorkload,
+    resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
@@ -38,6 +38,7 @@ const {
 // Admin dashboard event emitter
 const EventEmitter = require('events');
 const adminEvents = new EventEmitter();
+const WORKLOAD_PREFLIGHT_RECENT_LIMIT = 12;
 
 async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
@@ -216,6 +217,11 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         || payload?.client_now
         || '',
     );
+    let effectiveRequestMetadata = {
+        ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+        ...(requestTimezone ? { timezone: requestTimezone } : {}),
+        ...(requestNow ? { clientNow: requestNow } : {}),
+    };
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
@@ -244,9 +250,31 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     })) {
         effectiveOutputFormat = null;
     }
-    if (shouldDeferArtifactGenerationToWorkload(message, effectiveOutputFormat)) {
+    const recentMessagesForWorkloadPreflight = effectiveOutputFormat
+        ? await sessionStore.getRecentMessages(session.id, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
+        : [];
+    const workloadPreflight = resolveDeferredWorkloadPreflight({
+        text: message,
+        recentMessages: recentMessagesForWorkloadPreflight,
+        timezone: requestTimezone,
+        now: requestNow,
+    });
+    if (workloadPreflight.shouldSchedule) {
         effectiveOutputFormat = null;
     }
+    effectiveRequestMetadata = {
+        ...effectiveRequestMetadata,
+        timingDecision: workloadPreflight.shouldSchedule ? 'future' : 'now',
+        ...(workloadPreflight.shouldSchedule && workloadPreflight.scenario
+            ? {
+                workloadPreflight: {
+                    timing: 'future',
+                    request: workloadPreflight.request,
+                    trigger: workloadPreflight.scenario.trigger,
+                },
+            }
+            : {}),
+    };
     const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);
     runtimeTask = startRuntimeTask({
         sessionId: session.id,
@@ -365,11 +393,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
-            metadata: {
-                ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
-                ...(requestTimezone ? { timezone: requestTimezone } : {}),
-                ...(requestNow ? { clientNow: requestNow } : {}),
-            },
+            metadata: effectiveRequestMetadata,
             ownerId,
         });
         const response = execution.response;

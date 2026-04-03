@@ -3,7 +3,7 @@ const { normalizeFormat } = require('./artifacts/constants');
 const { buildSessionInstructions } = require('./session-instructions');
 const { config } = require('./config');
 const { getSessionControlState } = require('./runtime-control-state');
-const { hasWorkloadIntent } = require('./workloads/natural-language');
+const { resolveDeferredWorkloadPreflight } = require('./workloads/preflight');
 const settingsController = require('./routes/admin/settings.controller');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -120,13 +120,18 @@ function buildArtifactCompletionMessage(outputFormat, artifact) {
     return `Created the ${formatLabel} artifact${filename}.`;
 }
 
-function shouldDeferArtifactGenerationToWorkload(text = '', outputFormat = null) {
+function shouldDeferArtifactGenerationToWorkload(text = '', outputFormat = null, options = {}) {
     const normalizedFormat = normalizeFormat(outputFormat);
     if (!normalizedFormat) {
         return false;
     }
 
-    return hasWorkloadIntent(text);
+    return resolveDeferredWorkloadPreflight({
+        text,
+        recentMessages: options?.recentMessages || [],
+        timezone: options?.timezone || null,
+        now: options?.now || null,
+    }).shouldSchedule;
 }
 
 function hasExplicitArtifactGenerationIntent(text = '') {
@@ -955,6 +960,7 @@ module.exports = {
     maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     buildArtifactCompletionMessage,
+    resolveDeferredWorkloadPreflight,
     shouldDeferArtifactGenerationToWorkload,
     hasExplicitMermaidArtifactIntent,
     hasExplicitMermaidFileIntent,

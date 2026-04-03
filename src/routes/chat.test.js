@@ -11,6 +11,7 @@ jest.mock('../session-store', () => ({
         getOrCreateOwned: jest.fn(),
         getOwned: jest.fn(),
         get: jest.fn(),
+        getRecentMessages: jest.fn(),
         update: jest.fn(),
         recordResponse: jest.fn(),
         appendMessages: jest.fn(),
@@ -42,6 +43,12 @@ jest.mock('../ai-route-utils', () => ({
         artifacts: [],
         toolEvents: [],
         imagePrompt: null,
+    })),
+    resolveDeferredWorkloadPreflight: jest.fn(() => ({
+        timing: 'now',
+        shouldSchedule: false,
+        request: '',
+        scenario: null,
     })),
     shouldDeferArtifactGenerationToWorkload: jest.fn(() => false),
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
@@ -77,7 +84,7 @@ const {
     maybePrepareImagesForArtifactPrompt,
     maybeGenerateOutputArtifact,
     resolveSshRequestContext,
-    shouldDeferArtifactGenerationToWorkload,
+    resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveReasoningEffort,
@@ -97,9 +104,16 @@ describe('/api/chat route', () => {
         sessionStore.getOrCreateOwned.mockResolvedValue(session);
         sessionStore.getOwned.mockResolvedValue(session);
         sessionStore.get.mockResolvedValue(session);
+        sessionStore.getRecentMessages.mockResolvedValue([]);
         sessionStore.update.mockResolvedValue(session);
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
         maybeGenerateOutputArtifact.mockResolvedValue([]);
+        resolveDeferredWorkloadPreflight.mockReturnValue({
+            timing: 'now',
+            shouldSchedule: false,
+            request: '',
+            scenario: null,
+        });
     });
 
     test('routes SSH-looking requests through the orchestrator instead of executing a direct tool shortcut', async () => {
@@ -375,7 +389,17 @@ describe('/api/chat route', () => {
             effectivePrompt: 'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
         });
         require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('pdf');
-        shouldDeferArtifactGenerationToWorkload.mockReturnValue(true);
+        resolveDeferredWorkloadPreflight.mockReturnValue({
+            timing: 'future',
+            shouldSchedule: true,
+            request: 'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
+            scenario: {
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-03T14:52:00.000Z',
+                },
+            },
+        });
         executeConversationRuntime.mockResolvedValue({
             handledPersistence: true,
             response: {
@@ -408,10 +432,65 @@ describe('/api/chat route', () => {
         expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
         expect(maybeGenerateOutputArtifact).not.toHaveBeenCalled();
         expect(executeConversationRuntime).toHaveBeenCalled();
-        expect(shouldDeferArtifactGenerationToWorkload).toHaveBeenCalledWith(
-            'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
-            'pdf',
-        );
+        expect(resolveDeferredWorkloadPreflight).toHaveBeenCalledWith(expect.objectContaining({
+            text: 'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
+        }));
+    });
+
+    test('routes time-first scheduled PDF requests through the runtime instead of generating the artifact immediately', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'in 5 minutes can you do some research on adhd and make a pdf document on it I can review, make it designed to questions on diagnosis and why its adhd traits.',
+        });
+        require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('pdf');
+        resolveDeferredWorkloadPreflight.mockReturnValue({
+            timing: 'future',
+            shouldSchedule: true,
+            request: 'in 5 minutes can you do some research on adhd and make a pdf document on it I can review, make it designed to questions on diagnosis and why its adhd traits.',
+            scenario: {
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-03T14:52:00.000Z',
+                },
+            },
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-scheduled-adhd-pdf-1',
+                model: 'gpt-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'ADHD PDF scheduled.' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'in 5 minutes can you do some research on adhd and make a pdf document on it I can review, make it designed to questions on diagnosis and why its adhd traits.',
+                stream: false,
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('ADHD PDF scheduled.');
+        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
+        expect(maybeGenerateOutputArtifact).not.toHaveBeenCalled();
+        expect(executeConversationRuntime).toHaveBeenCalled();
+        expect(resolveDeferredWorkloadPreflight).toHaveBeenCalledWith(expect.objectContaining({
+            text: 'in 5 minutes can you do some research on adhd and make a pdf document on it I can review, make it designed to questions on diagnosis and why its adhd traits.',
+        }));
     });
 
     test('forwards normalized reasoning effort into runtime execution', async () => {

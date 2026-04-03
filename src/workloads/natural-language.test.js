@@ -84,6 +84,19 @@ describe('workload natural language parsing', () => {
         expect(hasWorkloadIntent('Run `date` on the server in five minutes from now.')).toBe(true);
     });
 
+    test('does not treat today content references as scheduled workloads', () => {
+        const result = parseWorkloadScenario(
+            'Make me a PDF of today\'s news.',
+            {
+                timezone: 'UTC',
+                now: new Date('2026-04-01T12:00:00.000Z'),
+            },
+        );
+
+        expect(result.trigger).toEqual({ type: 'manual' });
+        expect(result.prompt).toBe('Make me a PDF of today\'s news.');
+    });
+
     test('strips scheduling wrapper language from deferred workload prompts', () => {
         const result = parseWorkloadScenario(
             'Can you run a cron later every day at 8 PM to remote into the server and get a health report',
