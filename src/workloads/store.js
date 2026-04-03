@@ -492,7 +492,7 @@ class WorkloadStore {
                 SET status = '${RUN_STATUS.COMPLETED}',
                     response_id = $3,
                     trace = $4::jsonb,
-                    error = NULL,
+                    error = '{}'::jsonb,
                     finished_at = NOW(),
                     claim_expires_at = NULL,
                     updated_at = NOW()

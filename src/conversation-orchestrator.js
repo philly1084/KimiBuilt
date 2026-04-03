@@ -3175,6 +3175,7 @@ class ConversationOrchestrator extends EventEmitter {
                         metadata,
                         autonomyApproved,
                         executionTrace,
+                        stream,
                     });
                 }
 

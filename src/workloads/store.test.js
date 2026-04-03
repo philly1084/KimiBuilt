@@ -70,4 +70,46 @@ describe('WorkloadStore', () => {
         expect(postgres.query.mock.calls[0][0]).not.toContain('ON CONFLICT (idempotency_key)');
         expect(postgres.query.mock.calls[1][0]).toContain('WHERE idempotency_key = $1');
     });
+
+    test('completeRun clears error with an empty json object instead of null', async () => {
+        postgres.query.mockResolvedValueOnce({
+            rows: [{
+                id: 'run-1',
+                workload_id: 'workload-1',
+                owner_id: 'phill',
+                session_id: 'session-1',
+                status: 'completed',
+                reason: 'schedule',
+                scheduled_for: '2026-04-03T04:19:09.419Z',
+                started_at: '2026-04-03T04:19:10.000Z',
+                finished_at: '2026-04-03T04:19:11.000Z',
+                claim_owner: 'worker-1',
+                claim_expires_at: null,
+                parent_run_id: null,
+                stage_index: -1,
+                attempt: 0,
+                response_id: 'resp-1',
+                prompt: 'Run `date` on the server.',
+                trace: { structuredExecution: true },
+                error: {},
+                metadata: {},
+                created_at: '2026-04-03T04:19:09.419Z',
+                updated_at: '2026-04-03T04:19:11.000Z',
+            }],
+        });
+
+        const run = await store.completeRun('run-1', 'worker-1', {
+            responseId: 'resp-1',
+            trace: { structuredExecution: true },
+        });
+
+        expect(run).toEqual(expect.objectContaining({
+            id: 'run-1',
+            status: 'completed',
+            error: {},
+        }));
+        expect(postgres.query).toHaveBeenCalledTimes(1);
+        expect(postgres.query.mock.calls[0][0]).toContain("error = '{}'::jsonb");
+        expect(postgres.query.mock.calls[0][0]).not.toContain('error = NULL');
+    });
 });
