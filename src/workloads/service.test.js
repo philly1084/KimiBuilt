@@ -377,6 +377,59 @@ describe('AgentWorkloadService', () => {
         }));
     });
 
+    test('does not rebroadcast a once workload as queued when enqueue returns an existing completed run', async () => {
+        const workload = {
+            id: 'workload-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Check remote time',
+            prompt: 'Run `date` on the server.',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-01T09:05:00.000Z',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+        };
+        const run = {
+            id: 'run-1',
+            workload,
+            stageIndex: -1,
+            scheduledFor: '2026-04-01T09:05:00.000Z',
+            prompt: workload.prompt,
+        };
+
+        conversationRunService.runChatTurn.mockResolvedValue({
+            response: { id: 'resp-1', metadata: {} },
+            outputText: 'ok',
+            execution: { trace: {} },
+        });
+        store.completeRun.mockResolvedValue({ id: 'run-1', status: 'completed' });
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-1',
+            workloadId: 'workload-1',
+            status: 'completed',
+            reason: 'schedule',
+            stageIndex: -1,
+        });
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(store.enqueueRun).toHaveBeenCalledWith(expect.objectContaining({
+            workloadId: 'workload-1',
+            reason: 'schedule',
+            stageIndex: -1,
+        }));
+        expect(store.addRunEvent).not.toHaveBeenCalledWith('run-1', 'queued', expect.anything());
+    });
+
     test('executes a structured remote command directly when present', async () => {
         const workload = {
             id: 'workload-remote-1',

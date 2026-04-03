@@ -207,7 +207,7 @@ class AgentWorkloadService {
             idempotencyKey: options.idempotencyKey || null,
         });
 
-        if (run) {
+        if (run?.status === RUN_STATUS.QUEUED) {
             await this.onRunQueued(workload, run, options.reason || 'manual');
         }
 
@@ -372,7 +372,7 @@ class AgentWorkloadService {
                     reason: 'schedule',
                 }),
             });
-            if (run) {
+            if (run?.status === RUN_STATUS.QUEUED) {
                 await this.onRunQueued(workload, run, 'scheduled');
             }
             return run;
@@ -400,7 +400,7 @@ class AgentWorkloadService {
                     reason: 'cron',
                 }),
             });
-            if (run) {
+            if (run?.status === RUN_STATUS.QUEUED) {
                 await this.onRunQueued(workload, run, 'cron');
             }
             return run;
@@ -445,7 +445,7 @@ class AgentWorkloadService {
             },
         });
 
-        if (followupRun) {
+        if (followupRun?.status === RUN_STATUS.QUEUED) {
             await this.addRunEventSafe(run.id, 'followup-enqueued', {
                 followupRunId: followupRun.id,
                 stageIndex: nextIndex,

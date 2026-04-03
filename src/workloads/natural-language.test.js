@@ -70,6 +70,23 @@ describe('workload natural language parsing', () => {
         expect(result.prompt).toBe('run `date` on the server.');
     });
 
+    test('strips scheduling wrapper language from deferred workload prompts', () => {
+        const result = parseWorkloadScenario(
+            'Can you run a cron later every day at 8 PM to remote into the server and get a health report',
+            {
+                timezone: 'America/Halifax',
+                now: new Date('2026-04-03T10:00:00.000Z'),
+            },
+        );
+
+        expect(result.trigger).toEqual({
+            type: 'cron',
+            expression: '0 20 * * *',
+            timezone: 'America/Halifax',
+        });
+        expect(result.prompt).toBe('remote into the server and get a health report');
+    });
+
     test('detects explicit workload setup requests', () => {
         expect(hasWorkloadIntent('Set up a daily agent workload to summarize blockers every day at 11:05 PM.')).toBe(true);
         expect(hasWorkloadIntent('Set this up every day at 11:05 PM to summarize blockers.')).toBe(true);

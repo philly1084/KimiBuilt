@@ -1360,6 +1360,23 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
     });
 
+    test('does not auto-use agent-workload while executing a deferred workload run', () => {
+        expect(__testUtils.shouldAutoUseTool(
+            'agent-workload',
+            'run a cron later every day at 8 pm to summarize blockers',
+            null,
+            {
+                toolContext: {
+                    workloadRun: true,
+                    clientSurface: 'workload',
+                    workloadService: {
+                        isAvailable: () => true,
+                    },
+                },
+            },
+        )).toBe(false);
+    });
+
     test('merges route instructions with client-provided system prompts instead of stacking them', () => {
         const messages = __testUtils.buildMessages({
             input: [

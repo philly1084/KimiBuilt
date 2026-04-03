@@ -3027,6 +3027,35 @@ describe('ConversationOrchestrator', () => {
         ]);
     });
 
+    test('does not offer agent-workload during deferred workload execution', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-workload', 'remote-command'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'run a cron later every day at 8 pm to remote into the server and get a health report',
+            executionProfile: 'remote-build',
+            metadata: {
+                workloadRun: true,
+                clientSurface: 'workload',
+            },
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).not.toContain('agent-workload');
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+    });
+
     test('prefers remote-command over local file tools for remote website replacement prompts without explicit local artifacts', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

@@ -174,7 +174,13 @@ function extractTaskPromptFromScenario(scenario = '') {
         /^(?:please\s+)?(?:set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job)?\s*(?:to\s+)?/i,
         '',
     );
+    taskPrompt = taskPrompt.replace(/^(?:can|could|would)\s+you\s+/i, '');
+    taskPrompt = taskPrompt.replace(
+        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:cron|scheduled?|deferred)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job|check)?\s*(?:later\s*)?(?:to\s+)?/i,
+        '',
+    );
     taskPrompt = taskPrompt.replace(/^(?:have|let)\s+(?:the\s+)?(?:agent|assistant)\s+/i, '');
+    taskPrompt = taskPrompt.replace(/\bcron\b/gi, ' ');
 
     return taskPrompt
         .trim()

@@ -790,6 +790,10 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         || options?.toolContext?.executionProfile,
     );
     const workloadService = options?.workloadService || options?.toolContext?.workloadService;
+    const isDeferredWorkloadRun = options?.workloadRun === true
+        || options?.clientSurface === 'workload'
+        || options?.toolContext?.workloadRun === true
+        || options?.toolContext?.clientSurface === 'workload';
 
     if (toolId === 'k3s-deploy') {
         return hasUsableSshDefaults()
@@ -797,7 +801,9 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
     }
 
     if (toolId === 'agent-workload') {
-        return Boolean(workloadService?.isAvailable?.()) && hasWorkloadIntent(prompt);
+        return !isDeferredWorkloadRun
+            && Boolean(workloadService?.isAvailable?.())
+            && hasWorkloadIntent(prompt);
     }
 
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
@@ -1791,19 +1797,23 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '') {
     return automaticTools.filter((entry) => selectedIds.has(entry.id));
 }
 
-function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = []) {
+function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], options = {}) {
     const availableToolIds = new Set(Array.isArray(availableToolIdsInput) ? availableToolIdsInput : []);
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : 'remote-command');
     const explicitK3sDeployIntent = hasExplicitK3sDeployIntent(prompt);
     const explicitGitIntent = hasExplicitGitIntent(prompt);
+    const isDeferredWorkloadRun = options?.workloadRun === true
+        || options?.clientSurface === 'workload'
+        || options?.toolContext?.workloadRun === true
+        || options?.toolContext?.clientSurface === 'workload';
 
     if (explicitK3sDeployIntent && explicitGitIntent) {
         return null;
     }
 
-    if (hasWorkloadIntent(prompt) && availableToolIds.has('agent-workload')) {
+    if (!isDeferredWorkloadRun && hasWorkloadIntent(prompt) && availableToolIds.has('agent-workload')) {
         return 'agent-workload';
     }
 
@@ -1860,7 +1870,7 @@ function buildAutomaticToolChoice(selectedTools = [], api = 'responses', options
     }
 
     const prompt = String(options.prompt || '');
-    const requiredToolId = inferRequiredAutomaticToolId(prompt, selectedTools.map((tool) => tool.id));
+    const requiredToolId = inferRequiredAutomaticToolId(prompt, selectedTools.map((tool) => tool.id), options);
     if (requiredToolId && selectedTools.some((tool) => tool.id === requiredToolId)) {
         return buildForcedToolChoice(requiredToolId, api);
     }
@@ -2577,7 +2587,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             input: nextInput,
             previous_response_id: previousResponseId,
             tools: remainingTools.map((entry) => entry.responseDefinition),
-            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses', { model, prompt }) : 'auto',
+            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'responses', { model, prompt, toolContext }) : 'auto',
             parallel_tool_calls: false,
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
         });
@@ -2724,7 +2734,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             model,
             messages: workingMessages,
             tools: remainingTools.map((entry) => entry.chatDefinition),
-            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt }) : 'auto',
+            tool_choice: round === 0 ? buildAutomaticToolChoice(remainingTools, 'chat', { model, prompt, toolContext }) : 'auto',
             stream: false,
             ...chatReasoningParams,
         });
@@ -3045,7 +3055,7 @@ async function createResponse({
 
     try {
         if (enableAutomaticToolCalls) {
-            const requiredToolId = inferRequiredAutomaticToolId(prompt);
+            const requiredToolId = inferRequiredAutomaticToolId(prompt, [], toolContext);
 
             if (requiredToolId && !toolManager) {
                 throw new ToolOrchestrationError(
@@ -3065,7 +3075,7 @@ async function createResponse({
                 };
                 automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolExecutionContext);
                 const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
-                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id));
+                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id), toolExecutionContext);
 
                 if (requiredToolId && !selectedTools.some((tool) => tool.id === requiredToolId)) {
                     throw new ToolOrchestrationError(`Required tool '${requiredToolId}' is unavailable for this request. Check tool setup and runtime registration.`, {
@@ -3101,7 +3111,7 @@ async function createResponse({
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
-                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id));
+                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id), toolContext);
                 if (requiredToolId) {
                     throw toolError instanceof ToolOrchestrationError
                         ? toolError

@@ -2547,6 +2547,7 @@ class ConversationOrchestrator extends EventEmitter {
             objective,
             instructions,
             session,
+            metadata,
             executionProfile: resolvedProfile,
             toolManager: runtimeToolManager,
             requestedToolIds,
@@ -3297,6 +3298,7 @@ class ConversationOrchestrator extends EventEmitter {
         objective = '',
         instructions = '',
         session = null,
+        metadata = {},
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolManager = null,
         requestedToolIds = [],
@@ -3326,6 +3328,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasWorkloadSetupIntent = hasWorkloadIntent(`${objective || ''}\n${instructions || ''}`);
+        const isDeferredWorkloadRun = metadata?.workloadRun === true || metadata?.clientSurface === 'workload';
         const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(objective);
         const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
         const hasInternalArtifactUrl = hasInternalArtifactReference(`${objective || ''}\n${instructions || ''}`);
@@ -3337,7 +3340,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
-            if (hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
+            if (!isDeferredWorkloadRun && hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
                 candidates.add('agent-workload');
             }
             [
@@ -3403,7 +3406,7 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('file-mkdir');
             }
         } else {
-            if (hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
+            if (!isDeferredWorkloadRun && hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
                 candidates.add('agent-workload');
             }
             if (remoteToolId && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
