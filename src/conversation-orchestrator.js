@@ -1942,6 +1942,10 @@ function buildDeterministicRemoteWorkflow({ objective = '', session = null, tool
         return null;
     }
 
+    if (hasWorkloadIntent(objective)) {
+        return null;
+    }
+
     const sshContext = resolveSshRequestContext(objective, session);
     const target = sshContext.target;
     if (!target?.host) {

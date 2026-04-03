@@ -166,6 +166,91 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('prefers agent-workload over deterministic remote health when the request is scheduled for later', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'remote-command' || toolId === 'agent-workload'
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn(async (toolId) => {
+                if (toolId === 'agent-workload') {
+                    return {
+                        success: true,
+                        toolId,
+                        data: {
+                            action: 'create_from_scenario',
+                            message: 'Server health report created. Every day at 8:00 PM.',
+                            workload: {
+                                id: 'workload-1',
+                                title: 'Server Health Report',
+                                trigger: {
+                                    type: 'cron',
+                                    expression: '0 20 * * *',
+                                    timezone: 'America/Halifax',
+                                },
+                            },
+                        },
+                    };
+                }
+
+                throw new Error(`Unexpected tool execution: ${toolId}`);
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-scheduled-health', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'can you run a cron later every day at 8 pm to remote into the server and get a health report',
+            sessionId: 'session-scheduled-health',
+            stream: false,
+        });
+
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(llmClient.complete).not.toHaveBeenCalled();
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'agent-workload',
+            expect.objectContaining({
+                action: 'create_from_scenario',
+                request: 'can you run a cron later every day at 8 pm to remote into the server and get a health report',
+            }),
+            expect.any(Object),
+        );
+        expect(result.trace.runtimeMode).toBe('direct-tool');
+        expect(result.output).toContain('Every day at 8:00 PM');
+        expect(result.output).not.toContain('Server Health Report\n\nSystem Information');
+    });
+
     test('retries the stored deterministic remote health workflow without planner or synthesis', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
