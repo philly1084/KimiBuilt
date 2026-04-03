@@ -262,7 +262,7 @@ function buildInferredWorkloadPayload(params = {}, context = {}) {
     execution: params.execution,
     callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
       ? params.callableSlug
-      : inferred.callableSlug,
+      : undefined,
     policy: params.policy && typeof params.policy === 'object'
       ? params.policy
       : inferred.policy,
@@ -950,7 +950,7 @@ class ToolManager {
                 prompt: String(params.prompt || '').trim() || scenario.prompt,
                 callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
                   ? params.callableSlug
-                  : scenario.callableSlug,
+                  : undefined,
                 mode: params.mode,
                 enabled: params.enabled,
                 timezone: params.timezone || context?.timezone,

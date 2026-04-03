@@ -2567,8 +2567,19 @@ class Dashboard {
     formatDate(date) {
         if (!date) return 'Unknown';
         const d = new Date(date);
+        if (Number.isNaN(d.getTime())) {
+            return String(date);
+        }
         const now = new Date();
         const diff = now - d;
+        const futureDiff = d - now;
+
+        if (futureDiff > 0) {
+            if (futureDiff < 60000) return 'in under 1m';
+            if (futureDiff < 3600000) return `in ${Math.ceil(futureDiff / 60000)}m`;
+            if (futureDiff < 86400000) return `in ${Math.ceil(futureDiff / 3600000)}h`;
+            return d.toLocaleString();
+        }
         
         if (diff < 60000) return 'Just now';
         if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;

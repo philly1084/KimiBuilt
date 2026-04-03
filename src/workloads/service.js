@@ -37,7 +37,19 @@ class AgentWorkloadService {
             throw error;
         }
         const workload = await this.store.createWorkload(normalized);
-        await this.ensureNextScheduledRun(workload);
+        try {
+            const queuedRun = await this.ensureNextScheduledRun(workload);
+            if (workload.trigger?.type !== 'manual' && !queuedRun) {
+                throw new Error('Failed to enqueue workload run.');
+            }
+        } catch (error) {
+            try {
+                await this.store.deleteWorkload(workload.id, workload.ownerId);
+            } catch (cleanupError) {
+                console.warn(`[Workloads] Failed to clean up workload ${workload.id} after scheduling failure:`, cleanupError.message);
+            }
+            throw error;
+        }
         await this.emitWorkloadUpdate('workload_updated', workload.sessionId, {
             workload,
         });

@@ -648,6 +648,11 @@ function serializeDate(value) {
 
 function normalizeDate(value) {
     const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        const error = new Error('Invalid scheduled run time');
+        error.statusCode = 400;
+        throw error;
+    }
     return date.toISOString();
 }
 

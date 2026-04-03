@@ -918,9 +918,6 @@ class ChatApp {
 
             this.workloadTitleInput.value = setup.title;
             this.workloadPromptInput.value = setup.prompt;
-            if (!this.workloadCallableSlug.value.trim()) {
-                this.workloadCallableSlug.value = this.slugifyWorkloadValue(setup.title);
-            }
 
             this.workloadTriggerType.value = setup.trigger.type;
             this.workloadRunAt.value = setup.trigger.type === 'once'

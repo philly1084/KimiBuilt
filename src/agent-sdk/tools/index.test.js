@@ -194,6 +194,7 @@ describe('ToolManager image tools', () => {
       trigger: expect.objectContaining({
         type: 'once',
       }),
+      callableSlug: undefined,
     }), 'user-1');
   });
 

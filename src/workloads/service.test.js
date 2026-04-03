@@ -22,6 +22,7 @@ describe('AgentWorkloadService', () => {
             getWorkloadById: jest.fn(),
             getWorkloadByCallableSlug: jest.fn(),
             updateWorkload: jest.fn(),
+            deleteWorkload: jest.fn(),
             cancelQueuedRunsForWorkload: jest.fn(),
             completeRun: jest.fn(),
             failRun: jest.fn(),
@@ -160,6 +161,44 @@ describe('AgentWorkloadService', () => {
         }));
         expect(created.workload).toBe(workload);
         expect(created.scenario.scheduleDetected).toBe(true);
+    });
+
+    test('cleans up a newly-created scheduled workload if initial queueing fails', async () => {
+        const workload = {
+            id: 'workload-cleanup-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Check remote time',
+            prompt: 'Run `date` on the server.',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+        };
+
+        store.createWorkload.mockResolvedValue(workload);
+        store.enqueueRun.mockResolvedValue(null);
+
+        await expect(service.createWorkload({
+            sessionId: 'session-1',
+            title: 'Check remote time',
+            prompt: 'Run `date` on the server.',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+        }, 'phill')).rejects.toThrow('Failed to enqueue workload run.');
+
+        expect(store.deleteWorkload).toHaveBeenCalledWith('workload-cleanup-1', 'phill');
     });
 
     test('extracts structured execution when creating a workload from a remote scenario request', async () => {
