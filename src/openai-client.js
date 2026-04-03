@@ -1983,6 +1983,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `agent-workload` for later, recurring, or deferred tasks tied to the current conversation.');
         guidance.push('- For `agent-workload`, pass the full original user request instead of inventing separate `command`, `schedule`, or cron fields. The runtime will canonicalize the task.');
         guidance.push('- If the user asks to set up a cron job, recurring schedule, reminder, follow-up, or future run, prefer `agent-workload` even when the task will later execute remote commands on a server.');
+        guidance.push('- If the user asks for multiple scheduled jobs, split them into separate `agent-workload` creations instead of one combined workload.');
         guidance.push('- Do not create or edit host crontabs with `remote-command` unless the user explicitly asks to inspect or modify the server\'s own cron configuration.');
     }
 

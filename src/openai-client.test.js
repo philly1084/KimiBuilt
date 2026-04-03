@@ -1008,6 +1008,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('missing project checkout on the remote host');
         expect(guidance).toContain('Keep `remote-command` available for one-off server configuration and troubleshooting');
         expect(guidance).toContain('prefer `agent-workload` even when the task will later execute remote commands on a server');
+        expect(guidance).toContain('split them into separate `agent-workload` creations');
         expect(guidance).toContain('Do not use `remote-command` as a substitute scheduler');
         expect(guidance).toContain('Do not claim generic local shell or sandbox limits for Git work');
         expect(guidance).toContain('Do not infer an arbitrary live website path such as `/var/www/...` as the target');

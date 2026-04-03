@@ -369,6 +369,45 @@ function inferWorkloadPolicy(prompt = '') {
     return normalizePolicy({});
 }
 
+function hasImplicitRecurringJobIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(cron|crontab|job|jobs|schedule|scheduled|recurring|automation|task|tasks|workload|workloads)\b/.test(normalized)
+        && /\b(set up|setup|create|make|add|queue|save|plan)\b/.test(normalized);
+}
+
+function inferDefaultRecurringTrigger(scenario = '', timezone = 'UTC') {
+    const normalized = String(scenario || '').trim().toLowerCase();
+    if (!normalized || !hasImplicitRecurringJobIntent(normalized) || hasSchedulingCue(normalized)) {
+        return null;
+    }
+
+    if (/\b(update|updates|upgrade|upgrades|patch|patches)\b/.test(normalized)) {
+        return {
+            type: 'cron',
+            expression: '0 2 * * 1',
+            timezone,
+        };
+    }
+
+    if (/\b(check|checks|monitor|monitoring|audit|audits|scan|scans|health|verify|verification|security)\b/.test(normalized)) {
+        return {
+            type: 'cron',
+            expression: '0 9 * * *',
+            timezone,
+        };
+    }
+
+    return {
+        type: 'cron',
+        expression: '0 9 * * *',
+        timezone,
+    };
+}
+
 function translateCronExpression(expression = '', timezone = 'UTC') {
     const normalized = String(expression || '').trim();
     const parts = normalized.split(/\s+/).filter(Boolean);
@@ -476,6 +515,8 @@ function parseWorkloadScenario(scenario = '', options = {}) {
                 expression: createCronExpression(timeInfo, 'daily'),
                 timezone: resolvedTimezone,
             };
+        } else {
+            trigger = inferDefaultRecurringTrigger(normalizedScenario, resolvedTimezone) || trigger;
         }
     }
 
@@ -499,6 +540,7 @@ module.exports = {
     extractTaskPromptFromScenario,
     hasSchedulingCue,
     hasWorkloadIntent,
+    inferDefaultRecurringTrigger,
     inferWorkloadPolicy,
     parseWorkloadScenario,
     slugifyWorkloadValue,

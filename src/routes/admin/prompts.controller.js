@@ -54,6 +54,7 @@ function buildPlannerPromptSurface() {
     'Every remote-command step must include a non-empty params.command string.',
     'Every agent-workload step must pass the full original user request and let the runtime extract schedule and command details.',
     'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer agent-workload instead of remote-command even when an SSH target is available.',
+    'If the user asks for multiple scheduled jobs, split them into separate agent-workload steps rather than one combined workload.',
     'Use remote-command for server-side cron only when the user explicitly asks to inspect or modify the host crontab itself.',
     'Every file-write step must include both params.path and the full file body as params.content.',
     'Use file-write only for local runtime files. For remote hosts, deployed servers, or container-only paths, use remote-command or docker-exec instead.',

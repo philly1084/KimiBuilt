@@ -15,6 +15,7 @@ function buildContinuityInstructions(extra = '') {
         'Treat the local repository plus GitHub/CI as the source of truth for software delivery unless the user explicitly asks for a server-local Git workflow.',
         'Prefer a delivery chain of local authoring -> git-safe push -> CI or GitHub Actions -> k3s deploy or rollout verification, rather than hand-editing the live server.',
         'When scheduling work for later or on a recurrence, use agent-workload with the full original user request. Do not invent separate command, schedule, or cron fields unless the runtime already built them for you.',
+        'If the user asks for multiple scheduled jobs, split them into separate agent-workload creations rather than one combined workload.',
         'When calling remote-command, always include a non-empty command parameter. Host, username, and port may be omitted only when the runtime already has a default SSH target.',
         'For remote server or remote-build work, assume an Ubuntu/Linux target unless tool results prove otherwise. A safe reconnect baseline is: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
         'For remote troubleshooting, keep ownership of the original ask: continue through routine diagnostics, fixes, and verification instead of turning each intermediate issue into a new user task.',

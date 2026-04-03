@@ -56,6 +56,19 @@ function getDefaultWorkloadTimezone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
+function hasMultiWorkloadSchedulingIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const hasSchedulingLanguage = /\b(cron|job|jobs|schedule|scheduled|recurring|automation|task|tasks|workload|workloads)\b/.test(normalized);
+    const hasMultiLanguage = /\b(couple|few|multiple|several|two|three)\b/.test(normalized)
+        || /\bupdates?\b[\s\S]{0,20}\band\b[\s\S]{0,20}\bchecks?\b/.test(normalized);
+
+    return hasSchedulingLanguage && hasMultiLanguage;
+}
+
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
 
@@ -3666,6 +3679,8 @@ class ConversationOrchestrator extends EventEmitter {
         const researchQuery = extractExplicitWebResearchQuery(objective);
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+        const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
+            && hasMultiWorkloadSchedulingIntent(objective);
         const normalizedCreate = toolPolicy.candidateToolIds.includes('agent-workload')
             ? buildCanonicalWorkloadAction({
                 request: objective,
@@ -3680,6 +3695,7 @@ class ConversationOrchestrator extends EventEmitter {
             })
             : null;
         if (toolPolicy.candidateToolIds.includes('agent-workload')
+            && !shouldForcePlannerForMultiWorkload
             && (
                 hasWorkloadIntent(objective)
                 || normalizedCreate?.trigger?.type === 'cron'
@@ -4007,6 +4023,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
+            'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
+            'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',
             'Use `remote-command` for host cron only when the user explicitly asks to inspect or modify the server\'s own crontab.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',

@@ -161,4 +161,38 @@ describe('workload request builder', () => {
         expect(canonical.prompt).toContain('produce only the final document/report content');
         expect(canonical.prompt).toContain('do some research on ADHD and write the document on it I can review');
     });
+
+    test('infers a conservative default schedule for security update cron requests without explicit timing', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'Set up a cron job to reach out to the server and do security updates.',
+        }, {
+            timezone: 'America/Halifax',
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            trigger: {
+                type: 'cron',
+                expression: '0 2 * * 1',
+                timezone: 'America/Halifax',
+            },
+        }));
+    });
+
+    test('infers a conservative default schedule for security check cron requests without explicit timing', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'Set up a cron job to reach out to the server and do security checks.',
+        }, {
+            timezone: 'America/Halifax',
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            trigger: {
+                type: 'cron',
+                expression: '0 9 * * *',
+                timezone: 'America/Halifax',
+            },
+        }));
+    });
 });

@@ -3368,6 +3368,40 @@ describe('ConversationOrchestrator', () => {
         ]);
     });
 
+    test('does not shortcut multi-job scheduling requests into a single direct workload action', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-workload', 'remote-command'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'can you setup a couple cron jobs on the local system to reach out to the server and do security updates and checks';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+            toolContext: {
+                timezone: 'America/Halifax',
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('agent-workload');
+        expect(directAction).toBeNull();
+    });
+
     test('does not offer agent-workload during deferred workload execution', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
