@@ -305,6 +305,26 @@ class WorkloadStore {
         return this.mapRun(result.rows[0]);
     }
 
+    async getRunByIdempotencyKey(idempotencyKey = '') {
+        await this.ensureAvailable();
+        const normalizedKey = String(idempotencyKey || '').trim();
+        if (!normalizedKey) {
+            return null;
+        }
+
+        const result = await postgres.query(
+            `
+                SELECT *
+                FROM agent_runs
+                WHERE idempotency_key = $1
+                LIMIT 1
+            `,
+            [normalizedKey],
+        );
+
+        return this.mapRun(result.rows[0]);
+    }
+
     async listAdminRuns(limit = 100) {
         await this.ensureAvailable();
         const result = await postgres.query(
@@ -359,7 +379,7 @@ class WorkloadStore {
                         '${RUN_STATUS.QUEUED}',
                         $5, $6, $7, $8, $9, $10, $11, $12::jsonb
                     )
-                    ON CONFLICT (idempotency_key) DO NOTHING
+                    ON CONFLICT DO NOTHING
                     RETURNING *
                 `,
                 [
@@ -378,7 +398,16 @@ class WorkloadStore {
                 ],
             );
 
-            return this.mapRun(result.rows[0]);
+            const createdRun = this.mapRun(result.rows[0]);
+            if (createdRun) {
+                return createdRun;
+            }
+
+            if (idempotencyKey) {
+                return this.getRunByIdempotencyKey(idempotencyKey);
+            }
+
+            return null;
         } catch (error) {
             throw this.normalizePersistenceError(error, 'enqueue workload run');
         }

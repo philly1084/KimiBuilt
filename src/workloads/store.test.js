@@ -1,0 +1,73 @@
+'use strict';
+
+jest.mock('../postgres', () => ({
+    postgres: {
+        enabled: true,
+        query: jest.fn(),
+        getPool: jest.fn(),
+    },
+}));
+
+const { postgres } = require('../postgres');
+const { WorkloadStore } = require('./store');
+
+describe('WorkloadStore', () => {
+    let store;
+
+    beforeEach(() => {
+        store = new WorkloadStore();
+        postgres.enabled = true;
+        postgres.query.mockReset();
+    });
+
+    test('returns the existing run when enqueue hits an idempotency conflict', async () => {
+        postgres.query
+            .mockResolvedValueOnce({ rows: [] })
+            .mockResolvedValueOnce({
+                rows: [{
+                    id: 'run-existing-1',
+                    workload_id: 'workload-1',
+                    owner_id: 'phill',
+                    session_id: 'session-1',
+                    status: 'queued',
+                    reason: 'schedule',
+                    scheduled_for: '2026-04-03T12:05:00.000Z',
+                    started_at: null,
+                    finished_at: null,
+                    claim_owner: null,
+                    claim_expires_at: null,
+                    parent_run_id: null,
+                    stage_index: -1,
+                    attempt: 0,
+                    response_id: null,
+                    prompt: 'Run `date` on the server.',
+                    trace: {},
+                    error: {},
+                    metadata: {},
+                    created_at: '2026-04-03T12:00:00.000Z',
+                    updated_at: '2026-04-03T12:00:00.000Z',
+                }],
+            });
+
+        const run = await store.enqueueRun({
+            workloadId: 'workload-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            reason: 'schedule',
+            scheduledFor: '2026-04-03T12:05:00.000Z',
+            stageIndex: -1,
+            idempotencyKey: 'workload-1:schedule:2026-04-03T12:05:00.000Z:stage--1',
+            prompt: 'Run `date` on the server.',
+        });
+
+        expect(run).toEqual(expect.objectContaining({
+            id: 'run-existing-1',
+            workloadId: 'workload-1',
+            status: 'queued',
+        }));
+        expect(postgres.query).toHaveBeenCalledTimes(2);
+        expect(postgres.query.mock.calls[0][0]).toContain('ON CONFLICT DO NOTHING');
+        expect(postgres.query.mock.calls[0][0]).not.toContain('ON CONFLICT (idempotency_key)');
+        expect(postgres.query.mock.calls[1][0]).toContain('WHERE idempotency_key = $1');
+    });
+});
