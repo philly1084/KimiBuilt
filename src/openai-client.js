@@ -1982,6 +1982,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'agent-workload')) {
         guidance.push('- Use `agent-workload` for later, recurring, or deferred tasks tied to the current conversation.');
         guidance.push('- For `agent-workload`, pass the full original user request instead of inventing separate `command`, `schedule`, or cron fields. The runtime will canonicalize the task.');
+        guidance.push('- If the user asks to set up a cron job, recurring schedule, reminder, follow-up, or future run, prefer `agent-workload` even when the task will later execute remote commands on a server.');
+        guidance.push('- Do not create or edit host crontabs with `remote-command` unless the user explicitly asks to inspect or modify the server\'s own cron configuration.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'git-safe')) {
@@ -1998,6 +2000,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (remoteGuidanceToolId) {
         guidance.push(`- Use \`${remoteGuidanceToolId}\` for remote server commands over SSH when the user asks you to inspect, deploy, configure, or troubleshoot a remote host.`);
+        guidance.push(`- Do not use \`${remoteGuidanceToolId}\` as a substitute scheduler. If the user wants future, recurring, cron-like, or follow-up work, create it with \`agent-workload\` instead of writing host crontabs unless they explicitly asked for server-side cron management.`);
         guidance.push(`- Do not refer to internal tool names like \`run_shell_command\` or claim you lack generic shell access when \`${remoteGuidanceToolId}\` is attached.`);
         guidance.push(`- Every \`${remoteGuidanceToolId}\` call must include a non-empty \`command\` string. Host, username, and port may be omitted only when runtime defaults already exist.`);
         guidance.push(`- Keep ownership of the original remote troubleshooting request. Treat intermediate failures as part of the same task and continue with the next reasonable command instead of asking the user to choose each step.`);

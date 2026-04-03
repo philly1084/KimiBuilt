@@ -4006,6 +4006,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
+            'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
+            'Use `remote-command` for host cron only when the user explicitly asks to inspect or modify the server\'s own crontab.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
