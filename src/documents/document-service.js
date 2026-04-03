@@ -19,6 +19,9 @@ const {
   buildDocumentDesignPlan,
   resolveDocumentTheme,
 } = require('./document-design-engine');
+const {
+  buildDocumentCreativityPacket,
+} = require('./document-creativity');
 
 class DocumentService {
   constructor(openaiClient) {
@@ -663,11 +666,27 @@ class DocumentService {
     }));
   }
 
-  buildDocumentPlan({ prompt = '', documentType = '', format = '', tone = 'professional', length = 'medium', limit = 4 } = {}) {
+  buildDocumentPlan({
+    prompt = '',
+    documentType = '',
+    format = '',
+    tone = 'professional',
+    length = 'medium',
+    limit = 4,
+    existingContent = '',
+    session = null,
+  } = {}) {
     const recommendation = this.recommendDocumentWorkflow({ prompt, documentType, format, limit });
     const blueprint = resolveDocumentBlueprint(recommendation.inferredType);
     const title = this.derivePlanTitle(prompt, blueprint);
     const outlineType = recommendation.pipeline === 'presentation' ? 'slides' : 'sections';
+    const creativity = buildDocumentCreativityPacket({
+      prompt,
+      documentType: recommendation.inferredType,
+      format: recommendation.recommendedFormat || format,
+      existingContent,
+      session,
+    });
 
     return {
       ...recommendation,
@@ -676,6 +695,19 @@ class DocumentService {
       titleSuggestion: title,
       outlineType,
       outline: this.buildPlanItemsFromBlueprint(blueprint, recommendation.pipeline),
+      themeSuggestion: creativity.themeSuggestion,
+      creativeDirection: {
+        id: creativity.direction.id,
+        label: creativity.direction.label,
+        rationale: creativity.direction.rationale,
+      },
+      humanizationNotes: creativity.humanizationNotes,
+      sampleHandling: creativity.sampleSignals.guidance,
+      contextSignals: {
+        recentTasks: creativity.continuity.recentTasks.length,
+        recentArtifacts: creativity.continuity.recentArtifacts.length,
+        recentMessages: creativity.continuity.recentMessages.length,
+      },
     };
   }
 
@@ -761,7 +793,7 @@ class DocumentService {
       length: options.length || 'medium',
       documentType: options.documentType || structuredContent.documentType || template?.blueprint || template?.id || 'document',
       requestedPlan: options.designPlan || null,
-      theme: options.theme || structuredContent.theme || '',
+      theme: options.theme || structuredContent.theme || options.designPlan?.themeSuggestion || '',
     });
 
     if (template && this.shouldRenderTemplateAsPresentation(template, normalizedFormat)) {

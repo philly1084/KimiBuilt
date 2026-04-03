@@ -353,6 +353,70 @@ describe('ArtifactService', () => {
         expect(instructions).toContain('Prefer standard HTML <img src="..."> elements');
     });
 
+    test('adds sample-handling and creative-direction guardrails when scaffold content is provided', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Expansion Brief',
+                        creativeDirection: {
+                            id: 'boardroom-brief',
+                            label: 'Boardroom Brief',
+                            rationale: 'Fast, decision-ready structure.',
+                        },
+                        sections: [
+                            { heading: 'Decision', purpose: 'Frame the call', keyPoints: ['Approve the move'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Expansion Brief',
+                        sections: [
+                            { heading: 'Decision', kicker: 'Go / no-go', content: 'Approve the move.', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>Expansion Brief</h1></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-1', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a polished executive brief for Atlantic expansion.',
+            format: 'pdf',
+            artifactIds: [],
+            existingContent: '## Overview\n## Details\n{{company_name}}\nPlaceholder copy here',
+            model: 'gpt-5.3',
+        });
+
+        const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
+        expect(instructions).toContain('<creative_direction>');
+        expect(instructions).toContain('Direction:');
+        expect(instructions).toContain('<sample_handling>');
+        expect(instructions).toContain('Treat the provided template, defaults, and sample text as scaffolding, not final copy.');
+        expect(instructions).toContain('Do not simply recycle the sample section labels');
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                creativeDirection: expect.any(String),
+                themeSuggestion: expect.any(String),
+            }),
+        }));
+    });
+
     test('fetches Unsplash image references for visual html documents when configured', async () => {
         isConfigured.mockReturnValue(true);
         searchImages.mockResolvedValue({

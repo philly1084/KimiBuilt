@@ -41,6 +41,9 @@ describe('project-memory', () => {
                 downloadUrl: '/api/artifacts/artifact-1/download',
                 metadata: {
                     sourcePrompt: 'Create an HTML brief from the research',
+                    creativeDirection: 'Boardroom Brief',
+                    creativeDirectionId: 'boardroom-brief',
+                    themeSuggestion: 'executive',
                 },
             }],
         });
@@ -52,6 +55,14 @@ describe('project-memory', () => {
         ]));
         expect(update.artifacts).toHaveLength(2);
         expect(update.artifacts.map((entry) => entry.id)).toEqual(expect.arrayContaining(['artifact-1', 'artifact-2']));
+        expect(update.artifacts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'artifact-1',
+                creativeDirection: 'Boardroom Brief',
+                creativeDirectionId: 'boardroom-brief',
+                themeSuggestion: 'executive',
+            }),
+        ]));
         expect(update.tasks[0].summary).toMatch(/Created the file/i);
     });
 

@@ -361,10 +361,25 @@ Return JSON:
       '<production_plan>',
       designPlan.titleSuggestion ? `Title suggestion: ${designPlan.titleSuggestion}` : null,
       designPlan.outlineType ? `Outline type: ${designPlan.outlineType}` : null,
+      designPlan.themeSuggestion ? `Theme suggestion: ${designPlan.themeSuggestion}` : null,
+      designPlan.creativeDirection?.label ? `Creative direction: ${designPlan.creativeDirection.label}` : null,
+      designPlan.creativeDirection?.rationale ? `Creative rationale: ${designPlan.creativeDirection.rationale}` : null,
+      Array.isArray(designPlan.humanizationNotes) && designPlan.humanizationNotes.length > 0 ? 'Humanization notes:' : null,
+      ...(Array.isArray(designPlan.humanizationNotes)
+        ? designPlan.humanizationNotes.map((entry) => `- ${entry}`)
+        : []),
+      Array.isArray(designPlan.sampleHandling) && designPlan.sampleHandling.length > 0 ? 'Sample handling:' : null,
+      ...(Array.isArray(designPlan.sampleHandling)
+        ? designPlan.sampleHandling.map((entry) => `- ${entry}`)
+        : []),
       outline.length > 0 ? 'Planned structure:' : null,
       ...outline.map((item) => {
         const label = item.title || item.heading || `Section ${item.index || ''}`.trim();
-        const detail = item.purpose || item.layout || '';
+        const detail = [
+          item.purpose,
+          item.layout,
+          item.suggestedBlocks ? `blocks=${item.suggestedBlocks.join(',')}` : '',
+        ].filter(Boolean).join(' :: ');
         return `- ${label}${detail ? ` :: ${detail}` : ''}`;
       }),
       '</production_plan>',

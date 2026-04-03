@@ -256,5 +256,31 @@ describe('DocumentService', () => {
       layout: 'title',
       title: 'Title Slide',
     }));
+    expect(plan.creativeDirection).toEqual(expect.objectContaining({
+      id: expect.any(String),
+      label: expect.any(String),
+    }));
+    expect(plan.themeSuggestion).toEqual(expect.any(String));
+    expect(plan.humanizationNotes.length).toBeGreaterThan(0);
+  });
+
+  test('treats scaffold-like existing content as structure rather than final copy in production plans', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const plan = service.buildDocumentPlan({
+      prompt: 'Create a polished executive brief about expanding into Atlantic Canada',
+      documentType: 'executive-brief',
+      format: 'pdf',
+      existingContent: '## Overview\n## Details\n{{company_name}}\nPlaceholder copy here',
+    });
+
+    expect(plan.sampleHandling).toEqual(expect.arrayContaining([
+      expect.stringContaining('Treat the provided template'),
+      expect.stringContaining('Do not simply recycle'),
+    ]));
   });
 });

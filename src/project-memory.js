@@ -112,6 +112,14 @@ function buildArtifactRefs(artifacts = [], capturedAt = new Date().toISOString()
                 format: artifact.format || artifact.extension || '',
                 downloadUrl: normalizeUrl(artifact.downloadUrl || ''),
                 sourcePrompt: sanitizeText(artifact?.metadata?.sourcePrompt || ''),
+                creativeDirection: sanitizeText(
+                    artifact?.metadata?.creativeDirection
+                    || artifact?.metadata?.creativeDirectionLabel
+                    || '',
+                    80,
+                ),
+                creativeDirectionId: sanitizeText(artifact?.metadata?.creativeDirectionId || '', 64),
+                themeSuggestion: sanitizeText(artifact?.metadata?.themeSuggestion || '', 40),
                 capturedAt,
             };
         })
@@ -266,6 +274,9 @@ function mergeProjectMemory(existing = {}, update = {}) {
             format: entry.format || '',
             downloadUrl: normalizeUrl(entry.downloadUrl || ''),
             sourcePrompt: sanitizeText(entry.sourcePrompt || '', 160),
+            creativeDirection: sanitizeText(entry.creativeDirection || '', 80),
+            creativeDirectionId: sanitizeText(entry.creativeDirectionId || '', 64),
+            themeSuggestion: sanitizeText(entry.themeSuggestion || '', 40),
             capturedAt: entry.capturedAt || merged.lastUpdated,
         });
     });
@@ -330,7 +341,8 @@ function buildProjectMemoryInstructions(session = null) {
         lines.push('These are artifact references, not guaranteed local workspace files. Do not use local file tools on them unless the user explicitly provides a readable local path.');
         memory.artifacts.slice(-6).forEach((artifact) => {
             const download = artifact.downloadUrl ? ` -> ${artifact.downloadUrl}` : '';
-            lines.push(`- ${artifact.filename || artifact.id} (${artifact.format || 'file'})${download}`);
+            const creativeDirection = artifact.creativeDirection ? `, ${artifact.creativeDirection}` : '';
+            lines.push(`- ${artifact.filename || artifact.id} (${artifact.format || 'file'}${creativeDirection})${download}`);
         });
     }
 

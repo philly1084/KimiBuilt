@@ -9,6 +9,12 @@ const { vectorStore } = require('../memory/vector-store');
 const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
+const {
+    buildDocumentCreativityPacket,
+    inferDocumentTypeFromPrompt,
+    renderCreativityPromptContext,
+} = require('../documents/document-creativity');
+const { resolveDocumentTheme } = require('../documents/document-design-engine');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
 const DEFAULT_DOCUMENT_IMAGE_TARGET = 8;
 const COMPOSITION_PLANNING_PATTERNS = [
@@ -124,7 +130,9 @@ function extractResponseContentText(content, depth = 0) {
         return content
             .map((item) => extractResponseContentText(item, depth + 1))
             .filter(Boolean)
-            .join('');
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
     if (!content || typeof content !== 'object') {
@@ -209,6 +217,8 @@ function extractResponseText(response) {
             ?? choiceMessage.items
             ?? choiceMessage.text
             ?? choiceMessage.output_text
+            ?? choiceMessage.reasoning_content
+            ?? choiceMessage.reasoning
             ?? ''
         ).trim();
         if (choiceText) {
@@ -364,6 +374,9 @@ function normalizePlanSections(sections = []) {
                 .filter(Boolean)
                 .slice(0, 6),
             targetLength: String(section?.targetLength || 'medium').trim() || 'medium',
+            layout: String(section?.layout || section?.sectionLayout || '').trim() || 'narrative',
+            tone: String(section?.tone || '').trim(),
+            visualIntent: String(section?.visualIntent || section?.visual || '').trim(),
         }))
         .filter((section) => section.heading);
 }
@@ -377,8 +390,45 @@ function normalizeDocumentSections(sections = [], fallbackSections = []) {
             heading: String(section?.heading || section?.title || fallbackByIndex[index]?.heading || `Section ${index + 1}`).trim(),
             content: String(section?.content || section?.body || '').trim(),
             level: Number(section?.level) > 0 ? Number(section.level) : 1,
+            kicker: String(section?.kicker || fallbackByIndex[index]?.tone || '').trim(),
+            visualIntent: String(section?.visualIntent || fallbackByIndex[index]?.visualIntent || '').trim(),
         }))
         .filter((section) => section.heading && section.content);
+}
+
+function normalizeCreativePlan(parsedPlan = {}, fallbackPacket = null) {
+    const packet = fallbackPacket && typeof fallbackPacket === 'object'
+        ? fallbackPacket
+        : {};
+    const direction = packet.direction || {};
+    const directionLabel = typeof parsedPlan?.creativeDirection === 'string'
+        ? parsedPlan.creativeDirection
+        : parsedPlan?.creativeDirection?.label;
+
+    return {
+        id: String(parsedPlan?.creativeDirection?.id || direction.id || '').trim() || null,
+        label: String(
+            directionLabel
+            || direction.label
+            || ''
+        ).trim() || 'Editorial Feature',
+        rationale: String(parsedPlan?.creativeDirection?.rationale || direction.rationale || '').trim(),
+        themeSuggestion: String(
+            parsedPlan?.theme
+            || parsedPlan?.themeSuggestion
+            || packet.themeSuggestion
+            || direction.preferredTheme
+            || 'editorial'
+        ).trim(),
+        humanizationNotes: (Array.isArray(parsedPlan?.humanizationNotes) ? parsedPlan.humanizationNotes : packet.humanizationNotes || [])
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+            .slice(0, 4),
+        sampleHandling: (Array.isArray(parsedPlan?.sampleHandling) ? parsedPlan.sampleHandling : packet.sampleSignals?.guidance || [])
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+            .slice(0, 4),
+    };
 }
 
 function normalizeImageReferenceUrl(url = '') {
@@ -604,19 +654,35 @@ function pickImageReference(imageReferences = [], index = 0) {
     return normalized[index % normalized.length];
 }
 
-function buildExpandedDocumentHtml(title = 'Document', sections = [], imageReferences = []) {
+function buildExpandedDocumentHtml(title = 'Document', sections = [], imageReferences = [], creativePlan = null) {
     const safeTitle = escapeHtml(title);
     const normalizedSections = Array.isArray(sections) ? sections : [];
     const normalizedImages = Array.isArray(imageReferences) ? imageReferences : [];
+    const theme = resolveDocumentTheme(creativePlan?.themeSuggestion || 'editorial');
     const heroImage = pickImageReference(normalizedImages, 0);
+    const accentPills = [
+        creativePlan?.label || 'Crafted document',
+        `${normalizedSections.length || 1} section${normalizedSections.length === 1 ? '' : 's'}`,
+        creativePlan?.rationale || '',
+    ].filter(Boolean).slice(0, 3);
+    const humanNotes = Array.isArray(creativePlan?.humanizationNotes)
+        ? creativePlan.humanizationNotes.slice(0, 3)
+        : [];
 
-    const heroMarkup = heroImage
-        ? [
-            '<section class="document-hero">',
-            `  ${buildImageFigureHtml(heroImage, `${title} hero image`).replace(/\n/g, '\n  ')}`,
-            '</section>',
-        ].join('\n')
-        : '';
+    const heroMarkup = [
+        '<section class="document-hero-shell">',
+        '  <div class="document-hero-copy">',
+        `    <p class="document-eyebrow">${escapeHtml(creativePlan?.label || 'Crafted document')}</p>`,
+        `    <h1>${safeTitle}</h1>`,
+        creativePlan?.rationale ? `    <p class="document-standfirst">${escapeHtml(creativePlan.rationale)}</p>` : '',
+        accentPills.length > 0 ? `    <div class="document-pill-row">${accentPills.map((pill) => `<span class="document-pill">${escapeHtml(pill)}</span>`).join('')}</div>` : '',
+        humanNotes.length > 0 ? `    <div class="document-human-notes">${humanNotes.map((note) => `<p>${escapeHtml(note)}</p>`).join('')}</div>` : '',
+        '  </div>',
+        heroImage
+            ? `  <div class="document-hero-media">${buildImageFigureHtml(heroImage, `${title} hero image`).replace(/\n/g, '\n    ')}</div>`
+            : '  <div class="document-hero-panel"><p>Built from the approved plan with a deliberate narrative rhythm and visual structure.</p></div>',
+        '</section>',
+    ].filter(Boolean).join('\n');
 
     const sectionMarkup = normalizedSections.map((section, index) => {
         const safeHeading = escapeHtml(String(section?.heading || `Section ${index + 1}`).trim());
@@ -637,12 +703,26 @@ function buildExpandedDocumentHtml(title = 'Document', sections = [], imageRefer
                 '</div>',
             ].filter(Boolean).join('\n')
             : '';
+        const kicker = section?.kicker
+            ? `<p class="document-section-kicker">${escapeHtml(section.kicker)}</p>`
+            : '';
+        const aside = section?.visualIntent
+            ? `<aside class="document-section-aside">${escapeHtml(section.visualIntent)}</aside>`
+            : '';
 
         return [
             `<section class="document-section" data-section-index="${index + 1}">`,
-            `  <h2>${safeHeading}</h2>`,
-            imageRailMarkup ? `  ${imageRailMarkup.replace(/\n/g, '\n  ')}` : '',
-            `  <div class="document-copy">${bodyMarkup}</div>`,
+            '  <div class="document-section-chrome">',
+            `    <span class="document-section-number">${String(index + 1).padStart(2, '0')}</span>`,
+            `    <span class="document-section-tag">${escapeHtml(section?.visualIntent || section?.kicker || 'story block')}</span>`,
+            '  </div>',
+            '  <div class="document-section-body">',
+            kicker ? `    ${kicker}` : '',
+            `    <h2>${safeHeading}</h2>`,
+            aside ? `    ${aside}` : '',
+            imageRailMarkup ? `    ${imageRailMarkup.replace(/\n/g, '\n    ')}` : '',
+            `    <div class="document-copy">${bodyMarkup}</div>`,
+            '  </div>',
             '</section>',
         ].filter(Boolean).join('\n');
     }).join('\n');
@@ -651,9 +731,15 @@ function buildExpandedDocumentHtml(title = 'Document', sections = [], imageRefer
     const galleryMarkup = remainingImages.length > 0
         ? [
             '<section class="document-section document-gallery">',
-            '  <h2>Image Gallery</h2>',
-            '  <div class="document-gallery-grid">',
-            ...remainingImages.map((imageReference, index) => `  ${buildImageFigureHtml(imageReference, `${title} image ${index + 1}`).replace(/\n/g, '\n  ')}`),
+            '  <div class="document-section-chrome">',
+            '    <span class="document-section-number">++</span>',
+            '    <span class="document-section-tag">visual appendix</span>',
+            '  </div>',
+            '  <div class="document-section-body">',
+            '    <h2>Image Gallery</h2>',
+            '    <div class="document-gallery-grid">',
+            ...remainingImages.map((imageReference, index) => `      ${buildImageFigureHtml(imageReference, `${title} image ${index + 1}`).replace(/\n/g, '\n      ')}`),
+            '    </div>',
             '  </div>',
             '</section>',
         ].join('\n')
@@ -664,31 +750,60 @@ function buildExpandedDocumentHtml(title = 'Document', sections = [], imageRefer
         '<html>',
         '<head>',
         '  <meta charset="utf-8">',
+        '  <meta name="viewport" content="width=device-width, initial-scale=1">',
         `  <title>${safeTitle}</title>`,
         '  <style>',
-        '    body { font-family: Arial, sans-serif; margin: 40px; color: #1f2937; line-height: 1.6; }',
-        '    main { max-width: 900px; margin: 0 auto; }',
-        '    header { margin-bottom: 32px; }',
-        '    h1, h2, h3 { color: #111827; }',
-        '    .document-section { margin: 0 0 32px; }',
+        '    :root {',
+        `      --doc-bg: ${theme.background};`,
+        `      --doc-surface: ${theme.page};`,
+        `      --doc-panel: ${theme.panel};`,
+        `      --doc-panel-alt: ${theme.panelAlt};`,
+        `      --doc-text: ${theme.text};`,
+        `      --doc-muted: ${theme.muted};`,
+        `      --doc-accent: ${theme.accent};`,
+        `      --doc-border: ${theme.border};`,
+        '      --doc-shadow: 0 28px 70px rgba(15, 23, 42, 0.12);',
+        '    }',
+        '    * { box-sizing: border-box; }',
+        '    body { margin: 0; font-family: "Aptos", "Segoe UI", sans-serif; color: var(--doc-text); background: radial-gradient(circle at top, rgba(255,255,255,0.72), var(--doc-bg) 46%); }',
+        '    main { max-width: 1120px; margin: 0 auto; padding: 36px 20px 72px; }',
+        '    .document-hero-shell { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr); gap: 20px; background: var(--doc-surface); border: 1px solid var(--doc-border); border-radius: 28px; padding: 28px; box-shadow: var(--doc-shadow); margin-bottom: 24px; }',
+        '    .document-eyebrow, .document-section-kicker, .document-section-tag { color: var(--doc-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.78rem; font-weight: 700; }',
+        '    .document-hero-copy h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 4.8rem); line-height: 0.94; max-width: 12ch; }',
+        '    .document-standfirst { color: var(--doc-muted); font-size: 1.05rem; line-height: 1.7; max-width: 58ch; margin: 16px 0 0; }',
+        '    .document-pill-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }',
+        '    .document-pill { display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 999px; background: var(--doc-panel); border: 1px solid var(--doc-border); font-size: 0.88rem; }',
+        '    .document-human-notes { display: grid; gap: 8px; margin-top: 18px; }',
+        '    .document-human-notes p, .document-hero-panel p { margin: 0; padding: 12px 14px; background: var(--doc-panel-alt); border: 1px solid var(--doc-border); border-radius: 16px; color: var(--doc-muted); }',
+        '    .document-hero-media, .document-hero-panel { display: grid; align-content: stretch; }',
+        '    .document-hero-media .document-image, .document-hero-panel { height: 100%; margin: 0; }',
+        '    .document-hero-media .document-image img { min-height: 100%; height: 100%; object-fit: cover; }',
+        '    .document-section { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 18px; background: var(--doc-surface); border: 1px solid var(--doc-border); border-radius: 24px; padding: 22px; box-shadow: var(--doc-shadow); margin: 0 0 20px; }',
+        '    .document-section:nth-of-type(even) { background: linear-gradient(180deg, var(--doc-surface), var(--doc-panel)); }',
+        '    .document-section-number { font-size: 1.95rem; font-weight: 800; color: var(--doc-accent); line-height: 1; }',
+        '    .document-section-chrome { display: grid; align-content: start; gap: 8px; }',
+        '    .document-section-body h2 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.4rem); line-height: 1.02; }',
+        '    .document-section-aside { margin: 14px 0 0; padding: 12px 14px; border-left: 4px solid var(--doc-accent); background: var(--doc-panel); border-radius: 0 16px 16px 0; color: var(--doc-muted); }',
+        '    .document-copy { margin-top: 18px; }',
         '    .document-copy p, .document-copy ul, .document-copy ol { margin: 0 0 16px; }',
-        '    .document-hero { margin: 0 0 32px; }',
-        '    .document-image-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin: 20px 0 24px; }',
-        '    .document-image { margin: 20px 0 24px; }',
-        '    .document-image img { width: 100%; height: auto; min-height: 220px; object-fit: cover; border-radius: 16px; display: block; }',
-        '    .document-image figcaption { font-size: 12px; color: #4b5563; margin-top: 8px; }',
+        '    .document-copy ul, .document-copy ol { padding-left: 1.2rem; }',
+        '    .document-image-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 22px 0 24px; }',
+        '    .document-image { margin: 0; }',
+        '    .document-image img { width: 100%; height: auto; min-height: 220px; object-fit: cover; border-radius: 18px; display: block; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16); }',
+        '    .document-image figcaption { font-size: 12px; color: var(--doc-muted); margin-top: 8px; }',
         '    .document-credit { display: inline-block; margin-left: 8px; }',
-        '    .document-gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }',
-        '    a { color: #1d4ed8; }',
+        '    .document-gallery-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-top: 18px; }',
+        '    a { color: var(--doc-accent); }',
+        '    @media (max-width: 840px) {',
+        '      .document-hero-shell, .document-section { grid-template-columns: 1fr; }',
+        '      .document-section-chrome { grid-auto-flow: column; justify-content: space-between; align-items: center; }',
+        '    }',
         '  </style>',
         '</head>',
         '<body>',
         '  <main>',
-        '    <header>',
-        `      <h1>${safeTitle}</h1>`,
-        '    </header>',
-        heroMarkup ? `    ${heroMarkup.replace(/\n/g, '\n    ')}` : '',
-        sectionMarkup || '    <section class="document-section"><p>No content provided.</p></section>',
+        `    ${heroMarkup.replace(/\n/g, '\n    ')}`,
+        sectionMarkup || '    <section class="document-section"><div class="document-section-body"><p>No content provided.</p></div></section>',
         galleryMarkup ? `    ${galleryMarkup.replace(/\n/g, '\n    ')}` : '',
         '  </main>',
         '</body>',
@@ -746,8 +861,8 @@ function shouldFetchUnsplashReferences(prompt = '') {
 }
 
 function inferUnsplashQuery(prompt = '') {
-    const title = inferDocumentTitle(prompt, '').toLowerCase();
-    const cleaned = title
+    const cleaned = String(prompt || '').toLowerCase()
+        .replace(/^(create|make|generate|build|produce|write|draft)\s+/i, '')
         .replace(/\b(a|an|the|with|for|using|use|real|visual|visuals|image|images|photo|photos|unsplash)\b/g, ' ')
         .replace(/\b(html|pdf|docx|page|document|website|web|landing|create|make|generate|build|polished|guide|brief|report)\b/g, ' ')
         .replace(/\s+/g, ' ')
@@ -1010,8 +1125,51 @@ class ArtifactService {
         return `[Session artifacts]\n${inventory}\n\n[Selected artifact details]\n${selectedDetails}`;
     }
 
-    getGenerationInstructions(format, existingContent = '', promptContext = '') {
+    sanitizeDocumentInstructionSession(session = null) {
+        if (!session?.metadata || typeof session.metadata !== 'object') {
+            return session;
+        }
+
+        const memory = session.metadata.projectMemory;
+        if (!memory || typeof memory !== 'object') {
+            return session;
+        }
+
+        const sanitizedUrls = Array.isArray(memory.urls)
+            ? memory.urls.filter((entry) => {
+                const normalizedUrl = normalizeImageReferenceUrl(entry?.url || '');
+                if (!normalizedUrl) {
+                    return true;
+                }
+
+                return !(String(entry?.kind || '').toLowerCase() === 'image' && isInternalArtifactImageReferenceUrl(normalizedUrl));
+            })
+            : memory.urls;
+        const sanitizedArtifacts = Array.isArray(memory.artifacts)
+            ? memory.artifacts.filter((entry) => {
+                const downloadUrl = normalizeImageReferenceUrl(entry?.downloadUrl || '');
+                const format = String(entry?.format || '').trim().toLowerCase();
+                const imageLike = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(format);
+                return !(downloadUrl && imageLike && isInternalArtifactImageReferenceUrl(downloadUrl));
+            })
+            : memory.artifacts;
+
+        return {
+            ...session,
+            metadata: {
+                ...session.metadata,
+                projectMemory: {
+                    ...memory,
+                    urls: sanitizedUrls,
+                    artifacts: sanitizedArtifacts,
+                },
+            },
+        };
+    }
+
+    getGenerationInstructions(format, existingContent = '', promptContext = '', creativityPacket = null, requestPrompt = '') {
         const normalizedFormat = normalizeFormat(format);
+        const creativityContext = renderCreativityPromptContext(creativityPacket);
         const base = [
             'You are the LillyBuilt Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
@@ -1019,10 +1177,11 @@ class ArtifactService {
             'Do not mention environment limitations, permissions, API keys, or inability to create files.',
             'The platform will render, store, and deliver the file artifact for the user.',
             promptContext,
+            creativityContext,
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
         ].filter(Boolean).join('\n\n');
 
-        if (normalizedFormat === 'html' && isFrontendDemoArtifactRequest(`${promptContext}\n${existingContent}`)) {
+        if (normalizedFormat === 'html' && isFrontendDemoArtifactRequest(requestPrompt || `${promptContext}\n${existingContent}`)) {
             return [
                 base,
                 buildDocumentImageInstructions(),
@@ -1039,7 +1198,13 @@ class ArtifactService {
         }
 
         if (normalizedFormat === 'html' || normalizedFormat === 'pdf' || normalizedFormat === 'docx') {
-            return `${base}\n\n${buildDocumentImageInstructions()}\n\nReturn valid standalone HTML with inline-friendly structure and business formatting.`;
+            return [
+                base,
+                buildDocumentImageInstructions(),
+                'Return valid standalone HTML with inline-friendly structure and business formatting.',
+                'Use a deliberate visual thesis, strong hierarchy, and non-generic section pacing.',
+                'Treat any provided template or sample as reference material, not copy to preserve verbatim.',
+            ].filter(Boolean).join('\n\n');
         }
         if (normalizedFormat === 'xml') {
             return `${base}\n\nReturn valid XML only. No markdown fences.`;
@@ -1082,26 +1247,40 @@ class ArtifactService {
         };
     }
 
-    getArtifactPlanInstructions(format, promptContext = '', existingContent = '') {
+    getArtifactPlanInstructions(format, promptContext = '', existingContent = '', creativityPacket = null) {
+        const creativityContext = renderCreativityPromptContext(creativityPacket);
         return [
             'You are planning a high-quality business document generation workflow.',
             'Return JSON only. No markdown fences.',
-            'First decide the document title and the major sections required to satisfy the request.',
+            'First decide the document title, creative direction, and the major sections required to satisfy the request.',
             'Prefer 4-8 sections for substantial documents unless the request clearly needs fewer.',
-            'Each section should have a concrete purpose and 2-5 key points that must be covered.',
+            'Each section should have a concrete purpose, a visible layout role, and 2-5 key points that must be covered.',
             'If verified images are available, plan where real images support the document, but do not invent illustrations.',
+            'Do not mirror placeholder headings or sample copy from provided templates.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
             promptContext,
+            creativityContext,
             '',
             'Return exactly this shape:',
             '{',
             '  "title": "Document title",',
+            '  "creativeDirection": {',
+            '    "id": "direction-id",',
+            '    "label": "Direction label",',
+            '    "rationale": "Why this direction fits"',
+            '  },',
+            '  "themeSuggestion": "editorial|executive|product|bold",',
+            '  "humanizationNotes": ["Short note about how to keep the writing human"],',
+            '  "sampleHandling": ["Short note about how to avoid copying the sample"],',
             '  "sections": [',
             '    {',
             '      "heading": "Section heading",',
             '      "purpose": "Why this section exists",',
             '      "keyPoints": ["Point 1", "Point 2"],',
-            '      "targetLength": "short|medium|long"',
+            '      "targetLength": "short|medium|long",',
+            '      "layout": "lead|briefing|analysis|proof|comparison|close",',
+            '      "tone": "How this section should sound",',
+            '      "visualIntent": "How real visuals or layout contrast should support the section"',
             '    }',
             '  ]',
             '}',
@@ -1109,16 +1288,21 @@ class ArtifactService {
         ].filter(Boolean).join('\n');
     }
 
-    getArtifactExpansionInstructions(format, promptContext = '', existingContent = '') {
+    getArtifactExpansionInstructions(format, promptContext = '', existingContent = '', creativityPacket = null) {
+        const creativityContext = renderCreativityPromptContext(creativityPacket);
         return [
             'You are expanding an approved document outline into full section content.',
             'Return JSON only. No markdown fences.',
             'Write polished, business-ready prose for each section.',
             'Keep sections distinct, avoid repetition, and fully cover the requested key points.',
             'Use paragraphs and inline bullets within section content when appropriate.',
+            'Make the voice feel authored by a thoughtful human, not evenly templated by a machine.',
+            'Vary rhythm between sections instead of giving every section the same sentence cadence.',
             'If verified image references are available, mention the real image use naturally in the section content instead of describing fake illustrations.',
+            'Do not echo placeholder copy, sample headings, or tutorial language from the scaffold.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
             promptContext,
+            creativityContext,
             '',
             'Return exactly this shape:',
             '{',
@@ -1126,8 +1310,10 @@ class ArtifactService {
             '  "sections": [',
             '    {',
             '      "heading": "Section heading",',
+            '      "kicker": "Optional short eyebrow line",',
             '      "content": "Full section content",',
-            '      "level": 1',
+            '      "level": 1,',
+            '      "visualIntent": "Optional note for composition about contrast, image use, or pacing"',
             '    }',
             '  ]',
             '}',
@@ -1135,7 +1321,8 @@ class ArtifactService {
         ].filter(Boolean).join('\n');
     }
 
-    getArtifactCompositionInstructions(format, promptContext = '') {
+    getArtifactCompositionInstructions(format, promptContext = '', creativityPacket = null) {
+        const creativityContext = renderCreativityPromptContext(creativityPacket);
         return [
             'You are composing the final document artifact from an expanded section draft.',
             'Return valid standalone HTML only. No markdown fences.',
@@ -1144,11 +1331,15 @@ class ArtifactService {
             'Preserve the section order and cover all requested content.',
             'Use professional formatting suitable for business reports, briefs, plans, and polished notes.',
             'Keep the layout printer-friendly because the HTML may be rendered to PDF or DOCX.',
+            'Use CSS variables, a deliberate theme, and section-level hierarchy so the result feels designed rather than default.',
+            'Create a strong opening hero, visible section chrome, and alternating density across sections.',
+            'Do not let every section reuse the same card treatment, paragraph width, or transition language.',
             'When verified image URLs are available, make the design image-rich with a hero image, repeated section visuals, image cards, and gallery treatments across the document.',
             'Do not output a layout plan, source register instructions, build checklist, editorial note, or any meta-document that describes how a future document should be assembled.',
             'The output must be the finished document itself, not instructions for building it.',
             buildDocumentImageInstructions(),
             promptContext,
+            creativityContext,
             `Target output format: ${format}.`,
         ].filter(Boolean).join('\n');
     }
@@ -1246,6 +1437,7 @@ class ArtifactService {
         reasoningEffort = null,
         imageReferences = [],
         imageReferenceContext = '',
+        creativityPacket = null,
     }) {
         const resolvedImageReferences = Array.isArray(imageReferences) ? imageReferences : [];
         const resolvedImageReferenceContext = imageReferenceContext || this.formatImageReferenceContext(resolvedImageReferences);
@@ -1255,7 +1447,7 @@ class ArtifactService {
             input: prompt,
             instructions: buildSessionInstructions(
                 session,
-                this.getArtifactPlanInstructions(format, enrichedPromptContext, existingContent),
+                this.getArtifactPlanInstructions(format, enrichedPromptContext, existingContent, creativityPacket),
             ),
             model,
             reasoningEffort,
@@ -1263,9 +1455,11 @@ class ArtifactService {
         });
 
         const parsedPlan = safeJsonParse(planPass.outputText) || {};
+        const creativePlan = normalizeCreativePlan(parsedPlan, creativityPacket);
         const normalizedPlan = {
             title: String(parsedPlan.title || inferDocumentTitle(prompt, `${String(format || 'document').toUpperCase()} Document`)).trim(),
             sections: normalizePlanSections(parsedPlan.sections),
+            creativePlan,
         };
 
         if (normalizedPlan.sections.length === 0) {
@@ -1275,12 +1469,18 @@ class ArtifactService {
                     purpose: 'Summarize the document objective and context.',
                     keyPoints: [],
                     targetLength: 'medium',
+                    layout: 'lead',
+                    tone: 'direct',
+                    visualIntent: 'Use a strong opening block that frames the request clearly.',
                 },
                 {
                     heading: 'Details',
                     purpose: 'Cover the main requested content in detail.',
                     keyPoints: [],
                     targetLength: 'medium',
+                    layout: 'analysis',
+                    tone: 'grounded',
+                    visualIntent: 'Add contrast through image use or spacing rather than repeating the opener.',
                 },
             ];
         }
@@ -1296,7 +1496,7 @@ class ArtifactService {
             ].join('\n'),
             instructions: buildSessionInstructions(
                 session,
-                this.getArtifactExpansionInstructions(format, enrichedPromptContext, existingContent),
+                this.getArtifactExpansionInstructions(format, enrichedPromptContext, existingContent, creativityPacket),
             ),
             model,
             reasoningEffort,
@@ -1329,7 +1529,7 @@ class ArtifactService {
             ].join('\n'),
             instructions: buildSessionInstructions(
                 session,
-                this.getArtifactCompositionInstructions(format, enrichedPromptContext),
+                this.getArtifactCompositionInstructions(format, enrichedPromptContext, creativityPacket),
             ),
             model,
             reasoningEffort,
@@ -1337,7 +1537,12 @@ class ArtifactService {
 
         const usedCompositionRecovery = shouldRecoverCompositionOutput(compositionPass.outputText, expandedDocument);
         const finalOutputText = usedCompositionRecovery
-            ? buildExpandedDocumentHtml(expandedDocument.title || normalizedPlan.title, expandedDocument.sections, resolvedImageReferences)
+            ? buildExpandedDocumentHtml(
+                expandedDocument.title || normalizedPlan.title,
+                expandedDocument.sections,
+                resolvedImageReferences,
+                creativePlan,
+            )
             : compositionPass.outputText;
 
         return {
@@ -1349,10 +1554,15 @@ class ArtifactService {
                 generationPasses: ['plan', 'expand', 'compose'],
                 sectionCount: expandedDocument.sections.length,
                 compositionRecovered: usedCompositionRecovery,
+                creativeDirectionId: creativePlan.id,
+                creativeDirection: creativePlan.label,
+                creativeRationale: creativePlan.rationale,
+                themeSuggestion: creativePlan.themeSuggestion,
                 outline: normalizedPlan.sections.map((section) => ({
                     heading: section.heading,
                     purpose: section.purpose,
                     targetLength: section.targetLength,
+                    layout: section.layout,
                 })),
             },
         };
@@ -1388,17 +1598,27 @@ class ArtifactService {
         });
         const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
+        const creativityPacket = buildDocumentCreativityPacket({
+            prompt,
+            documentType: inferDocumentTypeFromPrompt(prompt),
+            format: normalizedFormat,
+            existingContent: combinedExistingContent,
+            session,
+        });
+        const instructionSession = this.sanitizeDocumentInstructionSession(session);
         const generated = frontendDemoRequest
             ? {
                 ...(await this.runGenerationPass({
-                    session,
+                    session: instructionSession,
                     input: prompt,
                     instructions: buildSessionInstructions(
-                        session,
+                        instructionSession,
                         this.getGenerationInstructions(
                             normalizedFormat,
                             combinedExistingContent,
                             [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
+                            creativityPacket,
+                            prompt,
                         ),
                     ),
                     model,
@@ -1412,7 +1632,7 @@ class ArtifactService {
             }
             : MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
             ? await this.generateMultiPassDocumentSource({
-                session,
+                session: instructionSession,
                 prompt,
                 format: normalizedFormat,
                 promptContext,
@@ -1421,16 +1641,19 @@ class ArtifactService {
                 reasoningEffort,
                 imageReferences,
                 imageReferenceContext,
+                creativityPacket,
             })
             : await this.runGenerationPass({
-                session,
+                session: instructionSession,
                 input: prompt,
                 instructions: buildSessionInstructions(
-                    session,
+                    instructionSession,
                     this.getGenerationInstructions(
                         normalizedFormat,
                         combinedExistingContent,
                         [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
+                        creativityPacket,
+                        prompt,
                     ),
                 ),
                 model,
@@ -1454,6 +1677,14 @@ class ArtifactService {
                 title,
                 content: unwrapped,
             });
+        const creativeMetadata = creativityPacket
+            ? {
+                creativeDirectionId: generated.metadata?.creativeDirectionId || creativityPacket.direction?.id || null,
+                creativeDirection: generated.metadata?.creativeDirection || creativityPacket.direction?.label || null,
+                creativeRationale: generated.metadata?.creativeRationale || creativityPacket.direction?.rationale || null,
+                themeSuggestion: generated.metadata?.themeSuggestion || creativityPacket.themeSuggestion || null,
+            }
+            : {};
 
         const artifact = await this.createStoredArtifact({
             sessionId,
@@ -1472,6 +1703,7 @@ class ArtifactService {
                 format: normalizedFormat,
                 sourcePrompt: prompt,
                 artifactIds,
+                ...creativeMetadata,
                 ...(generated.metadata || {}),
             },
             vectorize: Boolean(rendered.extractedText),
