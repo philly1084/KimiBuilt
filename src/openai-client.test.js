@@ -1360,6 +1360,44 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
     });
 
+    test('reconstructs a fragmented workload request from recent transcript in direct required tool mode', async () => {
+        const toolManager = createToolManager();
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'agent-workload',
+            selectedTools: [{ id: 'agent-workload' }],
+            prompt: 'run it five minutes from now',
+            toolContext: {
+                timezone: 'UTC',
+                now: '2026-04-02T09:00:00.000Z',
+                recentMessages: [
+                    { role: 'user', content: 'gather information on the k3s cluster on the server' },
+                ],
+                workloadService: {
+                    isAvailable: () => true,
+                },
+            },
+            model: 'gpt-4o',
+        });
+
+        expect(response.output[0].content[0].text).toContain('Runs once at 2026-04-02T09:05:00.000Z');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'agent-workload',
+            expect.objectContaining({
+                action: 'create',
+                prompt: expect.stringContaining('gather information on the k3s cluster on the server'),
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-02T09:05:00.000Z',
+                },
+                metadata: expect.objectContaining({
+                    scenarioRequest: expect.stringContaining('gather information on the k3s cluster on the server'),
+                }),
+            }),
+            expect.any(Object),
+        );
+    });
+
     test('does not auto-use agent-workload while executing a deferred workload run', () => {
         expect(__testUtils.shouldAutoUseTool(
             'agent-workload',

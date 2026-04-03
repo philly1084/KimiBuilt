@@ -35,6 +35,7 @@ const {
     resolveSshRequestContext,
     resolveArtifactContextIds,
     shouldPreGenerateImagesForArtifactRequest,
+    shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
 } = require('./ai-route-utils');
@@ -55,6 +56,17 @@ describe('ai-route-utils', () => {
     test('buildArtifactCompletionMessage formats friendly labels', () => {
         expect(buildArtifactCompletionMessage('pdf', { filename: 'space-zine.pdf' }))
             .toBe('Created the PDF artifact (space-zine.pdf).');
+    });
+
+    test('shouldDeferArtifactGenerationToWorkload detects scheduled artifact requests', () => {
+        expect(shouldDeferArtifactGenerationToWorkload(
+            'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
+            'pdf',
+        )).toBe(true);
+        expect(shouldDeferArtifactGenerationToWorkload(
+            'make me a pdf about penguins right now',
+            'pdf',
+        )).toBe(false);
     });
 
     test('generateOutputArtifactFromPrompt requires a user prompt', async () => {

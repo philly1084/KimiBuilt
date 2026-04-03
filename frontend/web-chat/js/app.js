@@ -66,6 +66,7 @@ class ChatApp {
         this.workloadsAvailable = true;
         this.currentSessionWorkloads = [];
         this.workloadRunsById = new Map();
+        this.hiddenCompletedWorkloadCount = 0;
         this.editingWorkload = null;
         this.workloadSocket = null;
         this.workloadSocketReconnectTimer = null;
@@ -323,6 +324,7 @@ class ChatApp {
                 this.subscribeToSessionUpdates(null);
                 this.currentSessionWorkloads = [];
                 this.workloadRunsById.clear();
+                this.hiddenCompletedWorkloadCount = 0;
                 this.renderWorkloadsPanel();
             }
             this.updateSessionInfo();
@@ -517,6 +519,7 @@ class ChatApp {
             this.workloadsAvailable = true;
             this.currentSessionWorkloads = [];
             this.workloadRunsById.clear();
+            this.hiddenCompletedWorkloadCount = 0;
             this.renderWorkloadsPanel();
             return [];
         }
@@ -529,11 +532,11 @@ class ChatApp {
         try {
             const result = await apiClient.getSessionWorkloads(sessionId);
             this.workloadsAvailable = result.available !== false;
-            this.currentSessionWorkloads = Array.isArray(result.workloads) ? result.workloads : [];
+            const allWorkloads = Array.isArray(result.workloads) ? result.workloads : [];
             this.workloadRunsById = new Map();
 
-            if (this.workloadsAvailable && this.currentSessionWorkloads.length > 0) {
-                const runs = await Promise.all(this.currentSessionWorkloads.map((workload) =>
+            if (this.workloadsAvailable && allWorkloads.length > 0) {
+                const runs = await Promise.all(allWorkloads.map((workload) =>
                     apiClient.getWorkloadRuns(workload.id, 6)
                         .then((items) => [workload.id, items])
                         .catch((error) => {
@@ -546,6 +549,12 @@ class ChatApp {
                 });
             }
 
+            this.currentSessionWorkloads = allWorkloads.filter((workload) => !this.shouldHideCompletedWorkload(
+                workload,
+                this.workloadRunsById.get(workload.id) || [],
+            ));
+            this.hiddenCompletedWorkloadCount = Math.max(0, allWorkloads.length - this.currentSessionWorkloads.length);
+
             this.renderWorkloadsPanel();
             return this.currentSessionWorkloads;
         } catch (error) {
@@ -553,6 +562,7 @@ class ChatApp {
             this.workloadsAvailable = true;
             this.currentSessionWorkloads = [];
             this.workloadRunsById.clear();
+            this.hiddenCompletedWorkloadCount = 0;
             this.renderWorkloadsPanel();
             uiHelpers.showToast(error.message || 'Failed to load workloads', 'error');
             return [];
@@ -653,7 +663,9 @@ class ChatApp {
         }
 
         if (this.currentSessionWorkloads.length === 0) {
-            this.workloadsEmpty.textContent = 'No workloads yet for this conversation.';
+            this.workloadsEmpty.textContent = this.hiddenCompletedWorkloadCount > 0
+                ? 'No active workloads for this conversation. Completed one-time workloads are hidden.'
+                : 'No workloads yet for this conversation.';
             this.workloadsEmpty.classList.remove('hidden');
             this.workloadsList.innerHTML = '';
             return;
@@ -717,6 +729,28 @@ class ChatApp {
         }
 
         return `${normalized.slice(0, limit - 3)}...`;
+    }
+
+    shouldHideCompletedWorkload(workload = {}, runs = []) {
+        if (String(workload?.trigger?.type || 'manual').trim().toLowerCase() !== 'once') {
+            return false;
+        }
+
+        const summary = workload?.workloadSummary || {};
+        if (Number(summary.queued || 0) > 0 || Number(summary.running || 0) > 0 || Number(summary.failed || 0) > 0) {
+            return false;
+        }
+
+        if (!Array.isArray(runs) || runs.length === 0) {
+            return false;
+        }
+
+        const terminalStatuses = new Set(['completed', 'cancelled']);
+        const statuses = runs
+            .map((run) => String(run?.status || '').trim().toLowerCase())
+            .filter(Boolean);
+
+        return statuses.length > 0 && statuses.every((status) => terminalStatuses.has(status));
     }
 
     describeTrigger(trigger = {}) {

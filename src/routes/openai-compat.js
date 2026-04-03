@@ -11,6 +11,7 @@ const {
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
     maybePrepareImagesForArtifactPrompt,
+    shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
@@ -525,6 +526,9 @@ router.post('/chat/completions', async (req, res, next) => {
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldDeferArtifactGenerationToWorkload(lastUserText, effectiveOutputFormat)) {
             effectiveOutputFormat = null;
         }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, lastUserText);
@@ -1055,6 +1059,9 @@ router.post('/responses', async (req, res, next) => {
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldDeferArtifactGenerationToWorkload(userInput, effectiveOutputFormat)) {
             effectiveOutputFormat = null;
         }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifact_ids, userInput);

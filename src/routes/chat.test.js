@@ -43,6 +43,7 @@ jest.mock('../ai-route-utils', () => ({
         toolEvents: [],
         imagePrompt: null,
     })),
+    shouldDeferArtifactGenerationToWorkload: jest.fn(() => false),
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
     resolveReasoningEffort: jest.fn(() => null),
@@ -76,6 +77,7 @@ const {
     maybePrepareImagesForArtifactPrompt,
     maybeGenerateOutputArtifact,
     resolveSshRequestContext,
+    shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveReasoningEffort,
@@ -320,6 +322,53 @@ describe('/api/chat route', () => {
             { id: 'pdf-artifact-1', filename: 'hypercars.pdf' },
         ]);
         expect(response.body.toolEvents).toEqual([{ toolCall: { function: { name: 'image-generate' } } }]);
+    });
+
+    test('routes scheduled PDF requests through the runtime instead of generating the artifact immediately', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
+        });
+        require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('pdf');
+        shouldDeferArtifactGenerationToWorkload.mockReturnValue(true);
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-scheduled-pdf-1',
+                model: 'gpt-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Penguin PDF scheduled.' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
+                stream: false,
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Penguin PDF scheduled.');
+        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
+        expect(maybeGenerateOutputArtifact).not.toHaveBeenCalled();
+        expect(executeConversationRuntime).toHaveBeenCalled();
+        expect(shouldDeferArtifactGenerationToWorkload).toHaveBeenCalledWith(
+            'can you do web search on penguins and then make a pdf for me but schedule it for 5 minutes from now',
+            'pdf',
+        );
     });
 
     test('forwards normalized reasoning effort into runtime execution', async () => {

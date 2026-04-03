@@ -4,9 +4,14 @@ const { ensureRuntimeToolManager } = require('./runtime-tool-manager');
 const { executeConversationRuntime } = require('./runtime-execution');
 const {
     buildInstructionsWithArtifacts,
+    buildArtifactCompletionMessage,
     canonicalizeRemoteToolId,
     extractSshSessionMetadataFromToolEvents,
     formatSshToolResult,
+    inferRequestedOutputFormat,
+    maybeGenerateOutputArtifact,
+    maybePrepareImagesForArtifactPrompt,
+    resolveArtifactContextIds,
 } = require('./ai-route-utils');
 const { extractResponseText } = require('./artifacts/artifact-service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('./project-memory');
@@ -104,10 +109,25 @@ class ConversationRunService {
             await this.sessionStore.update(sessionId, { metadata: sshMetadata });
         }
 
+        const deferredArtifact = await this.maybeGenerateDeferredArtifact({
+            runtimeToolManager,
+            sessionId,
+            ownerId,
+            session: resolvedSession,
+            message,
+            mode: metadata.taskType || 'chat',
+            responseId: response?.id || null,
+            outputText,
+            model,
+            reasoningEffort,
+            metadata,
+        });
+
         await this.updateProjectMemory(sessionId, ownerId, {
             userText: message,
             assistantText: outputText,
             toolEvents,
+            artifacts: deferredArtifact.artifacts,
         });
 
         return {
@@ -115,6 +135,8 @@ class ConversationRunService {
             response,
             outputText,
             toolEvents,
+            artifacts: deferredArtifact.artifacts,
+            artifactMessage: deferredArtifact.artifactMessage,
         };
     }
 
@@ -228,6 +250,104 @@ class ConversationRunService {
                 ),
             },
         });
+    }
+
+    async maybeGenerateDeferredArtifact({
+        runtimeToolManager,
+        sessionId,
+        ownerId = null,
+        session = null,
+        message = '',
+        mode = 'chat',
+        responseId = null,
+        outputText = '',
+        model = null,
+        reasoningEffort = null,
+        metadata = {},
+    }) {
+        if (metadata?.workloadRun !== true) {
+            return {
+                artifacts: [],
+                artifactMessage: '',
+            };
+        }
+
+        const outputFormat = inferRequestedOutputFormat(message);
+        if (!outputFormat || !String(outputText || '').trim()) {
+            return {
+                artifacts: [],
+                artifactMessage: '',
+            };
+        }
+
+        const latestSession = ownerId
+            ? await this.sessionStore.getOwned(sessionId, ownerId)
+            : await this.sessionStore.get(sessionId);
+        const artifactSession = latestSession || session;
+        const artifactIds = resolveArtifactContextIds(artifactSession, [], message);
+        const preparedImages = await maybePrepareImagesForArtifactPrompt({
+            toolManager: runtimeToolManager,
+            sessionId,
+            route: '/api/workloads',
+            transport: 'worker',
+            taskType: mode,
+            text: message,
+            outputFormat,
+            artifactIds,
+        });
+        const artifactGenerationSession = preparedImages.resetPreviousResponse
+            ? { ...(artifactSession || {}), previousResponseId: null }
+            : artifactSession;
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
+            sessionId,
+            session: artifactGenerationSession,
+            mode,
+            outputFormat,
+            content: outputText,
+            prompt: '',
+            title: `deferred-${outputFormat}-output`,
+            responseId,
+            artifactIds: preparedImages.artifactIds,
+            model,
+            reasoningEffort,
+        });
+        const artifacts = [
+            ...(preparedImages.artifacts || []),
+            ...(generatedArtifacts || []),
+        ].filter((artifact, index, array) => {
+            const artifactId = artifact?.id || '';
+            return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
+        });
+
+        if (artifacts.length === 0) {
+            return {
+                artifacts: [],
+                artifactMessage: '',
+            };
+        }
+
+        const primaryArtifact = artifacts[artifacts.length - 1];
+        const artifactMessage = buildArtifactCompletionMessage(outputFormat, primaryArtifact);
+        await this.sessionStore.update(sessionId, {
+            metadata: {
+                lastOutputFormat: outputFormat,
+                lastGeneratedArtifactId: primaryArtifact.id,
+            },
+        });
+        await this.appendSyntheticMessage(sessionId, 'assistant', artifactMessage);
+        if (artifactMessage && this.memoryService?.rememberResponse) {
+            this.memoryService.rememberResponse(sessionId, artifactMessage, ownerId ? { ownerId } : {});
+        }
+        await this.updateProjectMemory(sessionId, ownerId, {
+            userText: message,
+            assistantText: artifactMessage,
+            artifacts,
+        });
+
+        return {
+            artifacts,
+            artifactMessage,
+        };
     }
 }
 

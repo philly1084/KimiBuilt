@@ -11,6 +11,36 @@ function sanitizeText(value = '') {
     return String(value || '').trim();
 }
 
+function normalizeMessageText(value) {
+    if (typeof value === 'string') {
+        return value.trim();
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => {
+                if (typeof entry === 'string') {
+                    return entry.trim();
+                }
+
+                if (entry && typeof entry === 'object') {
+                    return sanitizeText(entry.text || entry.content || '');
+                }
+
+                return '';
+            })
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+    }
+
+    if (value && typeof value === 'object') {
+        return sanitizeText(value.text || value.content || '');
+    }
+
+    return '';
+}
+
 function isRecord(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -102,6 +132,107 @@ function extractWorkloadScenarioSource(params = {}) {
     return buildLooseScenarioSource(params);
 }
 
+function collectRecentUserMessages(recentMessages = [], limit = 6) {
+    if (!Array.isArray(recentMessages) || recentMessages.length === 0) {
+        return [];
+    }
+
+    return recentMessages
+        .filter((message) => message?.role === 'user')
+        .map((message) => normalizeMessageText(message?.content))
+        .filter(Boolean)
+        .slice(-Math.max(0, limit));
+}
+
+function buildScenarioSourceCandidates(baseSource = '', recentMessages = []) {
+    const directSource = sanitizeText(baseSource);
+    const candidates = [];
+    const seen = new Set();
+    const addCandidate = (value) => {
+        const normalized = sanitizeText(value);
+        if (!normalized) {
+            return;
+        }
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        candidates.push(normalized);
+    };
+
+    addCandidate(directSource);
+
+    const recentUserMessages = collectRecentUserMessages(recentMessages);
+    if (recentUserMessages.length === 0) {
+        return candidates;
+    }
+
+    const stripReferentialScheduleWrapper = (value = '') => sanitizeText(value)
+        .replace(/^(?:can|could|would)\s+you\s+/i, '')
+        .replace(/^(?:please\s+)?(?:run|do|schedule|set up|make|create)\s+(?:it|that|this|them|those)\s+/i, '')
+        .replace(/^(?:please\s+)?(?:run|do)\s+the commands(?:\s+you\s+listed(?:\s+there)?)?\s+/i, '')
+        .trim();
+    let merged = directSource;
+    for (let index = recentUserMessages.length - 1; index >= 0; index -= 1) {
+        const prior = recentUserMessages[index];
+        if (!prior || prior.toLowerCase() === directSource.toLowerCase()) {
+            continue;
+        }
+
+        merged = merged ? `${prior}. ${merged}` : prior;
+        addCandidate(merged);
+        if (directSource) {
+            const directFragment = stripReferentialScheduleWrapper(directSource);
+            const priorFragment = stripReferentialScheduleWrapper(prior);
+            if (directFragment && directFragment.toLowerCase() !== directSource.toLowerCase()) {
+                addCandidate(`${prior} ${directFragment}`);
+            }
+            if (priorFragment && priorFragment.toLowerCase() !== prior.toLowerCase()) {
+                addCandidate(`${priorFragment} ${directSource}`);
+                addCandidate(`${directSource} ${priorFragment}`);
+            }
+        }
+    }
+
+    return candidates;
+}
+
+function isReferentialWorkloadPrompt(prompt = '') {
+    const normalized = sanitizeText(prompt).toLowerCase();
+    if (!normalized) {
+        return true;
+    }
+
+    return [
+        /^(?:it|that|this|them|those)\b/,
+        /^(?:run|do|schedule|set up|make|create)\s+(?:it|that|this|them|those)\b/,
+        /\b(?:the commands|what you listed|what i asked|same thing|same task)\b/,
+        /^(?:do|run)\s+the commands\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function scoreCanonicalCandidate(candidate = {}) {
+    const payload = candidate?.payload || null;
+    if (!payload?.prompt || !payload?.title || !payload?.trigger) {
+        return Number.NEGATIVE_INFINITY;
+    }
+
+    let score = 0;
+    if (payload.trigger.type === 'cron' || payload.trigger.type === 'once') {
+        score += 100;
+    }
+    if (payload.execution) {
+        score += 20;
+    }
+    if (!isReferentialWorkloadPrompt(payload.prompt)) {
+        score += 15;
+    }
+    score += Math.min(payload.prompt.length, 120) / 10;
+
+    return score;
+}
+
 function buildFallbackExecution(params = {}, session = null, scenarioSource = '') {
     const source = sanitizeText(scenarioSource);
     const extracted = source
@@ -141,12 +272,11 @@ function buildFallbackExecution(params = {}, session = null, scenarioSource = ''
     };
 }
 
-function buildCanonicalWorkloadPayload(params = {}, options = {}) {
+function buildCanonicalWorkloadPayloadForSource(params = {}, options = {}, scenarioSource = '') {
     const session = options.session || null;
     const timezone = sanitizeText(options.timezone || params.timezone);
     const now = options.now || params.now || null;
     const metadata = isRecord(params.metadata) ? { ...params.metadata } : {};
-    const scenarioSource = extractWorkloadScenarioSource(params);
     const explicitPrompt = sanitizeText(params.prompt);
     const explicitTitle = sanitizeText(params.title);
     const explicitTrigger = isRecord(params.trigger) ? params.trigger : null;
@@ -203,6 +333,42 @@ function buildCanonicalWorkloadPayload(params = {}, options = {}) {
         scenario,
         scenarioSource,
     };
+}
+
+function buildCanonicalWorkloadPayload(params = {}, options = {}) {
+    const scenarioSource = extractWorkloadScenarioSource(params);
+    const explicitPrompt = sanitizeText(params.prompt);
+    const explicitTitle = sanitizeText(params.title);
+    const explicitTrigger = isRecord(params.trigger) ? params.trigger : null;
+    const explicitPolicy = isRecord(params.policy) ? params.policy : null;
+    const explicitExecution = isRecord(params.execution) ? params.execution : null;
+    const shouldInferFromScenario = Boolean(
+        scenarioSource
+        && (
+            !explicitPrompt
+            || !explicitTitle
+            || !explicitTrigger
+            || !explicitPolicy
+            || (!explicitExecution && hasRemoteExecutionShape(params))
+        ),
+    );
+
+    const candidateSources = shouldInferFromScenario
+        ? buildScenarioSourceCandidates(scenarioSource, options.recentMessages)
+        : [scenarioSource];
+
+    let bestCandidate = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    candidateSources.forEach((candidateSource) => {
+        const candidate = buildCanonicalWorkloadPayloadForSource(params, options, candidateSource);
+        const score = scoreCanonicalCandidate(candidate);
+        if (score > bestScore) {
+            bestCandidate = candidate;
+            bestScore = score;
+        }
+    });
+
+    return bestCandidate;
 }
 
 function buildCanonicalWorkloadAction(params = {}, options = {}) {

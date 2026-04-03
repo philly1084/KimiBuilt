@@ -10,6 +10,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     maybePrepareImagesForArtifactPrompt,
+    shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
@@ -168,6 +169,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(outputFormat),
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldDeferArtifactGenerationToWorkload(message, effectiveOutputFormat)) {
             effectiveOutputFormat = null;
         }
         const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);

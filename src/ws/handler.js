@@ -8,6 +8,7 @@ const {
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     maybePrepareImagesForArtifactPrompt,
+    shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     resolveSshRequestContext,
@@ -225,6 +226,9 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         outputFormat: effectiveOutputFormat,
         outputFormatProvided: Boolean(outputFormat),
     })) {
+        effectiveOutputFormat = null;
+    }
+    if (shouldDeferArtifactGenerationToWorkload(message, effectiveOutputFormat)) {
         effectiveOutputFormat = null;
     }
     const effectiveArtifactIds = resolveArtifactContextIds(session, artifactIds, message);

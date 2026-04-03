@@ -220,6 +220,7 @@ function assertWorkloadSchedulingIntent(params = {}, context = {}) {
 function buildNormalizedWorkloadPayload(params = {}, context = {}, session = null) {
   const canonical = buildCanonicalWorkloadPayload(params, {
     session,
+    recentMessages: context?.recentMessages || [],
     timezone: params.timezone || context?.timezone,
     now: params.now || context?.now,
   });

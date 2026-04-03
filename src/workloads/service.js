@@ -319,6 +319,7 @@ class AgentWorkloadService {
                 runId: run.id,
                 output: result.outputText || '',
                 responseId: result.response?.id || null,
+                artifacts: result.artifacts || [],
             });
             return completed;
         } catch (error) {

@@ -261,6 +261,46 @@ describe('ToolManager image tools', () => {
     }), 'user-1');
   });
 
+  test('reconstructs a fragmented scheduled workload request from recent transcript context', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-fragmented-1',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create_from_scenario',
+      request: 'run it five minutes from now',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'UTC',
+      now: '2026-04-02T09:00:00.000Z',
+      recentMessages: [
+        { role: 'user', content: 'gather information on the k3s cluster on the server' },
+      ],
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('gather information on the k3s cluster on the server'),
+      trigger: {
+        type: 'once',
+        runAt: '2026-04-02T09:05:00.000Z',
+      },
+      metadata: expect.objectContaining({
+        createdFromScenario: true,
+        scenarioRequest: expect.stringContaining('gather information on the k3s cluster on the server'),
+      }),
+    }), 'user-1');
+  });
+
   test('rejects ambiguous scenario requests instead of silently creating a manual workload', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

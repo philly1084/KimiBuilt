@@ -70,6 +70,20 @@ describe('workload natural language parsing', () => {
         expect(result.prompt).toBe('run `date` on the server.');
     });
 
+    test('parses spelled relative delays and treats them as workload intent', () => {
+        const result = parseWorkloadScenario(
+            'Run `date` on the server in five minutes from now.',
+            {
+                timezone: 'UTC',
+                now: new Date('2026-04-01T12:00:00.000Z'),
+            },
+        );
+
+        expect(result.trigger.type).toBe('once');
+        expect(result.trigger.runAt).toBe('2026-04-01T12:05:00.000Z');
+        expect(hasWorkloadIntent('Run `date` on the server in five minutes from now.')).toBe(true);
+    });
+
     test('strips scheduling wrapper language from deferred workload prompts', () => {
         const result = parseWorkloadScenario(
             'Can you run a cron later every day at 8 PM to remote into the server and get a health report',

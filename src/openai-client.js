@@ -801,9 +801,20 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
     }
 
     if (toolId === 'agent-workload') {
+        const canonicalWorkload = buildCanonicalWorkloadAction({
+            request: prompt,
+        }, {
+            recentMessages: options?.recentMessages || options?.toolContext?.recentMessages || [],
+            timezone: options?.timezone || options?.toolContext?.timezone || null,
+            now: options?.now || options?.toolContext?.now || null,
+        });
         return !isDeferredWorkloadRun
             && Boolean(workloadService?.isAvailable?.())
-            && hasWorkloadIntent(prompt);
+            && (
+                hasWorkloadIntent(prompt)
+                || canonicalWorkload?.trigger?.type === 'cron'
+                || canonicalWorkload?.trigger?.type === 'once'
+            );
     }
 
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
@@ -1808,12 +1819,25 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         || options?.clientSurface === 'workload'
         || options?.toolContext?.workloadRun === true
         || options?.toolContext?.clientSurface === 'workload';
+    const canonicalWorkload = buildCanonicalWorkloadAction({
+        request: prompt,
+    }, {
+        recentMessages: options?.recentMessages || options?.toolContext?.recentMessages || [],
+        timezone: options?.timezone || options?.toolContext?.timezone || null,
+        now: options?.now || options?.toolContext?.now || null,
+    });
 
     if (explicitK3sDeployIntent && explicitGitIntent) {
         return null;
     }
 
-    if (!isDeferredWorkloadRun && hasWorkloadIntent(prompt) && availableToolIds.has('agent-workload')) {
+    if (!isDeferredWorkloadRun
+        && availableToolIds.has('agent-workload')
+        && (
+            hasWorkloadIntent(prompt)
+            || canonicalWorkload?.trigger?.type === 'cron'
+            || canonicalWorkload?.trigger?.type === 'once'
+        )) {
         return 'agent-workload';
     }
 
@@ -2369,6 +2393,7 @@ async function runDirectRequiredToolAction({
             request: prompt,
         }, {
             session,
+            recentMessages: toolContext?.recentMessages || [],
             timezone: toolContext?.timezone || null,
             now: toolContext?.now || null,
         });
@@ -3045,6 +3070,12 @@ async function createResponse({
         input: buildResponsesInput(messages),
         stream,
     };
+    const effectiveToolContext = Array.isArray(toolContext?.recentMessages)
+        ? toolContext
+        : {
+            ...toolContext,
+            recentMessages,
+        };
     if (normalizedReasoningEffort) {
         params.reasoning = { effort: normalizedReasoningEffort };
     }
@@ -3055,7 +3086,7 @@ async function createResponse({
 
     try {
         if (enableAutomaticToolCalls) {
-            const requiredToolId = inferRequiredAutomaticToolId(prompt, [], toolContext);
+            const requiredToolId = inferRequiredAutomaticToolId(prompt, [], effectiveToolContext);
 
             if (requiredToolId && !toolManager) {
                 throw new ToolOrchestrationError(
@@ -3071,7 +3102,7 @@ async function createResponse({
                 const toolExecutionContext = {
                     executionProfile,
                     previousResponseId,
-                    ...toolContext,
+                    ...effectiveToolContext,
                 };
                 automaticTools = buildAutomaticToolDefinitions(toolManager, prompt, toolExecutionContext);
                 const selectedTools = selectAutomaticToolDefinitions(automaticTools, prompt);
@@ -3111,7 +3142,7 @@ async function createResponse({
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
-                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id), toolContext);
+                const requiredToolId = inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id), effectiveToolContext);
                 if (requiredToolId) {
                     throw toolError instanceof ToolOrchestrationError
                         ? toolError

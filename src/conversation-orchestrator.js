@@ -778,7 +778,7 @@ function normalizeFileWritePlanParams(step = {}, { objective = '', recentMessage
     return rawParams;
 }
 
-function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session = null, toolContext = {} } = {}) {
+function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session = null, recentMessages = [], toolContext = {} } = {}) {
     const params = step?.params && typeof step.params === 'object'
         ? { ...step.params }
         : {};
@@ -802,6 +802,7 @@ function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session =
         request: scenarioRequest,
     }, {
         session,
+        recentMessages,
         timezone: params.timezone
             || toolContext?.timezone
             || session?.metadata?.timezone
@@ -2578,6 +2579,8 @@ class ConversationOrchestrator extends EventEmitter {
             executionProfile: resolvedProfile,
             toolManager: runtimeToolManager,
             requestedToolIds,
+            recentMessages: resolvedRecentMessages,
+            toolContext,
         });
 
         this.emit('task:start', {
@@ -2883,6 +2886,7 @@ class ConversationOrchestrator extends EventEmitter {
                     const directAction = this.buildDirectAction({
                         objective,
                         session,
+                        recentMessages: resolvedRecentMessages,
                         toolPolicy,
                         toolContext,
                     });
@@ -3369,6 +3373,8 @@ class ConversationOrchestrator extends EventEmitter {
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolManager = null,
         requestedToolIds = [],
+        recentMessages = [],
+        toolContext = {},
     }) {
         const baseAllowedToolIds = (PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE])
             .filter((toolId) => toolManager?.getTool?.(toolId));
@@ -3394,7 +3400,20 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSchemaIntent = hasSchemaDesignIntent(prompt);
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
-        const hasWorkloadSetupIntent = hasWorkloadIntent(`${objective || ''}\n${instructions || ''}`);
+        const inferredWorkload = buildCanonicalWorkloadAction({
+            request: objective,
+        }, {
+            session,
+            recentMessages,
+            timezone: toolContext?.timezone
+                || session?.metadata?.timezone
+                || session?.metadata?.timeZone
+                || getDefaultWorkloadTimezone(),
+            now: toolContext?.now || null,
+        });
+        const hasWorkloadSetupIntent = hasWorkloadIntent(`${objective || ''}\n${instructions || ''}`)
+            || inferredWorkload?.trigger?.type === 'cron'
+            || inferredWorkload?.trigger?.type === 'once';
         const isDeferredWorkloadRun = metadata?.workloadRun === true || metadata?.clientSurface === 'workload';
         const hasExplicitLocalArtifacts = hasExplicitLocalArtifactReference(objective);
         const remoteWebsiteUpdateIntent = hasRemoteWebsiteUpdateIntent(prompt);
@@ -3568,21 +3587,29 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    buildDirectAction({ objective = '', session = null, toolPolicy = {}, toolContext = {} }) {
+    buildDirectAction({ objective = '', session = null, recentMessages = [], toolPolicy = {}, toolContext = {} }) {
         const researchQuery = extractExplicitWebResearchQuery(objective);
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
-        if (toolPolicy.candidateToolIds.includes('agent-workload') && hasWorkloadIntent(objective)) {
-            const normalizedCreate = buildCanonicalWorkloadAction({
+        const normalizedCreate = toolPolicy.candidateToolIds.includes('agent-workload')
+            ? buildCanonicalWorkloadAction({
                 request: objective,
             }, {
                 session,
+                recentMessages,
                 timezone: toolContext?.timezone
                     || session?.metadata?.timezone
                     || session?.metadata?.timeZone
                     || getDefaultWorkloadTimezone(),
                 now: toolContext?.now || null,
-            });
+            })
+            : null;
+        if (toolPolicy.candidateToolIds.includes('agent-workload')
+            && (
+                hasWorkloadIntent(objective)
+                || normalizedCreate?.trigger?.type === 'cron'
+                || normalizedCreate?.trigger?.type === 'once'
+            )) {
             if (normalizedCreate) {
                 return {
                     tool: 'agent-workload',
@@ -3670,6 +3697,7 @@ class ConversationOrchestrator extends EventEmitter {
             normalizedStep.params = normalizeAgentWorkloadPlanParams(step, {
                 objective,
                 session,
+                recentMessages,
                 toolContext,
             });
             return normalizedStep;
@@ -3725,7 +3753,7 @@ class ConversationOrchestrator extends EventEmitter {
         return normalizedStep;
     }
 
-    buildFallbackPlan({ objective = '', session = null, toolContext = {}, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
+    buildFallbackPlan({ objective = '', session = null, recentMessages = [], toolContext = {}, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
         if (!toolPolicy?.candidateToolIds?.length) {
             return [];
         }
@@ -3736,6 +3764,7 @@ class ConversationOrchestrator extends EventEmitter {
         const directAction = this.buildDirectAction({
             objective,
             session,
+            recentMessages,
             toolPolicy,
             toolContext,
         });
@@ -3976,6 +4005,7 @@ class ConversationOrchestrator extends EventEmitter {
         return this.buildFallbackPlan({
             objective,
             session,
+            recentMessages,
             toolContext,
             executionProfile,
             toolPolicy,
@@ -4028,6 +4058,9 @@ class ConversationOrchestrator extends EventEmitter {
             const toolStartedAt = new Date().toISOString();
 
             try {
+                const effectiveRecentMessages = Array.isArray(toolContext?.recentMessages)
+                    ? toolContext.recentMessages
+                    : recentMessages;
                 const result = await toolManager.executeTool(step.tool, step.params || {}, {
                     sessionId,
                     executionProfile,
@@ -4037,6 +4070,7 @@ class ConversationOrchestrator extends EventEmitter {
                     },
                     timestamp: new Date().toISOString(),
                     ...toolContext,
+                    recentMessages: effectiveRecentMessages,
                 });
                 const toolEndedAt = new Date().toISOString();
                 const normalizedResult = normalizeToolResult(result, step.tool, {

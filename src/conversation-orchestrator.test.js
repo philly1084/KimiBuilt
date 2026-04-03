@@ -3231,6 +3231,77 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
     });
 
+    test('offers agent-workload when a task-only follow-up relies on recent schedule context', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'agent-workload'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'gather information on the k3s cluster on the server',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            recentMessages: [
+                { role: 'user', content: 'run it five minutes from now' },
+            ],
+            toolContext: {
+                timezone: 'UTC',
+                now: '2026-04-02T09:00:00.000Z',
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('agent-workload');
+    });
+
+    test('builds a workload direct action from a schedule-only follow-up using recent transcript', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+        });
+
+        const directAction = orchestrator.buildDirectAction({
+            objective: 'run it five minutes from now',
+            session: {
+                metadata: {
+                    timezone: 'UTC',
+                },
+            },
+            recentMessages: [
+                { role: 'user', content: 'gather information on the k3s cluster on the server' },
+            ],
+            toolPolicy: {
+                candidateToolIds: ['agent-workload'],
+            },
+            toolContext: {
+                timezone: 'UTC',
+                now: '2026-04-02T09:00:00.000Z',
+            },
+        });
+
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'agent-workload',
+            params: expect.objectContaining({
+                action: 'create',
+                prompt: expect.stringContaining('gather information on the k3s cluster on the server'),
+                trigger: {
+                    type: 'once',
+                    runAt: '2026-04-02T09:05:00.000Z',
+                },
+            }),
+        }));
+    });
+
     test('prefers remote-command over local file tools for remote website replacement prompts without explicit local artifacts', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

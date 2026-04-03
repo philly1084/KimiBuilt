@@ -18,23 +18,101 @@ const WEEKDAY_TO_CRON = Object.freeze({
     saturday: '6',
 });
 
+const NUMBER_WORD_VALUES = Object.freeze({
+    a: 1,
+    an: 1,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+});
+
+const TENS_WORD_VALUES = Object.freeze({
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+});
+
+const ONES_NUMBER_WORD_FRAGMENT = 'one|two|three|four|five|six|seven|eight|nine';
+const SIMPLE_NUMBER_WORD_FRAGMENT = 'a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen';
+const TENS_NUMBER_WORD_FRAGMENT = 'twenty|thirty|forty|fifty|sixty';
+const RELATIVE_DELAY_AMOUNT_FRAGMENT = `(?:\\d+|${SIMPLE_NUMBER_WORD_FRAGMENT}|${TENS_NUMBER_WORD_FRAGMENT}(?:[-\\s](?:${ONES_NUMBER_WORD_FRAGMENT}))?)`;
+
 function getDefaultTimezone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
+function buildRelativeDelayPattern(flags = 'i') {
+    return new RegExp(
+        `\\b(?:(?:in|after)\\s+(${RELATIVE_DELAY_AMOUNT_FRAGMENT})\\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\\b(?:\\s+from\\s+now)?|(${RELATIVE_DELAY_AMOUNT_FRAGMENT})\\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\\b\\s+from\\s+now)`,
+        flags,
+    );
+}
+
+function parseRelativeAmountToken(value = '') {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/-/g, ' ')
+        .replace(/\s+/g, ' ');
+    if (!normalized) {
+        return null;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+        const amount = Number(normalized);
+        return Number.isFinite(amount) ? amount : null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(NUMBER_WORD_VALUES, normalized)) {
+        return NUMBER_WORD_VALUES[normalized];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(TENS_WORD_VALUES, normalized)) {
+        return TENS_WORD_VALUES[normalized];
+    }
+
+    const parts = normalized.split(' ');
+    if (parts.length === 2
+        && Object.prototype.hasOwnProperty.call(TENS_WORD_VALUES, parts[0])
+        && Object.prototype.hasOwnProperty.call(NUMBER_WORD_VALUES, parts[1])
+        && NUMBER_WORD_VALUES[parts[1]] < 10) {
+        return TENS_WORD_VALUES[parts[0]] + NUMBER_WORD_VALUES[parts[1]];
+    }
+
+    return null;
+}
+
 function extractRelativeDelayMs(input = '') {
     const text = String(input || '').trim();
-    const match = text.match(/\b(?:in|after)\s+(\d+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\b/i);
+    const match = text.match(buildRelativeDelayPattern());
     if (!match) {
         return null;
     }
 
-    const amount = Number(match[1]);
+    const amount = parseRelativeAmountToken(match[1] || match[3]);
     if (!Number.isFinite(amount) || amount <= 0) {
         return null;
     }
 
-    const unit = String(match[2] || '').toLowerCase();
+    const unit = String(match[2] || match[4] || '').toLowerCase();
     if (unit.startsWith('h')) {
         return amount * 60 * 60 * 1000;
     }
@@ -139,7 +217,7 @@ function createCronExpression(timeInfo = DEFAULT_TIME_INFO, cadence = 'daily') {
 
 function extractTaskPromptFromScenario(scenario = '') {
     const timeFragment = '(?:\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?|morning|afternoon|evening|night)';
-    const relativeDelayFragment = '(?:in|after)\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?)';
+    const relativeDelayFragment = `(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now)`;
     const leadingPatterns = [
         new RegExp(`^(?:every hour|hourly)(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
         new RegExp(`^(?:every|each)\\s+weekdays?(?:\\s+at\\s+${timeFragment})?[\\s,:-]*`, 'i'),
@@ -241,7 +319,7 @@ function hasSchedulingCue(text = '') {
         /\btomorrow\b/,
         /\btoday\b/,
         /\blater today\b/,
-        /\b(?:in|after)\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)\b/,
+        buildRelativeDelayPattern(),
         /\bone[- ]time\b/,
         /\bonce\b/,
         /\bcron\b/,
@@ -256,13 +334,13 @@ function hasWorkloadIntent(text = '') {
         return false;
     }
 
-    const scheduleIntentFragment = '(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|in\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?)|after\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?))';
+    const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
 
     const hasAutomationLanguage = [
         /\b(set up|schedule|create|make|add|queue|save)\b[\s\S]{0,40}\b(job|workload|automation|follow-?up|task|agent)\b/,
         new RegExp(`\\b(set up|schedule|create|make|add|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
         new RegExp(`\\b(run|check|review|summarize|follow up|watch)\\b[\\s\\S]{0,40}\\b${scheduleIntentFragment}\\b`),
-        new RegExp(`\\b(remind|follow up|handle|review)\\b[\\s\\S]{0,40}\\b(?:later|tomorrow|daily|every day|everyday|weekdays?|in\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?)|after\\s+\\d+\\s*(?:minutes?|mins?|hours?|hrs?))\\b`),
+        new RegExp(`\\b(remind|follow up|handle|review)\\b[\\s\\S]{0,40}\\b(?:later|tomorrow|daily|every day|everyday|weekdays?|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))\\b`),
         /\b(job|workload|automation|cron|schedule|scheduled|deferred)\b/,
     ].some((pattern) => pattern.test(normalized));
 

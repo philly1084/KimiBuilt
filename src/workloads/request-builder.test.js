@@ -83,4 +83,55 @@ describe('workload request builder', () => {
             }),
         }));
     });
+
+    test('reconstructs a schedule-only follow-up using recent user messages', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'run it five minutes from now',
+        }, {
+            now: '2026-04-02T09:00:00.000Z',
+            timezone: 'UTC',
+            recentMessages: [
+                { role: 'user', content: 'gather information on the k3s cluster on the server' },
+            ],
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            title: 'Gather Information On The K3s',
+            prompt: expect.stringContaining('gather information on the k3s cluster on the server'),
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+            metadata: expect.objectContaining({
+                createdFromScenario: true,
+                scenarioRequest: expect.stringContaining('gather information on the k3s cluster on the server'),
+            }),
+        }));
+    });
+
+    test('reconstructs a task-only follow-up using recent user schedule context', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'gather information on the k3s cluster on the server',
+        }, {
+            now: '2026-04-02T09:00:00.000Z',
+            timezone: 'UTC',
+            recentMessages: [
+                { role: 'user', content: 'run it five minutes from now' },
+            ],
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            prompt: expect.stringContaining('gather information on the k3s cluster on the server'),
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+            metadata: expect.objectContaining({
+                createdFromScenario: true,
+                scenarioRequest: expect.stringContaining('gather information on the k3s cluster on the server'),
+            }),
+        }));
+    });
 });
