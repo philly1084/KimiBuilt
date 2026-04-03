@@ -134,4 +134,31 @@ describe('workload request builder', () => {
             }),
         }));
     });
+
+    test('splits scheduled research-to-pdf requests into content and export stages', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'In 5 minutes can you do some research on ADHD and make a PDF document on it I can review, make it designed to questions on diagnosis and why its ADHD traits.',
+        }, {
+            now: '2026-04-02T09:00:00.000Z',
+            timezone: 'UTC',
+        });
+
+        expect(canonical).toEqual(expect.objectContaining({
+            action: 'create',
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+            metadata: expect.objectContaining({
+                requestedOutputFormat: 'pdf',
+            }),
+            stages: [expect.objectContaining({
+                when: 'on_success',
+                outputFormat: 'pdf',
+            })],
+        }));
+        expect(canonical.prompt).toContain('This scheduled run is split into content generation followed by PDF export.');
+        expect(canonical.prompt).toContain('produce only the final document/report content');
+        expect(canonical.prompt).toContain('do some research on ADHD and write the document on it I can review');
+    });
 });

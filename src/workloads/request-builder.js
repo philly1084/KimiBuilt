@@ -212,6 +212,86 @@ function isReferentialWorkloadPrompt(prompt = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasExplicitArtifactGenerationIntent(text = '') {
+    const normalized = sanitizeText(text).toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(export|download|save|convert|turn\b[\s\S]{0,20}\binto|turn\b[\s\S]{0,20}\bas|format\b[\s\S]{0,20}\bas)\b/i.test(normalized)
+        || /\b(create|make|generate|build|produce|render|prepare|draft)\b[\s\S]{0,60}\b(file|artifact|document|page|report|brief|pdf|html|docx)\b/i.test(normalized)
+        || /\b(as|into|in)\s+(?:an?\s+)?(?:pdf|html|docx)\b/i.test(normalized)
+        || /\b(pdf|html|docx)\s+(?:file|document|artifact|export)\b/i.test(normalized);
+}
+
+function inferDeferredArtifactOutputFormat(prompt = '') {
+    const normalized = sanitizeText(prompt).toLowerCase();
+    if (!normalized || !hasExplicitArtifactGenerationIntent(normalized)) {
+        return null;
+    }
+
+    if (/\bpdf\b/.test(normalized)) {
+        return 'pdf';
+    }
+
+    if (/\b(docx|word document)\b/.test(normalized)) {
+        return 'docx';
+    }
+
+    if (/\bhtml\b/.test(normalized)) {
+        return 'html';
+    }
+
+    return null;
+}
+
+function buildDeferredArtifactContentPrompt(prompt = '', outputFormat = '') {
+    const trimmedPrompt = sanitizeText(prompt);
+    if (!trimmedPrompt || !outputFormat) {
+        return trimmedPrompt;
+    }
+
+    const formatLabel = {
+        pdf: 'PDF',
+        docx: 'DOCX',
+        html: 'HTML',
+    }[outputFormat] || outputFormat.toUpperCase();
+    const formatToken = outputFormat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rewrittenPrompt = trimmedPrompt
+        .replace(
+            new RegExp(`\\b(?:make|create|generate|build|produce|prepare|render)\\s+(?:a|an)\\s+${formatToken}\\s+(?:document|file|artifact)\\b`, 'i'),
+            'write the document',
+        )
+        .replace(
+            new RegExp(`\\b(?:make|create|generate|build|produce|prepare|render)\\s+(?:a|an)\\s+${formatToken}\\b`, 'i'),
+            'write the document',
+        )
+        .replace(
+            new RegExp(`\\b(?:as|into|in)\\s+(?:an?\\s+)?${formatToken}\\s+(?:document|file|artifact)?\\b`, 'i'),
+            '',
+        )
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    const basePrompt = rewrittenPrompt || trimmedPrompt;
+
+    return `${basePrompt}\n\nImportant: This scheduled run is split into content generation followed by ${formatLabel} export. In this step, produce only the final document/report content that should go into the ${formatLabel}. Do not say that you created, will create, or are attaching the ${formatLabel}. Do not narrate your process, research steps, or tool usage unless that material belongs inside the actual document itself.`;
+}
+
+function buildDeferredArtifactStages(outputFormat = '') {
+    if (!outputFormat) {
+        return undefined;
+    }
+
+    return [{
+        when: 'on_success',
+        delayMs: 0,
+        outputFormat,
+        metadata: {
+            generatedFromDeferredArtifactRequest: true,
+        },
+    }];
+}
+
 function scoreCanonicalCandidate(candidate = {}) {
     const payload = candidate?.payload || null;
     if (!payload?.prompt || !payload?.title || !payload?.trigger) {
@@ -299,29 +379,40 @@ function buildCanonicalWorkloadPayloadForSource(params = {}, options = {}, scena
     }
 
     const prompt = explicitPrompt || scenario?.prompt || '';
+    const inferredDeferredArtifactFormat = explicitStages ? null : inferDeferredArtifactOutputFormat(prompt);
+    const effectivePrompt = inferredDeferredArtifactFormat
+        ? buildDeferredArtifactContentPrompt(prompt, inferredDeferredArtifactFormat)
+        : prompt;
     const title = explicitTitle || scenario?.title || (prompt ? deriveWorkloadTitle(prompt) : '');
     const trigger = explicitTrigger || scenario?.trigger || null;
     const execution = explicitExecution || buildFallbackExecution(params, session, scenarioSource || prompt);
-    const policy = explicitPolicy || scenario?.policy || (prompt ? inferWorkloadPolicy(prompt) : undefined);
+    const policy = explicitPolicy || scenario?.policy || (effectivePrompt ? inferWorkloadPolicy(effectivePrompt) : undefined);
     const scenarioRequest = sanitizeText(metadata.scenarioRequest || scenarioSource);
 
-    if (!prompt || !title || !trigger) {
+    if (!effectivePrompt || !title || !trigger) {
         return null;
     }
 
     return {
         payload: {
             title,
-            prompt,
+            prompt: effectivePrompt,
             ...(hasOwn(params, 'callableSlug') ? { callableSlug: params.callableSlug } : {}),
             ...(hasOwn(params, 'mode') ? { mode: params.mode } : {}),
             ...(hasOwn(params, 'enabled') ? { enabled: params.enabled } : {}),
             trigger,
             ...(execution ? { execution } : {}),
             ...(policy ? { policy } : {}),
-            ...(explicitStages ? { stages: explicitStages } : {}),
+            ...(explicitStages
+                ? { stages: explicitStages }
+                : (inferredDeferredArtifactFormat
+                    ? { stages: buildDeferredArtifactStages(inferredDeferredArtifactFormat) }
+                    : {})),
             metadata: {
                 ...metadata,
+                ...(inferredDeferredArtifactFormat
+                    ? { requestedOutputFormat: inferredDeferredArtifactFormat }
+                    : {}),
                 ...(scenarioRequest
                     ? {
                         createdFromScenario: true,

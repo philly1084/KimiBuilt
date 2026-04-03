@@ -216,6 +216,70 @@ describe('AgentWorkloadService', () => {
         }));
     });
 
+    test('creates a deferred pdf export stage for scheduled document research requests', async () => {
+        const workload = {
+            id: 'workload-pdf-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Do Some Research On Adhd',
+            prompt: 'do some research on ADHD and make a PDF document on it I can review.\n\nImportant: This scheduled run is split into content generation followed by PDF export. In this step, produce only the final document/report content that should go into the PDF. Do not say that you created, will create, or are attaching the PDF. Do not narrate your process, research steps, or tool usage unless that material belongs inside the actual document itself.',
+            enabled: true,
+            trigger: {
+                type: 'once',
+                runAt: '2026-04-02T09:05:00.000Z',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [{
+                when: 'on_success',
+                delayMs: 0,
+                prompt: '',
+                toolIds: [],
+                inputFrom: [],
+                outputKey: null,
+                outputFormat: 'pdf',
+                metadata: {
+                    generatedFromDeferredArtifactRequest: true,
+                },
+            }],
+            metadata: {
+                requestedOutputFormat: 'pdf',
+            },
+        };
+
+        store.createWorkload.mockResolvedValue(workload);
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-pdf-1',
+            workloadId: workload.id,
+            scheduledFor: workload.trigger.runAt,
+            reason: 'schedule',
+            stageIndex: -1,
+        });
+
+        await service.createWorkloadFromScenario(
+            'session-1',
+            'phill',
+            'In 5 minutes can you do some research on ADHD and make a PDF document on it I can review.',
+            { timezone: 'UTC' },
+        );
+
+        expect(store.createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                requestedOutputFormat: 'pdf',
+            }),
+            stages: [expect.objectContaining({
+                outputFormat: 'pdf',
+            })],
+        }));
+        expect(store.createWorkload.mock.calls[0][0].prompt).toContain('This scheduled run is split into content generation followed by PDF export.');
+    });
+
     test('falls back to the session model when creating a workload without an explicit model', async () => {
         sessionStore.getOwned.mockResolvedValue({
             id: 'session-1',
