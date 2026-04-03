@@ -3070,12 +3070,13 @@ async function createResponse({
         input: buildResponsesInput(messages),
         stream,
     };
-    const effectiveToolContext = Array.isArray(toolContext?.recentMessages)
-        ? toolContext
-        : {
-            ...toolContext,
-            recentMessages,
-        };
+    const effectiveToolContext = {
+        ...(toolContext || {}),
+        recentMessages: Array.isArray(toolContext?.recentMessages)
+            ? toolContext.recentMessages
+            : recentMessages,
+        model: toolContext?.model || model || null,
+    };
     if (normalizedReasoningEffort) {
         params.reasoning = { effort: normalizedReasoningEffort };
     }

@@ -301,6 +301,38 @@ describe('ToolManager image tools', () => {
     }), 'user-1');
   });
 
+  test('persists the caller model on created workloads so deferred runs can reuse it', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-model-1',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create_from_scenario',
+      request: 'Run `date` on the server in 5 minutes.',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'UTC',
+      now: '2026-04-02T09:00:00.000Z',
+      model: 'gpt-5.3-instant',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        requestedModel: 'gpt-5.3-instant',
+      }),
+    }), 'user-1');
+  });
+
   test('rejects ambiguous scenario requests instead of silently creating a manual workload', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

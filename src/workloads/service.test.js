@@ -163,6 +163,119 @@ describe('AgentWorkloadService', () => {
         expect(created.scenario.scheduleDetected).toBe(true);
     });
 
+    test('persists the requested model when creating a workload from a scenario', async () => {
+        const workload = {
+            id: 'workload-plain-model-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Review Repo Activity And Summarize',
+            prompt: 'review repo activity and summarize blockers.',
+            enabled: true,
+            trigger: {
+                type: 'cron',
+                expression: '0 9 * * 1-5',
+                timezone: 'America/Halifax',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+            metadata: {
+                requestedModel: 'gpt-5.3-instant',
+            },
+        };
+
+        store.createWorkload.mockResolvedValue(workload);
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-plain-model-1',
+            workloadId: workload.id,
+            scheduledFor: '2026-04-02T12:00:00.000Z',
+            reason: 'cron',
+            stageIndex: -1,
+        });
+
+        await service.createWorkloadFromScenario(
+            'session-1',
+            'phill',
+            'Every weekday at 9 AM review repo activity and summarize blockers.',
+            {
+                timezone: 'America/Halifax',
+                model: 'gpt-5.3-instant',
+            },
+        );
+
+        expect(store.createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                requestedModel: 'gpt-5.3-instant',
+            }),
+        }));
+    });
+
+    test('falls back to the session model when creating a workload without an explicit model', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            ownerId: 'phill',
+            metadata: {
+                model: 'gemini-3.1-pro-preview',
+            },
+        });
+        store.createWorkload.mockResolvedValue({
+            id: 'workload-session-model-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Review Repo Activity And Summarize',
+            prompt: 'review repo activity and summarize blockers.',
+            enabled: true,
+            trigger: {
+                type: 'cron',
+                expression: '0 9 * * 1-5',
+                timezone: 'America/Halifax',
+            },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+            metadata: {
+                requestedModel: 'gemini-3.1-pro-preview',
+            },
+        });
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-session-model-1',
+            workloadId: 'workload-session-model-1',
+            scheduledFor: '2026-04-02T12:00:00.000Z',
+            reason: 'cron',
+            stageIndex: -1,
+        });
+
+        await service.createWorkload({
+            sessionId: 'session-1',
+            title: 'Review Repo Activity And Summarize',
+            prompt: 'review repo activity and summarize blockers.',
+            trigger: {
+                type: 'cron',
+                expression: '0 9 * * 1-5',
+                timezone: 'America/Halifax',
+            },
+            metadata: {},
+        }, 'phill');
+
+        expect(store.createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                requestedModel: 'gemini-3.1-pro-preview',
+            }),
+        }));
+    });
+
     test('cleans up a newly-created scheduled workload if initial queueing fails', async () => {
         const workload = {
             id: 'workload-cleanup-1',
@@ -259,6 +372,54 @@ describe('AgentWorkloadService', () => {
                 command: 'date',
             },
         });
+    });
+
+    test('reuses the workload requested model when executing a deferred chat run', async () => {
+        const workload = {
+            id: 'workload-model-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Cluster breakdown',
+            prompt: 'Gather information on the k3s cluster on the server.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'remote-build',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: true,
+            },
+            stages: [],
+            metadata: {
+                requestedModel: 'gemini-3.1-pro-preview',
+            },
+        };
+        const run = {
+            id: 'run-model-1',
+            workload,
+            stageIndex: -1,
+            scheduledFor: '2026-04-01T09:00:00.000Z',
+            prompt: workload.prompt,
+            metadata: {},
+        };
+
+        conversationRunService.runChatTurn.mockResolvedValue({
+            outputText: 'Cluster details collected.',
+            response: { id: 'resp-model-1' },
+            execution: { trace: { steps: 1 } },
+            artifacts: [],
+        });
+        store.completeRun.mockResolvedValue({ id: 'run-model-1', status: 'completed' });
+        store.enqueueRun.mockResolvedValue(null);
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            message: 'Gather information on the k3s cluster on the server.',
+            model: 'gemini-3.1-pro-preview',
+        }));
     });
 
     test('enqueues the first follow-up stage after a successful base run', async () => {

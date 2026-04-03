@@ -24,6 +24,15 @@ class AgentWorkloadService {
         return this.store.isAvailable() && this.sessionStore?.isPersistent?.() === true;
     }
 
+    resolveRequestedModel(payload = {}, session = null) {
+        return String(
+            payload?.metadata?.requestedModel
+            || payload?.model
+            || session?.metadata?.model
+            || '',
+        ).trim() || null;
+    }
+
     async createWorkload(payload = {}, ownerId = null) {
         const normalized = validateWorkloadPayload(payload, {
             ownerId,
@@ -34,6 +43,13 @@ class AgentWorkloadService {
             const error = new Error('Session not found');
             error.statusCode = 404;
             throw error;
+        }
+        const requestedModel = this.resolveRequestedModel(payload, session);
+        if (requestedModel && normalized.metadata?.requestedModel !== requestedModel) {
+            normalized.metadata = {
+                ...(normalized.metadata || {}),
+                requestedModel,
+            };
         }
         const workload = await this.store.createWorkload(normalized);
         try {
@@ -68,6 +84,7 @@ class AgentWorkloadService {
             ...(options.execution ? { execution: options.execution } : {}),
             ...(options.policy ? { policy: options.policy } : {}),
             ...(options.metadata && typeof options.metadata === 'object' ? { metadata: options.metadata } : {}),
+            ...(options.model ? { model: options.model } : {}),
             ...(options.mode ? { mode: options.mode } : {}),
             ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
             ...(Array.isArray(options.stages) ? { stages: options.stages } : {}),
@@ -90,6 +107,7 @@ class AgentWorkloadService {
             sessionId,
             mode: options.mode || 'chat',
             enabled: options.enabled !== false,
+            ...(options.model ? { model: options.model } : {}),
             ...canonical.payload,
         };
         const workload = await this.createWorkload(payload, ownerId);
@@ -126,6 +144,13 @@ class AgentWorkloadService {
             ownerId,
             sessionId: current.sessionId,
         });
+        const requestedModel = this.resolveRequestedModel(payload, current);
+        if (requestedModel && normalized.metadata?.requestedModel !== requestedModel) {
+            normalized.metadata = {
+                ...(normalized.metadata || {}),
+                requestedModel,
+            };
+        }
 
         const updated = await this.store.updateWorkload(id, ownerId, normalized);
         const schedulingChanged = (
@@ -249,6 +274,12 @@ class AgentWorkloadService {
             : null;
         const prompt = stage?.prompt || run.prompt || workload.prompt;
         const execution = stage?.execution || workload.execution || null;
+        const requestedModel = String(
+            stage?.metadata?.requestedModel
+            || run?.metadata?.requestedModel
+            || workload?.metadata?.requestedModel
+            || '',
+        ).trim() || null;
         const startedMessage = `Deferred workload "${workload.title}" started${stage ? ` (stage ${run.stageIndex + 1})` : ''}.`;
         await this.appendSyntheticMessageSafe(workload.sessionId, 'system', startedMessage);
         await this.addRunEventSafe(run.id, 'started', { workerId, stageIndex: run.stageIndex });
@@ -279,6 +310,7 @@ class AgentWorkloadService {
                     ownerId: workload.ownerId,
                     session,
                     message: prompt,
+                    model: requestedModel,
                     executionProfile: workload.policy?.executionProfile,
                     requestedToolIds: workload.policy?.toolIds || [],
                     policy: workload.policy || {},

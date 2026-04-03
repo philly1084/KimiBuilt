@@ -228,6 +228,30 @@ function buildNormalizedWorkloadPayload(params = {}, context = {}, session = nul
   return canonical || null;
 }
 
+function applyWorkloadExecutionPreferences(payload = {}, params = {}, context = {}) {
+  const metadata = payload?.metadata && typeof payload.metadata === 'object'
+    ? { ...payload.metadata }
+    : {};
+  const requestedModel = String(
+    metadata.requestedModel
+    || params.model
+    || context.model
+    || '',
+  ).trim();
+
+  if (!requestedModel) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    metadata: {
+      ...metadata,
+      requestedModel,
+    },
+  };
+}
+
 class ToolManager {
   constructor() {
     this.registry = getUnifiedRegistry();
@@ -809,10 +833,10 @@ class ToolManager {
 
               assertWorkloadSchedulingIntent(normalized.payload, context);
 
-              const workload = await service.createWorkload({
+              const workload = await service.createWorkload(applyWorkloadExecutionPreferences({
                 ...normalized.payload,
                 sessionId,
-              }, ownerId);
+              }, params, context), ownerId);
 
               return {
                 action,
@@ -830,10 +854,10 @@ class ToolManager {
               const normalized = buildNormalizedWorkloadPayload(params, context, session);
               const payload = normalized?.payload || params;
               assertWorkloadSchedulingIntent(payload, context);
-              const workload = await service.createWorkload({
+              const workload = await service.createWorkload(applyWorkloadExecutionPreferences({
                 ...payload,
                 sessionId,
-              }, ownerId);
+              }, params, context), ownerId);
               return {
                 action,
                 sessionId,

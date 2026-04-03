@@ -217,6 +217,10 @@ function inferExecutionProfile(payload = {}) {
 
 async function executeConversationRuntime(app, params = {}) {
     const executionProfile = inferExecutionProfile(params);
+    const effectiveToolContext = {
+        ...(params.toolContext || {}),
+        model: params?.toolContext?.model || params.model || null,
+    };
     const orchestrator = app?.locals?.conversationOrchestrator
         || app?.locals?.agentOrchestrator
         || null;
@@ -225,6 +229,7 @@ async function executeConversationRuntime(app, params = {}) {
         return {
             ...(await orchestrator.executeConversation({
                 ...params,
+                toolContext: effectiveToolContext,
                 executionProfile,
             })),
             handledPersistence: true,
@@ -250,6 +255,7 @@ async function executeConversationRuntime(app, params = {}) {
     return {
         response: await createResponse({
             ...params,
+            toolContext: effectiveToolContext,
             executionProfile,
             contextMessages,
             recentMessages,

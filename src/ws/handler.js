@@ -61,6 +61,21 @@ async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = nul
     });
 }
 
+async function persistSessionModel(sessionId, session = null, model = null) {
+    const normalizedModel = String(model || '').trim();
+    if (!sessionId || !normalizedModel || session?.metadata?.model === normalizedModel) {
+        return session;
+    }
+
+    const updated = await sessionStore.update(sessionId, {
+        metadata: {
+            model: normalizedModel,
+        },
+    });
+
+    return updated || session;
+}
+
 function resolveConversationTaskType(payload = {}, session = null) {
     const candidates = [
         payload?.taskType,
@@ -205,6 +220,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
     }
+    session = await persistSessionModel(session.id, session, model);
 
     const sshContext = resolveSshRequestContext(message, session);
     const effectiveMessage = sshContext.effectivePrompt || message;
@@ -388,6 +404,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 if (sshMetadata) {
                     await sessionStore.update(session.id, { metadata: sshMetadata });
                 }
+                session = await persistSessionModel(session.id, session, event.response?.model || model || null);
                 const artifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,
                     session,

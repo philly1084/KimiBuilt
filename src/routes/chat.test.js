@@ -172,6 +172,49 @@ describe('/api/chat route', () => {
         expect(toolManager.executeTool).not.toHaveBeenCalled();
     });
 
+    test('persists the active chat model onto the session for later workload reuse', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Schedule a follow-up later.',
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-model-session-1',
+                model: 'gpt-5.3-instant',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Scheduled.' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Schedule a follow-up later.',
+                model: 'gpt-5.3-instant',
+                stream: false,
+            });
+
+        expect(response.status).toBe(200);
+        expect(sessionStore.update).toHaveBeenCalledWith('session-1', expect.objectContaining({
+            metadata: expect.objectContaining({
+                model: 'gpt-5.3-instant',
+            }),
+        }));
+    });
+
     test('suppresses implicit Mermaid artifact fallback for notes-style requests', async () => {
         ensureRuntimeToolManager.mockResolvedValue({
             getTool: jest.fn(),

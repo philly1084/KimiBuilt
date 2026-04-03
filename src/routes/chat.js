@@ -44,6 +44,21 @@ function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
 
+async function persistSessionModel(sessionId, session = null, model = null) {
+    const normalizedModel = String(model || '').trim();
+    if (!sessionId || !normalizedModel || session?.metadata?.model === normalizedModel) {
+        return session;
+    }
+
+    const updated = await sessionStore.update(sessionId, {
+        metadata: {
+            model: normalizedModel,
+        },
+    });
+
+    return updated || session;
+}
+
 async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
         return null;
@@ -148,6 +163,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        session = await persistSessionModel(sessionId, session, model);
 
         const sshContext = resolveSshRequestContext(message, session);
         const effectiveMessage = sshContext.effectivePrompt || message;
@@ -354,6 +370,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
+                    session = await persistSessionModel(sessionId, session, event.response?.model || model || null);
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
@@ -433,6 +450,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         if (sshMetadata) {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
+        session = await persistSessionModel(sessionId, session, response.model || model || null);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
