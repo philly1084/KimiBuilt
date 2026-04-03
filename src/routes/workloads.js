@@ -74,6 +74,52 @@ router.patch('/workloads/:id', async (req, res, next) => {
     }
 });
 
+router.get('/workloads/:id/project', async (req, res, next) => {
+    try {
+        const service = getService(req);
+        if (!service?.isAvailable()) {
+            return handleUnavailable(res);
+        }
+
+        const project = await service.getProjectPlan(req.params.id, getOwnerId(req));
+        if (!project) {
+            return res.status(404).json({ error: { message: 'Project workload not found' } });
+        }
+
+        res.json({
+            workloadId: req.params.id,
+            project,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+router.patch('/workloads/:id/project', async (req, res, next) => {
+    try {
+        const service = getService(req);
+        if (!service?.isAvailable()) {
+            return handleUnavailable(res);
+        }
+
+        const updated = await service.updateProjectPlan(
+            req.params.id,
+            getOwnerId(req),
+            req.body?.project || req.body || {},
+            {
+                changeReason: req.body?.changeReason || req.body?.change_reason || null,
+            },
+        );
+        if (!updated) {
+            return res.status(404).json({ error: { message: 'Project workload not found' } });
+        }
+
+        res.json(updated);
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.post('/workloads/:id/run', async (req, res, next) => {
     try {
         const service = getService(req);

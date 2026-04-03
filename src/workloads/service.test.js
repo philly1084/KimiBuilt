@@ -486,6 +486,93 @@ describe('AgentWorkloadService', () => {
         }));
     });
 
+    test('injects project plan context into long-running project runs and records a review snapshot', async () => {
+        const workload = {
+            id: 'workload-project-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Long project',
+            mode: 'project',
+            prompt: 'Implement the next approved milestone.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+            metadata: {
+                projectMode: true,
+                project: {
+                    title: 'Long project',
+                    objective: 'Build and deploy the long-running project.',
+                    milestones: [{
+                        id: 'm1',
+                        title: 'Approve the rollout plan',
+                        status: 'in_progress',
+                        acceptanceCriteria: ['Stakeholder review completed'],
+                    }],
+                },
+            },
+        };
+        const run = {
+            id: 'run-project-1',
+            workload,
+            stageIndex: -1,
+            scheduledFor: '2026-04-01T09:00:00.000Z',
+            prompt: workload.prompt,
+            metadata: {},
+        };
+
+        conversationRunService.runChatTurn.mockResolvedValue({
+            outputText: 'Milestone reviewed and implementation work continued.',
+            response: { id: 'resp-project-1' },
+            execution: { trace: { steps: 1 } },
+            artifacts: [],
+        });
+        store.completeRun.mockResolvedValue({ id: 'run-project-1', status: 'completed' });
+        store.enqueueRun.mockResolvedValue(null);
+        store.updateWorkload.mockResolvedValue({
+            ...workload,
+            metadata: {
+                ...workload.metadata,
+                project: {
+                    ...workload.metadata.project,
+                    reviewHistory: [{
+                        id: 'review-1',
+                        runId: 'run-project-1',
+                        reviewedAt: '2026-04-01T09:00:00.000Z',
+                        milestoneId: 'm1',
+                        status: 'completed',
+                        summary: 'Milestone reviewed and implementation work continued.',
+                        stageIndex: -1,
+                        artifactIds: [],
+                    }],
+                },
+            },
+        });
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            message: expect.stringContaining('<project_mode>'),
+        }));
+        expect(conversationRunService.runChatTurn).toHaveBeenCalledWith(expect.objectContaining({
+            message: expect.stringContaining('Approve the rollout plan [in_progress]'),
+        }));
+        expect(store.updateWorkload).toHaveBeenCalledWith('workload-project-1', 'phill', expect.objectContaining({
+            metadata: expect.objectContaining({
+                projectMode: true,
+                project: expect.objectContaining({
+                    reviewHistory: expect.any(Array),
+                }),
+            }),
+        }));
+    });
+
     test('enqueues the first follow-up stage after a successful base run', async () => {
         const workload = {
             id: 'workload-1',
@@ -863,6 +950,68 @@ describe('AgentWorkloadService', () => {
             trace: expect.objectContaining({
                 structuredExecution: true,
                 toolId: 'remote-command',
+            }),
+        }));
+    });
+
+    test('updates a project plan only when the workload exists', async () => {
+        store.getWorkloadById.mockResolvedValue({
+            id: 'workload-project-2',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Long project',
+            prompt: 'Implement the next approved milestone.',
+            mode: 'project',
+            metadata: {
+                projectMode: true,
+                project: {
+                    title: 'Long project',
+                    objective: 'Build and deploy the long-running project.',
+                    milestones: [{
+                        id: 'm1',
+                        title: 'Approve the rollout plan',
+                        status: 'planned',
+                    }],
+                },
+            },
+        });
+        store.updateWorkload.mockResolvedValue({
+            id: 'workload-project-2',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Long project',
+            prompt: 'Implement the next approved milestone.',
+            mode: 'project',
+            metadata: {
+                projectMode: true,
+                project: {
+                    title: 'Long project',
+                    objective: 'Build and deploy the long-running project.',
+                    milestones: [{
+                        id: 'm1',
+                        title: 'Approve the rollout plan',
+                        status: 'completed',
+                    }],
+                },
+            },
+        });
+
+        const updated = await service.updateProjectPlan('workload-project-2', 'phill', {
+            milestones: [{
+                id: 'm1',
+                title: 'Approve the rollout plan',
+                status: 'completed',
+            }],
+        }, {
+            changeReason: {
+                type: 'status_update',
+                summary: 'Marked the first milestone complete.',
+            },
+        });
+
+        expect(updated).toEqual(expect.objectContaining({
+            project: expect.objectContaining({
+                milestones: [expect.objectContaining({ status: 'completed' })],
             }),
         }));
     });

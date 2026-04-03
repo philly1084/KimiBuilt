@@ -359,4 +359,76 @@ describe('ToolManager image tools', () => {
     expect(result.error).toContain('needs a schedule');
     expect(createWorkload).not.toHaveBeenCalled();
   });
+
+  test('returns project plans through the workload tool', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const getProjectPlan = jest.fn(async () => ({
+      title: 'Long project',
+      milestones: [{ id: 'm1', title: 'Approve the rollout plan' }],
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'get_project',
+      workloadId: 'workload-1',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      workloadService: {
+        isAvailable: () => true,
+        getProjectPlan,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(getProjectPlan).toHaveBeenCalledWith('workload-1', 'user-1');
+    expect(result.data.project.title).toBe('Long project');
+  });
+
+  test('updates project plans through the workload tool', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const updateProjectPlan = jest.fn(async () => ({
+      workload: { id: 'workload-1' },
+      project: {
+        title: 'Long project',
+        milestones: [{ id: 'm1', title: 'Approve the rollout plan', status: 'completed' }],
+      },
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'update_project',
+      workloadId: 'workload-1',
+      project: {
+        milestones: [{ id: 'm1', title: 'Approve the rollout plan', status: 'completed' }],
+      },
+      changeReason: {
+        type: 'status_update',
+        summary: 'Marked the milestone complete.',
+      },
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      workloadService: {
+        isAvailable: () => true,
+        updateProjectPlan,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(updateProjectPlan).toHaveBeenCalledWith(
+      'workload-1',
+      'user-1',
+      expect.objectContaining({
+        milestones: [expect.objectContaining({ status: 'completed' })],
+      }),
+      expect.objectContaining({
+        changeReason: expect.objectContaining({
+          type: 'status_update',
+        }),
+      }),
+    );
+  });
 });

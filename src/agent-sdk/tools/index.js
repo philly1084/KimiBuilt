@@ -957,6 +957,45 @@ class ToolManager {
               };
             }
 
+            if (action === 'get_project') {
+              const workloadId = params.idOrSlug || params.workloadId || params.callableSlug || '';
+              const project = await service.getProjectPlan(workloadId, ownerId);
+              if (!project) {
+                throw new Error('Project workload not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                workloadId,
+                project,
+              };
+            }
+
+            if (action === 'update_project') {
+              const workloadId = params.idOrSlug || params.workloadId || params.callableSlug || '';
+              const updated = await service.updateProjectPlan(
+                workloadId,
+                ownerId,
+                params.project || {},
+                {
+                  changeReason: params.changeReason || params.change_reason || null,
+                },
+              );
+              if (!updated) {
+                throw new Error('Project workload not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                workloadId,
+                workload: updated.workload,
+                project: updated.project,
+                message: 'Project plan updated.',
+              };
+            }
+
             throw new Error(`Unsupported agent-workload action: ${action}`);
           },
           sideEffects: ['write'],
@@ -968,7 +1007,7 @@ class ToolManager {
           properties: {
             action: {
               type: 'string',
-              enum: ['create_from_scenario', 'create', 'list', 'run_now', 'pause', 'resume', 'delete', 'list_runs'],
+              enum: ['create_from_scenario', 'create', 'list', 'run_now', 'pause', 'resume', 'delete', 'list_runs', 'get_project', 'update_project'],
             },
             request: { type: 'string' },
             scenario: { type: 'string' },
@@ -988,6 +1027,8 @@ class ToolManager {
             policy: { type: 'object' },
             stages: { type: 'array' },
             metadata: { type: 'object' },
+            project: { type: 'object' },
+            changeReason: { type: 'object' },
             host: { type: 'string' },
             username: { type: 'string' },
             port: { type: 'integer' },

@@ -94,4 +94,62 @@ describe('/api workload routes', () => {
         expect(service.listRunsForWorkload).toHaveBeenCalledWith('workload-1', null, 2);
         expect(response.body.count).toBe(2);
     });
+
+    test('returns the project plan for a project workload', async () => {
+        const service = {
+            isAvailable: jest.fn(() => true),
+            getProjectPlan: jest.fn(async () => ({
+                title: 'Long project',
+                milestones: [{ id: 'm1', title: 'Approve the rollout plan' }],
+            })),
+        };
+        const app = buildApp(service);
+
+        const response = await request(app).get('/api/workloads/workload-1/project');
+
+        expect(response.status).toBe(200);
+        expect(service.getProjectPlan).toHaveBeenCalledWith('workload-1', null);
+        expect(response.body.project.title).toBe('Long project');
+    });
+
+    test('updates the project plan for a project workload', async () => {
+        const service = {
+            isAvailable: jest.fn(() => true),
+            updateProjectPlan: jest.fn(async () => ({
+                workload: { id: 'workload-1' },
+                project: {
+                    title: 'Long project',
+                    milestones: [{ id: 'm1', title: 'Approve the rollout plan', status: 'completed' }],
+                },
+            })),
+        };
+        const app = buildApp(service);
+
+        const response = await request(app)
+            .patch('/api/workloads/workload-1/project')
+            .send({
+                project: {
+                    milestones: [{ id: 'm1', title: 'Approve the rollout plan', status: 'completed' }],
+                },
+                changeReason: {
+                    type: 'status_update',
+                    summary: 'Marked the milestone complete.',
+                },
+            });
+
+        expect(response.status).toBe(200);
+        expect(service.updateProjectPlan).toHaveBeenCalledWith(
+            'workload-1',
+            null,
+            expect.objectContaining({
+                milestones: [expect.objectContaining({ status: 'completed' })],
+            }),
+            expect.objectContaining({
+                changeReason: expect.objectContaining({
+                    type: 'status_update',
+                }),
+            }),
+        );
+        expect(response.body.project.milestones[0].status).toBe('completed');
+    });
 });

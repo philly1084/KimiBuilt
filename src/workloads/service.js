@@ -1,6 +1,12 @@
 'use strict';
 
 const { getNextCronRun } = require('./cron-utils');
+const {
+    applyProjectPlanPatch,
+    extractProjectPlan,
+    formatProjectExecutionContext,
+    recordProjectReview,
+} = require('./project-plans');
 const { buildCanonicalWorkloadPayload } = require('./request-builder');
 const {
     deriveRunIdempotencyKey,
@@ -139,6 +145,10 @@ class AgentWorkloadService {
         const normalized = validateWorkloadPayload({
             ...current,
             ...payload,
+            metadata: {
+                ...(current.metadata || {}),
+                ...((payload && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)) ? payload.metadata : {}),
+            },
             sessionId: current.sessionId,
         }, {
             ownerId,
@@ -170,6 +180,60 @@ class AgentWorkloadService {
             workload: updated,
         });
         return updated;
+    }
+
+    async getProjectPlan(idOrSlug, ownerId) {
+        const workload = await this.resolveWorkload(idOrSlug, ownerId);
+        if (!workload) {
+            return null;
+        }
+
+        return extractProjectPlan(workload, {
+            title: workload.title,
+            prompt: workload.prompt,
+        });
+    }
+
+    async updateProjectPlan(idOrSlug, ownerId, projectPatch = {}, options = {}) {
+        const workload = await this.resolveWorkload(idOrSlug, ownerId);
+        if (!workload) {
+            return null;
+        }
+
+        const currentProject = extractProjectPlan(workload, {
+            title: workload.title,
+            prompt: workload.prompt,
+        });
+        const nextProject = applyProjectPlanPatch(
+            currentProject || {},
+            projectPatch || {},
+            {
+                defaults: {
+                    title: workload.title,
+                    prompt: workload.prompt,
+                },
+                changeReason: options.changeReason || null,
+            },
+        );
+        const metadata = {
+            ...(workload.metadata || {}),
+            projectMode: true,
+            project: nextProject,
+        };
+        const updated = await this.store.updateWorkload(workload.id, ownerId, { metadata });
+        const resolved = updated || {
+            ...workload,
+            metadata,
+        };
+
+        await this.emitWorkloadUpdate('workload_updated', resolved.sessionId, {
+            workload: resolved,
+        });
+
+        return {
+            workload: resolved,
+            project: nextProject,
+        };
     }
 
     async pauseWorkload(id, ownerId) {
@@ -275,7 +339,7 @@ class AgentWorkloadService {
         const prompt = stage?.prompt || run.prompt || workload.prompt;
         const execution = stage?.execution || workload.execution || null;
         const stageInputs = await this.resolveStageInputs(run, stage);
-        const message = this.buildStageMessage(prompt, stageInputs, stage);
+        const message = this.buildStageMessage(prompt, stageInputs, stage, workload);
         const stageOutputFormat = String(stage?.outputFormat || '').trim().toLowerCase() || null;
         const stageToolIds = Array.isArray(stage?.toolIds) && stage.toolIds.length > 0
             ? stage.toolIds
@@ -366,21 +430,27 @@ class AgentWorkloadService {
                 trace: completionTrace,
                 metadata: this.buildCompletedRunMetadata(run, stage, result),
             });
+            const trackedWorkload = await this.persistProjectReview(workload, run, {
+                succeeded: true,
+                stage,
+                outputText: result.outputText || result.artifactMessage || '',
+                artifacts: result.artifacts || [],
+            });
             await this.addRunEventSafe(run.id, 'completed', {
                 responseId: result.response?.id || null,
                 structuredExecution: Boolean(execution),
                 artifactOnly: artifactOnlyStage,
             });
-            await this.scheduleFollowupStage(workload, run, true);
-            await this.ensureNextScheduledRun(workload, run);
+            await this.scheduleFollowupStage(trackedWorkload, run, true);
+            await this.ensureNextScheduledRun(trackedWorkload, run);
 
             await this.appendSyntheticMessageSafe(
-                workload.sessionId,
+                trackedWorkload.sessionId,
                 'system',
-                `Deferred workload "${workload.title}" completed${stage ? ` (stage ${run.stageIndex + 1})` : ''}.`,
+                `Deferred workload "${trackedWorkload.title}" completed${stage ? ` (stage ${run.stageIndex + 1})` : ''}.`,
             );
-            await this.emitWorkloadUpdate('workload_completed', workload.sessionId, {
-                workloadId: workload.id,
+            await this.emitWorkloadUpdate('workload_completed', trackedWorkload.sessionId, {
+                workloadId: trackedWorkload.id,
                 runId: run.id,
                 output: result.outputText || '',
                 responseId: result.response?.id || null,
@@ -403,15 +473,21 @@ class AgentWorkloadService {
             await this.addRunEventSafe(run.id, 'failed', {
                 error: error.message,
             });
-            await this.scheduleFollowupStage(workload, run, false);
-            await this.ensureNextScheduledRun(workload, run);
+            const trackedWorkload = await this.persistProjectReview(workload, run, {
+                succeeded: false,
+                stage,
+                outputText: error.message,
+                artifacts: [],
+            });
+            await this.scheduleFollowupStage(trackedWorkload, run, false);
+            await this.ensureNextScheduledRun(trackedWorkload, run);
             await this.appendSyntheticMessageSafe(
-                workload.sessionId,
+                trackedWorkload.sessionId,
                 'system',
-                `Deferred workload "${workload.title}" failed${stage ? ` (stage ${run.stageIndex + 1})` : ''}: ${error.message}`,
+                `Deferred workload "${trackedWorkload.title}" failed${stage ? ` (stage ${run.stageIndex + 1})` : ''}: ${error.message}`,
             );
-            await this.emitWorkloadUpdate('workload_failed', workload.sessionId, {
-                workloadId: workload.id,
+            await this.emitWorkloadUpdate('workload_failed', trackedWorkload.sessionId, {
+                workloadId: trackedWorkload.id,
                 runId: run.id,
                 error: error.message,
             });
@@ -646,10 +722,23 @@ class AgentWorkloadService {
         return `[${label}]\n${parts.join('\n\n')}`;
     }
 
-    buildStageMessage(prompt = '', stageInputs = {}, stage = null) {
+    buildStageMessage(prompt = '', stageInputs = {}, stage = null, workload = null) {
         const trimmedPrompt = String(prompt || '').trim();
         const inputText = this.renderStageInputText(stageInputs, stage);
+        const projectContext = formatProjectExecutionContext(extractProjectPlan(workload, {
+            title: workload?.title,
+            prompt: workload?.prompt,
+        }));
 
+        if (projectContext && trimmedPrompt && inputText) {
+            return `${projectContext}\n\nCurrent run objective:\n${trimmedPrompt}\n\nContext from prior stages:\n\n${inputText}`;
+        }
+        if (projectContext && trimmedPrompt) {
+            return `${projectContext}\n\nCurrent run objective:\n${trimmedPrompt}`;
+        }
+        if (projectContext && inputText) {
+            return `${projectContext}\n\nContext from prior stages:\n\n${inputText}`;
+        }
         if (trimmedPrompt && inputText) {
             return `${trimmedPrompt}\n\nContext from prior stages:\n\n${inputText}`;
         }
@@ -704,6 +793,48 @@ class AgentWorkloadService {
         }
 
         return `${normalized.slice(0, maxLength - 3)}...`;
+    }
+
+    async persistProjectReview(workload, run, review = {}) {
+        const project = extractProjectPlan(workload, {
+            title: workload?.title,
+            prompt: workload?.prompt,
+        });
+        if (!project || typeof this.store?.updateWorkload !== 'function') {
+            return workload;
+        }
+
+        const nextProject = recordProjectReview(project, {
+            runId: run?.id || '',
+            reviewedAt: new Date().toISOString(),
+            milestoneId: project.activeMilestoneId,
+            status: review.succeeded ? 'completed' : 'failed',
+            summary: this.truncateStoredOutput(String(review.outputText || '').trim(), 400),
+            stageIndex: run?.stageIndex,
+            artifacts: review.artifacts || [],
+        });
+
+        try {
+            const updated = await this.store.updateWorkload(workload.id, workload.ownerId, {
+                metadata: {
+                    ...(workload.metadata || {}),
+                    projectMode: true,
+                    project: nextProject,
+                },
+            });
+
+            return updated || {
+                ...workload,
+                metadata: {
+                    ...(workload.metadata || {}),
+                    projectMode: true,
+                    project: nextProject,
+                },
+            };
+        } catch (error) {
+            console.warn(`[Workloads] Failed to persist project review for ${workload.id}:`, error.message);
+            return workload;
+        }
     }
 
     async getSessionSummaries(sessionIds = [], ownerId = null) {

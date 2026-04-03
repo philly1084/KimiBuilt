@@ -135,7 +135,7 @@ describe('workload schema', () => {
             sessionId: 'session-1',
         });
 
-        expect(workload.stages).toEqual([{
+        expect(workload.stages).toEqual([expect.objectContaining({
             when: 'on_success',
             delayMs: 0,
             prompt: 'Run `uptime` on the server.',
@@ -148,7 +148,7 @@ describe('workload schema', () => {
                 },
             },
             metadata: {},
-        }]);
+        })]);
     });
 
     test('normalizes stage handoff fields for chained routines', () => {
@@ -202,5 +202,35 @@ describe('workload schema', () => {
         });
 
         expect(key).toBe('workload-1:cron:2026-04-01T09:00:00.000Z:stage--1');
+    });
+
+    test('normalizes project workloads into locked milestone plans', () => {
+        const workload = validateWorkloadPayload({
+            sessionId: 'session-1',
+            title: 'Long project',
+            mode: 'project',
+            prompt: 'Build and deploy the long-running project.',
+            metadata: {
+                project: {
+                    milestones: [{
+                        title: 'Approve the rollout plan',
+                        acceptanceCriteria: ['Stakeholder review completed'],
+                    }],
+                },
+            },
+        }, {
+            ownerId: 'phill',
+            sessionId: 'session-1',
+        });
+
+        expect(workload.metadata).toEqual(expect.objectContaining({
+            projectMode: true,
+            project: expect.objectContaining({
+                activeMilestoneId: 'approve-the-rollout-plan',
+                governance: expect.objectContaining({
+                    modificationPolicy: 'technical_requirements_only',
+                }),
+            }),
+        }));
     });
 });

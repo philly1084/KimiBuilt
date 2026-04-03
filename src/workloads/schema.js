@@ -1,6 +1,7 @@
 'use strict';
 
 const { normalizeTimezone, parseCronExpression } = require('./cron-utils');
+const { normalizeProjectPlan } = require('./project-plans');
 const {
     DEFAULT_EXECUTION_PROFILE,
     PROFILE_TOOL_ALLOWLISTS,
@@ -91,7 +92,11 @@ function validateWorkloadPayload(payload = {}, options = {}) {
         execution,
         policy,
         stages,
-        metadata: normalizeMetadata(payload.metadata || {}),
+        metadata: normalizeMetadata(payload.metadata || {}, {
+            mode,
+            title,
+            prompt,
+        }),
     };
 }
 
@@ -302,12 +307,24 @@ function normalizeStages(stages = [], options = {}) {
     });
 }
 
-function normalizeMetadata(metadata = {}) {
+function normalizeMetadata(metadata = {}, options = {}) {
     if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
         return {};
     }
 
-    return metadata;
+    const normalized = {
+        ...metadata,
+    };
+
+    if (metadata.project || options.mode === 'project') {
+        normalized.projectMode = true;
+        normalized.project = normalizeProjectPlan(metadata.project || {}, {
+            title: options.title,
+            prompt: options.prompt,
+        });
+    }
+
+    return normalized;
 }
 
 function sanitizeSlug(value = '') {
