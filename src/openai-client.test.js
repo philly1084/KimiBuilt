@@ -1344,9 +1344,17 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(toolManager.executeTool).toHaveBeenCalledWith(
             'agent-workload',
             expect.objectContaining({
-                action: 'create_from_scenario',
-                request: 'Set up a daily agent workload to summarize blockers every day at 11:05 PM.',
-                timezone: 'America/Halifax',
+                action: 'create',
+                title: 'Summarize Blockers',
+                trigger: {
+                    type: 'cron',
+                    expression: '5 23 * * *',
+                    timezone: 'America/Halifax',
+                },
+                metadata: expect.objectContaining({
+                    createdFromScenario: true,
+                    scenarioRequest: 'Set up a daily agent workload to summarize blockers every day at 11:05 PM.',
+                }),
             }),
             expect.any(Object),
         );

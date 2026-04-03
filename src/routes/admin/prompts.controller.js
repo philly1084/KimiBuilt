@@ -52,6 +52,7 @@ function buildPlannerPromptSurface() {
     'Avoid redundant tool calls.',
     'Do not invent SSH hosts, usernames, file paths, or credentials.',
     'Every remote-command step must include a non-empty params.command string.',
+    'Every agent-workload step must pass the full original user request and let the runtime extract schedule and command details.',
     'Every file-write step must include both params.path and the full file body as params.content.',
     'Use file-write only for local runtime files. For remote hosts, deployed servers, or container-only paths, use remote-command or docker-exec instead.',
     'Do not plan a file-write step that only points at an earlier artifact or previous file when the full content is not already available in the prompt or recent transcript.',

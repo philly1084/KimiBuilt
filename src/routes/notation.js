@@ -9,6 +9,16 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 
 const router = Router();
 
+function normalizeClientNow(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
@@ -53,6 +63,17 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             || req.get('x-timezone')
             || '',
         ).trim() || null;
+        const requestNow = normalizeClientNow(
+            req.body?.metadata?.clientNow
+            || req.body?.metadata?.client_now
+            || req.get('x-client-now')
+            || '',
+        );
+        const effectiveRequestMetadata = {
+            ...(req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {}),
+            ...(requestTimezone ? { timezone: requestTimezone } : {}),
+            ...(requestNow ? { clientNow: requestNow } : {}),
+        };
 
         let session;
         if (!sessionId) {
@@ -99,11 +120,13 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
                 memoryService,
                 ownerId,
                 timezone: requestTimezone,
+                now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
+            metadata: effectiveRequestMetadata,
             ownerId,
         });
         const response = execution.response;

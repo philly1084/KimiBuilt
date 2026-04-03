@@ -99,7 +99,7 @@ describe('ToolManager image tools', () => {
       },
       metadata: expect.objectContaining({
         createdFromScenario: true,
-        scenarioFallback: 'structured_payload',
+        scenarioRequest: 'summarize blockers from this conversation',
       }),
     }), 'user-1');
     expect(result.data.message).toContain('Every day at 11:05 PM');
@@ -139,7 +139,7 @@ describe('ToolManager image tools', () => {
       },
       metadata: expect.objectContaining({
         createdFromScenario: true,
-        scenarioFallback: 'inferred_from_text',
+        scenarioRequest: 'Every weekday at 8:30 AM review the latest repo activity and summarize blockers.',
       }),
     }), 'user-1');
     expect(result.data.message).toContain('Every weekday at 8:30 AM');
@@ -157,11 +157,12 @@ describe('ToolManager image tools', () => {
     const result = await toolManager.executeTool('agent-workload', {
       action: 'create_from_scenario',
       request: 'Run `date` on the server in 5 minutes.',
-      timezone: 'America/Halifax',
+      timezone: 'UTC',
     }, {
       ownerId: 'user-1',
       sessionId: 'session-1',
-      timezone: 'America/Halifax',
+      timezone: 'UTC',
+      now: '2026-04-02T09:00:00.000Z',
       workloadService: {
         isAvailable: () => true,
         createWorkload,
@@ -193,8 +194,70 @@ describe('ToolManager image tools', () => {
       },
       trigger: expect.objectContaining({
         type: 'once',
+        runAt: '2026-04-02T09:05:00.000Z',
       }),
       callableSlug: undefined,
+    }), 'user-1');
+  });
+
+  test('canonicalizes malformed remote command workload params into a scheduled structured create', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const createWorkload = jest.fn(async (payload) => ({
+      id: 'workload-remote-2',
+      ...payload,
+    }));
+
+    const result = await toolManager.executeTool('agent-workload', {
+      action: 'create_from_scenario',
+      command: 'date',
+      schedule: 'in 5 minutes',
+      title: 'Check remote time',
+      tool: 'remote-command',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      timezone: 'UTC',
+      now: '2026-04-02T09:00:00.000Z',
+      workloadService: {
+        isAvailable: () => true,
+        createWorkload,
+        sessionStore: {
+          getOwned: jest.fn(async () => ({
+            id: 'session-1',
+            metadata: {
+              lastSshTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+              },
+            },
+          })),
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Check remote time',
+      trigger: {
+        type: 'once',
+        runAt: '2026-04-02T09:05:00.000Z',
+      },
+      execution: {
+        tool: 'remote-command',
+        params: {
+          host: '10.0.0.5',
+          username: 'ubuntu',
+          port: 22,
+          command: 'date',
+        },
+      },
+      metadata: expect.objectContaining({
+        createdFromScenario: true,
+        scenarioRequest: 'Run `date` on the server in 5 minutes',
+      }),
     }), 'user-1');
   });
 

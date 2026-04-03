@@ -79,6 +79,16 @@ function resolveConversationTaskType(payload = {}, session = null) {
     return candidates.find((value) => typeof value === 'string' && value.trim()) || 'chat';
 }
 
+function normalizeClientNow(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 function setupWebSocket(wss, app = null) {
     wss.on('connection', (ws, req) => {
         ws.app = app;
@@ -183,6 +193,13 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         || payload?.timezone
         || '',
     ).trim() || null;
+    const requestNow = normalizeClientNow(
+        payload?.metadata?.clientNow
+        || payload?.metadata?.client_now
+        || payload?.clientNow
+        || payload?.client_now
+        || '',
+    );
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
         return;
@@ -321,12 +338,18 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 memoryService,
                 ownerId,
                 timezone: requestTimezone,
+                now: requestNow,
                 workloadService: ws.app.locals.agentWorkloadService,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            metadata: {
+                ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+                ...(requestTimezone ? { timezone: requestTimezone } : {}),
+                ...(requestNow ? { clientNow: requestNow } : {}),
+            },
             ownerId,
         });
         const response = execution.response;

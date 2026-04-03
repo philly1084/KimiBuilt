@@ -1,8 +1,7 @@
 'use strict';
 
 const { getNextCronRun } = require('./cron-utils');
-const { extractStructuredExecution } = require('./execution-extractor');
-const { parseWorkloadScenario } = require('./natural-language');
+const { buildCanonicalWorkloadPayload } = require('./request-builder');
 const {
     deriveRunIdempotencyKey,
     validateWorkloadPayload,
@@ -57,32 +56,41 @@ class AgentWorkloadService {
     }
 
     async createWorkloadFromScenario(sessionId, ownerId, request = '', options = {}) {
-        const scenario = parseWorkloadScenario(request, {
+        const session = options.session || await this.sessionStore.getOwned(sessionId, ownerId);
+        const canonical = buildCanonicalWorkloadPayload({
+            request,
+            title: options.title,
+            prompt: options.prompt,
+            ...(Object.prototype.hasOwnProperty.call(options, 'callableSlug')
+                ? { callableSlug: options.callableSlug }
+                : {}),
+            ...(options.trigger ? { trigger: options.trigger } : {}),
+            ...(options.execution ? { execution: options.execution } : {}),
+            ...(options.policy ? { policy: options.policy } : {}),
+            ...(options.metadata && typeof options.metadata === 'object' ? { metadata: options.metadata } : {}),
+            ...(options.mode ? { mode: options.mode } : {}),
+            ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
+            ...(Array.isArray(options.stages) ? { stages: options.stages } : {}),
+        }, {
             timezone: options.timezone,
             now: options.now,
+            session,
         });
-        const session = options.session || await this.sessionStore.getOwned(sessionId, ownerId);
+        if (!canonical) {
+            throw new Error('Describe the task and when it should run.');
+        }
+        const scenario = canonical.scenario || {
+            title: canonical.payload.title,
+            prompt: canonical.payload.prompt,
+            trigger: canonical.payload.trigger,
+            policy: canonical.payload.policy,
+            scheduleDetected: canonical.payload.trigger?.type !== 'manual',
+        };
         const payload = {
             sessionId,
             mode: options.mode || 'chat',
-            title: options.title || scenario.title,
-            prompt: options.prompt || scenario.prompt,
-            execution: options.execution || extractStructuredExecution({
-                request,
-                session,
-            }),
             enabled: options.enabled !== false,
-            callableSlug: Object.prototype.hasOwnProperty.call(options, 'callableSlug')
-                ? options.callableSlug
-                : null,
-            trigger: options.trigger || scenario.trigger,
-            policy: options.policy || scenario.policy,
-            stages: options.stages || [],
-            metadata: {
-                createdFromScenario: true,
-                scenarioRequest: request,
-                ...(options.metadata && typeof options.metadata === 'object' ? options.metadata : {}),
-            },
+            ...canonical.payload,
         };
         const workload = await this.createWorkload(payload, ownerId);
 

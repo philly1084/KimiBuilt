@@ -232,6 +232,9 @@ describe('ConversationOrchestrator', () => {
         const result = await orchestrator.executeConversation({
             input: 'can you run a cron later every day at 8 pm to remote into the server and get a health report',
             sessionId: 'session-scheduled-health',
+            toolContext: {
+                timezone: 'America/Halifax',
+            },
             stream: false,
         });
 
@@ -241,8 +244,16 @@ describe('ConversationOrchestrator', () => {
         expect(toolManager.executeTool).toHaveBeenCalledWith(
             'agent-workload',
             expect.objectContaining({
-                action: 'create_from_scenario',
-                request: 'can you run a cron later every day at 8 pm to remote into the server and get a health report',
+                action: 'create',
+                trigger: {
+                    type: 'cron',
+                    expression: '0 20 * * *',
+                    timezone: 'America/Halifax',
+                },
+                metadata: expect.objectContaining({
+                    createdFromScenario: true,
+                    scenarioRequest: 'can you run a cron later every day at 8 pm to remote into the server and get a health report',
+                }),
             }),
             expect.any(Object),
         );
@@ -2992,16 +3003,26 @@ describe('ConversationOrchestrator', () => {
                     timezone: 'America/Halifax',
                 },
             },
+            toolContext: {
+                timezone: 'America/Halifax',
+                now: '2026-04-02T09:00:00.000Z',
+            },
         });
 
         expect(plan).toEqual([
             expect.objectContaining({
                 tool: 'agent-workload',
-                params: {
-                    action: 'create_from_scenario',
-                    request: 'can you run a cron later to check the time on the remote host in 5 minutes',
-                    timezone: 'America/Halifax',
-                },
+                params: expect.objectContaining({
+                    action: 'create',
+                    trigger: {
+                        type: 'once',
+                        runAt: '2026-04-02T09:05:00.000Z',
+                    },
+                    metadata: expect.objectContaining({
+                        createdFromScenario: true,
+                        scenarioRequest: 'can you run a cron later to check the time on the remote host in 5 minutes',
+                    }),
+                }),
             }),
         ]);
     });

@@ -242,6 +242,23 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
 
 function buildToolExecutionContext(toolManager, req, sessionId = null) {
   const body = req.body || {};
+  const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {};
+  const timezone = String(
+    metadata.timezone
+    || metadata.timeZone
+    || req.get('x-timezone')
+    || '',
+  ).trim() || null;
+  const rawClientNow = String(
+    metadata.clientNow
+    || metadata.client_now
+    || req.get('x-client-now')
+    || '',
+  ).trim();
+  const parsedClientNow = rawClientNow ? new Date(rawClientNow) : null;
+  const now = parsedClientNow && !Number.isNaN(parsedClientNow.getTime())
+    ? parsedClientNow.toISOString()
+    : null;
   return {
     sessionId,
     userId: req.user?.id || req.user?.username,
@@ -249,6 +266,8 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
     route: req.originalUrl || req.path || '/api/tools/invoke',
     transport: 'http',
     executionProfile: body.executionProfile || body.execution_profile || body.clientSurface || body.client_surface || 'tool-invoke',
+    timezone,
+    now,
     toolManager,
     tools: {
       get: (toolId) => toolManager.getTool(toolId),

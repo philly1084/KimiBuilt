@@ -6,6 +6,7 @@ const {
     hasWorkloadIntent,
     summarizeTrigger,
 } = require('./workloads/natural-language');
+const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const {
     PROMOTED_LOCAL_TOOL_IDS,
     getAllowedToolIdsForProfile,
@@ -1935,6 +1936,11 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `file-mkdir` to create folders or directories when the user asks for them.');
     }
 
+    if (automaticTools.some((entry) => entry.id === 'agent-workload')) {
+        guidance.push('- Use `agent-workload` for later, recurring, or deferred tasks tied to the current conversation.');
+        guidance.push('- For `agent-workload`, pass the full original user request instead of inventing separate `command`, `schedule`, or cron fields. The runtime will canonicalize the task.');
+    }
+
     if (automaticTools.some((entry) => entry.id === 'git-safe')) {
         guidance.push('- Use `git-safe` for local repository save flows: inspect git status, stage files, commit, and push.');
         guidance.push('- Use `git-safe remote-info` before pushing when you need to verify the current branch, HEAD revision, upstream tracking, or configured remotes.');
@@ -2339,15 +2345,33 @@ async function runDirectRequiredToolAction({
     }
 
     if (requiredToolId === 'agent-workload') {
+        let session = null;
+        const workloadService = toolContext?.workloadService || null;
+        if (workloadService?.sessionStore?.getOwned && toolContext?.sessionId && toolContext?.ownerId) {
+            try {
+                session = await workloadService.sessionStore.getOwned(toolContext.sessionId, toolContext.ownerId);
+            } catch (_error) {
+                session = null;
+            }
+        }
+
+        const canonicalCreate = buildCanonicalWorkloadAction({
+            request: prompt,
+        }, {
+            session,
+            timezone: toolContext?.timezone || null,
+            now: toolContext?.now || null,
+        });
         const toolCall = {
             id: 'direct_required_tool_1',
             type: 'function',
             function: {
                 name: requiredToolId,
-                arguments: JSON.stringify({
+                arguments: JSON.stringify(canonicalCreate || {
                     action: 'create_from_scenario',
                     request: prompt,
                     ...(toolContext?.timezone ? { timezone: toolContext.timezone } : {}),
+                    ...(toolContext?.now ? { now: toolContext.now } : {}),
                 }),
             },
         };

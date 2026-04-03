@@ -35,6 +35,16 @@ const { getSessionControlState } = require('../runtime-control-state');
 const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
 
+function normalizeClientNow(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
@@ -436,6 +446,17 @@ router.post('/chat/completions', async (req, res, next) => {
             || req.get('x-timezone')
             || ''
         ).trim() || null;
+        const requestNow = normalizeClientNow(
+            requestMetadata?.clientNow
+            || requestMetadata?.client_now
+            || req.get('x-client-now')
+            || '',
+        );
+        const effectiveRequestMetadata = {
+            ...requestMetadata,
+            ...(requestTimezone ? { timezone: requestTimezone } : {}),
+            ...(requestNow ? { clientNow: requestNow } : {}),
+        };
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({
@@ -681,13 +702,14 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     timezone: requestTimezone,
+                    now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
-                metadata: requestMetadata,
+                metadata: effectiveRequestMetadata,
                 ownerId,
             });
             const response = execution.response;
@@ -809,13 +831,14 @@ router.post('/chat/completions', async (req, res, next) => {
                 memoryService,
                 ownerId,
                 timezone: requestTimezone,
+                now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
-            metadata: requestMetadata,
+            metadata: effectiveRequestMetadata,
             ownerId,
         });
         let response = execution.response;
@@ -857,6 +880,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     timezone: requestTimezone,
+                    now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: 'remote-build',
@@ -864,7 +888,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 enableConversationExecutor,
                 taskType,
                 metadata: {
-                    ...requestMetadata,
+                    ...effectiveRequestMetadata,
                     remoteBuildAutonomyApproved: true,
                 },
                 ownerId,
@@ -969,6 +993,17 @@ router.post('/responses', async (req, res, next) => {
             || req.get('x-timezone')
             || ''
         ).trim() || null;
+        const requestNow = normalizeClientNow(
+            requestMetadata?.clientNow
+            || requestMetadata?.client_now
+            || req.get('x-client-now')
+            || '',
+        );
+        const effectiveRequestMetadata = {
+            ...requestMetadata,
+            ...(requestTimezone ? { timezone: requestTimezone } : {}),
+            ...(requestNow ? { clientNow: requestNow } : {}),
+        };
 
         let sessionId = resolveSessionId(req);
         let session;
@@ -1195,13 +1230,14 @@ router.post('/responses', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     timezone: requestTimezone,
+                    now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
-                metadata: requestMetadata,
+                metadata: effectiveRequestMetadata,
                 ownerId,
             });
             const response = execution.response;
@@ -1295,13 +1331,14 @@ router.post('/responses', async (req, res, next) => {
                 memoryService,
                 ownerId,
                 timezone: requestTimezone,
+                now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
-            metadata: requestMetadata,
+            metadata: effectiveRequestMetadata,
             ownerId,
         });
         let response = execution.response;
@@ -1343,6 +1380,7 @@ router.post('/responses', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     timezone: requestTimezone,
+                    now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
                 },
                 executionProfile: 'remote-build',
@@ -1350,7 +1388,7 @@ router.post('/responses', async (req, res, next) => {
                 enableConversationExecutor,
                 taskType,
                 metadata: {
-                    ...requestMetadata,
+                    ...effectiveRequestMetadata,
                     remoteBuildAutonomyApproved: true,
                 },
                 ownerId,

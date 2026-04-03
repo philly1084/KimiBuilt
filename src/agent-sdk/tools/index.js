@@ -10,12 +10,13 @@ const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
 const {
-  deriveWorkloadTitle,
   hasSchedulingCue,
-  parseWorkloadScenario,
   summarizeTrigger,
 } = require('../../workloads/natural-language');
-const { extractStructuredExecution } = require('../../workloads/execution-extractor');
+const {
+  buildCanonicalWorkloadPayload,
+  extractWorkloadScenarioSource,
+} = require('../../workloads/request-builder');
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -166,38 +167,6 @@ function resolveSessionWorkloadService(context = {}) {
   };
 }
 
-function buildStructuredWorkloadFallback(params = {}, context = {}) {
-  const prompt = String(params.prompt || '').trim();
-  if (!prompt) {
-    return null;
-  }
-
-  const metadata = params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
-    ? { ...params.metadata }
-    : {};
-
-  return {
-    title: String(params.title || '').trim() || deriveWorkloadTitle(prompt),
-    prompt,
-    callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
-      ? params.callableSlug
-      : undefined,
-    mode: params.mode,
-    enabled: params.enabled,
-    trigger: params.trigger,
-    execution: params.execution,
-    policy: params.policy,
-    stages: Array.isArray(params.stages) ? params.stages : undefined,
-    metadata: {
-      ...metadata,
-      createdFromScenario: true,
-      scenarioRequest: metadata.scenarioRequest || null,
-      scenarioFallback: 'structured_payload',
-    },
-    timezone: params.timezone || context?.timezone,
-  };
-}
-
 function hasExplicitManualWorkloadIntent(text = '') {
   const normalized = String(text || '').trim().toLowerCase();
   if (!normalized) {
@@ -218,61 +187,7 @@ function hasExplicitManualWorkloadIntent(text = '') {
 }
 
 function extractScenarioSource(params = {}) {
-  const direct = [
-    params.request,
-    params.scenario,
-    params.description,
-    params.metadata?.scenarioRequest,
-    params.metadata?.originalRequest,
-  ]
-    .map((value) => String(value || '').trim())
-    .find(Boolean);
-
-  if (direct) {
-    return direct;
-  }
-
-  return [params.title, params.prompt]
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .join('. ')
-    .trim();
-}
-
-function buildInferredWorkloadPayload(params = {}, context = {}) {
-  const scenarioSource = extractScenarioSource(params);
-  if (!scenarioSource || !hasSchedulingCue(scenarioSource)) {
-    return null;
-  }
-
-  const inferred = parseWorkloadScenario(scenarioSource, {
-    timezone: params.timezone || context?.timezone,
-  });
-  const metadata = params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
-    ? { ...params.metadata }
-    : {};
-
-  return {
-    ...params,
-    title: String(params.title || '').trim() || inferred.title,
-    prompt: inferred.prompt,
-    trigger: params.trigger && typeof params.trigger === 'object'
-      ? params.trigger
-      : inferred.trigger,
-    execution: params.execution,
-    callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
-      ? params.callableSlug
-      : undefined,
-    policy: params.policy && typeof params.policy === 'object'
-      ? params.policy
-      : inferred.policy,
-    metadata: {
-      ...metadata,
-      createdFromScenario: true,
-      scenarioRequest: metadata.scenarioRequest || scenarioSource,
-      scenarioFallback: metadata.scenarioFallback || 'inferred_from_text',
-    },
-  };
+  return extractWorkloadScenarioSource(params);
 }
 
 function assertWorkloadSchedulingIntent(params = {}, context = {}) {
@@ -302,28 +217,14 @@ function assertWorkloadSchedulingIntent(params = {}, context = {}) {
   throw new Error('Workload creation needs a schedule. Specify when it should run, or explicitly say it should be manual.');
 }
 
-function attachStructuredExecution(payload = {}, { request = '', session = null } = {}) {
-  if (!payload || typeof payload !== 'object') {
-    return payload;
-  }
-
-  if (payload.execution && typeof payload.execution === 'object' && !Array.isArray(payload.execution)) {
-    return payload;
-  }
-
-  const extractedExecution = extractStructuredExecution({
-    request: request || extractScenarioSource(payload),
+function buildNormalizedWorkloadPayload(params = {}, context = {}, session = null) {
+  const canonical = buildCanonicalWorkloadPayload(params, {
     session,
+    timezone: params.timezone || context?.timezone,
+    now: params.now || context?.now,
   });
 
-  if (!extractedExecution) {
-    return payload;
-  }
-
-  return {
-    ...payload,
-    execution: extractedExecution,
-  };
+  return canonical || null;
 }
 
 class ToolManager {
@@ -876,7 +777,7 @@ class ToolManager {
         id: 'agent-workload',
         name: 'Agent Workload Manager',
         category: 'system',
-        description: 'Create and manage deferred agent workloads for later, recurring, and follow-up work tied to the current conversation session.',
+        description: 'Create and manage deferred agent workloads for later, recurring, and follow-up work tied to the current conversation session. For scheduled requests, pass the full user request and let the runtime extract the schedule and remote command details.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const { service, ownerId, sessionId } = resolveSessionWorkloadService(context);
@@ -897,116 +798,41 @@ class ToolManager {
               const session = service.sessionStore?.getOwned
                 ? await service.sessionStore.getOwned(sessionId, ownerId)
                 : null;
-              if (!request) {
-                const inferredPayload = buildInferredWorkloadPayload(params, context);
-                if (inferredPayload) {
-                  const workload = await service.createWorkload(attachStructuredExecution({
-                    ...inferredPayload,
-                    sessionId,
-                  }, {
-                    request: extractScenarioSource(inferredPayload),
-                    session,
-                  }), ownerId);
-
-                  return {
-                    action,
-                    sessionId,
-                    workload,
-                    scenario: null,
-                    message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
-                  };
-                }
-
-                const fallbackPayload = buildStructuredWorkloadFallback(params, context);
-                if (!fallbackPayload) {
-                  throw new Error('agent-workload create_from_scenario requires a `request` string or a structured `prompt` payload.');
-                }
-
-                assertWorkloadSchedulingIntent(fallbackPayload, context);
-
-                const workload = await service.createWorkload(attachStructuredExecution({
-                  ...fallbackPayload,
-                  sessionId,
-                }, {
-                  request: extractScenarioSource(fallbackPayload),
-                  session,
-                }), ownerId);
-
-                return {
-                  action,
-                  sessionId,
-                  workload,
-                  scenario: null,
-                  message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
-                };
+              const normalized = buildNormalizedWorkloadPayload({
+                ...params,
+                ...(request ? { request } : {}),
+              }, context, session);
+              if (!normalized) {
+                throw new Error('agent-workload create_from_scenario requires a `request` string or a structured workload payload.');
               }
 
-              const scenario = parseWorkloadScenario(request, {
-                timezone: params.timezone || context?.timezone,
-              });
-              const scenarioPayload = {
-                ...params,
-                title: String(params.title || '').trim() || scenario.title,
-                prompt: String(params.prompt || '').trim() || scenario.prompt,
-                callableSlug: Object.prototype.hasOwnProperty.call(params, 'callableSlug')
-                  ? params.callableSlug
-                  : undefined,
-                mode: params.mode,
-                enabled: params.enabled,
-                timezone: params.timezone || context?.timezone,
-                trigger: params.trigger && typeof params.trigger === 'object'
-                  ? params.trigger
-                  : scenario.trigger,
-                execution: params.execution,
-                policy: params.policy && typeof params.policy === 'object'
-                  ? params.policy
-                  : scenario.policy,
-                stages: Array.isArray(params.stages) ? params.stages : undefined,
-                metadata: {
-                  ...(params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
-                    ? params.metadata
-                    : {}),
-                  createdFromScenario: true,
-                  scenarioRequest: request,
-                },
-              };
+              assertWorkloadSchedulingIntent(normalized.payload, context);
 
-              assertWorkloadSchedulingIntent(scenarioPayload, context);
-
-              const workload = await service.createWorkload(attachStructuredExecution({
-                ...scenarioPayload,
+              const workload = await service.createWorkload({
+                ...normalized.payload,
                 sessionId,
-              }, {
-                request,
-                session,
-              }), ownerId);
+              }, ownerId);
 
               return {
                 action,
                 sessionId,
                 workload,
-                scenario,
+                scenario: normalized.scenario,
                 message: `${workload.title} created. ${summarizeTrigger(workload.trigger || {})}.`,
               };
             }
 
             if (action === 'create') {
-              const inferredPayload = (
-                !params.trigger || params.trigger.type === 'manual'
-              )
-                ? buildInferredWorkloadPayload(params, context)
-                : null;
-              assertWorkloadSchedulingIntent(inferredPayload || params, context);
               const session = service.sessionStore?.getOwned
                 ? await service.sessionStore.getOwned(sessionId, ownerId)
                 : null;
-              const workload = await service.createWorkload(attachStructuredExecution({
-                ...(inferredPayload || params),
+              const normalized = buildNormalizedWorkloadPayload(params, context, session);
+              const payload = normalized?.payload || params;
+              assertWorkloadSchedulingIntent(payload, context);
+              const workload = await service.createWorkload({
+                ...payload,
                 sessionId,
-              }, {
-                request: extractScenarioSource(inferredPayload || params),
-                session,
-              }), ownerId);
+              }, ownerId);
               return {
                 action,
                 sessionId,
@@ -1126,13 +952,20 @@ class ToolManager {
             prompt: { type: 'string' },
             execution: { type: 'object' },
             callableSlug: { type: 'string' },
+            tool: { type: 'string' },
+            command: { type: 'string' },
+            schedule: { type: 'string' },
             mode: { type: 'string' },
             enabled: { type: 'boolean' },
             timezone: { type: 'string' },
+            now: { type: 'string' },
             trigger: { type: 'object' },
             policy: { type: 'object' },
             stages: { type: 'array' },
             metadata: { type: 'object' },
+            host: { type: 'string' },
+            username: { type: 'string' },
+            port: { type: 'integer' },
             idOrSlug: { type: 'string' },
             workloadId: { type: 'string' },
             limit: { type: 'integer' },

@@ -18,6 +18,17 @@ const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
 const USER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 
+function getClientNowIso() {
+    return new Date().toISOString();
+}
+
+function buildClientClockMetadata() {
+    return {
+        timezone: USER_TIMEZONE,
+        clientNow: getClientNowIso(),
+    };
+}
+
 // Retry configuration
 const RETRY_CONFIG = {
     maxRetries: 3,
@@ -374,7 +385,7 @@ class OpenAIAPIClient extends EventTarget {
             metadata: {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
                 enableConversationExecutor: true,
-                timezone: USER_TIMEZONE,
+                ...buildClientClockMetadata(),
             },
         };
 
@@ -676,7 +687,7 @@ class OpenAIAPIClient extends EventTarget {
             metadata: {
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
                 enableConversationExecutor: true,
-                timezone: USER_TIMEZONE,
+                ...buildClientClockMetadata(),
             },
         };
 
@@ -1153,6 +1164,10 @@ class OpenAIAPIClient extends EventTarget {
                 sessionId: this.currentSessionId,
                 taskType: WEB_CHAT_TASK_TYPE,
                 clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                metadata: {
+                    clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                    ...buildClientClockMetadata(),
+                },
             }),
         });
 

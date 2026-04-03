@@ -29,6 +29,7 @@ const {
     PROFILE_TOOL_ALLOWLISTS,
 } = require('./tool-execution-profiles');
 const { hasWorkloadIntent } = require('./workloads/natural-language');
+const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = 12000;
@@ -777,7 +778,7 @@ function normalizeFileWritePlanParams(step = {}, { objective = '', recentMessage
     return rawParams;
 }
 
-function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session = null } = {}) {
+function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session = null, toolContext = {} } = {}) {
     const params = step?.params && typeof step.params === 'object'
         ? { ...step.params }
         : {};
@@ -796,10 +797,27 @@ function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session =
         };
     }
 
+    const normalizedCreate = buildCanonicalWorkloadAction({
+        ...params,
+        request: scenarioRequest,
+    }, {
+        session,
+        timezone: params.timezone
+            || toolContext?.timezone
+            || session?.metadata?.timezone
+            || session?.metadata?.timeZone
+            || getDefaultWorkloadTimezone(),
+        now: toolContext?.now || null,
+    });
+    if (normalizedCreate) {
+        return normalizedCreate;
+    }
+
     return {
         action: 'create_from_scenario',
         request: scenarioRequest,
         timezone: params.timezone
+            || toolContext?.timezone
             || session?.metadata?.timezone
             || session?.metadata?.timeZone
             || getDefaultWorkloadTimezone(),
@@ -2838,6 +2856,7 @@ class ConversationOrchestrator extends EventEmitter {
                         objective,
                         session,
                         toolPolicy,
+                        toolContext,
                     });
 
                     if (directAction) {
@@ -2853,6 +2872,7 @@ class ConversationOrchestrator extends EventEmitter {
                         contextMessages: resolvedContextMessages,
                         recentMessages: resolvedRecentMessages,
                         session,
+                        toolContext,
                         executionProfile: resolvedProfile,
                         toolPolicy,
                         model,
@@ -3120,6 +3140,7 @@ class ConversationOrchestrator extends EventEmitter {
                 const recoveryPlan = this.buildFallbackPlan({
                     objective,
                     session,
+                    toolContext,
                     executionProfile: resolvedProfile,
                     toolPolicy,
                     model,
@@ -3477,18 +3498,38 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    buildDirectAction({ objective = '', session = null, toolPolicy = {} }) {
+    buildDirectAction({ objective = '', session = null, toolPolicy = {}, toolContext = {} }) {
         const researchQuery = extractExplicitWebResearchQuery(objective);
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         if (toolPolicy.candidateToolIds.includes('agent-workload') && hasWorkloadIntent(objective)) {
+            const normalizedCreate = buildCanonicalWorkloadAction({
+                request: objective,
+            }, {
+                session,
+                timezone: toolContext?.timezone
+                    || session?.metadata?.timezone
+                    || session?.metadata?.timeZone
+                    || getDefaultWorkloadTimezone(),
+                now: toolContext?.now || null,
+            });
+            if (normalizedCreate) {
+                return {
+                    tool: 'agent-workload',
+                    reason: 'Explicit later or recurring-agent request should be converted into a persisted workload.',
+                    params: normalizedCreate,
+                };
+            }
+
             return {
                 tool: 'agent-workload',
                 reason: 'Explicit later or recurring-agent request should be converted into a persisted workload.',
                 params: {
                     action: 'create_from_scenario',
                     request: objective,
-                    timezone: session?.metadata?.timezone
+                    ...(toolContext?.now ? { now: toolContext.now } : {}),
+                    timezone: toolContext?.timezone
+                        || session?.metadata?.timezone
                         || session?.metadata?.timeZone
                         || getDefaultWorkloadTimezone(),
                 },
@@ -3548,7 +3589,7 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, recentMessages = [] } = {}) {
+    normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, recentMessages = [], toolContext = {} } = {}) {
         const normalizedStep = {
             tool: canonicalizeRemoteToolId(typeof step?.tool === 'string' ? step.tool.trim() : ''),
             reason: typeof step?.reason === 'string' ? step.reason.trim() : '',
@@ -3559,6 +3600,7 @@ class ConversationOrchestrator extends EventEmitter {
             normalizedStep.params = normalizeAgentWorkloadPlanParams(step, {
                 objective,
                 session,
+                toolContext,
             });
             return normalizedStep;
         }
@@ -3613,7 +3655,7 @@ class ConversationOrchestrator extends EventEmitter {
         return normalizedStep;
     }
 
-    buildFallbackPlan({ objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
+    buildFallbackPlan({ objective = '', session = null, toolContext = {}, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
         if (!toolPolicy?.candidateToolIds?.length) {
             return [];
         }
@@ -3625,6 +3667,7 @@ class ConversationOrchestrator extends EventEmitter {
             objective,
             session,
             toolPolicy,
+            toolContext,
         });
 
         if (directAction) {
@@ -3734,6 +3777,7 @@ class ConversationOrchestrator extends EventEmitter {
         contextMessages = [],
         recentMessages = [],
         session = null,
+        toolContext = {},
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         toolPolicy = {},
         model = null,
@@ -3785,7 +3829,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
-            'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"full natural-language schedule request","timezone":"IANA/Zone"}}`.',
+            'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
+            'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
@@ -3850,6 +3895,7 @@ class ConversationOrchestrator extends EventEmitter {
                 session,
                 executionProfile,
                 recentMessages,
+                toolContext,
             }))
             .filter((step) => step.tool && toolPolicy.candidateToolIds.includes(step.tool));
 
@@ -3860,6 +3906,7 @@ class ConversationOrchestrator extends EventEmitter {
         return this.buildFallbackPlan({
             objective,
             session,
+            toolContext,
             executionProfile,
             toolPolicy,
         }).slice(0, MAX_PLAN_STEPS);
@@ -3898,6 +3945,7 @@ class ConversationOrchestrator extends EventEmitter {
                 session,
                 executionProfile,
                 recentMessages,
+                toolContext,
             });
             const toolCall = {
                 id: `tool_call_${index + 1}`,
