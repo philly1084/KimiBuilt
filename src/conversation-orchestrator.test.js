@@ -2948,6 +2948,64 @@ describe('ConversationOrchestrator', () => {
         expect(plan[0].params.command).not.toContain('kubectl get pods -A');
     });
 
+    test('repairs malformed planner params for agent-workload steps', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'agent-workload',
+                        reason: 'Schedule a deferred task to check the time on remote host in 5 minutes',
+                        params: {
+                            action: 'remote-command',
+                            command: 'date',
+                            name: 'time-check',
+                            schedule: 'in 5 minutes',
+                        },
+                    },
+                ],
+            })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-workload', 'remote-command'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'can you run a cron later to check the time on the remote host in 5 minutes',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'can you run a cron later to check the time on the remote host in 5 minutes',
+            executionProfile: 'default',
+            toolPolicy,
+            session: {
+                metadata: {
+                    timezone: 'America/Halifax',
+                },
+            },
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'agent-workload',
+                params: {
+                    action: 'create_from_scenario',
+                    request: 'can you run a cron later to check the time on the remote host in 5 minutes',
+                    timezone: 'America/Halifax',
+                },
+            }),
+        ]);
+    });
+
     test('prefers remote-command over local file tools for remote website replacement prompts without explicit local artifacts', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

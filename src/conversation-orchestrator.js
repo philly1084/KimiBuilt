@@ -777,6 +777,35 @@ function normalizeFileWritePlanParams(step = {}, { objective = '', recentMessage
     return rawParams;
 }
 
+function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session = null } = {}) {
+    const params = step?.params && typeof step.params === 'object'
+        ? { ...step.params }
+        : {};
+    const scenarioRequest = String(
+        params.request
+        || params.scenario
+        || params.description
+        || objective
+        || step?.reason
+        || '',
+    ).trim();
+
+    if (!scenarioRequest) {
+        return {
+            action: 'list',
+        };
+    }
+
+    return {
+        action: 'create_from_scenario',
+        request: scenarioRequest,
+        timezone: params.timezone
+            || session?.metadata?.timezone
+            || session?.metadata?.timeZone
+            || getDefaultWorkloadTimezone(),
+    };
+}
+
 function buildUbuntuMasterRemoteCommand() {
     return "hostname && uname -m && (test -f /etc/os-release && sed -n '1,3p' /etc/os-release || true) && uptime";
 }
@@ -3526,6 +3555,14 @@ class ConversationOrchestrator extends EventEmitter {
             params: step?.params && typeof step.params === 'object' ? { ...step.params } : {},
         };
 
+        if (normalizedStep.tool === 'agent-workload') {
+            normalizedStep.params = normalizeAgentWorkloadPlanParams(step, {
+                objective,
+                session,
+            });
+            return normalizedStep;
+        }
+
         if (normalizedStep.tool === 'file-write') {
             normalizedStep.params = normalizeFileWritePlanParams(step, {
                 objective,
@@ -3748,6 +3785,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
+            'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"full natural-language schedule request","timezone":"IANA/Zone"}}`.',
+            'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
