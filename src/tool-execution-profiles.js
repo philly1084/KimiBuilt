@@ -23,6 +23,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'file-search',
     'file-mkdir',
     'agent-workload',
+    'document-workflow',
     'user-checkpoint',
     'git-safe',
     'tool-doc-read',

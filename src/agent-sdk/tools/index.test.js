@@ -113,6 +113,93 @@ describe('ToolManager image tools', () => {
     expect(result.error).toContain('file-write requires a `content` string');
   });
 
+  test('recommends a document workflow through the document-workflow tool', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'website-slides',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Website Slides' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'recommend',
+      prompt: 'Research vacation pricing and build website slides I can review.',
+    }, {
+      documentService,
+    });
+
+    expect(result.success).toBe(true);
+    expect(documentService.recommendDocumentWorkflow).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'Research vacation pricing and build website slides I can review.',
+    }));
+    expect(result.data.recommendation).toEqual(expect.objectContaining({
+      inferredType: 'website-slides',
+      recommendedFormat: 'html',
+    }));
+  });
+
+  test('generates grounded html content from source material through document-workflow', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Executive Brief' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(async (prompt) => ({
+        id: 'doc-1',
+        filename: 'vacation-pricing.html',
+        mimeType: 'text/html',
+        content: '<!DOCTYPE html><html><body><h1>Vacation Pricing</h1></body></html>',
+        contentBuffer: Buffer.from('<!DOCTYPE html><html><body><h1>Vacation Pricing</h1></body></html>'),
+        metadata: { format: 'html' },
+        downloadUrl: '/api/documents/doc-1/download',
+      })),
+      assemble: jest.fn(),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate',
+      prompt: 'Create a vacation pricing summary page.',
+      format: 'html',
+      includeContent: true,
+      sources: [
+        {
+          title: 'Sample pricing',
+          sourceUrl: 'https://travel.example.com/packages',
+          content: 'Weekend package: $799. Flights from Halifax start at $214.',
+        },
+      ],
+    }, {
+      documentService,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      expect.stringContaining('Weekend package: $799. Flights from Halifax start at $214.'),
+      expect.objectContaining({
+        format: 'html',
+        model: 'gpt-5.4-mini',
+      }),
+    );
+    expect(result.data.document).toEqual(expect.objectContaining({
+      filename: 'vacation-pricing.html',
+      downloadUrl: '/api/documents/doc-1/download',
+      content: expect.stringContaining('<h1>Vacation Pricing</h1>'),
+    }));
+  });
+
   test('creates a workload from structured cron fields when request is omitted', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

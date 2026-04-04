@@ -15,6 +15,7 @@ const {
     USER_CHECKPOINT_TOOL_ID,
     buildUserCheckpointMessage,
 } = require('./user-checkpoints');
+const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 
 let chatClient = null;
 
@@ -161,6 +162,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-search',
     'file-mkdir',
     'agent-workload',
+    DOCUMENT_WORKFLOW_TOOL_ID,
     'git-safe',
     USER_CHECKPOINT_TOOL_ID,
     'ssh-execute',
@@ -825,6 +827,10 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
     if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         return promptHasExplicitSshIntent(prompt)
             || (executionProfile === 'remote-build' && hasUsableSshDefaults());
+    }
+
+    if (toolId === DOCUMENT_WORKFLOW_TOOL_ID) {
+        return Boolean(options?.documentService || options?.toolContext?.documentService);
     }
 
     if (toolId === USER_CHECKPOINT_TOOL_ID) {
@@ -1698,6 +1704,13 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
     const hasSchemaIntent = /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/i.test(normalizedPrompt);
     const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
+    const hasDocumentWorkflowIntent = (
+        /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html page|html document|web page)\b/i.test(normalizedPrompt)
+        && /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|inject|turn|convert|export)\b/i.test(normalizedPrompt)
+    ) || (
+        /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/i.test(normalizedPrompt)
+        && (hasWebResearchIntent || hasExplicitScrapeIntent || hasUrl)
+    );
     const canonicalWorkload = buildCanonicalWorkloadAction({
         request: prompt,
     }, {
@@ -1724,6 +1737,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
 
     if (hasWorkloadSetupIntent && availableToolIds.has('agent-workload')) {
         selectedIds.add('agent-workload');
+    }
+
+    if (hasDocumentWorkflowIntent && availableToolIds.has(DOCUMENT_WORKFLOW_TOOL_ID)) {
+        selectedIds.add(DOCUMENT_WORKFLOW_TOOL_ID);
     }
 
     if (shouldOfferUserCheckpoint) {

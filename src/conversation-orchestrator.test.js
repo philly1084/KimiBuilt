@@ -3082,6 +3082,93 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('prefers document-workflow once verified research pages exist for a requested slide deck', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'web-fetch', 'document-workflow'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Research vacation pricing in Halifax and build a slide deck I can review.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+            toolEvents: [
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-search',
+                            arguments: JSON.stringify({ query: 'vacation pricing in Halifax' }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'web-search',
+                        data: {
+                            query: 'vacation pricing in Halifax',
+                            results: [
+                                {
+                                    title: 'Nova Scotia Travel Packages',
+                                    url: 'https://travel.example.com/packages',
+                                    source: 'travel.example.com',
+                                    snippet: 'Weekend package from $799 with optional flights.',
+                                },
+                            ],
+                        },
+                    },
+                },
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-fetch',
+                            arguments: JSON.stringify({ url: 'https://travel.example.com/packages' }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'web-fetch',
+                        data: {
+                            url: 'https://travel.example.com/packages',
+                            title: 'Nova Scotia Travel Packages',
+                            body: '<html><body><main>Weekend package: $799. Flights from Halifax start at $214.</main></body></html>',
+                        },
+                    },
+                },
+            ],
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(
+            expect.arrayContaining(['web-search', 'document-workflow']),
+        );
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'document-workflow',
+            params: expect.objectContaining({
+                action: 'generate',
+                prompt: objective,
+                sources: expect.arrayContaining([
+                    expect.objectContaining({
+                        sourceUrl: 'https://travel.example.com/packages',
+                        kind: 'web-fetch',
+                        content: expect.stringContaining('Weekend package: $799. Flights from Halifax start at $214.'),
+                    }),
+                ]),
+            }),
+        }));
+    });
+
     test('forces a direct blind web-scrape action for explicit sensitive image scraping requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

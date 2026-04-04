@@ -35,6 +35,7 @@ const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = 12000;
 const RECENT_TRANSCRIPT_LIMIT = 12;
 const MAX_STEP_SIGNATURE_REPEATS = 3;
+const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /no ssh host configured/i,
     /no ssh username configured/i,
@@ -128,6 +129,21 @@ function hasExplicitWebResearchIntentText(text = '') {
     }
 
     return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(normalized);
+}
+
+function hasDocumentWorkflowIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return (
+        /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html page|html document|web page)\b/.test(normalized)
+        && /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|inject|turn|convert|export)\b/.test(normalized)
+    ) || (
+        /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/.test(normalized)
+        && /\b(research|look up|search|browse|scrape|extract|pricing|comparison|current|latest)\b/.test(normalized)
+    );
 }
 
 function inferRecallProfileFromText(text = '') {
@@ -241,6 +257,17 @@ function stripHtmlToText(html = '') {
         .replace(/&gt;/gi, '>')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function extractFetchBodyText(result = {}) {
+    const body = String(result?.data?.body || '').trim();
+    if (!body) {
+        return '';
+    }
+
+    return /<html\b|<body\b|<article\b|<main\b|<section\b/i.test(body)
+        ? stripHtmlToText(body)
+        : body.replace(/\s+/g, ' ').trim();
 }
 
 function normalizeInlineText(value = '') {
@@ -365,6 +392,77 @@ function extractResearchSourceExcerpt(event = {}) {
     }
 
     return truncateText(normalizeInlineText(extractFetchBodyText(event?.result || {})), 900);
+}
+
+function shouldIncludeDocumentWorkflowContent(text = '') {
+    return /\b(html|markdown|md)\b/i.test(String(text || ''))
+        && /\b(file|page|write|save|inject|local)\b/i.test(String(text || ''));
+}
+
+function buildDocumentWorkflowSourcesFromToolEvents(toolEvents = []) {
+    const events = Array.isArray(toolEvents) ? toolEvents : [];
+    const lastSearchEvent = getLastSuccessfulToolEvent(events, 'web-search');
+    const searchResults = Array.isArray(lastSearchEvent?.result?.data?.results)
+        ? lastSearchEvent.result.data.results
+        : [];
+    const sources = [];
+    const seen = new Set();
+
+    for (const event of events) {
+        const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+        if (!['web-fetch', 'web-scrape'].includes(toolId) || event?.result?.success === false) {
+            continue;
+        }
+
+        const data = event?.result?.data || {};
+        const args = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
+        const url = String(data?.url || args?.url || '').trim();
+        const searchResult = findSearchResultByUrl(searchResults, url);
+        const title = normalizeInlineText(data?.title || searchResult?.title || url || `${toolId} source`);
+        const sourceLabel = deriveResearchSourceLabel(url, searchResult?.source || data?.source || '');
+        const excerpt = extractResearchSourceExcerpt(event);
+        const snippet = truncateText(normalizeInlineText(searchResult?.snippet || data?.summary || ''), 260);
+        const content = [
+            snippet ? `Search snippet: ${snippet}` : '',
+            excerpt ? `Verified content: ${excerpt}` : '',
+        ].filter(Boolean).join('\n\n').trim();
+        const dedupeKey = url || `${title}:${content}`;
+
+        if (!content || seen.has(dedupeKey)) {
+            continue;
+        }
+
+        seen.add(dedupeKey);
+        sources.push({
+            id: `verified-source-${sources.length + 1}`,
+            title: title || `Verified source ${sources.length + 1}`,
+            sourceLabel,
+            sourceUrl: url,
+            kind: toolId,
+            content,
+        });
+
+        if (sources.length >= 6) {
+            break;
+        }
+    }
+
+    return sources;
+}
+
+function buildDocumentWorkflowGenerateParams({ objective = '', toolEvents = [] } = {}) {
+    const params = {
+        action: 'generate',
+        prompt: objective,
+        includeContent: shouldIncludeDocumentWorkflowContent(objective),
+    };
+    const sources = buildDocumentWorkflowSourcesFromToolEvents(toolEvents);
+
+    if (sources.length > 0) {
+        params.sources = sources;
+    }
+
+    return params;
 }
 
 function buildResearchDossierFromToolEvents({ objective = '', toolEvents = [] } = {}) {
@@ -1523,6 +1621,28 @@ function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = 
     }
 
     return [];
+}
+
+function buildDocumentWorkflowFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [] } = {}) {
+    if (!hasDocumentWorkflowIntentText(objective)
+        || !toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
+        return [];
+    }
+
+    const params = buildDocumentWorkflowGenerateParams({
+        objective,
+        toolEvents,
+    });
+
+    if (!Array.isArray(params.sources) || params.sources.length === 0) {
+        return [];
+    }
+
+    return [{
+        tool: DOCUMENT_WORKFLOW_TOOL_ID,
+        reason: 'Verified research results are ready to be compiled into the requested document or slide deck.',
+        params,
+    }];
 }
 
 function isInvalidRuntimeResponseText(text = '') {
@@ -2977,6 +3097,7 @@ class ConversationOrchestrator extends EventEmitter {
                         recentMessages: resolvedRecentMessages,
                         toolPolicy,
                         toolContext,
+                        toolEvents,
                     });
 
                     if (directAction) {
@@ -3041,6 +3162,23 @@ class ConversationOrchestrator extends EventEmitter {
 
                     if (guidedResearchPlan.length > 0) {
                         nextPlan = guidedResearchPlan;
+                        runtimeMode = 'guided-tools';
+                    }
+                }
+
+                if (nextPlan.length === 0) {
+                    const guidedDocumentPlan = filterRepeatedPlanSteps(
+                        buildDocumentWorkflowFollowupPlanFromToolEvents({
+                            objective,
+                            toolPolicy,
+                            toolEvents,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
+
+                    if (guidedDocumentPlan.length > 0) {
+                        nextPlan = guidedDocumentPlan;
                         runtimeMode = 'guided-tools';
                     }
                 }
@@ -3303,6 +3441,7 @@ class ConversationOrchestrator extends EventEmitter {
                     toolContext,
                     executionProfile: resolvedProfile,
                     toolPolicy,
+                    toolEvents,
                     model,
                 });
                 const filteredRecoveryPlan = filterRepeatedPlanSteps(
@@ -3488,6 +3627,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSchemaIntent = hasSchemaDesignIntent(prompt);
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
+        const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const inferredWorkload = buildCanonicalWorkloadAction({
             request: objective,
         }, {
@@ -3559,6 +3699,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (hasSecurityIntent && allowedToolIds.includes('security-scan')) {
                 candidates.add('security-scan');
+            }
+            if (hasDocumentWorkflowIntent && allowedToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
+                candidates.add(DOCUMENT_WORKFLOW_TOOL_ID);
             }
             if (hasImageIntent && allowedToolIds.includes('image-generate')) {
                 candidates.add('image-generate');
@@ -3655,6 +3798,9 @@ class ConversationOrchestrator extends EventEmitter {
             if (hasSecurityIntent && allowedToolIds.includes('security-scan')) {
                 candidates.add('security-scan');
             }
+            if (hasDocumentWorkflowIntent && allowedToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
+                candidates.add(DOCUMENT_WORKFLOW_TOOL_ID);
+            }
         }
 
         return {
@@ -3675,10 +3821,16 @@ class ConversationOrchestrator extends EventEmitter {
         };
     }
 
-    buildDirectAction({ objective = '', session = null, recentMessages = [], toolPolicy = {}, toolContext = {} }) {
+    buildDirectAction({ objective = '', session = null, recentMessages = [], toolPolicy = {}, toolContext = {}, toolEvents = [] }) {
         const researchQuery = extractExplicitWebResearchQuery(objective);
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+        const documentWorkflowParams = buildDocumentWorkflowGenerateParams({
+            objective,
+            toolEvents,
+        });
+        const hasGroundedDocumentSources = Array.isArray(documentWorkflowParams.sources)
+            && documentWorkflowParams.sources.length > 0;
         const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
             && hasMultiWorkloadSchedulingIntent(objective);
         const normalizedCreate = toolPolicy.candidateToolIds.includes('agent-workload')
@@ -3723,6 +3875,15 @@ class ConversationOrchestrator extends EventEmitter {
                 },
             };
         }
+        if (toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)
+            && hasDocumentWorkflowIntentText(objective)
+            && hasGroundedDocumentSources) {
+            return {
+                tool: DOCUMENT_WORKFLOW_TOOL_ID,
+                reason: 'Verified research results are already available, so the document workflow can generate the requested deliverable now.',
+                params: documentWorkflowParams,
+            };
+        }
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
             && researchQuery) {
@@ -3748,6 +3909,17 @@ class ConversationOrchestrator extends EventEmitter {
                 tool: 'web-scrape',
                 reason: 'Explicit scrape request with a direct URL should start with deterministic web scraping.',
                 params: inferBlindScrapeParams(objective, firstUrl),
+            };
+        }
+
+        if (toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)
+            && hasDocumentWorkflowIntentText(objective)
+            && !researchQuery
+            && !(firstUrl && /\b(scrape|extract|selector|structured|parse)\b/i.test(objective))) {
+            return {
+                tool: DOCUMENT_WORKFLOW_TOOL_ID,
+                reason: 'Explicit document or slide deliverable should start with the document workflow.',
+                params: documentWorkflowParams,
             };
         }
 
@@ -3844,7 +4016,7 @@ class ConversationOrchestrator extends EventEmitter {
         return normalizedStep;
     }
 
-    buildFallbackPlan({ objective = '', session = null, recentMessages = [], toolContext = {}, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {} }) {
+    buildFallbackPlan({ objective = '', session = null, recentMessages = [], toolContext = {}, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {}, toolEvents = [] }) {
         if (!toolPolicy?.candidateToolIds?.length) {
             return [];
         }
@@ -3858,6 +4030,7 @@ class ConversationOrchestrator extends EventEmitter {
             recentMessages,
             toolPolicy,
             toolContext,
+            toolEvents,
         });
 
         if (directAction) {
@@ -3930,6 +4103,17 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     prompt: buildImagePromptFromArtifactRequest(prompt),
                 },
+            }];
+        }
+
+        if (toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID) && hasDocumentWorkflowIntentText(prompt)) {
+            return [{
+                tool: DOCUMENT_WORKFLOW_TOOL_ID,
+                reason: 'Deterministic fallback for explicit document or slide generation.',
+                params: buildDocumentWorkflowGenerateParams({
+                    objective: prompt,
+                    toolEvents,
+                }),
             }];
         }
 
@@ -4024,6 +4208,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
             'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
+            'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
+            'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
+            'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
+            'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',
             'Use `remote-command` for host cron only when the user explicitly asks to inspect or modify the server\'s own crontab.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
@@ -4104,6 +4292,7 @@ class ConversationOrchestrator extends EventEmitter {
             toolContext,
             executionProfile,
             toolPolicy,
+            toolEvents,
         }).slice(0, MAX_PLAN_STEPS);
     }
 
@@ -4526,6 +4715,13 @@ class ConversationOrchestrator extends EventEmitter {
         if (allowedToolIds.includes('web-scrape')) {
             parts.push('Use `web-scrape` for structured extraction from URLs. Prefer `browser: true` for JS-heavy pages or certificate/TLS problems.');
             parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');
+        }
+
+        if (allowedToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
+            parts.push('Use `document-workflow` to recommend, plan, and generate reports, briefs, HTML documents, and slide decks.');
+            parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-scrape` first, then call `document-workflow generate` with grounded `sources` built from those verified results.');
+            parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
+            parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
         }
 
         if (toolEvents.length > 0) {

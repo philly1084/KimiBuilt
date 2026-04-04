@@ -38,9 +38,11 @@ describe('runtime-execution', () => {
             success: true,
             response: { id: 'resp_executor' },
         });
+        const documentService = { id: 'documents' };
 
         const result = await executeConversationRuntime({
             locals: {
+                documentService,
                 conversationOrchestrator: {
                     executeConversation,
                 },
@@ -55,6 +57,9 @@ describe('runtime-execution', () => {
             sessionId: 'session-1',
             input: 'Answer directly.',
             executionProfile: 'default',
+            toolContext: expect.objectContaining({
+                documentService,
+            }),
         }));
         expect(createResponse).not.toHaveBeenCalled();
         expect(result.handledPersistence).toBe(true);

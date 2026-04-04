@@ -220,6 +220,7 @@ async function executeConversationRuntime(app, params = {}) {
     const effectiveToolContext = {
         ...(params.toolContext || {}),
         model: params?.toolContext?.model || params.model || null,
+        documentService: params?.toolContext?.documentService || app?.locals?.documentService || null,
     };
     const orchestrator = app?.locals?.conversationOrchestrator
         || app?.locals?.agentOrchestrator

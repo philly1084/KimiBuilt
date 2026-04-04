@@ -25,6 +25,9 @@ const {
 
 const MAX_VERIFIED_REFERENCE_IMAGES = 20;
 const IMAGE_REFERENCE_VERIFY_TIMEOUT_MS = 15000;
+const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
+const MAX_DOCUMENT_SOURCES = 8;
+const MAX_DOCUMENT_SOURCE_CHARS = 4000;
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -344,6 +347,143 @@ function applyWorkloadExecutionPreferences(payload = {}, params = {}, context = 
       ...metadata,
       requestedModel,
     },
+  };
+}
+
+function resolveDocumentService(context = {}) {
+  const service = context?.documentService || null;
+  if (!service?.recommendDocumentWorkflow || !service?.buildDocumentPlan || !service?.aiGenerate || !service?.assemble) {
+    throw new Error('Document workflows are unavailable because the document service is not initialized.');
+  }
+
+  return service;
+}
+
+function normalizeDocumentWorkflowAction(value = '') {
+  return String(value || '').trim().toLowerCase() || 'recommend';
+}
+
+function truncateDocumentSourceText(value = '', limit = MAX_DOCUMENT_SOURCE_CHARS) {
+  const text = String(value || '').trim();
+  if (!text || text.length <= limit) {
+    return text;
+  }
+
+  return `${text.slice(0, limit)}\n[truncated ${text.length - limit} chars]`;
+}
+
+function normalizeDocumentSources(sources = []) {
+  return (Array.isArray(sources) ? sources : [])
+    .map((source, index) => {
+      if (!source || typeof source !== 'object') {
+        return null;
+      }
+
+      const content = truncateDocumentSourceText(
+        source.content
+        || source.text
+        || source.body
+        || source.summary
+        || '',
+      );
+
+      if (!content) {
+        return null;
+      }
+
+      const title = String(source.title || source.heading || source.label || '').trim();
+      const sourceLabel = String(source.sourceLabel || source.source || source.site || '').trim();
+      const sourceUrl = String(source.sourceUrl || source.url || '').trim();
+      const kind = String(source.kind || source.type || '').trim();
+
+      return {
+        id: String(source.id || `source-${index + 1}`).trim(),
+        title,
+        sourceLabel,
+        sourceUrl,
+        kind,
+        content,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_DOCUMENT_SOURCES);
+}
+
+function buildGroundedDocumentPrompt(prompt = '', sources = [], preferences = {}) {
+  const normalizedPrompt = String(prompt || '').trim();
+  const normalizedSources = normalizeDocumentSources(sources);
+  const sections = [];
+
+  if (normalizedPrompt) {
+    sections.push(normalizedPrompt);
+  }
+
+  const preferenceLines = [
+    preferences.title ? `Preferred title: ${String(preferences.title).trim()}` : '',
+    preferences.subtitle ? `Preferred subtitle: ${String(preferences.subtitle).trim()}` : '',
+    preferences.audience ? `Audience: ${String(preferences.audience).trim()}` : '',
+    preferences.style ? `Style: ${String(preferences.style).trim()}` : '',
+    preferences.theme ? `Theme: ${String(preferences.theme).trim()}` : '',
+    preferences.format ? `Target format: ${String(preferences.format).trim()}` : '',
+    preferences.documentType ? `Document type: ${String(preferences.documentType).trim()}` : '',
+  ].filter(Boolean);
+
+  if (preferenceLines.length > 0) {
+    sections.push(preferenceLines.join('\n'));
+  }
+
+  if (normalizedSources.length > 0) {
+    sections.push([
+      'Use the verified source material below as working facts and source context.',
+      'Preserve concrete numbers, names, links, dates, and pricing details unless the source material conflicts.',
+      normalizedSources.map((source, index) => [
+        `[Source ${index + 1}] ${source.title || source.sourceLabel || source.kind || source.id}`,
+        source.sourceLabel ? `Label: ${source.sourceLabel}` : '',
+        source.sourceUrl ? `URL: ${source.sourceUrl}` : '',
+        source.kind ? `Kind: ${source.kind}` : '',
+        `Content:\n${source.content}`,
+      ].filter(Boolean).join('\n')).join('\n\n'),
+    ].join('\n\n'));
+  }
+
+  return sections.filter(Boolean).join('\n\n').trim();
+}
+
+function isTextualDocumentMimeType(mimeType = '', filename = '') {
+  const normalizedMime = String(mimeType || '').trim().toLowerCase();
+  const normalizedFilename = String(filename || '').trim().toLowerCase();
+
+  return normalizedMime.startsWith('text/')
+    || normalizedMime.includes('json')
+    || normalizedFilename.endsWith('.html')
+    || normalizedFilename.endsWith('.htm')
+    || normalizedFilename.endsWith('.md')
+    || normalizedFilename.endsWith('.markdown');
+}
+
+function buildDocumentWorkflowResult(document = null, { includeContent = false } = {}) {
+  if (!document) {
+    return null;
+  }
+
+  const textualContent = isTextualDocumentMimeType(document.mimeType, document.filename)
+    ? String(document.contentBuffer || document.content || '')
+    : '';
+
+  return {
+    id: document.id,
+    filename: document.filename,
+    mimeType: document.mimeType,
+    size: document.size,
+    metadata: document.metadata || {},
+    preview: document.preview || null,
+    downloadUrl: document.downloadUrl || (document.id ? `/api/documents/${document.id}/download` : null),
+    ...(textualContent
+      ? {
+        contentPreview: textualContent.slice(0, 4000),
+        ...(includeContent ? { content: textualContent } : {}),
+      }
+      : {}),
   };
 }
 
@@ -709,6 +849,201 @@ class ToolManager {
         frontend: {
           exposeToFrontend: false,
           icon: 'book-open'
+        }
+      },
+      {
+        id: DOCUMENT_WORKFLOW_TOOL_ID,
+        name: 'Document Workflow',
+        category: 'system',
+        description: 'Recommend, plan, and generate documents or slide decks, optionally grounded in verified research and scrape results.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const documentService = resolveDocumentService(context);
+            const action = normalizeDocumentWorkflowAction(params.action);
+            const prompt = String(params.prompt || params.request || params.topic || '').trim();
+            const documentType = String(params.documentType || params.document_type || '').trim();
+            const tone = String(params.tone || 'professional').trim() || 'professional';
+            const length = String(params.length || 'medium').trim() || 'medium';
+            const formatPreference = String(params.format || '').trim().toLowerCase();
+            const sources = normalizeDocumentSources(params.sources || []);
+            const limit = Number.isFinite(Number(params.limit))
+              ? Math.max(1, Math.min(Number(params.limit), 8))
+              : 4;
+            const recommendation = documentService.recommendDocumentWorkflow({
+              prompt,
+              documentType,
+              format: formatPreference,
+              limit,
+            });
+            const resolvedDocumentType = documentType || recommendation.inferredType || 'document';
+            const resolvedFormat = formatPreference || recommendation.recommendedFormat || 'html';
+
+            if (action === 'recommend') {
+              return {
+                action,
+                recommendation,
+                sourceCount: sources.length,
+              };
+            }
+
+            if (action === 'plan') {
+              return {
+                action,
+                plan: documentService.buildDocumentPlan({
+                  prompt: buildGroundedDocumentPrompt(prompt, sources, {
+                    title: params.title,
+                    subtitle: params.subtitle,
+                    audience: params.audience,
+                    style: params.style,
+                    theme: params.theme,
+                    format: resolvedFormat,
+                    documentType: resolvedDocumentType,
+                  }),
+                  documentType: resolvedDocumentType,
+                  format: resolvedFormat,
+                  tone,
+                  length,
+                }),
+                sourceCount: sources.length,
+              };
+            }
+
+            if (action === 'assemble') {
+              if (sources.length === 0) {
+                throw new Error('document-workflow assemble requires one or more source entries.');
+              }
+
+              const document = await documentService.assemble(
+                sources.map((source) => ({
+                  title: source.title || source.sourceLabel || source.id,
+                  content: source.content,
+                  text: source.content,
+                  sourceUrl: source.sourceUrl,
+                  sourceLabel: source.sourceLabel,
+                })),
+                {
+                  format: resolvedFormat,
+                  title: String(params.title || recommendation.blueprint?.label || 'Research Brief').trim() || 'Research Brief',
+                },
+              );
+
+              return {
+                action,
+                sourceCount: sources.length,
+                document: buildDocumentWorkflowResult(document, {
+                  includeContent: params.includeContent === true,
+                }),
+              };
+            }
+
+            if (action === 'generate') {
+              const groundedPrompt = buildGroundedDocumentPrompt(prompt, sources, {
+                title: params.title,
+                subtitle: params.subtitle,
+                audience: params.audience,
+                style: params.style,
+                theme: params.theme,
+                format: resolvedFormat,
+                documentType: resolvedDocumentType,
+              });
+              if (!groundedPrompt) {
+                throw new Error('document-workflow generate requires a prompt or grounded source material.');
+              }
+
+              const document = await documentService.aiGenerate(groundedPrompt, {
+                documentType: resolvedDocumentType,
+                tone,
+                length,
+                format: resolvedFormat,
+                model: params.model || context.model || undefined,
+                title: params.title,
+                subtitle: params.subtitle,
+                audience: params.audience,
+                style: params.style,
+                theme: params.theme,
+                slideCount: params.slideCount,
+                generateImages: params.generateImages,
+              });
+
+              return {
+                action,
+                recommendation,
+                sourceCount: sources.length,
+                document: buildDocumentWorkflowResult(document, {
+                  includeContent: params.includeContent === true,
+                }),
+              };
+            }
+
+            throw new Error(`Unsupported document-workflow action: ${action}`);
+          },
+          sideEffects: ['write'],
+          timeout: 45000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['action'],
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['recommend', 'plan', 'generate', 'assemble']
+            },
+            prompt: { type: 'string' },
+            request: { type: 'string' },
+            topic: { type: 'string' },
+            documentType: { type: 'string' },
+            format: { type: 'string' },
+            tone: { type: 'string' },
+            length: { type: 'string' },
+            title: { type: 'string' },
+            subtitle: { type: 'string' },
+            audience: { type: 'string' },
+            style: { type: 'string' },
+            theme: { type: 'string' },
+            slideCount: { type: 'integer' },
+            generateImages: { type: 'boolean' },
+            model: { type: 'string' },
+            includeContent: { type: 'boolean' },
+            limit: { type: 'integer' },
+            sources: {
+              type: 'array',
+              maxItems: MAX_DOCUMENT_SOURCES,
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  title: { type: 'string' },
+                  sourceLabel: { type: 'string' },
+                  sourceUrl: { type: 'string' },
+                  kind: { type: 'string' },
+                  content: { type: 'string' },
+                  text: { type: 'string' },
+                  body: { type: 'string' },
+                  summary: { type: 'string' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'generate document',
+            'create report',
+            'create brief',
+            'build a deck',
+            'make slides',
+            'presentation',
+            'document workflow',
+            'research brief',
+            'html document',
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'file-text'
         }
       }
     ];

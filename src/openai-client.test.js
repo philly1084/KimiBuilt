@@ -294,6 +294,22 @@ function createToolManager() {
                 },
             },
         }],
+        ['document-workflow', {
+            id: 'document-workflow',
+            name: 'Document Workflow',
+            description: 'Recommend, plan, and generate documents or slide decks from prompts and source material.',
+            inputSchema: {
+                type: 'object',
+                required: ['action'],
+                properties: {
+                    action: { type: 'string' },
+                    prompt: { type: 'string' },
+                    format: { type: 'string' },
+                    documentType: { type: 'string' },
+                    sources: { type: 'array' },
+                },
+            },
+        }],
     ]);
 
     const skills = new Map([
@@ -319,6 +335,7 @@ function createToolManager() {
         ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'], requiresConfirmation: true }],
         ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'], requiresConfirmation: true }],
         ['user-checkpoint', { enabled: true, triggerPatterns: ['ask a checkpoint question'], requiresConfirmation: false }],
+        ['document-workflow', { enabled: true, triggerPatterns: ['generate document', 'make slides', 'create brief'], requiresConfirmation: false }],
     ]);
 
     return {
@@ -345,6 +362,22 @@ function createToolManager() {
                         stdout: 'deployment.apps/backend configured',
                         stderr: '',
                         host: 'default-host:22',
+                    },
+                };
+            }
+
+            if (id === 'document-workflow') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        action: params.action || 'generate',
+                        document: {
+                            id: 'doc-1',
+                            filename: 'brief.html',
+                            mimeType: 'text/html',
+                            downloadUrl: '/api/documents/doc-1/download',
+                        },
                     },
                 };
             }
@@ -758,6 +791,34 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('user-checkpoint');
+    });
+
+    test('offers document-workflow for research-backed deck generation when document service is available', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Research vacation pricing in Halifax and build a slide deck I can review.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    documentService: {},
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    documentService: {},
+                },
+            },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(
+            expect.arrayContaining(['web-search', 'document-workflow']),
+        );
     });
 
     test('suppresses user-checkpoint when a checkpoint is already pending', () => {
