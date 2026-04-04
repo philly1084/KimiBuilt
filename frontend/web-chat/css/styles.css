@@ -913,6 +913,10 @@ body.layout-minimal .input-toggle-btn {
     right: 1rem;
 }
 
+body.layout-minimal #input-meta-row {
+    opacity: 0.85;
+}
+
 /* ============================================
    Typing Indicator
    ============================================ */
@@ -1713,6 +1717,7 @@ code[class*="language-"] {
     position: sticky;
     bottom: 0;
     z-index: 20;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* iOS zoom fix - font-size 16px on inputs to prevent zoom */
@@ -1887,7 +1892,10 @@ code[class*="language-"] {
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding-top: 15vh;
+    padding:
+        max(1rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))
+        1rem
+        max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem));
 }
 
 .command-palette-overlay {
@@ -1901,12 +1909,15 @@ code[class*="language-"] {
     position: relative;
     width: 100%;
     max-width: 600px;
+    max-height: min(78dvh, 48rem);
     background-color: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     overflow: hidden;
     animation: scale-in 0.2s ease-out;
+    display: flex;
+    flex-direction: column;
 }
 
 .command-palette-header {
@@ -1939,7 +1950,9 @@ code[class*="language-"] {
 }
 
 .command-results {
-    max-height: 400px;
+    max-height: none;
+    min-height: 0;
+    flex: 1 1 auto;
     overflow-y: auto;
 }
 
@@ -2016,6 +2029,7 @@ code[class*="language-"] {
     border-top: 1px solid var(--border);
     font-size: 0.75rem;
     color: var(--text-secondary);
+    flex-wrap: wrap;
 }
 
 .command-palette-footer kbd {
@@ -2123,7 +2137,10 @@ code[class*="language-"] {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 1rem;
+    padding:
+        max(1rem, calc(env(safe-area-inset-top, 0px) + 0.5rem))
+        1rem
+        max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem));
 }
 
 .modal-overlay {
@@ -2137,11 +2154,15 @@ code[class*="language-"] {
     position: relative;
     width: 100%;
     max-width: 480px;
+    max-height: min(88dvh, 52rem);
     background-color: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     animation: scale-in 0.2s ease-out;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .image-modal-content {
@@ -2164,6 +2185,31 @@ code[class*="language-"] {
 
 .modal-body {
     padding: 1.25rem;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.modal-footer {
+    flex-shrink: 0;
+}
+
+.model-selector-dropdown {
+    padding:
+        max(1rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))
+        1rem
+        max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem));
+    align-items: flex-start;
+}
+
+.model-selector-dropdown-content {
+    max-height: min(80dvh, 32rem);
+    display: flex;
+    flex-direction: column;
+}
+
+.model-list {
+    min-height: 0;
+    flex: 1 1 auto;
 }
 
 .workloads-panel {
@@ -2824,19 +2870,21 @@ code[class*="language-"] {
     }
     
     .command-palette {
-        padding-top: 5vh;
+        align-items: flex-start;
     }
     
     .command-palette-content {
-        margin: 0 1rem;
+        margin: 0;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem);
     }
     
     .model-selector-dropdown {
-        padding-top: 70px;
+        justify-content: center;
     }
     
     .model-selector-dropdown-content {
-        margin: 0 1rem;
+        margin: 0;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem);
     }
     
     /* Mobile keyboard handling */
@@ -2849,6 +2897,14 @@ code[class*="language-"] {
     
     .image-lightbox-content img {
         max-height: calc(90vh - 60px);
+    }
+
+    .modal {
+        align-items: flex-start;
+    }
+
+    .modal-content {
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem);
     }
 }
 
@@ -2883,6 +2939,103 @@ code[class*="language-"] {
     body.layout-minimal .chat-header {
         padding-left: 0.75rem;
         padding-right: 0.75rem;
+    }
+
+    body.layout-minimal .chat-header-brand {
+        gap: 0.625rem;
+    }
+
+    body.layout-minimal .chat-header-brand > div:last-child {
+        min-width: 0;
+    }
+
+    body.layout-minimal #current-session-info {
+        display: none;
+    }
+
+    body.layout-minimal .chat-header-actions {
+        margin-left: 0.5rem;
+    }
+
+    body.layout-minimal #input-area {
+        padding: 0.625rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    body.layout-minimal #composer-shell {
+        gap: 0.5rem;
+        border-radius: 1rem;
+    }
+
+    body.layout-minimal #image-btn,
+    body.layout-minimal #input-meta-row,
+    body.layout-minimal #input-toggle-btn {
+        display: none !important;
+    }
+
+    body.layout-minimal #message-input {
+        padding-left: 0.875rem;
+        padding-right: 0.25rem;
+        min-height: 52px;
+    }
+
+    body.layout-minimal #messages-container {
+        padding: 0.75rem 0.75rem 1rem;
+    }
+
+    body.layout-minimal .message {
+        gap: 0.625rem;
+        padding: 0.75rem 0.125rem;
+    }
+
+    body.layout-minimal .message-avatar {
+        display: none;
+    }
+
+    body.layout-minimal .message.user,
+    body.layout-minimal .message.assistant,
+    body.layout-minimal .message.system {
+        flex-direction: column;
+    }
+
+    body.layout-minimal .message.user .message-content,
+    body.layout-minimal .message.assistant .message-content,
+    body.layout-minimal .message.system .message-content {
+        width: 100%;
+        align-items: stretch;
+    }
+
+    body.layout-minimal .message.user .message-header {
+        justify-content: flex-end;
+    }
+
+    body.layout-minimal .message.user .message-text,
+    body.layout-minimal .message.assistant .message-text,
+    body.layout-minimal .message.system .message-text,
+    body.layout-minimal .message-image {
+        max-width: 100%;
+    }
+
+    body.layout-minimal .message-actions {
+        display: none;
+    }
+
+    body.layout-minimal .typing-indicator-container {
+        top: 57px;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    .command-palette,
+    .modal,
+    .model-selector-dropdown {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    .command-palette-content,
+    .modal-content,
+    .model-selector-dropdown-content {
+        border-radius: 1rem;
     }
     
     #connection-status {

@@ -4362,6 +4362,22 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return /\b(export|generate|create|make|save|download|convert|render|produce|link)\b/.test(normalized);
     }
 
+    function shouldSuppressRequestedArtifactFormat(question = '', context = null, requestedArtifactFormat = null) {
+        if (!requestedArtifactFormat) {
+            return false;
+        }
+
+        if (shouldPreferInlineMermaidBlock(question, context, requestedArtifactFormat)) {
+            return true;
+        }
+
+        if (hasExplicitArtifactDeliveryIntent(question)) {
+            return false;
+        }
+
+        return shouldForcePageEditActions(question, context, {});
+    }
+
     function isExplicitMermaidDownloadIntent(question = '') {
         const normalized = String(question || '').toLowerCase();
         if (!normalized) return false;
@@ -4785,10 +4801,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const inferredArtifactFormat = isArtifactGenerationIntent(question)
             ? inferRequestedArtifactFormat(question)
             : null;
-        const requestedArtifactFormat = (
-            shouldPreferInlineMermaidBlock(question, context, inferredArtifactFormat)
-            || (explicitPageEditIntent && inferredArtifactFormat && !hasExplicitArtifactDeliveryIntent(question))
-        )
+        const requestedArtifactFormat = shouldSuppressRequestedArtifactFormat(question, context, inferredArtifactFormat)
             ? null
             : inferredArtifactFormat;
         const requestOptions = requestedArtifactFormat
@@ -5655,7 +5668,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,
         _hasNonPageRuntimeIntent: hasNonPageRuntimeIntent,
-        _shouldForcePageEditActions: shouldForcePageEditActions
+        _shouldForcePageEditActions: shouldForcePageEditActions,
+        _shouldSuppressRequestedArtifactFormat: shouldSuppressRequestedArtifactFormat
     };
 })();
 

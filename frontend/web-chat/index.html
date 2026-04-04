@@ -597,7 +597,7 @@
             <!-- Input Area -->
             <div id="input-area" class="input-area bg-bg-secondary border-t border-border p-4">
                 <div class="max-w-4xl mx-auto">
-                    <div class="relative flex items-end gap-2 bg-bg-tertiary rounded-xl border border-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition-all shadow-sm">
+                    <div id="composer-shell" class="relative flex items-end gap-2 bg-bg-tertiary rounded-xl border border-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition-all shadow-sm">
                         <!-- Image Generation Button -->
                         <button id="image-btn" class="image-btn ml-2 mb-3 p-2 rounded-lg text-text-secondary hover:text-purple-500 hover:bg-purple-500/10 transition-all" title="Generate image (Ctrl+I)" onclick="uiHelpers.openImageModal()" aria-label="Generate image">
                             <i data-lucide="image-plus" class="w-5 h-5" aria-hidden="true"></i>
@@ -617,11 +617,11 @@
                             </button>
                         </div>
                     </div>
-                    <div class="flex items-center justify-between mt-2 px-1">
+                    <div id="input-meta-row" class="flex items-center justify-between mt-2 px-1">
                         <p class="text-xs text-text-tertiary">
                             <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Shift</kbd> + <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Enter</kbd> for new line
                         </p>
-                        <div class="flex items-center gap-2">
+                        <div id="input-meta-actions" class="flex items-center gap-2">
                             <!-- Quick Model Indicator -->
                             <button id="input-model-indicator" class="text-xs text-text-tertiary hover:text-accent transition-colors flex items-center gap-1" onclick="uiHelpers.toggleModelSelector()" aria-label="Current model">
                                 <i data-lucide="cpu" class="w-3 h-3" aria-hidden="true"></i>

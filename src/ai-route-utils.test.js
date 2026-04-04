@@ -26,6 +26,7 @@ const {
     hasExplicitArtifactDeliveryIntent,
     hasExplicitImageGenerationIntent,
     hasExplicitMermaidFileIntent,
+    hasImplicitNotesPageBuildIntent,
     hasExplicitNotesPageEditIntent,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
@@ -208,6 +209,7 @@ describe('ai-route-utils', () => {
 
     test('distinguishes notes page edits from explicit artifact delivery requests', () => {
         expect(hasExplicitNotesPageEditIntent('Put this on the page as a polished hypercar brochure.')).toBe(true);
+        expect(hasImplicitNotesPageBuildIntent('Can you make me an HTML page about tropical fish with sections for habitat and care?')).toBe(true);
         expect(hasExplicitArtifactDeliveryIntent('Export a PDF file and add the download link to the page.')).toBe(true);
         expect(hasExplicitArtifactDeliveryIntent('Put this on the page as a polished hypercar brochure.')).toBe(false);
     });
@@ -270,6 +272,20 @@ describe('ai-route-utils', () => {
             text: 'Export this as a PDF file and add the download link to the page.',
             outputFormat: 'pdf',
             outputFormatProvided: true,
+        })).toBe(false);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Can you make me an HTML page about tropical fish with sections for habitat and care?',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(true);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Create an HTML file I can download for a tropical fish landing page.',
+            outputFormat: 'html',
+            outputFormatProvided: false,
         })).toBe(false);
     });
 

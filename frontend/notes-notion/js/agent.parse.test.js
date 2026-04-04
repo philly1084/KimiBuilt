@@ -244,4 +244,24 @@ Approved page plan:
         expect(agent._hasNonPageRuntimeIntent(question, {})).toBe(false);
         expect(agent._shouldForcePageEditActions(question, context, {})).toBe(true);
     });
+
+    test('suppresses inferred html artifacts for notes page build requests unless file delivery is explicit', () => {
+        const agent = loadAgent();
+        const context = {
+            blockCount: 8,
+            outline: [{ id: 'h1' }],
+        };
+
+        expect(agent._shouldSuppressRequestedArtifactFormat(
+            'Can you make me an HTML page about tropical fish with sections for habitat and care?',
+            context,
+            'html',
+        )).toBe(true);
+
+        expect(agent._shouldSuppressRequestedArtifactFormat(
+            'Create an HTML file I can download for a tropical fish landing page.',
+            context,
+            'html',
+        )).toBe(false);
+    });
 });

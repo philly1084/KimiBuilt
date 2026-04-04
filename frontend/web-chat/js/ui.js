@@ -2284,6 +2284,7 @@ class UIHelpers {
             this.closeSidebar();
             this.closeSearch();
             this.closeModelSelector();
+            this.ensureMobileMinimalComposer();
 
             if (appInstance?.workloadsOpen) {
                 appInstance.workloadsOpen = false;
@@ -2299,6 +2300,27 @@ class UIHelpers {
             setTimeout(() => {
                 document.getElementById('message-input')?.focus();
             }, 120);
+        }
+    }
+
+    ensureMobileMinimalComposer() {
+        if (!window.matchMedia('(max-width: 640px)').matches) {
+            return;
+        }
+
+        const inputArea = document.getElementById('input-area');
+        const toggleBtn = document.getElementById('input-toggle-btn');
+        const toggleIcon = document.getElementById('input-toggle-icon');
+        if (!inputArea) {
+            return;
+        }
+
+        inputArea.classList.remove('hidden');
+        toggleBtn?.classList.remove('input-hidden');
+
+        if (toggleIcon) {
+            toggleIcon.setAttribute('data-lucide', 'chevron-down');
+            this.reinitializeIcons(toggleBtn || toggleIcon);
         }
     }
 
@@ -3682,6 +3704,11 @@ class UIHelpers {
     }
     
     restoreInputAreaState() {
+        if (this.isMinimalistMode() && window.matchMedia('(max-width: 640px)').matches) {
+            this.ensureMobileMinimalComposer();
+            return;
+        }
+
         const isHidden = this.storageGet('webchat_input_hidden') === 'true';
         if (isHidden) {
             const inputArea = document.getElementById('input-area');

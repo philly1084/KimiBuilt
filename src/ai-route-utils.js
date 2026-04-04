@@ -207,6 +207,19 @@ function hasExplicitNotesPageEditIntent(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasImplicitNotesPageBuildIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const pageWritingVerb = /\b(create|make|build|draft|write|expand|fill out|flesh out|continue|finish|polish|rewrite|turn|convert|organize|restructure|rework|improve|work on)\b/.test(normalized);
+    const pageTarget = /\b(page|notes|note|document|doc|brief|report|spec|plan|guide|proposal|outline|section|content)\b/.test(normalized);
+    const asksForFullerContent = /\b(more detail|more details|fill it out|flesh it out|expand it|make it better|make it fuller|build it out|finish the page|work on the page)\b/.test(normalized);
+
+    return (pageWritingVerb && pageTarget) || asksForFullerContent;
+}
+
 function shouldSuppressNotesSurfaceArtifact({
     taskType = '',
     text = '',
@@ -226,7 +239,8 @@ function shouldSuppressNotesSurfaceArtifact({
         return !hasExplicitArtifactDeliveryIntent(text);
     }
 
-    return hasExplicitNotesPageEditIntent(text) && !hasExplicitArtifactDeliveryIntent(text);
+    return (hasExplicitNotesPageEditIntent(text) || hasImplicitNotesPageBuildIntent(text))
+        && !hasExplicitArtifactDeliveryIntent(text);
 }
 
 function shouldSuppressImplicitMermaidArtifact({
@@ -965,6 +979,7 @@ module.exports = {
     hasExplicitMermaidArtifactIntent,
     hasExplicitMermaidFileIntent,
     hasExplicitNotesPageEditIntent,
+    hasImplicitNotesPageBuildIntent,
     hasExplicitImageGenerationIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
