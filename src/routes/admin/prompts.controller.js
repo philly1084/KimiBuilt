@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getEffectiveSoulConfig } = require('../../agent-soul');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../../runtime-prompts');
 
@@ -88,8 +89,22 @@ function buildPromptSurfaces() {
   const orchestratorPath = path.join(rootDir, 'src/conversation-orchestrator.js');
   const notesAgentPath = path.join(rootDir, 'frontend/notes-notion/js/agent.js');
   const artifactPath = path.join(rootDir, 'src/artifacts/artifact-service.js');
+  const soul = getEffectiveSoulConfig();
 
   return [
+    {
+      id: 'agent-soul',
+      name: 'Agent Soul',
+      description: 'Persistent personality layer loaded from soul.md and appended to session instructions.',
+      assignment: 'shared runtime session instructions',
+      category: 'runtime',
+      live: true,
+      editable: false,
+      sourceFile: soul.absoluteFilePath,
+      updatedAt: soul.updatedAt,
+      usageModes: ['chat', 'openai-chat', 'openai-responses', 'canvas', 'notation', 'notes'],
+      content: soul.content,
+    },
     {
       id: 'chat-continuity',
       name: 'Chat Continuity Instructions',

@@ -1,5 +1,7 @@
 const { isDefaultBusinessAgentProfile } = require('./business-agent');
+const { buildSoulInstructions } = require('./agent-soul');
 const { buildProjectMemoryInstructions } = require('./project-memory');
+const settingsController = require('./routes/admin/settings.controller');
 const { getSessionControlState } = require('./runtime-control-state');
 
 function formatRemoteTarget(target = {}) {
@@ -70,6 +72,11 @@ function buildSessionInstructions(session, baseInstructions = '') {
 
     if (baseInstructions) {
         parts.push(baseInstructions.trim());
+    }
+
+    const soulInstructions = buildSoulInstructions(settingsController.settings?.personality || {});
+    if (soulInstructions) {
+        parts.push(soulInstructions);
     }
 
     const agent = session?.metadata?.agent;

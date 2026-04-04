@@ -954,6 +954,41 @@
                                         </form>
                                     </div>
                                 </div>
+
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h3>Agent Personality</h3>
+                                        <p class="text-muted">This markdown is loaded from <code id="soulFilePathLabel">soul.md</code> and appended to the shared runtime instructions for chat, canvas, notation, and OpenAI-compatible sessions.</p>
+                                        <div class="feature-item">
+                                            <div class="feature-info">
+                                                <span class="feature-name">Enable soul.md</span>
+                                                <span class="feature-desc">Turn the persistent personality layer on or off without deleting the file.</span>
+                                            </div>
+                                            <label class="toggle">
+                                                <input type="checkbox" id="personalityEnabled" checked>
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="personalityName">Display Name</label>
+                                                <input type="text" class="form-control" id="personalityName" value="Agent Soul">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="personalityUpdatedAt">Last Updated</label>
+                                                <input type="text" class="form-control" id="personalityUpdatedAt" value="Default content" readonly>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="soulContent">soul.md</label>
+                                            <textarea class="form-control" id="soulContent" rows="18" spellcheck="false" placeholder="# Soul&#10;&#10;Describe the agent's personality, voice, and boundaries here."></textarea>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button type="submit" form="generalSettingsForm" class="btn btn-primary">Save Soul + General</button>
+                                            <button type="button" class="btn btn-ghost" id="resetPersonalityBtn">Reset soul.md</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Features Settings -->

@@ -6,6 +6,11 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { config } = require('../../config');
+const {
+  getEffectiveSoulConfig,
+  resetSoulFile,
+  writeSoulFile,
+} = require('../../agent-soul');
 
 class SettingsController {
   constructor() {
@@ -38,6 +43,10 @@ class SettingsController {
         fallbackModel: 'gpt-4o-mini',
         maxTokens: 4096,
         temperature: 0.7
+      },
+      personality: {
+        enabled: true,
+        displayName: 'Agent Soul'
       },
       notifications: {
         enableEmail: false,
@@ -91,10 +100,12 @@ class SettingsController {
    */
   async update(req, res) {
     try {
-      const updates = this.normalizeIncomingSettings(req.body || {});
+      const updates = JSON.parse(JSON.stringify(req.body || {}));
+      this.applyPersonalityUpdate(updates);
+      const normalizedUpdates = this.normalizeIncomingSettings(updates);
 
       // Deep merge settings
-      this.settings = this.deepMerge(this.settings, updates);
+      this.settings = this.deepMerge(this.settings, normalizedUpdates);
 
       // Save to file (optional persistence)
       await this.saveSettings();
@@ -120,9 +131,13 @@ class SettingsController {
       if (section && this.settings[section]) {
         // Reset specific section
         this.settings[section] = this.getDefaultSettings()[section];
+        if (section === 'personality') {
+          resetSoulFile();
+        }
       } else {
         // Reset all
         this.settings = this.getDefaultSettings();
+        resetSoulFile();
       }
 
       await this.saveSettings();
@@ -218,6 +233,37 @@ class SettingsController {
 
   normalizeIncomingSettings(updates = {}) {
     const normalized = JSON.parse(JSON.stringify(updates || {}));
+    const personalityUpdate = normalized.personality;
+
+    if (personalityUpdate && typeof personalityUpdate === 'object') {
+      const currentPersonality = this.settings?.personality || {};
+      const nextPersonality = {
+        ...personalityUpdate,
+      };
+
+      if (nextPersonality.enabled !== undefined) {
+        nextPersonality.enabled = Boolean(nextPersonality.enabled);
+      }
+
+      if (nextPersonality.displayName !== undefined) {
+        nextPersonality.displayName = String(nextPersonality.displayName || '').trim()
+          || currentPersonality.displayName
+          || 'Agent Soul';
+      }
+
+      delete nextPersonality.content;
+      delete nextPersonality.defaultContent;
+      delete nextPersonality.filePath;
+      delete nextPersonality.absoluteFilePath;
+      delete nextPersonality.updatedAt;
+      delete nextPersonality.source;
+
+      if (Object.keys(nextPersonality).length === 0) {
+        delete normalized.personality;
+      } else {
+        normalized.personality = nextPersonality;
+      }
+    }
     const sshUpdate = normalized.integrations?.ssh;
 
     if (sshUpdate) {
@@ -274,6 +320,7 @@ class SettingsController {
     const publicSettings = JSON.parse(JSON.stringify(this.settings));
     const ssh = publicSettings.integrations?.ssh;
     const authEnabled = Boolean(config.auth.username && config.auth.password && config.auth.jwtSecret);
+    publicSettings.personality = this.getEffectivePersonalityConfig();
 
     if (ssh) {
       const effective = this.getEffectiveSshConfig();
@@ -293,6 +340,21 @@ class SettingsController {
     }
 
     return publicSettings;
+  }
+
+  getEffectivePersonalityConfig() {
+    return getEffectiveSoulConfig(this.settings?.personality || {});
+  }
+
+  applyPersonalityUpdate(updates = {}) {
+    const personalityUpdate = updates?.personality;
+    if (!personalityUpdate || typeof personalityUpdate !== 'object') {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(personalityUpdate, 'content')) {
+      writeSoulFile(personalityUpdate.content);
+    }
   }
 
   getEffectiveSshConfig() {
@@ -355,6 +417,10 @@ class SettingsController {
         fallbackModel: 'gpt-4o-mini',
         maxTokens: 4096,
         temperature: 0.7
+      },
+      personality: {
+        enabled: true,
+        displayName: 'Agent Soul'
       },
       notifications: {
         enableEmail: false,

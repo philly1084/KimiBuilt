@@ -248,6 +248,10 @@ class Dashboard {
             e.preventDefault();
             this.saveGeneralSettings();
         });
+
+        document.getElementById('resetPersonalityBtn')?.addEventListener('click', () => {
+            this.resetPersonality();
+        });
         
         document.getElementById('apiSettingsForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -3051,6 +3055,11 @@ class Dashboard {
                     timezone: document.getElementById('timezone').value,
                     dateFormat: document.getElementById('dateFormat').value,
                 },
+                personality: {
+                    enabled: document.getElementById('personalityEnabled').checked,
+                    displayName: document.getElementById('personalityName').value.trim(),
+                    content: document.getElementById('soulContent').value,
+                },
             };
 
             const response = await apiClient.put('/api/admin/settings', settings);
@@ -3095,6 +3104,23 @@ class Dashboard {
         } catch (error) {
             console.error('Error saving API settings:', error);
             this.showToast('Failed to save API settings', 'error');
+        }
+    }
+
+    async resetPersonality() {
+        if (!confirm('Reset soul.md to the default personality?')) {
+            return;
+        }
+
+        try {
+            const response = await apiClient.post('/api/admin/settings/reset', {
+                section: 'personality',
+            });
+            this.applySettings(this.unwrapApiPayload(response, this.state.settings));
+            this.showToast('soul.md reset to default', 'success');
+        } catch (error) {
+            console.error('Error resetting soul.md:', error);
+            this.showToast('Failed to reset soul.md', 'error');
         }
     }
 
@@ -3254,6 +3280,7 @@ class Dashboard {
         const models = settings.models || {};
         const api = settings.api || {};
         const features = settings.features || {};
+        const personality = settings.personality || {};
         const ssh = settings.integrations?.ssh || {};
 
         this.setInputValue('dashboardTitle', general.appName || 'Agent SDK Admin');
@@ -3276,6 +3303,17 @@ class Dashboard {
         this.setInputValue('sshCredentialSource', ssh.source || 'dashboard');
         this.setInputValue('sshPassword', '');
         this.setCheckboxValue('clearSshPassword', false);
+        this.setCheckboxValue('personalityEnabled', personality.enabled !== false);
+        this.setInputValue('personalityName', personality.displayName || 'Agent Soul');
+        this.setInputValue('soulContent', personality.content || '');
+        this.setInputValue(
+            'personalityUpdatedAt',
+            personality.updatedAt ? this.formatDate(personality.updatedAt) : 'Default content',
+        );
+        const soulFilePathLabel = document.getElementById('soulFilePathLabel');
+        if (soulFilePathLabel) {
+            soulFilePathLabel.textContent = personality.filePath || 'soul.md';
+        }
 
         this.syncModelOptions();
         this.setInputValue('defaultModel', models.defaultModel || 'gpt-4o');

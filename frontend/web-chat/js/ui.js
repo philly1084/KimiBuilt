@@ -1806,6 +1806,13 @@ class UIHelpers {
 
     async openModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
+        if (!dropdown) {
+            return;
+        }
+
+        this.closeSearch();
+        this.closeSidebar();
+        this.closeMobileActionSheet();
         dropdown.classList.remove('hidden');
         dropdown.setAttribute('aria-hidden', 'false');
         
@@ -1828,6 +1835,9 @@ class UIHelpers {
 
     closeModelSelector() {
         const dropdown = document.getElementById('model-selector-dropdown');
+        if (!dropdown) {
+            return;
+        }
         dropdown.classList.add('hidden');
         dropdown.setAttribute('aria-hidden', 'true');
         
@@ -2049,6 +2059,7 @@ class UIHelpers {
 
     updateRemoteBuildAutonomyUI() {
         const button = document.getElementById('remote-autonomy-btn');
+        const label = document.getElementById('remote-autonomy-label');
         if (!button) {
             return;
         }
@@ -2059,6 +2070,11 @@ class UIHelpers {
         button.title = enabled
             ? 'Remote server autonomy: On'
             : 'Remote server autonomy: Off';
+        if (label) {
+            label.textContent = enabled
+                ? 'Automatic remote steps: On'
+                : 'Automatic remote steps: Off';
+        }
     }
 
     setRemoteBuildAutonomyApproved(value) {
@@ -2623,6 +2639,10 @@ class UIHelpers {
         sidebar.setAttribute('aria-hidden', hidden ? 'true' : 'false');
     }
 
+    isCompactActionSheetMode() {
+        return window.matchMedia('(max-width: 1120px)').matches || this.isMinimalistMode();
+    }
+
     // ============================================
     // Theme Management
     // ============================================
@@ -2727,19 +2747,40 @@ class UIHelpers {
     openSearch() {
         const searchBar = document.getElementById('search-bar');
         const searchInput = document.getElementById('search-input');
-        searchBar.classList.remove('hidden');
-        searchInput.focus();
+        const searchPanel = searchBar?.querySelector('.search-bar-panel');
+        if (!searchBar || !searchInput) {
+            return;
+        }
+
+        this.closeModelSelector();
         this.closeSidebar();
+        this.closeMobileActionSheet();
+
+        this.searchLastFocusedElement = document.activeElement;
+        searchBar.classList.remove('hidden');
+        searchBar.setAttribute('aria-hidden', 'false');
+        this.trapFocus(searchPanel || searchBar);
+        searchInput.focus();
     }
 
     closeSearch() {
         const searchBar = document.getElementById('search-bar');
         const searchInput = document.getElementById('search-input');
+        if (!searchBar || !searchInput) {
+            return;
+        }
+
         searchBar.classList.add('hidden');
+        searchBar.setAttribute('aria-hidden', 'true');
         searchInput.value = '';
         this.clearSearchHighlights();
         this.searchResults = [];
         this.currentSearchIndex = -1;
+
+        if (this.searchLastFocusedElement && typeof this.searchLastFocusedElement.focus === 'function') {
+            this.searchLastFocusedElement.focus();
+            this.searchLastFocusedElement = null;
+        }
     }
 
     performSearch(query) {
@@ -3759,7 +3800,7 @@ class UIHelpers {
         const menu = document.getElementById('mobile-chat-menu');
         const sheet = menu?.querySelector('.mobile-chat-menu__sheet');
         const trigger = document.getElementById('mobile-chat-menu-btn');
-        const allowCompactActionSheet = window.matchMedia('(max-width: 768px)').matches || this.isMinimalistMode();
+        const allowCompactActionSheet = this.isCompactActionSheetMode();
         if (!menu || !sheet || !allowCompactActionSheet) {
             return;
         }
@@ -3802,11 +3843,12 @@ class UIHelpers {
         const layoutLabel = document.getElementById('mobile-chat-menu-layout-label');
         const layoutValue = document.getElementById('mobile-chat-menu-layout-value');
         const displayName = this.getModelDisplayName({ id: this.currentModel });
+        const reasoningLabel = this.getReasoningDisplayLabel(this.getCurrentReasoningEffort()).replace('Reasoning: ', '');
         const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
         const isMinimal = this.isMinimalistMode();
 
         if (modelValue) {
-            modelValue.textContent = displayName;
+            modelValue.textContent = `${displayName} | ${reasoningLabel}`;
         }
 
         if (themeValue) {
@@ -4034,7 +4076,7 @@ class UIHelpers {
         });
 
         window.addEventListener('resize', () => {
-            if (!(window.matchMedia('(max-width: 768px)').matches || this.isMinimalistMode())) {
+            if (!this.isCompactActionSheetMode()) {
                 this.closeMobileActionSheet();
             }
             this.syncSidebarState();
