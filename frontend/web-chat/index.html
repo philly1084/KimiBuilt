@@ -6,6 +6,10 @@
     <meta name="description" content="LillyBuilt AI - A modern AI chat interface with real-time streaming and image generation">
     <meta name="theme-color" content="#0d0d0d">
     <title>LillyBuilt AI Chat</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -382,12 +386,22 @@
         </div>
     </div>
 
-    <div id="app" class="flex h-full">
+    <div id="app" class="app-shell flex h-full">
         <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar bg-bg-secondary border-r border-border flex flex-col" aria-label="Conversation sidebar">
+        <aside id="sidebar" class="sidebar sidebar-panel bg-bg-secondary border-r border-border flex flex-col" aria-label="Conversation sidebar">
             <!-- Sidebar Header -->
-            <div class="p-4 border-b border-border">
-                <button id="new-chat-btn" class="btn-primary w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all" title="New Chat">
+            <div class="sidebar-brand-shell p-4 border-b border-border">
+                <div class="sidebar-brand-card">
+                    <div class="sidebar-brand-mark" aria-hidden="true">
+                        <i data-lucide="bot" class="w-5 h-5"></i>
+                    </div>
+                    <div class="sidebar-brand-copy">
+                        <p class="sidebar-brand-kicker">AI Workspace</p>
+                        <h2 class="sidebar-brand-title">LillyBuilt</h2>
+                        <p class="sidebar-brand-description">Chat-first interface with sessions, files, exports, and agent workloads close at hand.</p>
+                    </div>
+                </div>
+                <button id="new-chat-btn" class="btn-primary sidebar-primary-btn w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all" title="New Chat">
                     <i data-lucide="plus" class="w-5 h-5" aria-hidden="true"></i>
                     <span class="sidebar-btn-text">New Chat</span>
                 </button>
@@ -399,7 +413,8 @@
             </div>
             
             <!-- Sidebar Footer -->
-            <div class="p-4 border-t border-border space-y-2">
+            <div class="sidebar-footer p-4 border-t border-border space-y-2">
+                <div class="sidebar-footer-label">Workspace</div>
                 <!-- Action Buttons -->
                 <div class="grid grid-cols-2 gap-2">
                     <button id="import-btn" class="btn-secondary flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-all" onclick="uiHelpers.openImportModal()" title="Import">
@@ -427,6 +442,7 @@
                 </button>
                 
                 <!-- Theme Toggle -->
+                <div class="sidebar-footer-label sidebar-footer-label--subtle">Appearance</div>
                 <button id="theme-toggle" class="btn-secondary w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium transition-all" aria-label="Toggle dark/light mode" title="Toggle Theme">
                     <i data-lucide="sun" class="w-4 h-4 hidden" id="theme-icon-light" aria-hidden="true"></i>
                     <i data-lucide="moon" class="w-4 h-4" id="theme-icon-dark" aria-hidden="true"></i>
@@ -444,61 +460,68 @@
         <div id="sidebar-overlay" class="sidebar-overlay hidden fixed inset-0 bg-black/50 z-40 backdrop-blur-sm" onclick="uiHelpers.closeSidebar()"></div>
         
         <!-- Main Chat Area -->
-        <main id="main-content" class="flex-1 flex flex-col min-w-0 relative" role="main">
+        <main id="main-content" class="main-shell flex-1 flex flex-col min-w-0 relative" role="main">
             <!-- Chat Header -->
-            <header class="chat-header bg-bg-secondary/80 backdrop-blur border-b border-border px-6 py-4 flex items-center justify-between">
+            <header class="chat-header chat-header-shell bg-bg-secondary/80 backdrop-blur border-b border-border px-6 py-4 flex items-center justify-between">
                 <div class="chat-header-brand flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20" aria-hidden="true">
+                    <div class="chat-brand-mark w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20" aria-hidden="true">
                         <i data-lucide="bot" class="w-5 h-5 text-white"></i>
                     </div>
-                    <div>
-                        <h1 class="font-semibold text-lg">LillyBuilt AI</h1>
+                    <div class="chat-header-copy">
+                        <div class="chat-header-title-row">
+                            <h1 class="chat-brand-title font-semibold text-lg">LillyBuilt AI</h1>
+                            <span class="chat-header-pill">Live chat</span>
+                        </div>
                         <p class="text-xs text-text-secondary" id="current-session-info">No active session</p>
                     </div>
                 </div>
                 <div class="chat-header-actions flex items-center gap-2">
-                    <button id="minimalist-toggle-btn" class="btn-icon minimalist-toggle-btn px-3 rounded-lg" title="Enter minimalist mode" aria-label="Enter minimalist mode" aria-pressed="false">
-                        <i data-lucide="minimize-2" class="w-4 h-4" id="minimalist-toggle-icon" aria-hidden="true"></i>
-                        <span class="minimalist-toggle-label hidden lg:inline">Focus</span>
-                    </button>
-                    <!-- Connection Status (Header) -->
-                    <div id="connection-status" class="connection-status full-shell-control" title="Backend connection status">
-                        <span id="connection-indicator" class="connection-indicator"></span>
-                        <span id="connection-text" class="connection-text text-xs">Connecting...</span>
+                    <div class="header-control-group header-control-group--workspace">
+                        <button id="minimalist-toggle-btn" class="btn-icon minimalist-toggle-btn px-3 rounded-lg" title="Enter minimalist mode" aria-label="Enter minimalist mode" aria-pressed="false">
+                            <i data-lucide="minimize-2" class="w-4 h-4" id="minimalist-toggle-icon" aria-hidden="true"></i>
+                            <span class="minimalist-toggle-label hidden lg:inline">Focus</span>
+                        </button>
+                        <!-- Connection Status (Header) -->
+                        <div id="connection-status" class="connection-status full-shell-control" title="Backend connection status">
+                            <span id="connection-indicator" class="connection-indicator"></span>
+                            <span id="connection-text" class="connection-text text-xs">Connecting...</span>
+                        </div>
+                        <div class="reasoning-selector-wrapper full-shell-control">
+                            <label class="sr-only" for="reasoning-effort-select">Reasoning effort</label>
+                            <select id="reasoning-effort-select" class="reasoning-select" title="Reasoning effort" aria-label="Reasoning effort">
+                                <option value="">Reasoning: Default</option>
+                                <option value="low">Reasoning: Low</option>
+                                <option value="medium">Reasoning: Medium</option>
+                                <option value="high">Reasoning: High</option>
+                                <option value="xhigh">Reasoning: XHigh</option>
+                            </select>
+                        </div>
+                        <button id="remote-autonomy-btn" class="btn-icon remote-autonomy-btn full-shell-control" title="Allow automatic remote server steps" aria-label="Allow automatic remote server steps" aria-pressed="false">
+                            <i data-lucide="server" class="w-5 h-5" aria-hidden="true"></i>
+                        </button>
+                        <!-- Model Selector -->
+                        <div class="model-selector-wrapper full-shell-control">
+                            <button id="model-selector-btn" class="model-selector-btn" onclick="uiHelpers.toggleModelSelector()" title="Change model" aria-label="Change model" aria-haspopup="listbox" aria-expanded="false" aria-controls="model-list">
+                                <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
+                                <span id="current-model-label">GPT-4o</span>
+                                <i data-lucide="chevron-down" class="w-3 h-3" aria-hidden="true"></i>
+                            </button>
+                        </div>
                     </div>
-                    <div class="reasoning-selector-wrapper full-shell-control">
-                        <label class="sr-only" for="reasoning-effort-select">Reasoning effort</label>
-                        <select id="reasoning-effort-select" class="reasoning-select" title="Reasoning effort" aria-label="Reasoning effort">
-                            <option value="">Reasoning: Default</option>
-                            <option value="low">Reasoning: Low</option>
-                            <option value="medium">Reasoning: Medium</option>
-                            <option value="high">Reasoning: High</option>
-                            <option value="xhigh">Reasoning: XHigh</option>
-                        </select>
-                    </div>
-                    <button id="remote-autonomy-btn" class="btn-icon remote-autonomy-btn full-shell-control" title="Allow automatic remote server steps" aria-label="Allow automatic remote server steps" aria-pressed="false">
-                        <i data-lucide="server" class="w-5 h-5" aria-hidden="true"></i>
-                    </button>
-                    <!-- Model Selector -->
-                    <div class="model-selector-wrapper full-shell-control">
-                        <button id="model-selector-btn" class="model-selector-btn" onclick="uiHelpers.toggleModelSelector()" title="Change model" aria-label="Change model" aria-haspopup="listbox" aria-expanded="false" aria-controls="model-list">
-                            <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
-                            <span id="current-model-label">GPT-4o</span>
-                            <i data-lucide="chevron-down" class="w-3 h-3" aria-hidden="true"></i>
+                    <div class="header-control-group header-control-group--utilities">
+                        <button id="search-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Search messages (Ctrl+F)" onclick="app.openSearch()" aria-label="Search messages (Ctrl+F)">
+                            <i data-lucide="search" class="w-5 h-5" aria-hidden="true"></i>
+                        </button>
+                        <button id="workloads-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Agent workloads" aria-label="Agent workloads">
+                            <i data-lucide="calendar-clock" class="w-5 h-5" aria-hidden="true"></i>
+                        </button>
+                        <button id="export-chat-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Export conversation" onclick="uiHelpers.openExportModal()" aria-label="Export conversation">
+                            <i data-lucide="download" class="w-5 h-5" aria-hidden="true"></i>
+                        </button>
+                        <button id="clear-chat-btn" class="btn-icon danger p-2 rounded-lg full-shell-control" title="Clear chat" aria-label="Clear all messages in current conversation">
+                            <i data-lucide="trash-2" class="w-5 h-5" aria-hidden="true"></i>
                         </button>
                     </div>
-                    <button id="search-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Search messages (Ctrl+F)" onclick="app.openSearch()" aria-label="Search messages (Ctrl+F)">
-                        <i data-lucide="search" class="w-5 h-5" aria-hidden="true"></i>
-                    </button>
-                    <button id="workloads-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Agent workloads" aria-label="Agent workloads">
-                        <i data-lucide="calendar-clock" class="w-5 h-5" aria-hidden="true"></i>
-                    </button>
-                    <button id="export-chat-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Export conversation" onclick="uiHelpers.openExportModal()" aria-label="Export conversation">
-                        <i data-lucide="download" class="w-5 h-5" aria-hidden="true"></i>
-                    </button>
-                    <button id="clear-chat-btn" class="btn-icon danger p-2 rounded-lg full-shell-control" title="Clear chat" aria-label="Clear all messages in current conversation">
-                        <i data-lucide="trash-2" class="w-5 h-5" aria-hidden="true"></i>
-                    </button>
                 </div>
             </header>
 
@@ -537,52 +560,51 @@
             <!-- Messages Container -->
             <div id="messages-container" class="flex-1 overflow-y-auto px-4 py-6 space-y-6 scroll-smooth" role="log" aria-label="Conversation messages" aria-live="polite">
                 <!-- Welcome Message -->
-                <div id="welcome-message" class="flex flex-col items-center justify-center h-full text-center px-4">
-                    <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mb-6 shadow-xl shadow-blue-500/20 animate-pulse-slow" aria-hidden="true">
-                        <i data-lucide="sparkles" class="w-10 h-10 text-white"></i>
+                <div id="welcome-message" class="welcome-state flex flex-col items-center justify-center h-full text-center px-4">
+                    <div class="welcome-badge">
+                        <span class="welcome-badge-mark" aria-hidden="true">
+                            <i data-lucide="sparkles" class="w-4 h-4 text-white"></i>
+                        </span>
+                        <span class="welcome-badge-label">Streamlined chat workspace</span>
                     </div>
-                    <h2 class="text-3xl font-bold mb-3 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Welcome to LillyBuilt AI</h2>
-                    <p class="text-text-secondary max-w-md mb-8 text-lg">
-                        Start a conversation with your AI assistant. Ask questions, get help with coding, 
-                        or explore creative ideas. Generate stunning images with AI.
-                    </p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
-                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="app.setInput('Explain quantum computing in simple terms')">
-                            <i data-lucide="atom" class="w-5 h-5 text-blue-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
-                            <span class="text-sm font-medium block">Explain quantum computing</span>
-                            <span class="text-xs text-text-tertiary">Science & Physics</span>
+                    <div class="welcome-copy">
+                        <h2 class="welcome-title">Ask, build, and ship from one conversation.</h2>
+                        <p class="welcome-description">
+                            Keep the thread central while models, files, exports, and agent workloads stay available when you need them.
+                        </p>
+                    </div>
+                    <div class="welcome-capability-row" aria-label="Workspace capabilities">
+                        <span>Live streaming</span>
+                        <span>Search and tools</span>
+                        <span>Image generation</span>
+                        <span>Saved sessions</span>
+                    </div>
+                    <div class="welcome-suggestion-grid">
+                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="app.setInput('Research the latest market shifts in residential solar and turn it into a concise briefing with sources.')">
+                            <i data-lucide="globe" class="w-5 h-5 text-blue-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
+                            <span class="text-sm font-medium block">Research with sources</span>
+                            <span class="text-xs text-text-tertiary">News, analysis, and citations</span>
                         </button>
-                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="app.setInput('Write a Python function to sort a list of dictionaries by multiple keys')">
-                            <i data-lucide="code-2" class="w-5 h-5 text-green-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
-                            <span class="text-sm font-medium block">Write a Python function</span>
-                            <span class="text-xs text-text-tertiary">Programming</span>
+                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="app.setInput('Refactor this Node.js route to be smaller, easier to test, and safer around error handling.')">
+                            <i data-lucide="code-2" class="w-5 h-5 text-emerald-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
+                            <span class="text-sm font-medium block">Refactor code</span>
+                            <span class="text-xs text-text-tertiary">Faster engineering help</span>
                         </button>
-                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="app.setInput('Help me debug this JavaScript error: TypeError: Cannot read property of undefined')">
-                            <i data-lucide="bug" class="w-5 h-5 text-red-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
-                            <span class="text-sm font-medium block">Help me debug code</span>
-                            <span class="text-xs text-text-tertiary">Debugging</span>
+                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="app.setInput('Draft a product brief for a mobile-first AI assistant focused on approachable UX and clear controls.')">
+                            <i data-lucide="file-stack" class="w-5 h-5 text-amber-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
+                            <span class="text-sm font-medium block">Write a brief</span>
+                            <span class="text-xs text-text-tertiary">Documents, plans, and summaries</span>
                         </button>
-                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="uiHelpers.openImageModal(); document.getElementById('image-prompt-input').value = 'futuristic cityscape at night with neon lights';">
-                            <i data-lucide="image" class="w-5 h-5 text-purple-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
-                            <span class="text-sm font-medium block">Generate an image</span>
-                            <span class="text-xs text-text-tertiary">AI Image Generation</span>
+                        <button class="suggestion-chip p-4 rounded-xl border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-accent/50 transition-all text-left group" onclick="uiHelpers.openImageModal(); document.getElementById('image-prompt-input').value = 'editorial product photo of a cobalt blue AI device on brushed metal';">
+                            <i data-lucide="image" class="w-5 h-5 text-orange-500 mb-2 group-hover:scale-110 transition-transform" aria-hidden="true"></i>
+                            <span class="text-sm font-medium block">Generate visuals</span>
+                            <span class="text-xs text-text-tertiary">AI images and references</span>
                         </button>
                     </div>
-                    <div class="mt-8 flex flex-wrap items-center justify-center gap-4 text-xs text-text-tertiary">
-                        <span class="flex items-center gap-1">
-                            <kbd class="px-2 py-1 rounded bg-bg-tertiary border border-border">Ctrl</kbd>
-                            <span>+</span>
-                            <kbd class="px-2 py-1 rounded bg-bg-tertiary border border-border">K</kbd>
-                            <span>commands</span>
-                        </span>
-                        <span class="flex items-center gap-1">
-                            <kbd class="px-2 py-1 rounded bg-bg-tertiary border border-border">/</kbd>
-                            <span>for quick commands</span>
-                        </span>
-                        <span class="flex items-center gap-1">
-                            <kbd class="px-2 py-1 rounded bg-bg-tertiary border border-border">?</kbd>
-                            <span>for help</span>
-                        </span>
+                    <div class="welcome-shortcuts">
+                        <span><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd><span>commands</span></span>
+                        <span><kbd>/</kbd><span>quick actions</span></span>
+                        <span><kbd>Ctrl</kbd><span>+</span><kbd>B</kbd><span>toggle sidebar</span></span>
                     </div>
                 </div>
                 <!-- Messages will be rendered here -->
@@ -597,43 +619,57 @@
             <!-- Input Area -->
             <div id="input-area" class="input-area bg-bg-secondary border-t border-border p-4">
                 <div class="max-w-4xl mx-auto">
-                    <div id="composer-shell" class="relative flex items-end gap-2 bg-bg-tertiary rounded-xl border border-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition-all shadow-sm">
-                        <!-- Image Generation Button -->
-                        <button id="image-btn" class="image-btn ml-2 mb-3 p-2 rounded-lg text-text-secondary hover:text-purple-500 hover:bg-purple-500/10 transition-all" title="Generate image (Ctrl+I)" onclick="uiHelpers.openImageModal()" aria-label="Generate image">
-                            <i data-lucide="image-plus" class="w-5 h-5" aria-hidden="true"></i>
-                        </button>
-                        <textarea 
-                            id="message-input" 
-                            class="flex-1 bg-transparent border-0 resize-none py-3 px-2 max-h-48 min-h-[56px] focus:outline-none text-text-primary placeholder-text-secondary"
-                            placeholder="Message LillyBuilt AI..."
-                            rows="1"
-                            autocomplete="off"
-                            aria-label="Message input"
-                        ></textarea>
-                        <div class="flex items-center gap-2 pr-3 pb-3">
-                            <span id="char-counter" class="text-xs text-text-secondary hidden" aria-live="polite">0/4000</span>
-                            <button id="send-btn" class="btn-primary p-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95" disabled aria-label="Send message">
-                                <i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>
-                            </button>
+                    <div class="composer-frame">
+                        <div class="composer-frame__head">
+                            <div class="composer-frame__label">
+                                <span class="composer-eyebrow">Message</span>
+                                <span class="composer-support-text">Live responses with tools, files, and exports available in the workspace.</span>
+                            </div>
+                            <div class="composer-frame__status">
+                                <span class="composer-status-pill">
+                                    <span class="composer-status-dot" aria-hidden="true"></span>
+                                    Session ready
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                    <div id="input-meta-row" class="flex items-center justify-between mt-2 px-1">
-                        <p class="text-xs text-text-tertiary">
-                            <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Shift</kbd> + <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Enter</kbd> for new line
-                        </p>
-                        <div id="input-meta-actions" class="flex items-center gap-2">
-                            <!-- Quick Model Indicator -->
-                            <button id="input-model-indicator" class="text-xs text-text-tertiary hover:text-accent transition-colors flex items-center gap-1" onclick="uiHelpers.toggleModelSelector()" aria-label="Current model">
-                                <i data-lucide="cpu" class="w-3 h-3" aria-hidden="true"></i>
-                                <span id="input-model-label">GPT-4o</span>
+                        <div id="composer-shell" class="relative flex items-end gap-2 bg-bg-tertiary rounded-xl border border-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 transition-all shadow-sm">
+                            <!-- Image Generation Button -->
+                            <button id="image-btn" class="image-btn ml-2 mb-3 p-2 rounded-lg text-text-secondary hover:text-purple-500 hover:bg-purple-500/10 transition-all" title="Generate image (Ctrl+I)" onclick="uiHelpers.openImageModal()" aria-label="Generate image">
+                                <i data-lucide="image-plus" class="w-5 h-5" aria-hidden="true"></i>
                             </button>
-                            <span class="text-xs text-text-tertiary hidden sm:flex items-center gap-1" id="input-reasoning-indicator">
-                                <i data-lucide="brain" class="w-3 h-3" aria-hidden="true"></i>
-                                <span id="input-reasoning-label">Reasoning: Default</span>
-                            </span>
-                            <span class="text-xs text-text-tertiary hidden sm:block">
-                                <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Ctrl</kbd> + <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">/</kbd> for help
-                            </span>
+                            <textarea 
+                                id="message-input" 
+                                class="flex-1 bg-transparent border-0 resize-none py-3 px-2 max-h-48 min-h-[56px] focus:outline-none text-text-primary placeholder-text-secondary"
+                                placeholder="Message LillyBuilt AI..."
+                                rows="1"
+                                autocomplete="off"
+                                aria-label="Message input"
+                            ></textarea>
+                            <div class="flex items-center gap-2 pr-3 pb-3">
+                                <span id="char-counter" class="text-xs text-text-secondary hidden" aria-live="polite">0/4000</span>
+                                <button id="send-btn" class="btn-primary p-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95" disabled aria-label="Send message">
+                                    <i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="input-meta-row" class="flex items-center justify-between mt-2 px-1">
+                            <p class="text-xs text-text-tertiary">
+                                <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Shift</kbd> + <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Enter</kbd> for new line
+                            </p>
+                            <div id="input-meta-actions" class="flex items-center gap-2">
+                                <!-- Quick Model Indicator -->
+                                <button id="input-model-indicator" class="text-xs text-text-tertiary hover:text-accent transition-colors flex items-center gap-1" onclick="uiHelpers.toggleModelSelector()" aria-label="Current model">
+                                    <i data-lucide="cpu" class="w-3 h-3" aria-hidden="true"></i>
+                                    <span id="input-model-label">GPT-4o</span>
+                                </button>
+                                <span class="text-xs text-text-tertiary hidden sm:flex items-center gap-1" id="input-reasoning-indicator">
+                                    <i data-lucide="brain" class="w-3 h-3" aria-hidden="true"></i>
+                                    <span id="input-reasoning-label">Reasoning: Default</span>
+                                </span>
+                                <span class="text-xs text-text-tertiary hidden sm:block">
+                                    <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Ctrl</kbd> + <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">/</kbd> for help
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
