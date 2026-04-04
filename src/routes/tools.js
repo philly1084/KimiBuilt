@@ -335,14 +335,21 @@ async function resolveToolExecutionProfile(req, requestedSessionId = null) {
 async function resolveToolSessionId(requestedSessionId = null, ownerId = null) {
   const normalized = typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '';
 
+  if (ownerId) {
+    const session = await sessionStore.resolveOwnedSession(
+      normalized && !normalized.startsWith('local_') ? normalized : null,
+      { mode: 'chat' },
+      ownerId,
+    );
+    return session?.id || null;
+  }
+
   if (normalized && !normalized.startsWith('local_')) {
-    const session = ownerId
-      ? await sessionStore.getOrCreateOwned(normalized, { mode: 'chat' }, ownerId)
-      : await sessionStore.getOrCreate(normalized, { mode: 'chat' });
+    const session = await sessionStore.getOrCreate(normalized, { mode: 'chat' });
     return session?.id || normalized;
   }
 
-  const session = await sessionStore.create(ownerId ? { mode: 'chat', ownerId } : { mode: 'chat' });
+  const session = await sessionStore.create({ mode: 'chat' });
   return session.id;
 }
 

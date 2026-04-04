@@ -66,6 +66,14 @@ class PostgresManager {
         `);
 
         await this.query(`
+            CREATE TABLE IF NOT EXISTS user_session_state (
+                owner_id TEXT PRIMARY KEY,
+                active_session_id TEXT NULL REFERENCES sessions(id) ON DELETE SET NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+
+        await this.query(`
             CREATE TABLE IF NOT EXISTS session_messages (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

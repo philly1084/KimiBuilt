@@ -70,6 +70,7 @@ class AIAssistant {
         // Fetch models on init
         this.fetchModels();
         this.setMode('chat');
+        this.restoreSharedConversation();
     }
     
     async fetchModels() {
@@ -840,6 +841,84 @@ class AIAssistant {
         }
     }
 
+    async restoreSharedConversation() {
+        try {
+            const sessionState = await window.apiManager.getSessionState();
+            const activeSessionId = String(sessionState.activeSessionId || '').trim()
+                || String(sessionState.sessions?.[0]?.id || '').trim();
+
+            if (!activeSessionId) {
+                return;
+            }
+
+            window.apiManager.setSessionId(activeSessionId);
+            const messages = await window.apiManager.getSessionMessages(activeSessionId, 40);
+            this.chatHistory = messages
+                .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+                .map((message) => ({
+                    role: message.role,
+                    content: this.extractHistoryContent(message.content),
+                }))
+                .filter((message) => message.content)
+                .slice(-12);
+
+            this.renderConversationHistory();
+            if (this.chatHistory.length > 0) {
+                this.showStatus('Loaded shared session history.', 'success');
+            }
+        } catch (error) {
+            console.warn('Failed to restore shared canvas conversation:', error);
+        }
+    }
+
+    extractHistoryContent(content) {
+        if (typeof content === 'string') {
+            return content.trim();
+        }
+
+        if (Array.isArray(content)) {
+            return content
+                .map((entry) => this.extractHistoryContent(entry))
+                .filter(Boolean)
+                .join('\n')
+                .trim();
+        }
+
+        if (!content || typeof content !== 'object') {
+            return '';
+        }
+
+        return this.extractHistoryContent(
+            content.text
+            || content.content
+            || content.value
+            || content.output_text
+            || '',
+        );
+    }
+
+    renderConversationHistory() {
+        if (!this.conversation) {
+            return;
+        }
+
+        this.conversation.innerHTML = '';
+        if (this.chatHistory.length === 0) {
+            if (this.conversationEmpty) {
+                this.conversationEmpty.style.display = '';
+            }
+            return;
+        }
+
+        if (this.conversationEmpty) {
+            this.conversationEmpty.style.display = 'none';
+        }
+
+        this.chatHistory.forEach((message) => {
+            this.addConversationMessage(message.role, message.content);
+        });
+    }
+
     addConversationMessage(role, content) {
         if (!this.conversation) return;
 
@@ -861,7 +940,6 @@ class AIAssistant {
 
 // Create global instance
 window.aiAssistant = new AIAssistant();
-
 
 
 

@@ -552,15 +552,13 @@ router.post('/chat/completions', async (req, res, next) => {
         let sessionId = resolveSessionId(req);
         let session;
         const requestedTaskType = resolveConversationTaskType(req.body);
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: requestedTaskType, ownerId });
+        session = await sessionStore.resolveOwnedSession(
+            sessionId,
+            { mode: requestedTaskType, ownerId },
+            ownerId,
+        );
+        if (session) {
             sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: requestedTaskType }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({
@@ -1148,15 +1146,13 @@ router.post('/responses', async (req, res, next) => {
         let sessionId = resolveSessionId(req);
         let session;
         const requestedTaskType = resolveConversationTaskType(req.body);
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: requestedTaskType, ownerId });
+        session = await sessionStore.resolveOwnedSession(
+            sessionId,
+            { mode: requestedTaskType, ownerId },
+            ownerId,
+        );
+        if (session) {
             sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: requestedTaskType }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({
@@ -1628,16 +1624,13 @@ router.post('/images/generations', async (req, res, next) => {
 
         let sessionId = resolveSessionId(req);
         const ownerId = getRequestOwnerId(req);
-        let session;
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: 'image', ownerId });
+        const session = await sessionStore.resolveOwnedSession(
+            sessionId,
+            { mode: 'image', ownerId },
+            ownerId,
+        );
+        if (session) {
             sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'image' }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({

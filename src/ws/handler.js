@@ -152,21 +152,23 @@ function setupWebSocket(wss, app = null) {
                     return;
                 }
 
-                let session;
-                if (!sessionId) {
-                    session = await sessionStore.create({ mode: type, transport: 'ws', ownerId });
-                    sessionId = session.id;
-                    ws.send(JSON.stringify({ type: 'session_created', sessionId }));
-                } else {
-                    session = await sessionStore.getOrCreateOwned(sessionId, { mode: type, transport: 'ws' }, ownerId);
-                }
-
-                if (!session) {
-                    session = await sessionStore.getOwned(sessionId, ownerId);
-                }
+                const requestedSessionId = sessionId;
+                const session = ownerId
+                    ? await sessionStore.resolveOwnedSession(
+                        requestedSessionId,
+                        { mode: type, transport: 'ws' },
+                        ownerId,
+                    )
+                    : requestedSessionId
+                        ? await sessionStore.getOrCreate(requestedSessionId, { mode: type, transport: 'ws' })
+                        : await sessionStore.create({ mode: type, transport: 'ws' });
                 if (!session) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
                     return;
+                }
+                sessionId = session.id;
+                if (!requestedSessionId) {
+                    ws.send(JSON.stringify({ type: 'session_created', sessionId }));
                 }
 
                 switch (type) {

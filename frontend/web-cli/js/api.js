@@ -571,8 +571,95 @@ class WebCLIAPI {
         };
     }
 
+    async getSessionState() {
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/sessions`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to load sessions: HTTP ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async setActiveSession(sessionId = null) {
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/sessions/state`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activeSessionId: sessionId || null,
+                }),
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to persist active session: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        this.sessionId = data.activeSessionId || null;
+        return data;
+    }
+
+    async getSessionMessages(sessionId = this.sessionId, limit = 100) {
+        if (!sessionId) {
+            return [];
+        }
+
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=${encodeURIComponent(limit)}`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to load session history: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data.messages) ? data.messages : [];
+    }
+
+    async getSessionArtifacts(sessionId = this.sessionId) {
+        if (!sessionId) {
+            return [];
+        }
+
+        const response = await this.fetchWithTimeout(
+            `${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/artifacts`,
+            {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            },
+            10000
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to load session artifacts: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data.artifacts) ? data.artifacts : [];
+    }
+
     setModel(model) {
         this.currentModel = model;
+    }
+
+    setSessionId(sessionId) {
+        this.sessionId = sessionId || null;
     }
 
     // Alias for checkHealth to match app expectations

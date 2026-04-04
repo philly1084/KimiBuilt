@@ -8,6 +8,9 @@ jest.mock('../session-store', () => ({
         create: jest.fn(),
         list: jest.fn(),
         getOwned: jest.fn(),
+        getActiveOwnedSession: jest.fn(),
+        getLatestOwnedSession: jest.fn(),
+        setActiveSession: jest.fn(),
         listMessages: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -45,6 +48,9 @@ describe('/api/sessions route', () => {
                 updatedAt: '2026-04-01T09:05:00.000Z',
             },
         ]);
+        sessionStore.getActiveOwnedSession.mockResolvedValue({
+            id: 'session-1',
+        });
 
         const app = express();
         app.locals.agentWorkloadService = {
@@ -72,5 +78,38 @@ describe('/api/sessions route', () => {
                 },
             }),
         ]);
+        expect(response.body.activeSessionId).toBe('session-1');
+    });
+
+    test('persists active session selection for the authenticated user', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+        sessionStore.setActiveSession.mockResolvedValue({
+            ownerId: 'phill',
+            activeSessionId: 'session-1',
+        });
+        sessionStore.getActiveOwnedSession.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app)
+            .put('/api/sessions/state')
+            .send({ activeSessionId: 'session-1' });
+
+        expect(response.status).toBe(200);
+        expect(sessionStore.getOwned).toHaveBeenCalledWith('session-1', 'phill');
+        expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', 'session-1');
+        expect(response.body.activeSessionId).toBe('session-1');
     });
 });

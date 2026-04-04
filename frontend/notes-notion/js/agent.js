@@ -32,17 +32,58 @@ const Agent = (function() {
         return window.Editor?.getCurrentPage?.()?.id || null;
     }
 
+    function getConversationSessionId(pageContext = null) {
+        return state.sharedSessionId || pageContext?.pageId || getCurrentPageSessionId();
+    }
+
     function syncAPIClientSession(apiClient, pageContext = null) {
         if (!apiClient?.setSessionId) {
             return null;
         }
 
-        const sessionId = pageContext?.pageId || getCurrentPageSessionId();
+        const sessionId = getConversationSessionId(pageContext);
         if (sessionId) {
             apiClient.setSessionId(sessionId);
         }
 
         return sessionId;
+    }
+
+    async function hydrateSharedConversationSession(apiClient = null) {
+        const client = apiClient || getAPIClient();
+        if (!client?.getSessionState || !client?.getSessionMessages) {
+            return null;
+        }
+
+        try {
+            const sessionState = await client.getSessionState();
+            const activeSessionId = String(sessionState.activeSessionId || '').trim()
+                || String(sessionState.sessions?.[0]?.id || '').trim();
+
+            if (!activeSessionId) {
+                return null;
+            }
+
+            state.sharedSessionId = activeSessionId;
+            client.setSessionId(activeSessionId);
+
+            const backendMessages = await client.getSessionMessages(activeSessionId, 100);
+            if (backendMessages.length > 0) {
+                state.messages = backendMessages
+                    .map((message) => ({
+                        ...message,
+                        content: String(message?.content || '').trim(),
+                    }))
+                    .filter((message) => message.role && message.content)
+                    .slice(-100);
+                saveMessagesForPage(activeSessionId, state.messages);
+            }
+
+            return activeSessionId;
+        } catch (error) {
+            console.warn('Failed to hydrate shared notes session:', error);
+            return null;
+        }
     }
 
     function getMessagesStorageKey(pageId) {
@@ -3442,6 +3483,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         isActive: false,
         messages: [],
         activePageId: null,
+        sharedSessionId: null,
         isProcessing: false,
         streamingEnabled: true,
         cachedModels: null,
@@ -3467,22 +3509,23 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             pageId = getCurrentPageSessionId(),
             emitEvent = true
         } = options;
+        const conversationId = getConversationSessionId({ pageId });
 
-        if (!pageId) {
+        if (!conversationId) {
             return state.messages;
         }
 
-        if (state.activePageId === pageId) {
-            syncAPIClientSession(getAPIClient(), { pageId });
+        if (state.activePageId === conversationId) {
+            syncAPIClientSession(getAPIClient(), { pageId: conversationId });
             if (emitEvent) {
                 emitConversationChange({ reason: 'page-sync' });
             }
             return state.messages;
         }
 
-        state.activePageId = pageId;
-        state.messages = readStoredMessages(pageId).slice(-100);
-        syncAPIClientSession(getAPIClient(), { pageId });
+        state.activePageId = conversationId;
+        state.messages = readStoredMessages(conversationId).slice(-100);
+        syncAPIClientSession(getAPIClient(), { pageId: conversationId });
 
         if (emitEvent) {
             emitConversationChange({ reason: 'page-switch' });
@@ -3735,6 +3778,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
         initPromise = (async () => {
             state.messages = readStoredMessages();
+            const apiClient = getAPIClient();
+            await hydrateSharedConversationSession(apiClient);
             syncConversationWithCurrentPage({ emitEvent: false });
 
             // Try to fetch models from API first

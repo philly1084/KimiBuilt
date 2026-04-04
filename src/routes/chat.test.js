@@ -8,7 +8,7 @@ jest.mock('../middleware/validate', () => ({
 jest.mock('../session-store', () => ({
     sessionStore: {
         create: jest.fn(),
-        getOrCreateOwned: jest.fn(),
+        resolveOwnedSession: jest.fn(),
         getOwned: jest.fn(),
         get: jest.fn(),
         getRecentMessages: jest.fn(),
@@ -101,7 +101,7 @@ describe('/api/chat route', () => {
             previousResponseId: null,
             metadata: {},
         };
-        sessionStore.getOrCreateOwned.mockResolvedValue(session);
+        sessionStore.resolveOwnedSession.mockResolvedValue(session);
         sessionStore.getOwned.mockResolvedValue(session);
         sessionStore.get.mockResolvedValue(session);
         sessionStore.getRecentMessages.mockResolvedValue([]);

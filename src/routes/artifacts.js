@@ -39,19 +39,20 @@ const generationSchema = {
 router.post('/upload', async (req, res, next) => {
     try {
         const { fields, file } = await parseMultipartRequest(req);
-        const sessionId = fields.sessionId;
+        let sessionId = fields.sessionId;
         const mode = fields.mode || 'chat';
         const label = fields.label || '';
         const tags = fields.tags || [];
-
-        if (!sessionId) {
-            return res.status(400).json({ error: { message: 'sessionId is required' } });
-        }
-
-        const session = await sessionStore.getOrCreateOwned(sessionId, { mode }, getRequestOwnerId(req));
+        const ownerId = getRequestOwnerId(req);
+        const session = ownerId
+            ? await sessionStore.resolveOwnedSession(sessionId, { mode }, ownerId)
+            : sessionId
+                ? await sessionStore.getOrCreate(sessionId, { mode })
+                : await sessionStore.create({ mode });
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        sessionId = session.id;
         const artifact = await artifactService.uploadArtifact({
             sessionId,
             mode,
@@ -69,7 +70,7 @@ router.post('/upload', async (req, res, next) => {
 router.post('/generate', validate(generationSchema), async (req, res, next) => {
     try {
         const {
-            sessionId,
+            sessionId: requestedSessionId,
             mode,
             prompt,
             format,
@@ -80,10 +81,16 @@ router.post('/generate', validate(generationSchema), async (req, res, next) => {
             parentArtifactId = null,
         } = req.body;
 
-        const session = await sessionStore.getOrCreateOwned(sessionId, { mode }, getRequestOwnerId(req));
+        const ownerId = getRequestOwnerId(req);
+        const session = ownerId
+            ? await sessionStore.resolveOwnedSession(requestedSessionId, { mode }, ownerId)
+            : requestedSessionId
+                ? await sessionStore.getOrCreate(requestedSessionId, { mode })
+                : await sessionStore.create({ mode });
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        const sessionId = session.id;
         const result = await artifactService.generateArtifact({
             session,
             sessionId,

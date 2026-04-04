@@ -71,6 +71,23 @@ describe('SessionStore recent message continuity', () => {
         expect((await store.get('legacy-session')).metadata.ownerId).toBe('phill');
     });
 
+    test('getOrCreateOwned does not overwrite an existing session owned by another user', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        await store.create({ mode: 'chat', ownerId: 'other-user' }, 'shared-session');
+
+        const session = await store.getOrCreateOwned('shared-session', { mode: 'chat' }, 'phill');
+
+        expect(session).toBeNull();
+        await expect(store.get('shared-session')).resolves.toEqual(expect.objectContaining({
+            id: 'shared-session',
+            metadata: expect.objectContaining({
+                ownerId: 'other-user',
+            }),
+        }));
+    });
+
     test('list filters sessions by owner while preserving visible legacy sessions', async () => {
         const store = new SessionStore();
         store.initialized = true;
@@ -162,6 +179,37 @@ describe('SessionStore recent message continuity', () => {
             expect(loadedMessages).toHaveLength(2);
             expect(loadedMessages[1]).toEqual(expect.objectContaining({
                 content: '<!DOCTYPE html><html><body>Saved</body></html>',
+            }));
+        } finally {
+            await fs.rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test('persists fallback active session state across store instances', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-session-state-'));
+        const storagePath = path.join(tempDir, 'sessions.json');
+
+        try {
+            const store = new SessionStore();
+            store.initialized = true;
+            store.usePostgres = false;
+            store.fallbackStoragePath = storagePath;
+            store.fallbackLoaded = true;
+
+            await store.create({ mode: 'chat', ownerId: 'phill' }, 'session-a');
+            await store.create({ mode: 'chat', ownerId: 'phill' }, 'session-b');
+            await store.setActiveSession('phill', 'session-b');
+
+            const reloaded = new SessionStore();
+            reloaded.fallbackStoragePath = storagePath;
+            await reloaded.initialize();
+
+            await expect(reloaded.getUserSessionState('phill')).resolves.toEqual(expect.objectContaining({
+                ownerId: 'phill',
+                activeSessionId: 'session-b',
+            }));
+            await expect(reloaded.resolveOwnedSession(null, { mode: 'chat' }, 'phill')).resolves.toEqual(expect.objectContaining({
+                id: 'session-b',
             }));
         } finally {
             await fs.rm(tempDir, { recursive: true, force: true });

@@ -18,6 +18,7 @@ class SessionStore {
     constructor() {
         this.sessions = new Map();
         this.sessionMessages = new Map();
+        this.userSessionState = new Map();
         this.initialized = false;
         this.usePostgres = false;
         this.fallbackStoragePath = path.join(config.persistence.dataDir, 'sessions.json');
@@ -113,6 +114,11 @@ class SessionStore {
         return normalized || null;
     }
 
+    normalizeSessionId(sessionId = null) {
+        const normalized = String(sessionId || '').trim();
+        return normalized || null;
+    }
+
     getSessionOwnerId(sessionOrMetadata = null) {
         const metadata = sessionOrMetadata?.metadata || sessionOrMetadata || {};
         const ownerId = this.normalizeOwnerId(
@@ -122,6 +128,25 @@ class SessionStore {
         );
 
         return ownerId;
+    }
+
+    normalizeUserSessionState(state = {}) {
+        return {
+            ownerId: this.normalizeOwnerId(state?.ownerId || state?.owner_id),
+            activeSessionId: this.normalizeSessionId(state?.activeSessionId || state?.active_session_id),
+            updatedAt: state?.updatedAt instanceof Date
+                ? state.updatedAt.toISOString()
+                : (state?.updatedAt || state?.updated_at || new Date().toISOString()),
+        };
+    }
+
+    toUserSessionState(row) {
+        const normalized = this.normalizeUserSessionState(row);
+        if (!normalized.ownerId) {
+            return null;
+        }
+
+        return normalized;
     }
 
     buildOwnedMetadata(metadata = {}, ownerId = null) {
@@ -170,6 +195,7 @@ class SessionStore {
             const parsed = JSON.parse(raw);
             const sessions = Array.isArray(parsed?.sessions) ? parsed.sessions : [];
             const messages = Array.isArray(parsed?.messages) ? parsed.messages : [];
+            const userSessionState = Array.isArray(parsed?.userSessionState) ? parsed.userSessionState : [];
 
             this.sessions = new Map(
                 sessions
@@ -209,6 +235,19 @@ class SessionStore {
                     })
                     .filter(Boolean),
             );
+
+            this.userSessionState = new Map(
+                userSessionState
+                    .map((entry) => {
+                        const normalized = this.toUserSessionState(entry);
+                        if (!normalized?.ownerId) {
+                            return null;
+                        }
+
+                        return [normalized.ownerId, normalized];
+                    })
+                    .filter(Boolean),
+            );
         } catch (error) {
             if (error.code !== 'ENOENT') {
                 console.warn('[SessionStore] Failed to load file-backed sessions:', error.message);
@@ -226,6 +265,7 @@ class SessionStore {
             savedAt: new Date().toISOString(),
             sessions: Array.from(this.sessions.values()),
             messages: Array.from(this.sessionMessages.entries()),
+            userSessionState: Array.from(this.userSessionState.values()),
         };
 
         const directory = path.dirname(this.fallbackStoragePath);
@@ -260,6 +300,10 @@ class SessionStore {
         await this.initialize();
 
         const id = preferredId || uuidv4();
+        const existing = preferredId ? await this.get(id) : null;
+        if (existing) {
+            return existing;
+        }
         const now = new Date().toISOString();
         const session = {
             id,
@@ -382,12 +426,158 @@ class SessionStore {
 
     async getOrCreateOwned(id, metadata = {}, ownerId = null) {
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
-        const existing = await this.getOwned(id, normalizedOwnerId);
+        const existing = await this.get(id);
         if (existing) {
-            return existing;
+            return normalizedOwnerId ? this.getOwned(id, normalizedOwnerId) : existing;
         }
 
         return this.create(this.buildOwnedMetadata(metadata, normalizedOwnerId), id);
+    }
+
+    async getUserSessionState(ownerId = null) {
+        await this.initialize();
+
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return null;
+        }
+
+        if (!this.usePostgres) {
+            return this.userSessionState.get(normalizedOwnerId) || null;
+        }
+
+        const result = await postgres.query(
+            `
+                SELECT owner_id, active_session_id, updated_at
+                FROM user_session_state
+                WHERE owner_id = $1
+            `,
+            [normalizedOwnerId],
+        );
+
+        return this.toUserSessionState(result.rows[0]);
+    }
+
+    async setActiveSession(ownerId = null, sessionId = null) {
+        await this.initialize();
+
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return null;
+        }
+
+        const normalizedSessionId = this.normalizeSessionId(sessionId);
+        if (normalizedSessionId) {
+            const session = await this.getOwned(normalizedSessionId, normalizedOwnerId);
+            if (!session) {
+                return null;
+            }
+        }
+
+        const nextState = this.normalizeUserSessionState({
+            ownerId: normalizedOwnerId,
+            activeSessionId: normalizedSessionId,
+            updatedAt: new Date().toISOString(),
+        });
+
+        if (!this.usePostgres) {
+            this.userSessionState.set(normalizedOwnerId, nextState);
+            await this.persistFallbackState();
+            return nextState;
+        }
+
+        const result = await postgres.query(
+            `
+                INSERT INTO user_session_state (owner_id, active_session_id, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (owner_id) DO UPDATE
+                SET active_session_id = EXCLUDED.active_session_id,
+                    updated_at = NOW()
+                RETURNING owner_id, active_session_id, updated_at
+            `,
+            [normalizedOwnerId, normalizedSessionId],
+        );
+
+        return this.toUserSessionState(result.rows[0]);
+    }
+
+    async getActiveOwnedSession(ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return null;
+        }
+
+        const state = await this.getUserSessionState(normalizedOwnerId);
+        const activeSessionId = this.normalizeSessionId(state?.activeSessionId);
+        if (!activeSessionId) {
+            return null;
+        }
+
+        const session = await this.getOwned(activeSessionId, normalizedOwnerId);
+        if (session) {
+            return session;
+        }
+
+        await this.setActiveSession(normalizedOwnerId, null);
+        return null;
+    }
+
+    async getLatestOwnedSession(ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        const sessions = await this.list(normalizedOwnerId ? { ownerId: normalizedOwnerId } : {});
+        const latest = sessions[0] || null;
+
+        if (!latest) {
+            return null;
+        }
+
+        if (!normalizedOwnerId) {
+            return latest;
+        }
+
+        return this.getOwned(latest.id, normalizedOwnerId);
+    }
+
+    async resolveOwnedSession(sessionId = null, metadata = {}, ownerId = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        const normalizedSessionId = this.normalizeSessionId(sessionId);
+
+        if (normalizedSessionId) {
+            const session = await this.getOrCreateOwned(
+                normalizedSessionId,
+                metadata,
+                normalizedOwnerId,
+            );
+
+            if (session && normalizedOwnerId) {
+                await this.setActiveSession(normalizedOwnerId, session.id);
+            }
+
+            return session;
+        }
+
+        if (normalizedOwnerId) {
+            const activeSession = await this.getActiveOwnedSession(normalizedOwnerId);
+            if (activeSession) {
+                return activeSession;
+            }
+
+            const latestSession = await this.getLatestOwnedSession(normalizedOwnerId);
+            if (latestSession) {
+                await this.setActiveSession(normalizedOwnerId, latestSession.id);
+                return latestSession;
+            }
+        }
+
+        const session = await this.create(
+            normalizedOwnerId ? this.buildOwnedMetadata(metadata, normalizedOwnerId) : metadata,
+        );
+
+        if (session && normalizedOwnerId) {
+            await this.setActiveSession(normalizedOwnerId, session.id);
+        }
+
+        return session;
     }
 
     async update(id, updates = {}) {

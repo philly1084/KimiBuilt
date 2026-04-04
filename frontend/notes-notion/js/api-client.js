@@ -872,6 +872,73 @@ class NotesAPIClient {
         return this.currentSessionId;
     }
 
+    async getSessionState() {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw await this.buildRequestError(response);
+        }
+
+        return response.json();
+    }
+
+    async setActiveSession(sessionId = null) {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/state`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                activeSessionId: sessionId || null,
+            }),
+        });
+
+        if (!response.ok) {
+            throw await this.buildRequestError(response);
+        }
+
+        const data = await response.json();
+        this.currentSessionId = data.activeSessionId || null;
+        return data;
+    }
+
+    async getSessionMessages(sessionId = this.currentSessionId, limit = 100) {
+        if (!sessionId) {
+            return [];
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=${encodeURIComponent(limit)}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw await this.buildRequestError(response);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data.messages) ? data.messages : [];
+    }
+
+    async getSessionArtifacts(sessionId = this.currentSessionId) {
+        if (!sessionId) {
+            return [];
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions/${encodeURIComponent(sessionId)}/artifacts`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw await this.buildRequestError(response);
+        }
+
+        const data = await response.json();
+        return Array.isArray(data.artifacts) ? data.artifacts : [];
+    }
+
     /**
      * Filter models to only include chat models
      * @param {Array} models - Array of model objects

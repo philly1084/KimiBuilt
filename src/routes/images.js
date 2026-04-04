@@ -57,20 +57,15 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
 
-        let session;
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: 'image', ownerId });
-            sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'image' }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
-        }
+        const session = ownerId
+            ? await sessionStore.resolveOwnedSession(sessionId, { mode: 'image' }, ownerId)
+            : sessionId
+                ? await sessionStore.getOrCreate(sessionId, { mode: 'image' })
+                : await sessionStore.create({ mode: 'image' });
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        sessionId = session.id;
 
         console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${prompt.substring(0, 50)}..."`);
 

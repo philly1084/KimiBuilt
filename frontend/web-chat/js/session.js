@@ -160,7 +160,12 @@ class SessionManager extends EventTarget {
                     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
                 });
 
-                if (!this.sessions.find((session) => session.id === this.currentSessionId)) {
+                const backendActiveSessionId = typeof data.activeSessionId === 'string'
+                    ? data.activeSessionId.trim()
+                    : '';
+                if (backendActiveSessionId && this.sessions.find((session) => session.id === backendActiveSessionId)) {
+                    this.currentSessionId = backendActiveSessionId;
+                } else if (!this.sessions.find((session) => session.id === this.currentSessionId)) {
                     this.currentSessionId = this.sessions[0]?.id || null;
                 }
 
@@ -175,6 +180,24 @@ class SessionManager extends EventTarget {
             detail: { sessions: this.sessions } 
         }));
         return this.sessions;
+    }
+
+    async persistActiveSession(sessionId = null) {
+        const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+
+        try {
+            await fetch(`${this.apiBaseUrl}/sessions/state`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    activeSessionId: normalizedSessionId || null,
+                }),
+            });
+        } catch (error) {
+            console.warn('Failed to persist active session state:', error);
+        }
     }
 
     async loadSessionMessagesFromBackend(sessionId, options = {}) {
@@ -312,8 +335,11 @@ class SessionManager extends EventTarget {
         this.sessions.unshift(localSession);
         this.sessionMessages.set(localSession.id, []);
         this.currentSessionId = localSession.id;
-        
+
         this.saveToStorage();
+        if (!isLocal) {
+            void this.persistActiveSession(localSession.id);
+        }
         this.dispatchEvent(new CustomEvent('sessionCreated', { 
             detail: { session: localSession, isLocal: true } 
         }));
@@ -342,8 +368,15 @@ class SessionManager extends EventTarget {
         if (this.currentSessionId === sessionId) {
             this.currentSessionId = this.sessions.length > 0 ? this.sessions[0].id : null;
         }
-        
+
         this.saveToStorage();
+        if (this.currentSessionId) {
+            if (!this.isLocalSession(this.currentSessionId)) {
+                void this.persistActiveSession(this.currentSessionId);
+            }
+        } else {
+            void this.persistActiveSession(null);
+        }
         this.dispatchEvent(new CustomEvent('sessionDeleted', { 
             detail: { sessionId, newCurrentSessionId: this.currentSessionId } 
         }));
@@ -362,7 +395,10 @@ class SessionManager extends EventTarget {
         
         this.currentSessionId = sessionId;
         this.safeStorageSet(this.currentSessionKey, sessionId);
-        
+        if (!this.isLocalSession(sessionId)) {
+            void this.persistActiveSession(sessionId);
+        }
+
         const messages = this.sessionMessages.get(sessionId) || [];
         this.dispatchEvent(new CustomEvent('sessionSwitched', { 
             detail: { sessionId, messages } 
@@ -448,6 +484,9 @@ class SessionManager extends EventTarget {
         }
 
         this.saveToStorage();
+        if (!this.isLocalSession(newSessionId)) {
+            void this.persistActiveSession(newSessionId);
+        }
         this.dispatchEvent(new CustomEvent('sessionPromoted', {
             detail: {
                 previousSessionId,

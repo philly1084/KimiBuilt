@@ -9,13 +9,20 @@ function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
 
+function normalizeSessionId(value = null) {
+    const normalized = String(value || '').trim();
+    return normalized || null;
+}
+
 router.post('/', async (req, res, next) => {
     try {
+        const ownerId = getRequestOwnerId(req);
         const { metadata } = req.body || {};
         const session = await sessionStore.create({
             ...(metadata || {}),
-            ownerId: getRequestOwnerId(req),
+            ownerId,
         });
+        await sessionStore.setActiveSession(ownerId, session.id);
         res.status(201).json(session);
     } catch (err) {
         next(err);
@@ -24,14 +31,15 @@ router.post('/', async (req, res, next) => {
 
 router.get('/', async (req, res, next) => {
     try {
+        const ownerId = getRequestOwnerId(req);
         const sessions = await sessionStore.list({
-            ownerId: getRequestOwnerId(req),
+            ownerId,
         });
         const workloadService = req.app?.locals?.agentWorkloadService;
         const summaries = workloadService?.isAvailable?.()
             ? await workloadService.getSessionSummaries(
                 sessions.map((session) => session.id),
-                getRequestOwnerId(req),
+                ownerId,
             )
             : {};
         const enrichedSessions = sessions.map((session) => ({
@@ -42,7 +50,49 @@ router.get('/', async (req, res, next) => {
                 failed: 0,
             },
         }));
-        res.json({ sessions: enrichedSessions, count: enrichedSessions.length });
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+        res.json({
+            sessions: enrichedSessions,
+            count: enrichedSessions.length,
+            activeSessionId: activeSession?.id || null,
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.get('/state', async (req, res, next) => {
+    try {
+        const ownerId = getRequestOwnerId(req);
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+        res.json({
+            activeSessionId: activeSession?.id || null,
+            session: activeSession,
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.put('/state', async (req, res, next) => {
+    try {
+        const ownerId = getRequestOwnerId(req);
+        const activeSessionId = normalizeSessionId(req.body?.activeSessionId);
+
+        if (activeSessionId) {
+            const session = await sessionStore.getOwned(activeSessionId, ownerId);
+            if (!session) {
+                return res.status(404).json({ error: { message: 'Session not found' } });
+            }
+        }
+
+        await sessionStore.setActiveSession(ownerId, activeSessionId);
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+
+        res.json({
+            activeSessionId: activeSession?.id || null,
+            session: activeSession,
+        });
     } catch (err) {
         next(err);
     }
@@ -111,7 +161,9 @@ router.patch('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
     try {
         const { id } = req.params;
-        const session = await sessionStore.getOwned(id, getRequestOwnerId(req));
+        const ownerId = getRequestOwnerId(req);
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+        const session = await sessionStore.getOwned(id, ownerId);
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -119,6 +171,11 @@ router.delete('/:id', async (req, res, next) => {
         await artifactService.deleteArtifactsForSession(id);
         await memoryService.forget(id);
         await sessionStore.delete(id);
+
+        if (activeSession?.id === id) {
+            const nextSession = await sessionStore.getLatestOwnedSession(ownerId);
+            await sessionStore.setActiveSession(ownerId, nextSession?.id || null);
+        }
 
         res.status(204).end();
     } catch (err) {

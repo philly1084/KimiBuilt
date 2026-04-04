@@ -28,7 +28,7 @@ class CodeCLIApp {
         this.commands = [
             '/help', '/?', '/clear', '/cls', '/models', '/model', '/theme', 
             '/export', '/save', '/load', '/copy', '/image', '/image-models', '/unsplash', '/diagram',
-            '/upload', '/session', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
+            '/upload', '/session', '/history', '/artifacts', '/stats', '/shortcuts', '/keys', '/health', '/tools', '/tool', '/tool-help',
             '/files', '/ls', '/download', '/open'
         ];
         
@@ -58,6 +58,7 @@ class CodeCLIApp {
         this.checkConnection();
         this.loadModels();
         this.printWelcome();
+        this.restoreSharedSession();
     }
     
     initMermaid() {
@@ -317,7 +318,13 @@ class CodeCLIApp {
                 this.triggerFileUpload();
                 break;
             case 'session':
-                this.printSessionInfo();
+                await this.printSessionInfo();
+                break;
+            case 'history':
+                await this.showSessionHistory();
+                break;
+            case 'artifacts':
+                await this.showSessionArtifacts();
                 break;
             case 'stats':
                 this.printStats();
@@ -444,7 +451,29 @@ Session Statistics:
   Session: ${api.sessionId || 'none'}
         `.trim());
     }
-    
+
+    async restoreSharedSession() {
+        try {
+            const data = await api.getSessionState();
+            const activeSessionId = String(data.activeSessionId || '').trim();
+            const fallbackSessionId = Array.isArray(data.sessions) && data.sessions.length > 0
+                ? String(data.sessions[0].id || '').trim()
+                : '';
+            const resolvedSessionId = activeSessionId || fallbackSessionId || '';
+
+            if (!resolvedSessionId) {
+                this.updateSessionInfo();
+                return;
+            }
+
+            api.setSessionId(resolvedSessionId);
+            this.updateSessionInfo();
+            this.printSystem(`Connected to shared session ${resolvedSessionId.slice(0, 8)}...`);
+        } catch (error) {
+            console.warn('Failed to restore shared session:', error);
+        }
+    }
+
     updateSessionInfo() {
         if (this.sessionInfo && api.sessionId) {
             const shortId = api.sessionId.slice(0, 8);
@@ -546,6 +575,8 @@ Session Statistics:
 
 **Session:**
   /session           Show session information
+  /history           Show persisted shared session history
+  /artifacts         Show persisted shared session artifacts
   /stats             Show session statistics
   /save <name>       Save conversation
   /load <name>       Load conversation
@@ -1510,17 +1541,97 @@ ${pdfFile ? `**Downloaded:** ${pdfFilename}\n` : ''}**File IDs:** #${file.id}${p
     
     // ==================== Session Management ====================
     
-    printSessionInfo() {
+    async printSessionInfo() {
         const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
         const minutes = Math.floor(elapsed / 60);
         const seconds = elapsed % 60;
         const queueSize = this.commandQueue.length;
-        
+        let historyCount = 0;
+        let artifactCount = 0;
+
+        if (api.sessionId) {
+            try {
+                const [messages, artifacts] = await Promise.all([
+                    api.getSessionMessages(api.sessionId, 200),
+                    api.getSessionArtifacts(api.sessionId),
+                ]);
+                historyCount = messages.length;
+                artifactCount = artifacts.length;
+            } catch (error) {
+                console.warn('Failed to load session details:', error);
+            }
+        }
+
         this.printSystem(`Session Info:
+  Shared Session: ${api.sessionId || 'none'}
   Duration: ${minutes}m ${seconds}s
+  Backend History: ${historyCount}
+  Backend Artifacts: ${artifactCount}
   Files: ${this.sessionFiles.length}
   Queue: ${queueSize}
   Commands: ${this.commandHistory.length}`);
+    }
+
+    async showSessionHistory() {
+        if (!api.sessionId) {
+            this.printSystem('No shared session is active yet.');
+            return;
+        }
+
+        try {
+            const messages = await api.getSessionMessages(api.sessionId, 40);
+            if (!messages.length) {
+                this.printSystem('No persisted backend history for this session yet.');
+                return;
+            }
+
+            const lines = ['## Shared Session History', ''];
+            messages.forEach((message, index) => {
+                const role = String(message.role || 'unknown').toUpperCase();
+                const timestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : 'unknown time';
+                const content = String(message.content || '').trim() || '[empty]';
+                lines.push(`${index + 1}. ${role} | ${timestamp}`);
+                lines.push(content);
+                lines.push('');
+            });
+            this.printAI(lines.join('\n'));
+        } catch (error) {
+            this.printError(`Failed to load session history: ${error.message}`);
+        }
+    }
+
+    async showSessionArtifacts() {
+        if (!api.sessionId) {
+            this.printSystem('No shared session is active yet.');
+            return;
+        }
+
+        try {
+            const artifacts = await api.getSessionArtifacts(api.sessionId);
+            if (!artifacts.length) {
+                this.printSystem('No persisted artifacts for this session yet.');
+                return;
+            }
+
+            const lines = ['## Shared Session Artifacts', ''];
+            artifacts.forEach((artifact, index) => {
+                const filename = artifact.filename || artifact.id || `artifact-${index + 1}`;
+                const format = String(artifact.format || 'file').toUpperCase();
+                const size = Number.isFinite(Number(artifact.sizeBytes))
+                    ? this.formatFileSize(Number(artifact.sizeBytes))
+                    : 'unknown size';
+                const createdAt = artifact.createdAt ? new Date(artifact.createdAt).toLocaleString() : 'unknown time';
+                lines.push(`${index + 1}. ${filename}`);
+                lines.push(`   ${format} | ${size} | ${createdAt}`);
+                if (artifact.downloadUrl) {
+                    lines.push(`   Download: ${artifact.downloadUrl}`);
+                }
+                lines.push('');
+            });
+            this.printAI(lines.join('\n'));
+        } catch (error) {
+            this.printError(`Failed to load session artifacts: ${error.message}`);
+        }
     }
     saveConversation(name) {
         const data = {

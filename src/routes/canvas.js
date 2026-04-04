@@ -221,16 +221,13 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             ...(requestNow ? { clientNow: requestNow } : {}),
         };
 
-        let session;
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: 'canvas', canvasType, ownerId });
+        const session = await sessionStore.resolveOwnedSession(
+            sessionId,
+            { mode: 'canvas', canvasType, ownerId },
+            ownerId,
+        );
+        if (session) {
             sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'canvas', canvasType }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });

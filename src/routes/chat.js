@@ -151,23 +151,20 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             ...(requestNow ? { clientNow: requestNow } : {}),
         };
 
-        let session;
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: requestedTaskType, ownerId });
+        const session = await sessionStore.resolveOwnedSession(
+            sessionId,
+            { mode: requestedTaskType, ownerId },
+            ownerId,
+        );
+        if (session) {
             sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: requestedTaskType }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
-        session = await persistSessionModel(sessionId, session, model);
+        let effectiveSession = await persistSessionModel(sessionId, session, model);
 
-        const sshContext = resolveSshRequestContext(message, session);
+        const sshContext = resolveSshRequestContext(message, effectiveSession);
         const effectiveMessage = sshContext.effectivePrompt || message;
         const taskType = resolveConversationTaskType(requestMetadata, session);
         let effectiveOutputFormat = outputFormat
@@ -237,8 +234,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 artifactIds: effectiveArtifactIds,
             });
             const artifactGenerationSession = preparedImages.resetPreviousResponse
-                ? { ...session, previousResponseId: null }
-                : session;
+                ? { ...effectiveSession, previousResponseId: null }
+                : effectiveSession;
             const generationArtifacts = await generateOutputArtifactFromPrompt({
                 sessionId,
                 session: artifactGenerationSession,
@@ -394,10 +391,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
-                    session = await persistSessionModel(sessionId, session, event.response?.model || model || null);
-                    const artifacts = await maybeGenerateOutputArtifact({
-                        sessionId,
-                        session,
+            effectiveSession = await persistSessionModel(sessionId, effectiveSession, event.response?.model || model || null);
+            const artifacts = await maybeGenerateOutputArtifact({
+                sessionId,
+                session: effectiveSession,
                         mode: taskType,
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
@@ -474,10 +471,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         if (sshMetadata) {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
-        session = await persistSessionModel(sessionId, session, response.model || model || null);
+        effectiveSession = await persistSessionModel(sessionId, effectiveSession, response.model || model || null);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
-            session,
+            session: effectiveSession,
             mode: taskType,
             outputFormat: effectiveOutputFormat,
             content: outputText,

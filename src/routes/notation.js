@@ -75,16 +75,13 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             ...(requestNow ? { clientNow: requestNow } : {}),
         };
 
-        let session;
-        if (!sessionId) {
-            session = await sessionStore.create({ mode: 'notation', helperMode, ownerId });
+        const session = await sessionStore.resolveOwnedSession(
+            sessionId,
+            { mode: 'notation', helperMode, ownerId },
+            ownerId,
+        );
+        if (session) {
             sessionId = session.id;
-        } else {
-            session = await sessionStore.getOrCreateOwned(sessionId, { mode: 'notation', helperMode }, ownerId);
-        }
-
-        if (!session) {
-            session = await sessionStore.getOwned(sessionId, ownerId);
         }
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
