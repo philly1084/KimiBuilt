@@ -107,6 +107,33 @@ function extractHtmlBody(html = '') {
     };
 }
 
+function findLikelyHtmlStartIndex(text = '') {
+    const match = String(text || '').match(
+        /```html\b|<!doctype html>|<html\b|<body\b|<main\b|<article\b|<section\b|<header\b|<footer\b|<nav\b|<aside\b|<figure\b|<table\b|<div\b|<h1\b|<h2\b|<h3\b|<ul\b|<ol\b|<p\b/i,
+    );
+
+    return match && Number.isInteger(match.index) ? match.index : -1;
+}
+
+function findHtmlFence(source = '') {
+    const fencePattern = /```([a-z0-9_-]*)\s*([\s\S]*?)```/ig;
+    let match;
+
+    while ((match = fencePattern.exec(String(source || ''))) !== null) {
+        const language = String(match[1] || '').trim().toLowerCase();
+        const content = String(match[2] || '').trim();
+
+        if (language === 'html' || (!language && findLikelyHtmlStartIndex(content) === 0)) {
+            return {
+                fullMatch: match[0],
+                content,
+            };
+        }
+    }
+
+    return null;
+}
+
 function extractCompositeDocumentParts(input = '') {
     let source = String(input || '').replace(/\r\n?/g, '\n').trim();
     if (!source) {
@@ -115,18 +142,24 @@ function extractCompositeDocumentParts(input = '') {
 
     let bodyContent = '';
     let headContent = '';
+    let preserveSourceText = true;
 
-    const htmlFence = source.match(/```html\s*([\s\S]*?)```/i);
+    const htmlFence = findHtmlFence(source);
     if (htmlFence) {
-        source = source.replace(htmlFence[0], '').trim();
-        const htmlParts = extractHtmlBody(htmlFence[1]);
+        source = source.replace(htmlFence.fullMatch, '').trim();
+        const htmlParts = extractHtmlBody(htmlFence.content);
         bodyContent = htmlParts.body;
         headContent = htmlParts.head;
-    } else if (/<!doctype html>|<html\b|<body\b/i.test(source)) {
-        const htmlParts = extractHtmlBody(source);
-        source = '';
-        bodyContent = htmlParts.body;
-        headContent = htmlParts.head;
+        preserveSourceText = false;
+    } else {
+        const htmlStart = findLikelyHtmlStartIndex(source);
+        if (htmlStart >= 0) {
+            const htmlParts = extractHtmlBody(source.slice(htmlStart));
+            source = source.slice(0, htmlStart).trim();
+            bodyContent = htmlParts.body;
+            headContent = htmlParts.head;
+            preserveSourceText = false;
+        }
     }
 
     let mermaidSource = '';
@@ -135,7 +168,7 @@ function extractCompositeDocumentParts(input = '') {
         mermaidSource = normalizeMermaidSource(mermaidFence[1]);
         source = source.replace(mermaidFence[0], '').trim();
     } else if (detectMermaidDiagramType(source) !== 'unknown') {
-        const htmlStart = source.search(/```html\b|<!doctype html>|<html\b|<body\b|^#\s|^\d+\.\s|\n#\s|\n\d+\.\s/m);
+        const htmlStart = source.search(/```html\b|<!doctype html>|<html\b|<body\b|<main\b|<article\b|<section\b|<header\b|<footer\b|<nav\b|<aside\b|<figure\b|<table\b|<div\b|<h1\b|<h2\b|<h3\b|<ul\b|<ol\b|<p\b|^#\s|^\d+\.\s|\n#\s|\n\d+\.\s/m);
         const mermaidCandidate = htmlStart > 0 ? source.slice(0, htmlStart).trim() : source;
         const normalizedMermaid = normalizeMermaidSource(mermaidCandidate);
         if (detectMermaidDiagramType(normalizedMermaid) !== 'unknown') {
@@ -146,7 +179,7 @@ function extractCompositeDocumentParts(input = '') {
 
     if (!bodyContent) {
         bodyContent = source.trim();
-    } else if (source.trim()) {
+    } else if (preserveSourceText && source.trim()) {
         bodyContent = `${source.trim()}\n\n${bodyContent}`.trim();
     }
 

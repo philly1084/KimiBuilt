@@ -119,6 +119,8 @@ describe('workload natural language parsing', () => {
         expect(hasWorkloadIntent('Set this up every day at 11:05 PM to summarize blockers.')).toBe(true);
         expect(hasWorkloadIntent('Run `date` on the server in 5 minutes.')).toBe(true);
         expect(hasWorkloadIntent('Explain what a cron expression is.')).toBe(false);
+        expect(hasWorkloadIntent('I keep getting cron calls too quickly and every message turns into a workload.')).toBe(false);
+        expect(hasWorkloadIntent('I want a planning agent to decide when something should become a job.')).toBe(false);
     });
 
     test('infers remote-build policy for environment-building work', () => {

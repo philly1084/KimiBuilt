@@ -336,17 +336,19 @@ function hasWorkloadIntent(text = '') {
         return false;
     }
 
-    const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
+    const scheduleIntentFragment = `(?:every|daily|hourly|weekdays?|tomorrow|later today|later|once|at\\s+(?:1[0-2]|0?\\d)(?::[0-5]\\d)?\\s*(?:am|pm)|at\\s+(?:[01]?\\d|2[0-3]):[0-5]\\d|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))`;
 
-    const hasAutomationLanguage = [
-        /\b(set up|schedule|create|make|add|queue|save)\b[\s\S]{0,40}\b(job|workload|automation|follow-?up|task|agent)\b/,
-        new RegExp(`\\b(set up|schedule|create|make|add|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
-        new RegExp(`\\b(run|check|review|summarize|follow up|watch)\\b[\\s\\S]{0,40}\\b${scheduleIntentFragment}\\b`),
-        new RegExp(`\\b(remind|follow up|handle|review)\\b[\\s\\S]{0,40}\\b(?:later|tomorrow|daily|every day|everyday|weekdays?|(?:(?:in|after)\\s+${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)(?:\\s+from\\s+now)?|${RELATIVE_DELAY_AMOUNT_FRAGMENT}\\s*(?:minutes?|mins?|hours?|hrs?)\\s+from\\s+now))\\b`),
-        /\b(job|workload|automation|cron|schedule|scheduled|deferred)\b/,
+    const hasExplicitWorkloadSetup = [
+        /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workload|follow-?up|reminder|cron(?:\s+job)?|scheduled\s+job|scheduled\s+task|recurring\s+job|recurring\s+task)\b/,
+        new RegExp(`\\b(set up|setup|schedule|create|make|add|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
     ].some((pattern) => pattern.test(normalized));
 
-    return hasSchedulingCue(normalized) && hasAutomationLanguage;
+    const hasTimedTaskRequest = [
+        new RegExp(`\\b(run|check|review|summarize|follow up|watch|remind|collect|gather|send|report|monitor|audit|scan)\\b[\\s\\S]{0,40}\\b${scheduleIntentFragment}\\b`),
+        new RegExp(`\\b${scheduleIntentFragment}\\b[\\s\\S]{0,60}\\b(run|check|review|summarize|follow up|watch|remind|collect|gather|send|report|monitor|audit|scan)\\b`),
+    ].some((pattern) => pattern.test(normalized));
+
+    return hasSchedulingCue(normalized) && (hasExplicitWorkloadSetup || hasTimedTaskRequest);
 }
 
 function inferWorkloadPolicy(prompt = '') {
@@ -375,8 +377,7 @@ function hasImplicitRecurringJobIntent(text = '') {
         return false;
     }
 
-    return /\b(cron|crontab|job|jobs|schedule|scheduled|recurring|automation|task|tasks|workload|workloads)\b/.test(normalized)
-        && /\b(set up|setup|create|make|add|queue|save|plan)\b/.test(normalized);
+    return /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workload|follow-?up|reminder|cron(?:\s+job)?|scheduled\s+job|scheduled\s+task|recurring\s+job|recurring\s+task)\b/.test(normalized);
 }
 
 function inferDefaultRecurringTrigger(scenario = '', timezone = 'UTC') {

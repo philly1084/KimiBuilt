@@ -232,23 +232,15 @@ class SessionManager extends EventTarget {
     }
 
     async pruneBlankSessions() {
-        const sessionsToRemove = this.sessions.filter((session) => this.isBlankSession(session));
+        const sessionsToRemove = this.sessions.filter((session) => {
+            return this.isLocalSession(session.id) && this.isBlankSession(session);
+        });
 
         if (sessionsToRemove.length === 0) {
             return;
         }
 
         for (const session of sessionsToRemove) {
-            if (!this.isLocalSession(session.id)) {
-                try {
-                    await fetch(this.apiBaseUrl + '/sessions/' + session.id, {
-                        method: 'DELETE',
-                    });
-                } catch (error) {
-                    console.warn('Failed to delete blank backend session:', error);
-                }
-            }
-
             this.sessionMessages.delete(session.id);
         }
 

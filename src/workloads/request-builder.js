@@ -164,7 +164,7 @@ function buildScenarioSourceCandidates(baseSource = '', recentMessages = []) {
     addCandidate(directSource);
 
     const recentUserMessages = collectRecentUserMessages(recentMessages);
-    if (recentUserMessages.length === 0) {
+    if (recentUserMessages.length === 0 || !isDeferredContextFollowupPrompt(directSource)) {
         return candidates;
     }
 
@@ -196,6 +196,20 @@ function buildScenarioSourceCandidates(baseSource = '', recentMessages = []) {
     }
 
     return candidates;
+}
+
+function isDeferredContextFollowupPrompt(prompt = '') {
+    const normalized = sanitizeText(prompt).toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/,
+        /\bfrom now\b/,
+        /^(?:do|run|schedule|set up|queue|create|make|get|fetch|check)\s+(?:it|that|this|them|those)\b/,
+        /\b(the commands|what you listed|the one you listed|the ones you listed|what i asked|same task|same thing|that one)\b/,
+    ].some((pattern) => pattern.test(normalized));
 }
 
 function isReferentialWorkloadPrompt(prompt = '') {
@@ -464,7 +478,7 @@ function buildCanonicalWorkloadPayload(params = {}, options = {}) {
 
 function buildCanonicalWorkloadAction(params = {}, options = {}) {
     const canonical = buildCanonicalWorkloadPayload(params, options);
-    if (!canonical) {
+    if (!canonical || canonical?.payload?.trigger?.type === 'manual') {
         return null;
     }
 

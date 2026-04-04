@@ -3518,7 +3518,7 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).toContain('remote-command');
     });
 
-    test('offers agent-workload when a task-only follow-up relies on recent schedule context', () => {
+    test('does not offer agent-workload when only a prior turn contained the schedule', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -3546,7 +3546,7 @@ describe('ConversationOrchestrator', () => {
             },
         });
 
-        expect(toolPolicy.candidateToolIds).toContain('agent-workload');
+        expect(toolPolicy.candidateToolIds).not.toContain('agent-workload');
     });
 
     test('builds a workload direct action from a schedule-only follow-up using recent transcript', () => {

@@ -104,7 +104,7 @@ describe('ai-route-utils', () => {
         });
     });
 
-    test('resolveDeferredWorkloadPreflight keeps future timing when the schedule came in a prior user turn', () => {
+    test('resolveDeferredWorkloadPreflight does not keep prior schedule context sticky for a new task turn', () => {
         expect(resolveDeferredWorkloadPreflight({
             text: 'do some research on adhd and make a pdf document on it I can review',
             recentMessages: [
@@ -113,14 +113,24 @@ describe('ai-route-utils', () => {
             timezone: 'UTC',
             now: '2026-04-03T14:47:00.000Z',
         })).toMatchObject({
-            timing: 'future',
-            shouldSchedule: true,
-            scenario: {
-                trigger: {
-                    type: 'once',
-                    runAt: '2026-04-03T14:52:00.000Z',
-                },
-            },
+            timing: 'now',
+            shouldSchedule: false,
+            scenario: null,
+        });
+    });
+
+    test('resolveDeferredWorkloadPreflight keeps greetings out of scheduled workload routing', () => {
+        expect(resolveDeferredWorkloadPreflight({
+            text: 'hi',
+            recentMessages: [
+                { role: 'user', content: 'in five minutes from now' },
+            ],
+            timezone: 'UTC',
+            now: '2026-04-03T14:47:00.000Z',
+        })).toMatchObject({
+            timing: 'now',
+            shouldSchedule: false,
+            scenario: null,
         });
     });
 

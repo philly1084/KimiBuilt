@@ -110,7 +110,7 @@ describe('workload request builder', () => {
         }));
     });
 
-    test('reconstructs a task-only follow-up using recent user schedule context', () => {
+    test('does not keep prior schedule context sticky for a new task-only turn', () => {
         const canonical = buildCanonicalWorkloadAction({
             request: 'gather information on the k3s cluster on the server',
         }, {
@@ -121,18 +121,17 @@ describe('workload request builder', () => {
             ],
         });
 
-        expect(canonical).toEqual(expect.objectContaining({
-            action: 'create',
-            prompt: expect.stringContaining('gather information on the k3s cluster on the server'),
-            trigger: {
-                type: 'once',
-                runAt: '2026-04-02T09:05:00.000Z',
-            },
-            metadata: expect.objectContaining({
-                createdFromScenario: true,
-                scenarioRequest: expect.stringContaining('gather information on the k3s cluster on the server'),
-            }),
-        }));
+        expect(canonical).toBeNull();
+    });
+
+    test('does not treat abstract workload discussion as a canonical scheduled workload', () => {
+        const canonical = buildCanonicalWorkloadAction({
+            request: 'I keep getting cron calls too quickly and every message turns into a workload. I want a planning agent to decide when something should become a job.',
+        }, {
+            timezone: 'UTC',
+        });
+
+        expect(canonical).toBeNull();
     });
 
     test('splits scheduled research-to-pdf requests into content and export stages', () => {

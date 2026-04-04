@@ -59,6 +59,32 @@ describe('normalizeMermaidSource', () => {
         expect(parts.bodyContent).toContain('<h1>Dog Life Stages Assessment</h1>');
     });
 
+    test('drops explanatory prose around fenced html blocks', () => {
+        const parts = extractCompositeDocumentParts([
+            'Below is a ready-to-use HTML file.',
+            'Copy and paste it as-is.',
+            '```html',
+            '<!DOCTYPE html>',
+            '<html><body><main>Ready</main></body></html>',
+            '```',
+            'Let me know if you want a cron version too.',
+        ].join('\n'));
+
+        expect(parts.bodyContent).toBe('<main>Ready</main>');
+        expect(parts.bodyContent).not.toContain('Below is a ready-to-use HTML file.');
+        expect(parts.bodyContent).not.toContain('cron version');
+    });
+
+    test('drops explanatory prose before standalone html fragments', () => {
+        const parts = extractCompositeDocumentParts([
+            'Here is the finished page:',
+            '<section><h1>Ready</h1><p>Published.</p></section>',
+        ].join('\n'));
+
+        expect(parts.bodyContent).toBe('<section><h1>Ready</h1><p>Published.</p></section>');
+        expect(parts.bodyContent).not.toContain('Here is the finished page:');
+    });
+
     test('injects mermaid block into printable html documents', () => {
         const html = ensureHtmlDocument([
             'flowchart TD A[Birth] --> B[Adult]',

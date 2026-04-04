@@ -1187,6 +1187,7 @@ class ArtifactService {
                 base,
                 buildDocumentImageInstructions(),
                 'Return standalone HTML only.',
+                'Start at the first character with <!DOCTYPE html> and include no preface, explanation, or trailing notes.',
                 'Build a polished frontend demo instead of a plain document.',
                 'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium landing-page or microsite feel.',
                 'Use semantic sections, responsive CSS, and purposeful but restrained interaction.',
@@ -1203,6 +1204,7 @@ class ArtifactService {
                 base,
                 buildDocumentImageInstructions(),
                 'Return valid standalone HTML with inline-friendly structure and business formatting.',
+                'Start at the first character with <!DOCTYPE html> and include no preface, explanation, or trailing notes.',
                 'Use a deliberate visual thesis, strong hierarchy, and non-generic section pacing.',
                 'Treat any provided template or sample as reference material, not copy to preserve verbatim.',
             ].filter(Boolean).join('\n\n');
@@ -1327,6 +1329,7 @@ class ArtifactService {
         return [
             'You are composing the final document artifact from an expanded section draft.',
             'Return valid standalone HTML only. No markdown fences.',
+            'Start at the first character with <!DOCTYPE html> and include no preface, explanation, or trailing notes.',
             'Use semantic HTML with a strong document structure.',
             'Include one H1 title and then H2/H3 sections as appropriate.',
             'Preserve the section order and cover all requested content.',

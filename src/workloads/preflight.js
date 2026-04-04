@@ -80,7 +80,6 @@ function hasExplicitDeferredTimingCue(text = '') {
         hasWorkloadIntent(normalized),
         /^(?:in|after|at|tomorrow|later|once|one[- ]time|daily|hourly|every)\b/.test(normalized),
         /\bfrom now\b/.test(normalized),
-        /\b(?:schedule|scheduled|cron|recurring|deferred|automation|workload)\b/.test(normalized),
         /\b(?:every day|everyday|each day|every weekday|weekdays|every workday|each workday|every hour|hourly|nightly)\b/.test(normalized),
         /\b(?:every|each)\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/.test(normalized),
         /\b(?:in|after)\s+(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty)(?:[-\s](?:one|two|three|four|five|six|seven|eight|nine))?\s*(?:minutes?|mins?|hours?|hrs?)\b/.test(normalized),
@@ -109,7 +108,7 @@ function buildScenarioCandidates(request = '', recentMessages = []) {
     addCandidate(source);
 
     const recentUserMessages = collectRecentUserMessages(recentMessages);
-    if (recentUserMessages.length === 0 || !source) {
+    if (recentUserMessages.length === 0 || !source || !isLikelyDeferredFollowup(source)) {
         return candidates;
     }
 
