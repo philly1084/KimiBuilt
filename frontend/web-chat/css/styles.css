@@ -297,6 +297,12 @@ select:focus-visible,
 .sidebar {
     width: 300px;
     flex-shrink: 0;
+    min-width: 0;
+    transition:
+        width var(--transition-normal),
+        transform var(--transition-normal),
+        opacity var(--transition-normal),
+        border-color var(--transition-normal);
 }
 
 .sidebar.collapsed {
@@ -787,6 +793,124 @@ select:focus-visible,
     z-index: 10;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+}
+
+.chat-header-brand {
+    min-width: 0;
+}
+
+.chat-header-brand h1,
+.chat-header-brand p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-header-actions {
+    flex-shrink: 0;
+}
+
+.minimalist-toggle-btn {
+    width: auto;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.minimalist-toggle-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.minimalist-toggle-btn.is-active,
+#minimalist-toggle-sidebar.is-active {
+    border-color: rgba(59, 130, 246, 0.28);
+    background-color: var(--accent-light);
+    color: var(--accent);
+}
+
+/* ============================================
+   Minimalist Layout
+   ============================================ */
+
+body.layout-minimal .sidebar {
+    width: 0 !important;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+    border-right-color: transparent;
+}
+
+body.layout-minimal #sidebar-toggle,
+body.layout-minimal #sidebar-overlay,
+body.layout-minimal #workloads-panel,
+body.layout-minimal .full-shell-control {
+    display: none !important;
+}
+
+body.layout-minimal .chat-header {
+    padding: 1rem 1.25rem;
+}
+
+body.layout-minimal .chat-header-actions {
+    margin-left: 1rem;
+}
+
+body.layout-minimal .chat-header-brand h1 {
+    font-size: 1rem;
+}
+
+body.layout-minimal #current-session-info {
+    max-width: min(62vw, 32rem);
+}
+
+body.layout-minimal #messages-container {
+    padding: 1rem 1rem 1.5rem;
+}
+
+body.layout-minimal .message,
+body.layout-minimal .typing-indicator-content {
+    max-width: 880px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+body.layout-minimal #welcome-message {
+    max-width: 32rem;
+    margin: 0 auto;
+    gap: 0.75rem;
+}
+
+body.layout-minimal #welcome-message .grid,
+body.layout-minimal #welcome-message .mt-8 {
+    display: none;
+}
+
+body.layout-minimal #welcome-message > div:first-child {
+    width: 3.5rem;
+    height: 3.5rem;
+    margin-bottom: 0.5rem;
+    box-shadow: none;
+}
+
+body.layout-minimal #welcome-message h2 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+body.layout-minimal #welcome-message p {
+    max-width: 24rem;
+    margin-bottom: 0;
+    font-size: 1rem;
+}
+
+body.layout-minimal .input-area {
+    background-color: var(--bg-secondary);
+}
+
+body.layout-minimal .input-toggle-btn {
+    right: 1rem;
 }
 
 /* ============================================
@@ -2647,7 +2771,12 @@ code[class*="language-"] {
         padding-left: 4rem;
         padding-right: 1rem;
     }
-    
+
+    body.layout-minimal .chat-header {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
     .model-selector-btn {
         padding: 0.375rem 0.5rem;
         font-size: 0.75rem;
@@ -2748,6 +2877,11 @@ code[class*="language-"] {
     
     .chat-header {
         padding-left: 3.5rem;
+        padding-right: 0.75rem;
+    }
+
+    body.layout-minimal .chat-header {
+        padding-left: 0.75rem;
         padding-right: 0.75rem;
     }
     

@@ -41,6 +41,9 @@ class UIHelpers {
             selectedIndex: 0,
             items: []
         };
+
+        this.layoutPreferenceKey = 'webchat_layout_mode';
+        this.layoutMode = 'full';
         
         // Setup draft saving
         this.setupDraftSaving();
@@ -2239,6 +2242,120 @@ class UIHelpers {
     }
 
     // ============================================
+    // Layout Management
+    // ============================================
+
+    getDefaultLayoutMode() {
+        return window.matchMedia('(max-width: 768px)').matches ? 'minimal' : 'full';
+    }
+
+    initLayoutMode(appInstance = null) {
+        const savedLayoutMode = this.storageGet(this.layoutPreferenceKey);
+        const initialMode = savedLayoutMode === 'minimal' || savedLayoutMode === 'full'
+            ? savedLayoutMode
+            : this.getDefaultLayoutMode();
+        this.applyLayoutMode(initialMode, { persist: false, appInstance });
+    }
+
+    isMinimalistMode() {
+        return this.layoutMode === 'minimal';
+    }
+
+    toggleMinimalistMode(options = {}) {
+        const nextMode = this.isMinimalistMode() ? 'full' : 'minimal';
+        this.applyLayoutMode(nextMode, { persist: true, ...options });
+    }
+
+    applyLayoutMode(mode, options = {}) {
+        const normalizedMode = mode === 'minimal' ? 'minimal' : 'full';
+        const persist = options.persist !== false;
+        const appInstance = options.appInstance || window.chatApp;
+
+        this.layoutMode = normalizedMode;
+
+        document.body.classList.toggle('layout-minimal', normalizedMode === 'minimal');
+        document.documentElement.setAttribute('data-layout-mode', normalizedMode);
+
+        if (persist) {
+            this.storageSet(this.layoutPreferenceKey, normalizedMode);
+        }
+
+        if (normalizedMode === 'minimal') {
+            this.closeSidebar();
+            this.closeSearch();
+            this.closeModelSelector();
+
+            if (appInstance?.workloadsOpen) {
+                appInstance.workloadsOpen = false;
+            }
+            appInstance?.workloadsPanel?.classList.add('hidden');
+        }
+
+        this.syncSidebarState();
+        this.updateMinimalistToggleUI();
+        appInstance?.updateSessionInfo?.();
+
+        if (normalizedMode === 'minimal') {
+            setTimeout(() => {
+                document.getElementById('message-input')?.focus();
+            }, 120);
+        }
+    }
+
+    updateMinimalistToggleUI() {
+        const isMinimal = this.isMinimalistMode();
+        const button = document.getElementById('minimalist-toggle-btn');
+        const buttonIcon = document.getElementById('minimalist-toggle-icon');
+        const sidebarButton = document.getElementById('minimalist-toggle-sidebar');
+        const sidebarButtonIcon = document.getElementById('minimalist-toggle-sidebar-icon');
+        const sidebarButtonText = document.getElementById('minimalist-toggle-sidebar-text');
+        const buttonTitle = isMinimal ? 'Return to full interface' : 'Enter minimalist mode';
+        const iconName = isMinimal ? 'maximize-2' : 'minimize-2';
+
+        if (button) {
+            button.setAttribute('title', buttonTitle);
+            button.setAttribute('aria-label', buttonTitle);
+            button.setAttribute('aria-pressed', isMinimal ? 'true' : 'false');
+            button.classList.toggle('is-active', isMinimal);
+        }
+
+        if (sidebarButton) {
+            sidebarButton.setAttribute('title', buttonTitle);
+            sidebarButton.setAttribute('aria-label', buttonTitle);
+            sidebarButton.classList.toggle('is-active', isMinimal);
+        }
+
+        if (sidebarButtonText) {
+            sidebarButtonText.textContent = isMinimal ? 'Full Interface' : 'Focus Mode';
+        }
+
+        [buttonIcon, sidebarButtonIcon].forEach((iconNode) => {
+            if (!iconNode) return;
+            iconNode.setAttribute('data-lucide', iconName);
+        });
+
+        this.reinitializeIcons(button || document);
+        if (sidebarButton) {
+            this.reinitializeIcons(sidebarButton);
+        }
+    }
+
+    syncSidebarState() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (!sidebar || !overlay) {
+            return;
+        }
+
+        const isMobile = window.matchMedia('(max-width: 768px)').matches;
+        const isOpen = sidebar.classList.contains('open');
+        const hidden = this.isMinimalistMode() || (isMobile && !isOpen);
+
+        overlay.classList.toggle('hidden', !isMobile || !isOpen || this.isMinimalistMode());
+        sidebar.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+    }
+
+    // ============================================
     // Theme Management
     // ============================================
 
@@ -2721,6 +2838,7 @@ class UIHelpers {
             { category: 'Actions', icon: 'keyboard', title: 'Keyboard Shortcuts', description: 'View all keyboard shortcuts', action: 'show-shortcuts' },
             { category: 'Model', icon: 'cpu', title: 'Change Model', description: 'Select a different AI model', action: 'open-model-selector' },
             { category: 'Navigation', icon: 'sidebar', title: 'Toggle Sidebar', description: 'Show or hide the sidebar', action: 'toggle-sidebar', shortcut: 'Ctrl+B' },
+            { category: 'View', icon: 'minimize-2', title: this.isMinimalistMode() ? 'Return to Full Interface' : 'Enter Minimalist Mode', description: 'Switch between the full workspace and a chat-first view', action: 'toggle-minimalist-mode', shortcut: 'Ctrl+Shift+M' },
             { category: 'View', icon: 'minimize-2', title: 'Toggle Input Area', description: 'Show or hide the message input', action: 'toggle-input-area', shortcut: 'Ctrl+Shift+H' },
             { category: 'View', icon: 'sun', title: 'Toggle Theme', description: 'Switch between light and dark mode', action: 'toggle-theme' },
             ...(hasMessages ? [
@@ -2777,6 +2895,9 @@ class UIHelpers {
                 break;
             case 'toggle-sidebar':
                 this.toggleSidebar();
+                break;
+            case 'toggle-minimalist-mode':
+                this.toggleMinimalistMode();
                 break;
             case 'toggle-input-area':
                 this.toggleInputArea();
@@ -2851,6 +2972,7 @@ class UIHelpers {
             { key: 'Ctrl + F', description: 'Search messages' },
             { key: 'Ctrl + I', description: 'Create image (AI or Unsplash)' },
             { key: 'Ctrl + B', description: 'Toggle sidebar' },
+            { key: 'Ctrl + Shift + M', description: 'Toggle minimalist mode' },
             { key: 'Ctrl + Shift + H', description: 'Toggle input area' },
             { key: 'Shift + Enter', description: 'New line in input' },
             { key: 'Enter', description: 'Send message' },
@@ -3332,23 +3454,22 @@ class UIHelpers {
 
     toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebar-overlay');
-        
+        if (!sidebar) return;
+
+        if (this.isMinimalistMode()) {
+            this.applyLayoutMode('full');
+        }
+
         sidebar.classList.toggle('open');
-        overlay.classList.toggle('hidden');
-        
-        // Update aria attributes
-        const isOpen = sidebar.classList.contains('open');
-        sidebar.setAttribute('aria-hidden', !isOpen);
+        this.syncSidebarState();
     }
 
     closeSidebar() {
         const sidebar = document.getElementById('sidebar');
-        const overlay = document.getElementById('sidebar-overlay');
-        
+        if (!sidebar) return;
+
         sidebar.classList.remove('open');
-        overlay.classList.add('hidden');
-        sidebar.setAttribute('aria-hidden', 'true');
+        this.syncSidebarState();
     }
 
     // ============================================
@@ -3421,6 +3542,16 @@ class UIHelpers {
                 this.toggleRemoteBuildAutonomy();
             });
         }
+
+        const minimalistButtons = [
+            document.getElementById('minimalist-toggle-btn'),
+            document.getElementById('minimalist-toggle-sidebar'),
+        ].filter(Boolean);
+        minimalistButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                this.toggleMinimalistMode();
+            });
+        });
 
         // Command palette input
         const commandInput = document.getElementById('command-input');
@@ -3495,6 +3626,10 @@ class UIHelpers {
                 // Re-check connection when tab becomes visible
                 window.chatApp.checkConnection?.();
             }
+        });
+
+        window.addEventListener('resize', () => {
+            this.syncSidebarState();
         });
     }
 

@@ -84,6 +84,7 @@ class ChatApp {
         
         // Initialize theme
         uiHelpers.initTheme();
+        uiHelpers.initLayoutMode(this);
         
         // Initialize auto-resize textarea
         this.autoResize = uiHelpers.initAutoResize(this.messageInput);
@@ -381,6 +382,12 @@ class ChatApp {
                 e.preventDefault();
                 uiHelpers.toggleSidebar();
             }
+
+            // Toggle minimalist mode: Ctrl+Shift+M
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'M') {
+                e.preventDefault();
+                uiHelpers.toggleMinimalistMode({ appInstance: this });
+            }
             
             // Toggle input area: Ctrl+Shift+H
             if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') {
@@ -612,7 +619,7 @@ class ChatApp {
         }
     }
 
-    updateSessionInfo() {
+    updateSessionInfoLegacy() {
         const session = sessionManager.getCurrentSession();
         if (session) {
             const messageCount = sessionManager.getMessages(session.id)?.length || 0;
@@ -3326,6 +3333,23 @@ class ChatApp {
     // ============================================
     // UI State
     // ============================================
+
+    updateSessionInfo() {
+        const session = sessionManager.getCurrentSession();
+        if (session) {
+            const messageCount = sessionManager.getMessages(session.id)?.length || 0;
+            if (uiHelpers.isMinimalistMode()) {
+                this.currentSessionInfo.textContent = `${session.title || 'Conversation'} | ${messageCount} message${messageCount !== 1 ? 's' : ''}`;
+            } else {
+                this.currentSessionInfo.textContent = `${sessionManager.getSessionModeLabel(session.mode)} | ${sessionManager.formatTimestamp(session.updatedAt)} | ${messageCount} message${messageCount !== 1 ? 's' : ''}`;
+            }
+            return;
+        }
+
+        this.currentSessionInfo.textContent = uiHelpers.isMinimalistMode()
+            ? 'Minimalist mode active'
+            : 'No active session';
+    }
 
     updateSendButton() {
         const hasContent = this.messageInput?.value?.trim()?.length > 0;
