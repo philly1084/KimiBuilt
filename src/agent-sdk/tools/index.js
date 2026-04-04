@@ -17,6 +17,11 @@ const {
   buildCanonicalWorkloadPayload,
   extractWorkloadScenarioSource,
 } = require('../../workloads/request-builder');
+const {
+  USER_CHECKPOINT_TOOL_ID,
+  normalizeCheckpointRequest,
+  buildUserCheckpointMessage,
+} = require('../../user-checkpoints');
 
 const MAX_VERIFIED_REFERENCE_IMAGES = 20;
 const IMAGE_REFERENCE_VERIFY_TIMEOUT_MS = 15000;
@@ -1206,12 +1211,87 @@ class ToolManager {
       },
     ];
 
+    const interactionTools = [
+      {
+        id: USER_CHECKPOINT_TOOL_ID,
+        name: 'User Checkpoint',
+        category: 'system',
+        description: 'Pause once or twice for a high-impact user decision before major work by creating a structured multiple-choice checkpoint.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const policy = context?.userCheckpointPolicy || {};
+            const hasPendingCheckpoint = Boolean(policy?.pending?.id);
+            const remainingQuestions = Number(policy?.remaining ?? 0);
+
+            if (hasPendingCheckpoint) {
+              throw new Error('A user checkpoint is already pending in this session.');
+            }
+
+            if (policy?.enabled !== true) {
+              throw new Error('User checkpoints are only available in the web chat surface.');
+            }
+
+            if (remainingQuestions <= 0) {
+              throw new Error('No checkpoint questions remain in this session. Continue with the best reasonable assumption.');
+            }
+
+            const checkpoint = normalizeCheckpointRequest(params);
+            return {
+              checkpoint,
+              message: buildUserCheckpointMessage(checkpoint),
+            };
+          },
+          sideEffects: [],
+          timeout: 5000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['question', 'options'],
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            preamble: { type: 'string' },
+            question: { type: 'string' },
+            whyThisMatters: { type: 'string' },
+            allowMultiple: { type: 'boolean' },
+            maxSelections: { type: 'integer' },
+            allowFreeText: { type: 'boolean' },
+            freeTextLabel: { type: 'string' },
+            options: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 5,
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  label: { type: 'string' },
+                  description: { type: 'string' },
+                },
+                required: ['label'],
+                additionalProperties: false,
+              },
+            },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'list-checks',
+        },
+      },
+    ];
+
     const systemToolInstances = [
       new GitLocalTool(),
     ];
 
     // Register all system tools
-    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools].forEach(def => {
+    [...fileTools, ...codeTools, ...docsTools, ...mediaTools, ...workloadTools, ...interactionTools].forEach(def => {
       this.registry.register({
         ...def,
         version: '1.0.0',

@@ -463,6 +463,200 @@ class UIHelpers {
     // Message Rendering
     // ============================================
 
+    parseJsonSafely(value = '') {
+        try {
+            return JSON.parse(value);
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    normalizeSurveyOption(option = {}, index = 0) {
+        if (!option || typeof option !== 'object') {
+            return null;
+        }
+
+        const label = String(option.label || option.title || option.text || `Option ${index + 1}`).trim();
+        if (!label) {
+            return null;
+        }
+
+        const id = String(option.id || label)
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || `option-${index + 1}`;
+        const description = String(option.description || option.details || option.hint || '').trim();
+
+        return {
+            id,
+            label,
+            ...(description ? { description } : {}),
+        };
+    }
+
+    normalizeSurveyDefinition(value = null) {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+
+        const options = (Array.isArray(value.options) ? value.options : [])
+            .map((option, index) => this.normalizeSurveyOption(option, index))
+            .filter(Boolean)
+            .slice(0, 5);
+
+        const question = String(value.question || value.prompt || '').trim();
+        if (!question || options.length < 2) {
+            return null;
+        }
+
+        const allowMultiple = value.allowMultiple === true;
+        const maxSelections = allowMultiple
+            ? Math.min(options.length, Math.max(1, Number(value.maxSelections) || Math.min(2, options.length)))
+            : 1;
+        const allowFreeText = value.allowFreeText === true || value.allowText === true;
+
+        return {
+            id: String(value.id || `survey-${Date.now().toString(36)}`).trim(),
+            title: String(value.title || 'Choose a direction').trim() || 'Choose a direction',
+            question,
+            whyThisMatters: String(value.whyThisMatters || value.context || value.rationale || '').trim(),
+            allowMultiple,
+            maxSelections,
+            allowFreeText,
+            freeTextLabel: allowFreeText
+                ? (String(value.freeTextLabel || value.freeTextPrompt || 'Add context (optional)').trim() || 'Add context (optional)')
+                : '',
+            options,
+        };
+    }
+
+    buildSurveyAnsweredSummary(surveyState = {}) {
+        const selectedLabels = Array.isArray(surveyState.selectedLabels)
+            ? surveyState.selectedLabels.filter(Boolean)
+            : [];
+        const notes = String(surveyState.notes || '').trim();
+        const parts = [];
+
+        if (selectedLabels.length > 0) {
+            parts.push(`Answered with ${selectedLabels.join(', ')}`);
+        }
+
+        if (notes) {
+            parts.push(`Note: ${notes}`);
+        }
+
+        return parts.join('. ');
+    }
+
+    renderSurveyBlock(survey = null, message = {}) {
+        if (!survey) {
+            return '';
+        }
+
+        const messageId = String(message.id || '').trim();
+        const surveyState = message?.surveyState?.checkpointId === survey.id
+            ? message.surveyState
+            : null;
+        const isAnswered = surveyState?.status === 'answered';
+        const selectedOptionIds = new Set(
+            Array.isArray(surveyState?.selectedOptionIds) && surveyState.selectedOptionIds.length > 0
+                ? surveyState.selectedOptionIds
+                : survey.options
+                    .filter((option) => Array.isArray(surveyState?.selectedLabels) && surveyState.selectedLabels.includes(option.label))
+                    .map((option) => option.id),
+        );
+        const answeredSummary = isAnswered
+            ? this.buildSurveyAnsweredSummary(surveyState)
+            : '';
+        const selectionHint = survey.allowMultiple
+            ? `Choose up to ${survey.maxSelections}`
+            : 'Choose one option';
+        const optionsHtml = survey.options.map((option) => {
+            const selected = selectedOptionIds.has(option.id);
+            return `
+                <button
+                    type="button"
+                    class="agent-survey-option ${selected ? 'is-selected' : ''}"
+                    data-option-id="${this.escapeHtmlAttr(option.id)}"
+                    data-option-label="${this.escapeHtmlAttr(option.label)}"
+                    onclick="uiHelpers.toggleSurveyOption(this)"
+                    ${isAnswered ? 'disabled' : ''}
+                    aria-checked="${selected ? 'true' : 'false'}"
+                >
+                    <span class="agent-survey-option__title">${this.escapeHtml(option.label)}</span>
+                    ${option.description ? `<span class="agent-survey-option__description">${this.escapeHtml(option.description)}</span>` : ''}
+                </button>
+            `;
+        }).join('');
+
+        return `
+            <div
+                class="agent-survey-card ${isAnswered ? 'is-answered' : ''}"
+                data-message-id="${this.escapeHtmlAttr(messageId)}"
+                data-survey-id="${this.escapeHtmlAttr(survey.id)}"
+                data-allow-multiple="${survey.allowMultiple ? 'true' : 'false'}"
+                data-max-selections="${String(survey.maxSelections)}"
+                data-submitted="${isAnswered ? 'true' : 'false'}"
+            >
+                <div class="agent-survey-card__eyebrow">Decision checkpoint</div>
+                <div class="agent-survey-card__title-row">
+                    <h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>
+                    <span class="agent-survey-card__meta">${this.escapeHtml(selectionHint)}</span>
+                </div>
+                <p class="agent-survey-card__question">${this.escapeHtml(survey.question)}</p>
+                ${survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : ''}
+                <div class="agent-survey-card__options">
+                    ${optionsHtml}
+                </div>
+                ${survey.allowFreeText ? `
+                    <label class="agent-survey-card__notes-label">
+                        <span>${this.escapeHtml(survey.freeTextLabel || 'Add context (optional)')}</span>
+                        <textarea
+                            class="agent-survey-card__notes"
+                            rows="3"
+                            maxlength="500"
+                            placeholder="Add a short note for the agent"
+                            ${isAnswered ? 'disabled' : ''}
+                        >${this.escapeHtml(surveyState?.notes || '')}</textarea>
+                    </label>
+                ` : ''}
+                <div class="agent-survey-card__footer">
+                    ${isAnswered ? `
+                        <div class="agent-survey-card__answered">
+                            <span class="agent-survey-card__answered-badge">Answered</span>
+                            <span class="agent-survey-card__answered-text">${this.escapeHtml(answeredSummary || 'Response sent back to the agent.')}</span>
+                        </div>
+                    ` : `
+                        <div class="agent-survey-card__actions">
+                            <button type="button" class="agent-survey-card__submit" onclick="window.chatApp.submitAgentSurvey(this)" disabled>
+                                Continue with this choice
+                            </button>
+                            <span class="agent-survey-card__hint">The agent will continue once you answer.</span>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }
+
+    renderSurveyMarkdownBlocks(content = '', message = {}) {
+        const source = String(content || '');
+        if (!/```(?:survey|kb-survey)/i.test(source)) {
+            return source;
+        }
+
+        return source.replace(/```(?:survey|kb-survey)\s*([\s\S]*?)```/gi, (_match, rawJson) => {
+            const parsed = this.parseJsonSafely(rawJson);
+            const survey = this.normalizeSurveyDefinition(parsed);
+            if (!survey) {
+                return _match;
+            }
+
+            return this.renderSurveyBlock(survey, message);
+        });
+    }
+
     renderMessage(message, isStreaming = false) {
         if (message.type === 'unsplash-search') {
             return this.renderUnsplashSearchMessage(message);
@@ -507,7 +701,7 @@ class UIHelpers {
 
         const content = isUser ? 
             this.renderUserMessage(renderedContent) :
-            this.renderAssistantMessage(renderedContent, isStreaming);
+            this.renderAssistantMessage(message, isStreaming);
 
         const time = this.formatTime(message.timestamp);
         const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
@@ -548,11 +742,17 @@ class UIHelpers {
         return this.escapeHtml(content);
     }
 
-    renderAssistantMessage(content, isStreaming = false) {
+    renderAssistantMessage(messageOrContent, isStreaming = false) {
+        const message = messageOrContent && typeof messageOrContent === 'object'
+            ? messageOrContent
+            : { content: messageOrContent };
+        const content = message.displayContent ?? message.content;
         if (!content) return '';
+
+        const renderedContent = this.renderSurveyMarkdownBlocks(content, message);
         
         // Parse markdown
-        let html = marked.parse(content);
+        let html = marked.parse(renderedContent);
         
         // Sanitize HTML with stricter config
         html = DOMPurify.sanitize(html, {
@@ -565,12 +765,16 @@ class UIHelpers {
                 'a', 'img',
                 'table', 'thead', 'tbody', 'tr', 'th', 'td',
                 'div', 'span', 'button', 'i',
-                'input'
+                'input', 'textarea', 'label'
             ],
             ALLOWED_ATTR: [
                 'href', 'title', 'target', 'rel', 'src', 'alt', 
                 'class', 'data-code', 'onclick', 'type', 'checked', 'disabled',
-                'aria-label', 'aria-hidden', 'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide'
+                'aria-label', 'aria-hidden', 'aria-checked',
+                'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide',
+                'data-message-id', 'data-survey-id', 'data-allow-multiple', 'data-max-selections',
+                'data-option-id', 'data-option-label', 'data-submitted',
+                'placeholder', 'rows', 'maxlength', 'role'
             ],
             ALLOW_DATA_ATTR: false
         });
@@ -581,6 +785,45 @@ class UIHelpers {
         }
 
         return html;
+    }
+
+    toggleSurveyOption(button) {
+        const optionButton = button?.closest?.('.agent-survey-option');
+        const card = optionButton?.closest?.('.agent-survey-card');
+        if (!optionButton || !card || card.dataset.submitted === 'true') {
+            return;
+        }
+
+        const allOptions = Array.from(card.querySelectorAll('.agent-survey-option'));
+        const allowMultiple = card.dataset.allowMultiple === 'true';
+        const maxSelections = Math.max(1, Number(card.dataset.maxSelections) || 1);
+        const isSelected = optionButton.classList.contains('is-selected');
+
+        if (!allowMultiple) {
+            allOptions.forEach((entry) => {
+                entry.classList.remove('is-selected');
+                entry.setAttribute('aria-checked', 'false');
+            });
+            optionButton.classList.add('is-selected');
+            optionButton.setAttribute('aria-checked', 'true');
+        } else {
+            if (!isSelected) {
+                const selectedCount = allOptions.filter((entry) => entry.classList.contains('is-selected')).length;
+                if (selectedCount >= maxSelections) {
+                    this.showToast(`Choose up to ${maxSelections} option${maxSelections === 1 ? '' : 's'}`, 'info');
+                    return;
+                }
+            }
+
+            optionButton.classList.toggle('is-selected', !isSelected);
+            optionButton.setAttribute('aria-checked', isSelected ? 'false' : 'true');
+        }
+
+        const submitButton = card.querySelector('.agent-survey-card__submit');
+        if (submitButton) {
+            const hasSelection = allOptions.some((entry) => entry.classList.contains('is-selected'));
+            submitButton.disabled = !hasSelection;
+        }
     }
 
     renderImageMessage(message) {
@@ -1135,7 +1378,7 @@ class UIHelpers {
         if (isUser) {
             textEl.textContent = content;
         } else {
-            textEl.innerHTML = this.renderAssistantMessage(content, isStreaming);
+            textEl.innerHTML = this.renderAssistantMessage({ id: messageId, content }, isStreaming);
             this.highlightCodeBlocks(textEl);
             this.renderMermaidDiagrams(textEl);
             this.reinitializeIcons(textEl);
@@ -1164,7 +1407,7 @@ class UIHelpers {
         const newText = currentText + content;
         
         // Re-render as markdown
-        textEl.innerHTML = this.renderAssistantMessage(newText, true);
+        textEl.innerHTML = this.renderAssistantMessage({ id: messageId, content: newText }, true);
         this.highlightCodeBlocks(textEl);
         this.renderMermaidDiagrams(textEl);
         this.reinitializeIcons(textEl);

@@ -517,7 +517,8 @@ class ChatApp {
     }
 
     async loadSessionMessages(sessionId) {
-        const messages = await sessionManager.loadSessionMessagesFromBackend(sessionId);
+        await sessionManager.loadSessionMessagesFromBackend(sessionId);
+        const messages = this.syncAnnotatedSurveyStates(sessionId);
         this.renderMessages(messages);
     }
 
@@ -1596,45 +1597,53 @@ class ChatApp {
             this.updateSendButton();
             return;
         }
-        
-        // Check if we need to create a session
-        if (!sessionManager.currentSessionId) {
-            await this.createNewSession();
-        }
-        
-        const sessionId = sessionManager.currentSessionId;
-        
-        // Hide welcome message
-        uiHelpers.hideWelcomeMessage();
-        
-        // Add user message
-        const userMessage = {
-            role: 'user',
-            content: content,
-            timestamp: new Date().toISOString()
-        };
-        
-        sessionManager.addMessage(sessionId, userMessage);
-        
-        const userMessageEl = uiHelpers.renderMessage(userMessage);
-        this.messagesContainer.appendChild(userMessageEl);
-        uiHelpers.scrollToBottom();
-        
-        // Clear input
+
         this.messageInput.value = '';
         this.autoResize?.reset?.();
         this.updateSendButton();
         uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
-        
+
+        await this.sendPreparedMessage(content);
+    }
+
+    async sendPreparedMessage(content) {
+        const normalizedContent = String(content || '').trim();
+        if (!normalizedContent || this.isProcessing) {
+            return;
+        }
+
+        // Check if we need to create a session
+        if (!sessionManager.currentSessionId) {
+            await this.createNewSession();
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+
+        // Hide welcome message
+        uiHelpers.hideWelcomeMessage();
+
+        // Add user message
+        const userMessage = {
+            role: 'user',
+            content: normalizedContent,
+            timestamp: new Date().toISOString()
+        };
+
+        sessionManager.addMessage(sessionId, userMessage);
+
+        const userMessageEl = uiHelpers.renderMessage(userMessage);
+        this.messagesContainer.appendChild(userMessageEl);
+        uiHelpers.scrollToBottom();
+
         // Show typing indicator
         this.isProcessing = true;
         this.updateSendButton();
         uiHelpers.showTypingIndicator();
-        
+
         // Get current model
         const model = uiHelpers.getCurrentModel();
         const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
-        
+
         // Create placeholder for assistant response
         const assistantMessage = {
             role: 'assistant',
@@ -1646,9 +1655,9 @@ class ChatApp {
         
         this.currentStreamingMessageId = uiHelpers.generateMessageId();
         assistantMessage.id = this.currentStreamingMessageId;
-        
+
         sessionManager.addMessage(sessionId, assistantMessage);
-        
+
         // Delay showing the assistant message slightly for better UX
         setTimeout(() => {
             const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
@@ -1670,7 +1679,7 @@ class ChatApp {
             
             let hasReceivedContent = false;
             let retryCount = 0;
-            
+
             // Stream the chat
             for await (const chunk of apiClient.streamChat(messages, model, this.currentAbortController.signal, reasoningEffort)) {
                 if (chunk.sessionId) {
@@ -1711,6 +1720,57 @@ class ChatApp {
         } finally {
             this.currentAbortController = null;
         }
+    }
+
+    async submitAgentSurvey(trigger) {
+        const button = trigger?.closest?.('.agent-survey-card__submit') || trigger;
+        const card = button?.closest?.('.agent-survey-card');
+        if (!card || this.isProcessing) {
+            return;
+        }
+
+        const messageId = String(card.dataset.messageId || '').trim();
+        const surveyId = String(card.dataset.surveyId || '').trim();
+        const selectedOptions = Array.from(card.querySelectorAll('.agent-survey-option.is-selected'))
+            .map((option) => ({
+                id: String(option.dataset.optionId || '').trim(),
+                label: String(option.dataset.optionLabel || '').trim(),
+            }))
+            .filter((option) => option.label);
+
+        if (selectedOptions.length === 0) {
+            uiHelpers.showToast('Choose an option first', 'info');
+            return;
+        }
+
+        const notes = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
+        const responseContent = this.buildSurveyResponseContent({
+            checkpointId: surveyId,
+            selectedOptions,
+            notes,
+        });
+        const sessionId = sessionManager.currentSessionId;
+        const surveyMessage = this.getSessionMessage(sessionId, messageId);
+
+        if (surveyMessage) {
+            surveyMessage.surveyState = {
+                status: 'answered',
+                checkpointId: surveyId,
+                summary: responseContent.replace(/^Survey response \([^)]+\):\s*/i, ''),
+                selectedOptionIds: selectedOptions.map((option) => option.id),
+                selectedLabels: selectedOptions.map((option) => option.label),
+                notes,
+            };
+            this.upsertSessionMessage(sessionId, surveyMessage);
+            this.renderOrReplaceMessage(surveyMessage);
+        }
+
+        card.dataset.submitted = 'true';
+        if (button) {
+            button.disabled = true;
+        }
+
+        await this.sendPreparedMessage(responseContent);
     }
 
     async tryHandleToolCommand(content) {
@@ -2288,6 +2348,136 @@ class ChatApp {
         }
     }
 
+    extractSurveyDefinition(messageContent = '') {
+        const match = String(messageContent || '').match(/```(?:survey|kb-survey)\s*([\s\S]*?)```/i);
+        if (!match?.[1]) {
+            return null;
+        }
+
+        try {
+            return uiHelpers.normalizeSurveyDefinition(JSON.parse(match[1]));
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    parseSurveyResponseContent(messageContent = '') {
+        const match = String(messageContent || '').trim().match(/^Survey response \(([^)]+)\):\s*([\s\S]+)$/i);
+        if (!match) {
+            return null;
+        }
+
+        return {
+            checkpointId: String(match[1] || '').trim(),
+            summary: String(match[2] || '').trim(),
+        };
+    }
+
+    extractSurveySelectedLabels(summary = '') {
+        return Array.from(String(summary || '').matchAll(/"([^"]+)"/g))
+            .map((match) => String(match[1] || '').trim())
+            .filter(Boolean);
+    }
+
+    extractSurveySelectedOptionIds(summary = '', surveyOptions = []) {
+        const options = Array.isArray(surveyOptions) ? surveyOptions : [];
+        const matches = Array.from(String(summary || '').matchAll(/"([^"]+)"(?:\s*\[([^\]]+)\])?/g));
+
+        return Array.from(new Set(matches
+            .map((match) => {
+                const explicitId = String(match[2] || '').trim();
+                if (explicitId) {
+                    return explicitId;
+                }
+
+                const label = String(match[1] || '').trim();
+                return options.find((option) => option?.label === label)?.id || '';
+            })
+            .filter(Boolean)));
+    }
+
+    extractSurveyNotes(summary = '') {
+        const match = String(summary || '').match(/Notes:\s*([\s\S]+)$/i);
+        return match?.[1] ? String(match[1]).trim() : '';
+    }
+
+    annotateSurveyStates(messages = []) {
+        const responseLookup = new Map();
+
+        messages.forEach((message) => {
+            if (message?.role !== 'user') {
+                return;
+            }
+
+            const response = this.parseSurveyResponseContent(message.content || '');
+            if (response?.checkpointId) {
+                responseLookup.set(response.checkpointId, response);
+            }
+        });
+
+        return messages.map((message) => {
+            if (message?.role !== 'assistant') {
+                return message;
+            }
+
+            const survey = this.extractSurveyDefinition(message.displayContent ?? message.content ?? '');
+            if (!survey) {
+                return message;
+            }
+
+            const response = responseLookup.get(survey.id);
+            if (!response) {
+                return message.surveyState
+                    ? { ...message, surveyState: null }
+                    : message;
+            }
+
+            return {
+                ...message,
+                surveyState: {
+                    status: 'answered',
+                    checkpointId: survey.id,
+                    summary: response.summary,
+                    selectedOptionIds: this.extractSurveySelectedOptionIds(response.summary, survey.options),
+                    selectedLabels: this.extractSurveySelectedLabels(response.summary),
+                    notes: this.extractSurveyNotes(response.summary),
+                },
+            };
+        });
+    }
+
+    syncAnnotatedSurveyStates(sessionId) {
+        const messages = sessionManager.getMessages(sessionId);
+        const annotatedMessages = this.annotateSurveyStates(messages);
+        sessionManager.sessionMessages.set(sessionId, annotatedMessages);
+        sessionManager.saveToStorage();
+        return annotatedMessages;
+    }
+
+    buildSurveyResponseContent({ checkpointId = '', selectedOptions = [], notes = '' } = {}) {
+        const chosen = (Array.isArray(selectedOptions) ? selectedOptions : [])
+            .map((option) => {
+                const label = String(option?.label || option?.id || '').trim();
+                const id = String(option?.id || '').trim();
+                if (!label) {
+                    return '';
+                }
+
+                return id && id !== label
+                    ? `"${label}" [${id}]`
+                    : `"${label}"`;
+            })
+            .filter(Boolean)
+            .join(', ');
+        const noteText = String(notes || '').trim();
+        const summaryParts = [
+            chosen ? `chose ${chosen}` : 'answered the checkpoint',
+            noteText ? `Notes: ${noteText}` : '',
+        ].filter(Boolean);
+
+        return `Survey response (${String(checkpointId || '').trim()}): ${summaryParts.join('. ')}`;
+    }
+
     buildArtifactUrl(path, { inline = false } = {}) {
         const normalizedPath = typeof path === 'string' ? path.trim() : '';
         if (!normalizedPath) {
@@ -2734,11 +2924,11 @@ class ChatApp {
         uiHelpers.hideTypingIndicator();
         
         // Update UI
-        const messages = sessionManager.getMessages(sessionId);
+        const messages = this.syncAnnotatedSurveyStates(sessionId);
         const lastMessage = messages[messages.length - 1];
         
         if (lastMessage) {
-            uiHelpers.updateMessageContent(this.currentStreamingMessageId, lastMessage.content, false);
+            this.renderOrReplaceMessage(lastMessage);
         }
         
         this.isProcessing = false;

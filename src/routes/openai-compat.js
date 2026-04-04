@@ -32,6 +32,15 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { getSessionControlState } = require('../runtime-control-state');
+const {
+    buildUserCheckpointAnsweredPatch,
+    buildUserCheckpointAskedPatch,
+    buildUserCheckpointInstructions,
+    buildUserCheckpointPolicy,
+    extractPendingUserCheckpoint,
+    getUserCheckpointState,
+    parseUserCheckpointResponseMessage,
+} = require('../user-checkpoints');
 
 const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
@@ -300,6 +309,76 @@ function buildContinuityInstructions(extra = '') {
     return buildBaseContinuityInstructions(extra);
 }
 
+function resolveClientSurface(payload = {}, session = null) {
+    const candidates = [
+        payload?.clientSurface,
+        payload?.client_surface,
+        payload?.metadata?.clientSurface,
+        payload?.metadata?.client_surface,
+        session?.metadata?.clientSurface,
+        session?.metadata?.client_surface,
+    ];
+
+    return candidates.find((value) => typeof value === 'string' && value.trim()) || '';
+}
+
+function attachUpdatedControlState(session = null, controlState = null) {
+    if (!session || !controlState) {
+        return session;
+    }
+
+    return {
+        ...session,
+        controlState,
+        metadata: {
+            ...(session.metadata || {}),
+            controlState,
+        },
+    };
+}
+
+async function applyAnsweredUserCheckpointState(sessionId, session, userText = '') {
+    const response = parseUserCheckpointResponseMessage(userText);
+    if (!response) {
+        return {
+            session,
+            response: null,
+        };
+    }
+
+    const checkpointState = getUserCheckpointState(session);
+    if (checkpointState.pending?.id && checkpointState.pending.id !== response.checkpointId) {
+        return {
+            session,
+            response,
+        };
+    }
+
+    const controlState = await sessionStore.updateControlState(
+        sessionId,
+        buildUserCheckpointAnsweredPatch(session, response),
+    );
+
+    return {
+        session: attachUpdatedControlState(session, controlState),
+        response,
+    };
+}
+
+async function applyAskedUserCheckpointState(sessionId, session, toolEvents = []) {
+    const checkpoint = extractPendingUserCheckpoint(toolEvents);
+    if (!checkpoint) {
+        return session;
+    }
+
+    const controlState = await sessionStore.updateControlState(
+        sessionId,
+        buildUserCheckpointAskedPatch(session, checkpoint),
+    );
+
+    return attachUpdatedControlState(session, controlState);
+}
+
 function getHeaderValue(req, headerName) {
     const value = req.headers?.[headerName];
     if (Array.isArray(value)) {
@@ -491,8 +570,15 @@ router.post('/chat/completions', async (req, res, next) => {
             });
         }
 
+        const clientSurface = resolveClientSurface(req.body, session);
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
         const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
+        const answeredCheckpointResult = await applyAnsweredUserCheckpointState(sessionId, session, lastUserText);
+        session = answeredCheckpointResult.session;
+        const userCheckpointPolicy = buildUserCheckpointPolicy({
+            session,
+            clientSurface,
+        });
         const sshContext = resolveSshRequestContext(lastUserText, session);
         const effectiveInput = sshContext.effectivePrompt || lastUserText;
         const taskType = resolveConversationTaskType(req.body, session);
@@ -544,6 +630,19 @@ router.post('/chat/completions', async (req, res, next) => {
         effectiveRequestMetadata = {
             ...effectiveRequestMetadata,
             timingDecision: workloadPreflight.shouldSchedule ? 'future' : 'now',
+            userCheckpointPolicy: {
+                enabled: userCheckpointPolicy.enabled,
+                maxQuestions: userCheckpointPolicy.maxQuestions,
+                askedCount: userCheckpointPolicy.askedCount,
+                remaining: userCheckpointPolicy.remaining,
+                pending: userCheckpointPolicy.pending
+                    ? {
+                        id: userCheckpointPolicy.pending.id,
+                        title: userCheckpointPolicy.pending.title,
+                        question: userCheckpointPolicy.pending.question,
+                    }
+                    : null,
+            },
             ...(workloadPreflight.shouldSchedule && workloadPreflight.scenario
                 ? {
                     workloadPreflight: {
@@ -611,7 +710,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generation.artifact.id,
                     taskType,
-                    clientSurface: taskType,
+                    clientSurface: clientSurface || taskType,
                 },
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
@@ -692,9 +791,14 @@ router.post('/chat/completions', async (req, res, next) => {
         const artifactInstructions = effectiveOutputFormat
             ? artifactService.getGenerationInstructions(effectiveOutputFormat)
             : '';
+        const userCheckpointInstructions = buildUserCheckpointInstructions(userCheckpointPolicy);
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            buildContinuityInstructions(artifactInstructions),
+            buildContinuityInstructions(
+                [artifactInstructions, userCheckpointInstructions]
+                    .filter(Boolean)
+                    .join('\n\n'),
+            ),
             effectiveArtifactIds,
         );
         const input = effectiveMessages;
@@ -726,11 +830,13 @@ router.post('/chat/completions', async (req, res, next) => {
                     sessionId,
                     route: '/v1/chat/completions',
                     transport: 'http',
+                    clientSurface,
                     memoryService,
                     ownerId,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
+                    userCheckpointPolicy,
                 },
                 executionProfile: effectiveExecutionProfile,
                 enableAutomaticToolCalls: true,
@@ -792,6 +898,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
+                    session = await applyAskedUserCheckpointState(sessionId, session, toolEvents);
                     const artifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
@@ -855,11 +962,13 @@ router.post('/chat/completions', async (req, res, next) => {
                 sessionId,
                 route: '/v1/chat/completions',
                 transport: 'http',
+                clientSurface,
                 memoryService,
                 ownerId,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
+                userCheckpointPolicy,
             },
             executionProfile: effectiveExecutionProfile,
             enableAutomaticToolCalls: true,
@@ -904,11 +1013,13 @@ router.post('/chat/completions', async (req, res, next) => {
                     sessionId,
                     route: '/v1/chat/completions',
                     transport: 'http',
+                    clientSurface,
                     memoryService,
                     ownerId,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
+                    userCheckpointPolicy,
                 },
                 executionProfile: 'remote-build',
                 enableAutomaticToolCalls: true,
@@ -934,6 +1045,7 @@ router.post('/chat/completions', async (req, res, next) => {
         if (sshMetadata) {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
+        session = await applyAskedUserCheckpointState(sessionId, session, response?.metadata?.toolEvents || []);
         const artifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
@@ -1166,7 +1278,7 @@ router.post('/responses', async (req, res, next) => {
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generation.artifact.id,
                     taskType,
-                    clientSurface: taskType,
+                    clientSurface: clientSurface || taskType,
                 },
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});

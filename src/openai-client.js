@@ -11,6 +11,10 @@ const {
     PROMOTED_LOCAL_TOOL_IDS,
     getAllowedToolIdsForProfile,
 } = require('./tool-execution-profiles');
+const {
+    USER_CHECKPOINT_TOOL_ID,
+    buildUserCheckpointMessage,
+} = require('./user-checkpoints');
 
 let chatClient = null;
 
@@ -158,6 +162,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-mkdir',
     'agent-workload',
     'git-safe',
+    USER_CHECKPOINT_TOOL_ID,
     'ssh-execute',
     'remote-command',
     'k3s-deploy',
@@ -821,6 +826,14 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         return promptHasExplicitSshIntent(prompt)
             || (executionProfile === 'remote-build' && hasUsableSshDefaults());
     }
+
+    if (toolId === USER_CHECKPOINT_TOOL_ID) {
+        const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
+        return checkpointPolicy.enabled === true
+            && Number(checkpointPolicy.remaining || 0) > 0
+            && !checkpointPolicy.pending;
+    }
+
     return true;
 }
 
@@ -1703,9 +1716,18 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const internalArtifactReference = hasInternalArtifactReference(prompt);
     const shouldPreferRemoteWebsiteSource = Boolean(remoteToolId && remoteWebsiteUpdateIntent && !explicitLocalArtifact);
     const shouldSuppressWebFetchForRemoteWebsite = shouldPreferRemoteWebsiteSource && internalArtifactReference;
+    const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
+    const shouldOfferUserCheckpoint = availableToolIds.has(USER_CHECKPOINT_TOOL_ID)
+        && checkpointPolicy.enabled === true
+        && Number(checkpointPolicy.remaining || 0) > 0
+        && !checkpointPolicy.pending;
 
     if (hasWorkloadSetupIntent && availableToolIds.has('agent-workload')) {
         selectedIds.add('agent-workload');
+    }
+
+    if (shouldOfferUserCheckpoint) {
+        selectedIds.add(USER_CHECKPOINT_TOOL_ID);
     }
 
     if (hasWebResearchIntent) {
@@ -2353,10 +2375,28 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         return JSON.stringify(data, null, 2);
     }
 
+    if (toolId === USER_CHECKPOINT_TOOL_ID) {
+        if (!result.success) {
+            return `Checkpoint request failed: ${result.error || 'Unknown error'}`;
+        }
+
+        if (typeof result?.data?.message === 'string' && result.data.message.trim()) {
+            return result.data.message;
+        }
+
+        if (result?.data?.checkpoint) {
+            return buildUserCheckpointMessage(result.data.checkpoint);
+        }
+    }
+
     return JSON.stringify(result?.data || {}, null, 2);
 }
 
-function buildDirectToolResponse(toolEvent, model = null) {
+function buildDirectToolResponse(toolEvent, model = null, toolEvents = []) {
+    const normalizedToolEvents = Array.isArray(toolEvents) && toolEvents.length > 0
+        ? toolEvents
+        : [toolEvent];
+
     return {
         id: `resp_tool_${Date.now()}`,
         object: 'response',
@@ -2375,7 +2415,7 @@ function buildDirectToolResponse(toolEvent, model = null) {
             },
         ],
         _kimibuilt: {
-            toolEvents: [toolEvent],
+            toolEvents: normalizedToolEvents,
         },
     };
 }
@@ -2666,7 +2706,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
                 },
             }, toolContext);
             toolResults.push(result);
-            toolEvents.push({
+            const toolEvent = {
                 toolCall: normalizeToolCall({
                     id: toolCall.id || toolCall.call_id,
                     type: 'function',
@@ -2676,7 +2716,12 @@ async function runAutomaticToolLoopWithResponses(openai, {
                     },
                 }),
                 result,
-            });
+            };
+            toolEvents.push(toolEvent);
+
+            if (toolCall.name === USER_CHECKPOINT_TOOL_ID && result.success !== false) {
+                return buildDirectToolResponse(toolEvent, model, toolEvents);
+            }
         }
 
         previousResponseId = finalResponse.id;
@@ -2808,15 +2853,20 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
 
         for (const toolCall of toolCalls) {
             const result = await executeAutomaticToolCall(toolContext.toolManager, toolCall, toolContext);
-            toolEvents.push({
+            const toolEvent = {
                 toolCall: normalizeToolCall(toolCall),
                 result,
-            });
+            };
+            toolEvents.push(toolEvent);
             workingMessages.push({
                 role: 'tool',
                 tool_call_id: toolCall.id,
                 content: JSON.stringify(result),
             });
+
+            if (toolCall.function?.name === USER_CHECKPOINT_TOOL_ID && result.success !== false) {
+                return buildDirectToolResponse(toolEvent, model, toolEvents);
+            }
         }
     }
 

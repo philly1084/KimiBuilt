@@ -280,6 +280,20 @@ function createToolManager() {
                 },
             },
         }],
+        ['user-checkpoint', {
+            id: 'user-checkpoint',
+            name: 'User Checkpoint',
+            description: 'Create a structured multiple-choice checkpoint before major work.',
+            inputSchema: {
+                type: 'object',
+                required: ['question', 'options'],
+                properties: {
+                    title: { type: 'string' },
+                    question: { type: 'string' },
+                    options: { type: 'array' },
+                },
+            },
+        }],
     ]);
 
     const skills = new Map([
@@ -304,6 +318,7 @@ function createToolManager() {
         ['ssh-execute', { enabled: true, triggerPatterns: ['ssh', 'remote command'], requiresConfirmation: true }],
         ['remote-command', { enabled: true, triggerPatterns: ['remote command', 'execute remotely'], requiresConfirmation: true }],
         ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'], requiresConfirmation: true }],
+        ['user-checkpoint', { enabled: true, triggerPatterns: ['ask a checkpoint question'], requiresConfirmation: false }],
     ]);
 
     return {
@@ -707,6 +722,84 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toEqual(['web-search', 'file-mkdir']);
+    });
+
+    test('offers user-checkpoint alongside normal tools for web-chat when checkpoint budget remains', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Build a web chat survey flow before doing the larger implementation.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('user-checkpoint');
+    });
+
+    test('suppresses user-checkpoint when a checkpoint is already pending', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Refactor the web chat experience.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 1,
+                        pending: {
+                            id: 'checkpoint-1',
+                            question: 'Which direction?',
+                        },
+                    },
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 1,
+                        pending: {
+                            id: 'checkpoint-1',
+                            question: 'Which direction?',
+                        },
+                    },
+                },
+            },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('user-checkpoint');
     });
 
     test('selects git-safe and k3s-deploy for explicit repo and cluster operations', () => {
