@@ -499,58 +499,53 @@
         return `${API_BASE}${artifact.downloadUrl}?inline=1`;
     }
 
-    function renderGeneratedArtifacts(artifacts) {
-        const container = document.getElementById('messages-container');
-        if (!container) return;
+    function buildArtifactCardMarkup(artifact) {
+        const iconClass = getFileIconClass(artifact.filename);
+        const iconName = getFileIcon(artifact.filename);
+        const mermaidSource = String(artifact.format || '').toLowerCase() === 'mermaid'
+            ? getMermaidSourceFromArtifact(artifact)
+            : '';
+        const mermaidBaseName = getArtifactBaseName(artifact.filename);
+        const htmlPreviewUrl = isHtmlArtifact(artifact) ? getHtmlPreviewUrl(artifact) : '';
+        const mermaidPreview = mermaidSource
+            ? `
+                <div class="artifact-mermaid-preview">
+                    <div class="mermaid-render-surface" data-mermaid-source="${escapeHtmlAttr(mermaidSource)}" data-mermaid-filename="${escapeHtmlAttr(mermaidBaseName)}">
+                        <div class="mermaid-placeholder">Rendering diagram...</div>
+                    </div>
+                </div>
+            `
+            : '';
+        const htmlPreview = htmlPreviewUrl
+            ? `
+                <div class="artifact-html-preview">
+                    <iframe src="${escapeHtmlAttr(htmlPreviewUrl)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+                </div>
+            `
+            : '';
+        const mermaidActions = mermaidSource
+            ? `
+                <button onclick="uiHelpers.downloadMermaidSource(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.mmd">
+                    <i data-lucide="file-code" class="w-4 h-4"></i>
+                    .mmd
+                </button>
+                <button onclick="uiHelpers.downloadMermaidPdf(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.pdf">
+                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                    PDF
+                </button>
+            `
+            : '';
+        const htmlActions = htmlPreviewUrl
+            ? `
+                <button onclick="artifactManager.openArtifactPreview('${artifact.id}')">
+                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                    Preview
+                </button>
+            `
+            : '';
 
-        artifacts.forEach(artifact => {
-            const card = document.createElement('div');
-            const iconClass = getFileIconClass(artifact.filename);
-            const iconName = getFileIcon(artifact.filename);
-            const mermaidSource = String(artifact.format || '').toLowerCase() === 'mermaid'
-                ? getMermaidSourceFromArtifact(artifact)
-                : '';
-            const mermaidBaseName = getArtifactBaseName(artifact.filename);
-            const htmlPreviewUrl = isHtmlArtifact(artifact) ? getHtmlPreviewUrl(artifact) : '';
-            const mermaidPreview = mermaidSource
-                ? `
-                    <div class="artifact-mermaid-preview">
-                        <div class="mermaid-render-surface" data-mermaid-source="${escapeHtmlAttr(mermaidSource)}" data-mermaid-filename="${escapeHtmlAttr(mermaidBaseName)}">
-                            <div class="mermaid-placeholder">Rendering diagram...</div>
-                        </div>
-                    </div>
-                `
-                : '';
-            const htmlPreview = htmlPreviewUrl
-                ? `
-                    <div class="artifact-html-preview">
-                        <iframe src="${escapeHtmlAttr(htmlPreviewUrl)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals"></iframe>
-                    </div>
-                `
-                : '';
-            const mermaidActions = mermaidSource
-                ? `
-                    <button onclick="uiHelpers.downloadMermaidSource(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.mmd">
-                        <i data-lucide="file-code" class="w-4 h-4"></i>
-                        .mmd
-                    </button>
-                    <button onclick="uiHelpers.downloadMermaidPdf(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.pdf">
-                        <i data-lucide="file-text" class="w-4 h-4"></i>
-                        PDF
-                    </button>
-                `
-                : '';
-            const htmlActions = htmlPreviewUrl
-                ? `
-                    <button onclick="artifactManager.openArtifactPreview('${artifact.id}')">
-                        <i data-lucide="external-link" class="w-4 h-4"></i>
-                        Preview
-                    </button>
-                `
-                : '';
-            
-            card.className = 'artifact-generated-card';
-            card.innerHTML = `
+        return `
+            <div class="artifact-generated-card">
                 <div class="file-icon ${iconClass}">
                     <i data-lucide="${iconName}" class="w-5 h-5"></i>
                 </div>
@@ -572,19 +567,57 @@
                         Add to Context
                     </button>
                 </div>
-            `;
+            </div>
+        `;
+    }
+
+    function buildArtifactGalleryMarkup(artifacts = []) {
+        return (Array.isArray(artifacts) ? artifacts : [])
+            .map((artifact) => buildArtifactCardMarkup(artifact))
+            .join('');
+    }
+
+    function buildArtifactGalleryMessage(artifacts = [], parentMessageId = '') {
+        const files = (Array.isArray(artifacts) ? artifacts : []).filter((artifact) => artifact?.id);
+        if (files.length === 0) {
+            return null;
+        }
+
+        return {
+            id: parentMessageId ? `${parentMessageId}-artifacts` : uiHelpers.generateMessageId(),
+            parentMessageId: parentMessageId || '',
+            role: 'assistant',
+            type: 'artifact-gallery',
+            content: buildArtifactSummary(files) || `Generated ${files.length} file${files.length === 1 ? '' : 's'}.`,
+            artifacts: files,
+            excludeFromTranscript: true,
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    function renderGeneratedArtifacts(artifacts) {
+        const container = document.getElementById('messages-container');
+        if (!container) return;
+
+        (Array.isArray(artifacts) ? artifacts : []).forEach((artifact) => {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = buildArtifactCardMarkup(artifact);
+            const card = wrapper.firstElementChild;
+            if (!card) {
+                return;
+            }
+
             container.appendChild(card);
-            
-            // Also add to file manager
+
             if (window.fileManager) {
                 window.fileManager.addFile(artifact);
             }
 
             window.uiHelpers?.renderMermaidDiagrams?.(card);
         });
-        
+
         container.scrollTop = container.scrollHeight;
-        
+
         if (typeof lucide !== 'undefined') {
             lucide.createIcons();
         }
@@ -824,20 +857,30 @@
         window.chatApp.handleDone = function() {
             if (originalHandleDone) originalHandleDone();
             if (state.lastDone?.artifacts?.length) {
-                const artifactSummary = buildArtifactSummary(state.lastDone.artifacts);
-                if (artifactSummary && window.sessionManager?.currentSessionId) {
+                if (window.sessionManager?.currentSessionId) {
                     const sessionId = window.sessionManager.currentSessionId;
                     const messages = window.sessionManager.getMessages(sessionId) || [];
                     const lastMessage = messages[messages.length - 1];
                     if (lastMessage && lastMessage.role === 'assistant') {
-                        lastMessage.displayContent = artifactSummary;
+                        const artifactSummary = buildArtifactSummary(state.lastDone.artifacts);
+                        if (artifactSummary) {
+                            lastMessage.displayContent = artifactSummary;
+                        }
                         window.sessionManager.saveToStorage?.();
                         if (lastMessage.id && window.uiHelpers?.updateMessageContent) {
-                            window.uiHelpers.updateMessageContent(lastMessage.id, artifactSummary, false);
+                            window.uiHelpers.updateMessageContent(lastMessage.id, lastMessage.displayContent || lastMessage.content || '', false);
+                        }
+
+                        const galleryMessage = buildArtifactGalleryMessage(state.lastDone.artifacts, lastMessage.id || '');
+                        if (galleryMessage) {
+                            const savedGalleryMessage = window.sessionManager.upsertMessage?.(sessionId, galleryMessage)
+                                || window.sessionManager.addMessage?.(sessionId, galleryMessage);
+                            if (savedGalleryMessage) {
+                                window.chatApp.renderOrReplaceMessage?.(savedGalleryMessage);
+                            }
                         }
                     }
                 }
-                renderGeneratedArtifacts(state.lastDone.artifacts);
                 state.artifacts = [...state.lastDone.artifacts, ...state.artifacts.filter((artifact) => !state.lastDone.artifacts.find((next) => next.id === artifact.id))];
                 state.selectedArtifactIds = [];
                 renderSelectedChips();
@@ -1068,6 +1111,8 @@
             const file = new File([blob], filename, { type: mimeType || blob.type || 'application/octet-stream' });
             await uploadArtifact(file);
         },
+        buildGalleryMarkup: buildArtifactGalleryMarkup,
+        buildGalleryMessage: buildArtifactGalleryMessage,
         refresh: fetchArtifacts,
         getSelectedIds: () => [...state.selectedArtifactIds],
         clearSelection: () => {

@@ -33,6 +33,7 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { getSessionControlState } = require('../runtime-control-state');
+const { buildWebChatSessionMessages } = require('../web-chat-message-state');
 const {
     buildUserCheckpointAnsweredPatch,
     buildUserCheckpointAskedPatch,
@@ -713,10 +714,12 @@ router.post('/chat/completions', async (req, res, next) => {
                 },
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: lastUserText },
-                { role: 'assistant', content: generation.assistantMessage },
-            ]);
+            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                userText: lastUserText,
+                assistantText: generation.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
+            }));
             await updateSessionProjectMemory(sessionId, {
                 userText: lastUserText,
                 assistantText: generation.assistantMessage,
@@ -888,10 +891,6 @@ router.post('/chat/completions', async (req, res, next) => {
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
                         memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
-                        await sessionStore.appendMessages(sessionId, [
-                            { role: 'user', content: lastUserText },
-                            { role: 'assistant', content: fullText },
-                        ]);
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -917,6 +916,14 @@ router.post('/chat/completions', async (req, res, next) => {
                         toolEvents,
                         artifacts,
                     }, ownerId);
+                    if (!execution.handledPersistence) {
+                        await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                            userText: lastUserText,
+                            assistantText: fullText,
+                            toolEvents,
+                            artifacts,
+                        }));
+                    }
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: resolvedCompletion.response.id,
                         output: fullText,
@@ -1035,10 +1042,6 @@ router.post('/chat/completions', async (req, res, next) => {
         }
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: lastUserText },
-                { role: 'assistant', content: outputText },
-            ]);
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -1064,6 +1067,14 @@ router.post('/chat/completions', async (req, res, next) => {
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
         }, ownerId);
+        if (!execution.handledPersistence) {
+            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                userText: lastUserText,
+                assistantText: outputText,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifacts,
+            }));
+        }
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,
@@ -1279,10 +1290,12 @@ router.post('/responses', async (req, res, next) => {
                 },
             });
             memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: userInput },
-                { role: 'assistant', content: generation.assistantMessage },
-            ]);
+            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                userText: userInput,
+                assistantText: generation.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
+            }));
             await updateSessionProjectMemory(sessionId, {
                 userText: userInput,
                 assistantText: generation.assistantMessage,
@@ -1428,10 +1441,6 @@ router.post('/responses', async (req, res, next) => {
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
                         memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
-                        await sessionStore.appendMessages(sessionId, [
-                            { role: 'user', content: userInput },
-                            { role: 'assistant', content: fullText },
-                        ]);
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -1456,6 +1465,14 @@ router.post('/responses', async (req, res, next) => {
                         toolEvents: resolvedCompletion.response?.metadata?.toolEvents || [],
                         artifacts,
                     }, ownerId);
+                    if (!execution.handledPersistence) {
+                        await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                            userText: userInput,
+                            assistantText: fullText,
+                            toolEvents: resolvedCompletion.response?.metadata?.toolEvents || [],
+                            artifacts,
+                        }));
+                    }
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: resolvedCompletion.response.id,
                         output: fullText,
@@ -1559,10 +1576,6 @@ router.post('/responses', async (req, res, next) => {
         }
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: userInput },
-                { role: 'assistant', content: outputText },
-            ]);
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -1587,6 +1600,14 @@ router.post('/responses', async (req, res, next) => {
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
         }, ownerId);
+        if (!execution.handledPersistence) {
+            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                userText: userInput,
+                assistantText: outputText,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifacts,
+            }));
+        }
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,

@@ -27,6 +27,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
+const { buildWebChatSessionMessages } = require('../web-chat-message-state');
 const {
     broadcastToAdmins,
     broadcastToSession,
@@ -333,10 +334,12 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 },
             });
             memoryService.rememberResponse(session.id, generation.assistantMessage, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(session.id, [
-                { role: 'user', content: message },
-                { role: 'assistant', content: generation.assistantMessage },
-            ]);
+            await sessionStore.appendMessages(session.id, buildWebChatSessionMessages({
+                userText: message,
+                assistantText: generation.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
+            }));
             await updateSessionProjectMemory(session.id, {
                 userText: message,
                 assistantText: generation.assistantMessage,
@@ -422,10 +425,6 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 if (!execution.handledPersistence) {
                     await sessionStore.recordResponse(session.id, event.response.id);
                     memoryService.rememberResponse(session.id, fullText, ownerId ? { ownerId } : {});
-                    await sessionStore.appendMessages(session.id, [
-                        { role: 'user', content: message },
-                        { role: 'assistant', content: fullText },
-                    ]);
                 }
                 const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
                 if (sshMetadata) {
@@ -451,6 +450,14 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     toolEvents: event.response?.metadata?.toolEvents || [],
                     artifacts,
                 }, ownerId);
+                if (!execution.handledPersistence) {
+                    await sessionStore.appendMessages(session.id, buildWebChatSessionMessages({
+                        userText: message,
+                        assistantText: fullText,
+                        toolEvents: event.response?.metadata?.toolEvents || [],
+                        artifacts,
+                    }));
+                }
                 completeRuntimeTask(runtimeTask?.id, {
                     responseId: event.response.id,
                     output: fullText,

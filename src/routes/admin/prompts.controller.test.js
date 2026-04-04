@@ -1,0 +1,150 @@
+jest.mock('fs', () => ({
+  statSync: jest.fn(() => ({
+    mtime: new Date('2026-04-04T00:00:00.000Z'),
+  })),
+}));
+
+jest.mock('../../agent-soul', () => ({
+  getEffectiveSoulConfig: jest.fn((settings = {}) => ({
+    enabled: settings.enabled !== false,
+    displayName: settings.displayName || 'Agent Soul',
+    content: '# Soul\nCurrent soul content\n',
+    absoluteFilePath: 'C:/Users/phill/KimiBuilt/soul.md',
+    updatedAt: '2026-04-04T00:00:00.000Z',
+  })),
+  writeSoulFile: jest.fn(),
+}));
+
+jest.mock('../../artifacts/artifact-service', () => ({
+  artifactService: {
+    getArtifactPlanInstructions: jest.fn(() => 'plan prompt'),
+    getArtifactExpansionInstructions: jest.fn(() => 'expand prompt'),
+    getArtifactCompositionInstructions: jest.fn(() => 'compose prompt'),
+  },
+}));
+
+jest.mock('../../runtime-prompts', () => ({
+  buildContinuityInstructions: jest.fn(() => 'continuity prompt'),
+}));
+
+jest.mock('./settings.controller', () => ({
+  settings: {
+    personality: {
+      enabled: true,
+      displayName: 'Agent Soul',
+    },
+  },
+  deepMerge: jest.fn((target = {}, source = {}) => {
+    const result = { ...target };
+    Object.keys(source || {}).forEach((key) => {
+      const sourceValue = source[key];
+      if (sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)) {
+        result[key] = {
+          ...(target[key] || {}),
+          ...sourceValue,
+        };
+      } else {
+        result[key] = sourceValue;
+      }
+    });
+    return result;
+  }),
+  saveSettings: jest.fn().mockResolvedValue(),
+}));
+
+const soulHelpers = require('../../agent-soul');
+const settingsController = require('./settings.controller');
+const promptsController = require('./prompts.controller');
+
+describe('admin prompts controller', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    settingsController.settings = {
+      personality: {
+        enabled: true,
+        displayName: 'Agent Soul',
+      },
+    };
+  });
+
+  test('marks the agent soul surface as editable', async () => {
+    const res = {
+      json: jest.fn(),
+    };
+
+    await promptsController.getAll({ query: {} }, res);
+
+    const payload = res.json.mock.calls[0][0];
+    const soulPrompt = payload.data.find((entry) => entry.id === 'agent-soul');
+    const continuityPrompt = payload.data.find((entry) => entry.id === 'chat-continuity');
+
+    expect(payload.readonly).toBe(false);
+    expect(soulPrompt).toEqual(expect.objectContaining({
+      id: 'agent-soul',
+      name: 'Agent Soul',
+      editable: true,
+    }));
+    expect(continuityPrompt.editable).toBe(false);
+  });
+
+  test('updates the agent soul surface and persists the renamed display name', async () => {
+    const req = {
+      params: { id: 'agent-soul' },
+      body: {
+        name: 'Operations Soul',
+        content: '# Soul\nUpdated from prompts tab\n',
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await promptsController.update(req, res);
+
+    expect(soulHelpers.writeSoulFile).toHaveBeenCalledWith('# Soul\nUpdated from prompts tab\n');
+    expect(settingsController.deepMerge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        personality: expect.objectContaining({
+          enabled: true,
+          displayName: 'Agent Soul',
+        }),
+      }),
+      {
+        personality: {
+          displayName: 'Operations Soul',
+        },
+      },
+    );
+    expect(settingsController.saveSettings).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      readonly: false,
+      data: expect.objectContaining({
+        id: 'agent-soul',
+        name: 'Operations Soul',
+        editable: true,
+      }),
+    }));
+  });
+
+  test('rejects edits to code-backed prompt surfaces', async () => {
+    const req = {
+      params: { id: 'chat-continuity' },
+      body: {
+        name: 'Chat Continuity Instructions',
+        content: 'override',
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await promptsController.update(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(410);
+    expect(soulHelpers.writeSoulFile).not.toHaveBeenCalled();
+    expect(settingsController.saveSettings).not.toHaveBeenCalled();
+  });
+});

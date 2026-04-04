@@ -674,6 +674,10 @@ class UIHelpers {
             return this.renderImageSelectionMessage(message);
         }
 
+        if (message.type === 'artifact-gallery') {
+            return this.renderArtifactGalleryMessage(message);
+        }
+
         // Handle image messages
         if (message.type === 'image' || message.imageUrl) {
             return this.renderImageMessage(message);
@@ -1280,6 +1284,54 @@ class UIHelpers {
                 </div>
             </div>
         `;
+
+        return messageEl;
+    }
+
+    renderArtifactGalleryMessage(message) {
+        const messageId = message.id || this.generateMessageId();
+        const time = this.formatTime(message.timestamp);
+        const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
+        const artifacts = Array.isArray(message.artifacts) ? message.artifacts : [];
+        const galleryMarkup = window.artifactManager?.buildGalleryMarkup?.(artifacts) || '';
+
+        const messageEl = document.createElement('div');
+        messageEl.className = 'message assistant';
+        messageEl.id = messageId;
+        messageEl.dataset.messageId = messageId;
+        messageEl.setAttribute('role', 'article');
+        messageEl.setAttribute('aria-label', 'Generated files');
+
+        messageEl.innerHTML = `
+            <div class="message-avatar assistant" aria-hidden="true">
+                <i data-lucide="files" class="w-4 h-4"></i>
+            </div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-author">Generated Files</span>
+                    <span class="message-time" title="${fullTimestamp}">${time}</span>
+                </div>
+                <div class="message-selection-panel">
+                    <div class="selection-panel-info">
+                        <div class="icon" aria-hidden="true">
+                            <i data-lucide="files" class="w-3.5 h-3.5"></i>
+                        </div>
+                        <span class="text">Files ready</span>
+                        <span class="meta">${artifacts.length} item${artifacts.length === 1 ? '' : 's'}</span>
+                    </div>
+                    ${galleryMarkup || `
+                        <div class="unsplash-search-empty">
+                            <i data-lucide="file-x" class="w-8 h-8" aria-hidden="true"></i>
+                            <p>No generated files are available.</p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+
+        if (messageEl.querySelector('.artifact-generated-card')) {
+            this.renderMermaidDiagrams(messageEl);
+        }
 
         return messageEl;
     }

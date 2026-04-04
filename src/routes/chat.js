@@ -28,6 +28,7 @@ const {
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
+const { buildWebChatSessionMessages } = require('../web-chat-message-state');
 
 const router = Router();
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
@@ -271,10 +272,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 },
             });
             memoryService.rememberResponse(sessionId, generationArtifacts.assistantMessage, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: message },
-                { role: 'assistant', content: generationArtifacts.assistantMessage },
-            ]);
+            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                userText: message,
+                assistantText: generationArtifacts.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifacts: responseArtifacts,
+            }));
             await updateSessionProjectMemory(sessionId, {
                 userText: message,
                 assistantText: generationArtifacts.assistantMessage,
@@ -382,10 +385,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
                         memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
-                        await sessionStore.appendMessages(sessionId, [
-                            { role: 'user', content: message },
-                            { role: 'assistant', content: fullText },
-                        ]);
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -411,6 +410,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         toolEvents,
                         artifacts,
                     }, ownerId);
+                    if (!execution.handledPersistence) {
+                        await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                            userText: message,
+                            assistantText: fullText,
+                            toolEvents,
+                            artifacts,
+                        }));
+                    }
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: event.response.id,
                         output: fullText,
@@ -462,10 +469,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
             memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
-            await sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: message },
-                { role: 'assistant', content: outputText },
-            ]);
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -491,6 +494,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
         }, ownerId);
+        if (!execution.handledPersistence) {
+            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
+                userText: message,
+                assistantText: outputText,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifacts,
+            }));
+        }
 
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,

@@ -131,6 +131,56 @@ router.get('/:id/messages', async (req, res, next) => {
     }
 });
 
+router.post('/:id/messages', async (req, res, next) => {
+    try {
+        const session = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
+
+        const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+        if (messages.length === 0) {
+            return res.status(400).json({ error: { message: 'messages[] is required' } });
+        }
+
+        await sessionStore.appendMessages(req.params.id, messages);
+        await sessionStore.update(req.params.id, {});
+        res.status(204).end();
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.put('/:id/messages/:messageId', async (req, res, next) => {
+    try {
+        const session = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));
+        if (!session) {
+            return res.status(404).json({ error: { message: 'Session not found' } });
+        }
+
+        const message = req.body?.message && typeof req.body.message === 'object'
+            ? req.body.message
+            : null;
+        if (!message) {
+            return res.status(400).json({ error: { message: 'message is required' } });
+        }
+
+        const savedMessage = await sessionStore.upsertMessage(req.params.id, {
+            ...message,
+            id: req.params.messageId,
+        });
+
+        if (!savedMessage) {
+            return res.status(400).json({ error: { message: 'Unable to persist message' } });
+        }
+
+        await sessionStore.update(req.params.id, {});
+        res.json({ sessionId: req.params.id, message: savedMessage });
+    } catch (err) {
+        next(err);
+    }
+});
+
 router.get('/:id', async (req, res, next) => {
     try {
         const session = await sessionStore.getOwned(req.params.id, getRequestOwnerId(req));

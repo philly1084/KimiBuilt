@@ -1353,11 +1353,13 @@ class Dashboard {
         promptEditor.readOnly = readOnly;
         if (savePromptBtn) {
             savePromptBtn.disabled = readOnly;
-            savePromptBtn.title = readOnly ? 'Live prompt surfaces are read-only snapshots from application code.' : '';
+            savePromptBtn.title = readOnly
+                ? 'This prompt surface is generated from application code and cannot be edited here.'
+                : 'Save changes to this managed prompt surface.';
         }
         if (newPromptBtn) {
             newPromptBtn.disabled = true;
-            newPromptBtn.title = 'The dashboard now shows live prompt surfaces instead of editable prompt slots.';
+            newPromptBtn.title = 'Prompt surfaces are fixed slots. Select a managed surface to edit it.';
         }
         
         // Update active state in list

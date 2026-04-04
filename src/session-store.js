@@ -25,6 +25,109 @@ class SessionStore {
         this.fallbackLoaded = false;
     }
 
+    sanitizeMessageMetadataValue(value, depth = 0) {
+        if (depth > 8 || value == null) {
+            return null;
+        }
+
+        if (typeof value === 'string') {
+            return stripNullCharacters(value);
+        }
+
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return value;
+        }
+
+        if (Array.isArray(value)) {
+            return value
+                .map((entry) => this.sanitizeMessageMetadataValue(entry, depth + 1))
+                .filter((entry) => entry != null);
+        }
+
+        if (typeof value !== 'object') {
+            return null;
+        }
+
+        return Object.fromEntries(
+            Object.entries(value)
+                .map(([key, entry]) => [key, this.sanitizeMessageMetadataValue(entry, depth + 1)])
+                .filter(([, entry]) => entry != null),
+        );
+    }
+
+    normalizeMessageMetadata(metadata = {}) {
+        if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+            return {};
+        }
+
+        const sanitized = this.sanitizeMessageMetadataValue(metadata);
+        return sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+            ? sanitized
+            : {};
+    }
+
+    extractMessageMetadata(message = {}) {
+        if (!message || typeof message !== 'object') {
+            return {};
+        }
+
+        const metadata = message.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata)
+            ? { ...message.metadata }
+            : {};
+
+        Object.entries(message).forEach(([key, value]) => {
+            if (['id', 'role', 'content', 'timestamp', 'metadata'].includes(key)) {
+                return;
+            }
+
+            metadata[key] = value;
+        });
+
+        return this.normalizeMessageMetadata(metadata);
+    }
+
+    normalizeStoredMessages(messages = []) {
+        if (!Array.isArray(messages)) {
+            return [];
+        }
+
+        return messages
+            .map((entry) => {
+                const role = ['user', 'assistant', 'system', 'tool'].includes(entry?.role)
+                    ? entry.role
+                    : null;
+                const content = stripNullCharacters(entry?.content || '').trim();
+                const timestamp = entry?.timestamp || new Date().toISOString();
+                const metadata = this.extractMessageMetadata(entry);
+
+                if (!role || !content) {
+                    return null;
+                }
+
+                return {
+                    id: entry?.id || uuidv4(),
+                    role,
+                    content,
+                    timestamp,
+                    metadata,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    toClientMessage(message = {}) {
+        const metadata = this.normalizeMessageMetadata(message?.metadata || {});
+
+        return {
+            id: message?.id || uuidv4(),
+            role: message?.role,
+            content: message?.content,
+            timestamp: message?.timestamp || new Date().toISOString(),
+            ...metadata,
+            metadata,
+        };
+    }
+
     trimRecentMessageContent(content = '') {
         const value = stripNullCharacters(content).trim();
         if (!value) {
@@ -40,29 +143,13 @@ class SessionStore {
     }
 
     normalizeTranscriptMessages(messages = []) {
-        if (!Array.isArray(messages)) {
-            return [];
-        }
-
-        return messages
-            .map((entry) => {
-                const role = ['user', 'assistant', 'system', 'tool'].includes(entry?.role)
-                    ? entry.role
-                    : null;
-                const content = stripNullCharacters(entry?.content || '').trim();
-                const timestamp = entry?.timestamp || new Date().toISOString();
-
-                if (!role || !content) {
-                    return null;
-                }
-
-                return {
-                    role,
-                    content,
-                    timestamp,
-                };
-            })
-            .filter(Boolean);
+        return this.normalizeStoredMessages(messages)
+            .filter((entry) => entry?.metadata?.excludeFromTranscript !== true)
+            .map((entry) => ({
+                role: entry.role,
+                content: entry.content,
+                timestamp: entry.timestamp,
+            }));
     }
 
     normalizeRecentMessages(messages = []) {
@@ -230,7 +317,7 @@ class SessionStore {
 
                         return [
                             sessionId,
-                            this.normalizeTranscriptMessages(entry?.[1] || []),
+                            this.normalizeStoredMessages(entry?.[1] || []),
                         ];
                     })
                     .filter(Boolean),
@@ -740,9 +827,10 @@ class SessionStore {
         if (this.usePostgres) {
             const result = await postgres.query(
                 `
-                    SELECT role, content, created_at
+                    SELECT id, role, content, created_at, metadata
                     FROM session_messages
                     WHERE session_id = $1
+                      AND COALESCE(metadata->>'excludeFromTranscript', 'false') <> 'true'
                     ORDER BY created_at DESC
                     LIMIT $2
                 `,
@@ -750,7 +838,11 @@ class SessionStore {
             );
 
             return result.rows
-                .map((row) => this.normalizeRecentMessageRow(row))
+                .map((row) => this.normalizeRecentMessageRow({
+                    role: row?.role,
+                    content: row?.content,
+                    created_at: row?.created_at,
+                }))
                 .filter(Boolean)
                 .reverse();
         }
@@ -762,8 +854,8 @@ class SessionStore {
     async appendMessages(id, messages = []) {
         await this.initialize();
 
-        const transcriptMessages = this.normalizeTranscriptMessages(messages);
-        if (transcriptMessages.length === 0) {
+        const storedMessages = this.normalizeStoredMessages(messages);
+        if (storedMessages.length === 0) {
             return this.get(id);
         }
 
@@ -773,18 +865,19 @@ class SessionStore {
                 return null;
             }
 
-            for (const message of transcriptMessages) {
+            for (const message of storedMessages) {
                 await postgres.query(
                     `
-                        INSERT INTO session_messages (id, session_id, role, content, created_at)
-                        VALUES ($1, $2, $3, $4, $5)
+                        INSERT INTO session_messages (id, session_id, role, content, created_at, metadata)
+                        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                     `,
                     [
-                        uuidv4(),
+                        message.id,
                         id,
                         message.role,
                         message.content,
                         message.timestamp,
+                        JSON.stringify(message.metadata || {}),
                     ],
                 );
             }
@@ -798,7 +891,7 @@ class SessionStore {
         }
 
         const existingMessages = this.sessionMessages.get(id) || [];
-        const nextMessages = [...existingMessages, ...transcriptMessages];
+        const nextMessages = [...existingMessages, ...storedMessages];
         this.sessionMessages.set(id, nextMessages);
 
         const updated = await this.update(id, {
@@ -808,6 +901,86 @@ class SessionStore {
         });
         await this.persistFallbackState();
         return updated;
+    }
+
+    async upsertMessage(id, message = {}) {
+        await this.initialize();
+
+        const storedMessage = this.normalizeStoredMessages([message])[0] || null;
+        if (!storedMessage) {
+            return null;
+        }
+
+        const current = await this.get(id);
+        if (!current) {
+            return null;
+        }
+
+        if (this.usePostgres) {
+            const result = await postgres.query(
+                `
+                    INSERT INTO session_messages (id, session_id, role, content, created_at, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                    ON CONFLICT (id) DO UPDATE
+                    SET role = EXCLUDED.role,
+                        content = EXCLUDED.content,
+                        created_at = EXCLUDED.created_at,
+                        metadata = EXCLUDED.metadata
+                    WHERE session_messages.session_id = EXCLUDED.session_id
+                    RETURNING id, role, content, created_at, metadata
+                `,
+                [
+                    storedMessage.id,
+                    id,
+                    storedMessage.role,
+                    storedMessage.content,
+                    storedMessage.timestamp,
+                    JSON.stringify(storedMessage.metadata || {}),
+                ],
+            );
+
+            if (result.rowCount === 0) {
+                return null;
+            }
+
+            return this.toClientMessage({
+                id: result.rows[0].id,
+                role: result.rows[0].role,
+                content: result.rows[0].content,
+                timestamp: result.rows[0].created_at instanceof Date
+                    ? result.rows[0].created_at.toISOString()
+                    : result.rows[0].created_at,
+                metadata: result.rows[0].metadata || {},
+            });
+        }
+
+        const existingMessages = this.sessionMessages.get(id) || [];
+        const index = existingMessages.findIndex((entry) => entry.id === storedMessage.id);
+        const nextMessages = [...existingMessages];
+
+        if (index >= 0) {
+            nextMessages[index] = {
+                ...nextMessages[index],
+                ...storedMessage,
+                metadata: this.normalizeMessageMetadata({
+                    ...(nextMessages[index]?.metadata || {}),
+                    ...(storedMessage.metadata || {}),
+                }),
+            };
+        } else {
+            nextMessages.push(storedMessage);
+        }
+
+        this.sessionMessages.set(id, nextMessages);
+
+        await this.update(id, {
+            metadata: {
+                recentMessages: this.normalizeRecentMessages(nextMessages),
+            },
+        });
+        await this.persistFallbackState();
+
+        return this.toClientMessage(index >= 0 ? nextMessages[index] : storedMessage);
     }
 
     async recordResponse(id, responseId) {
@@ -910,7 +1083,7 @@ class SessionStore {
         if (this.usePostgres) {
             const result = await postgres.query(
                 `
-                    SELECT role, content, created_at
+                    SELECT id, role, content, created_at, metadata
                     FROM session_messages
                     WHERE session_id = $1
                     ORDER BY created_at DESC
@@ -920,17 +1093,21 @@ class SessionStore {
             );
 
             return result.rows
-                .map((row) => ({
+                .map((row) => this.toClientMessage({
+                    id: row?.id,
                     role: ['user', 'assistant', 'system', 'tool'].includes(row?.role) ? row.role : null,
                     content: stripNullCharacters(row?.content || '').trim(),
                     timestamp: row?.created_at instanceof Date ? row.created_at.toISOString() : row?.created_at,
+                    metadata: row?.metadata || {},
                 }))
                 .filter((row) => row.role && row.content)
                 .reverse();
         }
 
         const transcript = this.sessionMessages.get(session.id) || [];
-        return transcript.slice(-normalizedLimit);
+        return transcript
+            .slice(-normalizedLimit)
+            .map((message) => this.toClientMessage(message));
     }
 
     async healthCheck() {

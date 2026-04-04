@@ -185,6 +185,41 @@ describe('SessionStore recent message continuity', () => {
         }
     });
 
+    test('keeps ui-only rich messages in session history while excluding them from recent transcript continuity', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' }, 'rich-message-session');
+
+        await store.appendMessages(session.id, [
+            { role: 'user', content: 'Build me a report' },
+            { role: 'assistant', content: 'Created the report.' },
+            {
+                id: 'artifact-card-1',
+                role: 'assistant',
+                type: 'artifact-gallery',
+                content: 'Created report.pdf. Use Download below.',
+                artifacts: [{ id: 'artifact-1', filename: 'report.pdf', format: 'pdf' }],
+                excludeFromTranscript: true,
+            },
+        ]);
+
+        const listed = await store.listMessages(session.id, 10);
+        const recent = await store.getRecentMessages(session.id, 10);
+
+        expect(listed).toHaveLength(3);
+        expect(listed[2]).toEqual(expect.objectContaining({
+            id: 'artifact-card-1',
+            type: 'artifact-gallery',
+            artifacts: [{ id: 'artifact-1', filename: 'report.pdf', format: 'pdf' }],
+            excludeFromTranscript: true,
+        }));
+        expect(recent).toEqual([
+            expect.objectContaining({ role: 'user', content: 'Build me a report' }),
+            expect.objectContaining({ role: 'assistant', content: 'Created the report.' }),
+        ]);
+    });
+
     test('persists fallback active session state across store instances', async () => {
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-session-state-'));
         const storagePath = path.join(tempDir, 'sessions.json');

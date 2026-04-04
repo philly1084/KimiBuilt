@@ -2041,14 +2041,17 @@ class ChatApp {
         const userMessage = {
             role: 'user',
             content: `/unsplash ${query}`,
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         };
         
-        sessionManager.addMessage(sessionId, userMessage);
+        const savedUserMessage = sessionManager.addMessage(sessionId, userMessage);
         
-        const userMessageEl = uiHelpers.renderMessage(userMessage);
+        const userMessageEl = uiHelpers.renderMessage(savedUserMessage);
         this.messagesContainer.appendChild(userMessageEl);
         uiHelpers.scrollToBottom();
+        void sessionManager.syncMessagesToBackend(sessionId, [savedUserMessage]);
         
         // Create placeholder for search results
         const searchMessageId = uiHelpers.generateMessageId();
@@ -2064,15 +2067,18 @@ class ChatApp {
             loadingText: 'Searching Unsplash...',
             currentPage: 1,
             perPage: 9,
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         };
         
-        sessionManager.addMessage(sessionId, searchMessage);
+        const savedSearchMessage = sessionManager.addMessage(sessionId, searchMessage);
         
-        const searchMessageEl = uiHelpers.renderUnsplashSearchMessage(searchMessage);
+        const searchMessageEl = uiHelpers.renderUnsplashSearchMessage(savedSearchMessage);
         this.messagesContainer.appendChild(searchMessageEl);
         uiHelpers.reinitializeIcons(searchMessageEl);
         uiHelpers.scrollToBottom();
+        void sessionManager.syncMessageToBackend(sessionId, savedSearchMessage);
         
         this.isGeneratingImage = true;
         
@@ -2092,10 +2098,15 @@ class ChatApp {
                 totalPages,
                 currentPage: 1,
                 perPage: 9,
+                clientOnly: true,
+                excludeFromTranscript: true,
                 timestamp: new Date().toISOString()
             });
 
             this.renderOrReplaceMessage(nextMessage || searchMessage);
+            if (nextMessage) {
+                void sessionManager.syncMessageToBackend(sessionId, nextMessage);
+            }
             
             uiHelpers.showToast(`Found ${(result.results || []).length} images on Unsplash`, 'success');
             
@@ -2112,10 +2123,15 @@ class ChatApp {
                 currentPage: 1,
                 perPage: 9,
                 error: error.message || 'Failed to search Unsplash',
+                clientOnly: true,
+                excludeFromTranscript: true,
                 timestamp: new Date().toISOString()
             });
 
             this.renderOrReplaceMessage(failedMessage || searchMessage);
+            if (failedMessage) {
+                void sessionManager.syncMessageToBackend(sessionId, failedMessage);
+            }
             
             uiHelpers.showToast(error.message || 'Failed to search Unsplash', 'error');
         } finally {
@@ -2147,21 +2163,25 @@ class ChatApp {
             id: imageMessageId,
             role: 'assistant',
             type: 'image',
+            content: image.description || image.altDescription || 'Unsplash image',
             imageUrl: image.urls.regular,
             thumbnailUrl: image.urls.small,
             prompt: image.description || image.altDescription || 'Unsplash image',
             source: 'unsplash',
             author: image.author,
             unsplashLink: image.links.html,
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         };
         
-        sessionManager.addMessage(sessionId, imageMessage);
+        const savedImageMessage = sessionManager.addMessage(sessionId, imageMessage);
         
-        const imageMessageEl = uiHelpers.renderImageMessage(imageMessage);
+        const imageMessageEl = uiHelpers.renderImageMessage(savedImageMessage);
         this.messagesContainer.appendChild(imageMessageEl);
         uiHelpers.reinitializeIcons(imageMessageEl);
         uiHelpers.scrollToBottom();
+        void sessionManager.syncMessagesToBackend(sessionId, [savedImageMessage]);
         
         uiHelpers.showToast('Image added to conversation', 'success');
         this.updateSessionInfo();
@@ -2183,6 +2203,7 @@ class ChatApp {
             id: uiHelpers.generateMessageId(),
             role: 'assistant',
             type: 'image',
+            content: image.alt || image.prompt || message.prompt || (isArtifact ? 'Captured image' : 'Generated image'),
             imageUrl: image.imageUrl,
             thumbnailUrl: image.thumbnailUrl || image.imageUrl,
             prompt: image.alt || image.prompt || message.prompt || (isArtifact ? 'Captured image' : 'Generated image'),
@@ -2193,13 +2214,16 @@ class ChatApp {
             artifactId: image.artifactId || '',
             filename: image.filename || '',
             sourceHost: image.sourceHost || message.sourceHost || '',
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         };
 
-        sessionManager.addMessage(sessionId, imageMessage);
-        this.messagesContainer.appendChild(uiHelpers.renderImageMessage(imageMessage));
+        const savedImageMessage = sessionManager.addMessage(sessionId, imageMessage);
+        this.messagesContainer.appendChild(uiHelpers.renderImageMessage(savedImageMessage));
         uiHelpers.reinitializeIcons(this.messagesContainer.lastElementChild);
         uiHelpers.scrollToBottom();
+        void sessionManager.syncMessagesToBackend(sessionId, [savedImageMessage]);
 
         uiHelpers.showToast('Image added to conversation', 'success');
         this.updateSessionInfo();
@@ -2223,9 +2247,14 @@ class ChatApp {
             loadingText: `Loading page ${page}...`,
             error: null,
             currentPage: page,
+            clientOnly: true,
+            excludeFromTranscript: true,
             timestamp: new Date().toISOString()
         });
         this.renderOrReplaceMessage(loadingMessage || currentMessage);
+        if (loadingMessage) {
+            void sessionManager.syncMessageToBackend(sessionId, loadingMessage);
+        }
 
         try {
             const result = await apiClient.searchUnsplash(currentMessage.query, {
@@ -2248,19 +2277,29 @@ class ChatApp {
                 perPage,
                 orientation: currentMessage.orientation || null,
                 error: null,
+                clientOnly: true,
+                excludeFromTranscript: true,
                 timestamp: new Date().toISOString()
             });
 
             this.renderOrReplaceMessage(nextMessage || currentMessage);
+            if (nextMessage) {
+                void sessionManager.syncMessageToBackend(sessionId, nextMessage);
+            }
         } catch (error) {
             const failedMessage = this.upsertSessionMessage(sessionId, {
                 id: messageId,
                 isLoading: false,
                 currentPage: currentMessage.currentPage || 1,
                 error: error.message || 'Failed to load Unsplash results',
+                clientOnly: true,
+                excludeFromTranscript: true,
                 timestamp: new Date().toISOString()
             });
             this.renderOrReplaceMessage(failedMessage || currentMessage);
+            if (failedMessage) {
+                void sessionManager.syncMessageToBackend(sessionId, failedMessage);
+            }
             uiHelpers.showToast(error.message || 'Failed to load Unsplash results', 'error');
         }
     }
@@ -2821,6 +2860,7 @@ class ChatApp {
                     currentPage: args.page || 1,
                     perPage: args.perPage || results.length || 6,
                     orientation: args.orientation || null,
+                    excludeFromTranscript: true,
                     timestamp: new Date().toISOString(),
                 });
                 return;
@@ -2844,6 +2884,7 @@ class ChatApp {
                     query: data.query || args.query || '',
                     results,
                     total: results.length,
+                    excludeFromTranscript: true,
                     timestamp: new Date().toISOString(),
                 });
                 return;
@@ -2867,6 +2908,7 @@ class ChatApp {
                     prompt: data.prompt || args.prompt || '',
                     model: data.model || '',
                     results,
+                    excludeFromTranscript: true,
                     timestamp: new Date().toISOString(),
                 });
                 return;
@@ -2901,6 +2943,7 @@ class ChatApp {
                     prompt: data.title || data.url || args.url || '',
                     sourceHost: fallbackHost,
                     results,
+                    excludeFromTranscript: true,
                     timestamp: new Date().toISOString(),
                 });
             }
@@ -2936,6 +2979,7 @@ class ChatApp {
                 query,
                 results: researchSources,
                 total: researchSources.length,
+                excludeFromTranscript: true,
                 timestamp: new Date().toISOString(),
             });
         }

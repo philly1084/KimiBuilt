@@ -1,15 +1,19 @@
 /**
  * Prompts Controller
- * Exposes the live read-only prompt surfaces that currently drive the app.
+ * Exposes managed and read-only prompt surfaces that currently drive the app.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { getEffectiveSoulConfig } = require('../../agent-soul');
+const { getEffectiveSoulConfig, writeSoulFile } = require('../../agent-soul');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../../runtime-prompts');
+const settingsController = require('./settings.controller');
 
-const READ_ONLY_MESSAGE = 'Runtime prompt editing is deprecated. The dashboard now shows read-only snapshots of the live prompt/instruction surfaces used by application code.';
+const MANAGED_MESSAGE = 'Managed prompt surfaces can be edited here. Code-backed runtime snapshots remain read-only.';
+const READ_ONLY_MESSAGE = 'This prompt surface is generated from application code and cannot be edited from the dashboard.';
+const FIXED_SURFACE_MESSAGE = 'Prompt surfaces are fixed slots. Create/delete is not supported here.';
+const EDITABLE_SURFACE_IDS = new Set(['agent-soul']);
 
 function estimateTokens(text = '') {
   const normalized = String(text || '').trim();
@@ -89,17 +93,17 @@ function buildPromptSurfaces() {
   const orchestratorPath = path.join(rootDir, 'src/conversation-orchestrator.js');
   const notesAgentPath = path.join(rootDir, 'frontend/notes-notion/js/agent.js');
   const artifactPath = path.join(rootDir, 'src/artifacts/artifact-service.js');
-  const soul = getEffectiveSoulConfig();
+  const soul = getEffectiveSoulConfig(settingsController.settings?.personality || {});
 
   return [
     {
       id: 'agent-soul',
-      name: 'Agent Soul',
+      name: soul.displayName || 'Agent Soul',
       description: 'Persistent personality layer loaded from soul.md and appended to session instructions.',
       assignment: 'shared runtime session instructions',
       category: 'runtime',
       live: true,
-      editable: false,
+      editable: true,
       sourceFile: soul.absoluteFilePath,
       updatedAt: soul.updatedAt,
       usageModes: ['chat', 'openai-chat', 'openai-responses', 'canvas', 'notation', 'notes'],
@@ -185,6 +189,7 @@ function buildPromptSurfaces() {
     },
   ].map((surface) => ({
     ...surface,
+    editable: surface.editable === true || EDITABLE_SURFACE_IDS.has(surface.id),
     variables: [],
     stats: {
       characters: surface.content.length,
@@ -240,6 +245,14 @@ class PromptsController {
     return buildPromptSurfaces();
   }
 
+  getSurfaceById(id) {
+    return this.getSurfaces().find((entry) => entry.id === id);
+  }
+
+  isEditableSurface(prompt = null) {
+    return Boolean(prompt?.editable);
+  }
+
   async getAll(req, res) {
     const { category, search } = req.query;
     let prompts = this.getSurfaces();
@@ -261,13 +274,13 @@ class PromptsController {
     res.json({
       success: true,
       data: prompts,
-      readonly: true,
-      message: READ_ONLY_MESSAGE,
+      readonly: prompts.every((prompt) => !this.isEditableSurface(prompt)),
+      message: MANAGED_MESSAGE,
     });
   }
 
   async getById(req, res) {
-    const prompt = this.getSurfaces().find((entry) => entry.id === req.params.id);
+    const prompt = this.getSurfaceById(req.params.id);
 
     if (!prompt) {
       return res.status(404).json({ success: false, error: 'Prompt surface not found' });
@@ -276,13 +289,13 @@ class PromptsController {
     res.json({
       success: true,
       data: prompt,
-      readonly: true,
-      message: READ_ONLY_MESSAGE,
+      readonly: !this.isEditableSurface(prompt),
+      message: this.isEditableSurface(prompt) ? MANAGED_MESSAGE : READ_ONLY_MESSAGE,
     });
   }
 
   async getHistory(req, res) {
-    const prompt = this.getSurfaces().find((entry) => entry.id === req.params.id);
+    const prompt = this.getSurfaceById(req.params.id);
 
     if (!prompt) {
       return res.status(404).json({ success: false, error: 'Prompt surface not found' });
@@ -291,7 +304,7 @@ class PromptsController {
     res.json({
       success: true,
       data: getPromptUsageHistory(req, prompt),
-      readonly: true,
+      readonly: !this.isEditableSurface(prompt),
       message: 'History shows the current live snapshot plus recent runtime usages that matched this prompt surface.',
     });
   }
@@ -299,29 +312,72 @@ class PromptsController {
   async create(req, res) {
     res.status(410).json({
       success: false,
-      error: READ_ONLY_MESSAGE,
+      error: FIXED_SURFACE_MESSAGE,
       readonly: true,
     });
   }
 
   async update(req, res) {
-    res.status(410).json({
-      success: false,
-      error: READ_ONLY_MESSAGE,
-      readonly: true,
-    });
+    try {
+      const prompt = this.getSurfaceById(req.params.id);
+
+      if (!prompt) {
+        return res.status(404).json({ success: false, error: 'Prompt surface not found' });
+      }
+
+      if (!this.isEditableSurface(prompt)) {
+        return res.status(410).json({
+          success: false,
+          error: READ_ONLY_MESSAGE,
+          readonly: true,
+        });
+      }
+
+      const name = String(req.body?.name || '').trim() || prompt.name || 'Agent Soul';
+      const content = String(req.body?.content || '');
+      if (!content.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Prompt content is required',
+        });
+      }
+
+      if (prompt.id === 'agent-soul') {
+        writeSoulFile(content);
+        settingsController.settings = settingsController.deepMerge(
+          settingsController.settings,
+          {
+            personality: {
+              displayName: name,
+            },
+          },
+        );
+        await settingsController.saveSettings();
+      }
+
+      const savedPrompt = this.getSurfaceById(prompt.id);
+      res.json({
+        success: true,
+        data: savedPrompt,
+        readonly: false,
+        message: 'Prompt updated successfully',
+      });
+    } catch (error) {
+      console.error('Error updating prompt surface:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
   }
 
   async remove(req, res) {
     res.status(410).json({
       success: false,
-      error: READ_ONLY_MESSAGE,
+      error: FIXED_SURFACE_MESSAGE,
       readonly: true,
     });
   }
 
   async test(req, res) {
-    const prompt = this.getSurfaces().find((entry) => entry.id === req.params.id);
+    const prompt = this.getSurfaceById(req.params.id);
 
     if (!prompt) {
       return res.status(404).json({ success: false, error: 'Prompt surface not found' });
@@ -329,8 +385,8 @@ class PromptsController {
 
     res.json({
       success: true,
-      readonly: true,
-      message: READ_ONLY_MESSAGE,
+      readonly: !this.isEditableSurface(prompt),
+      message: this.isEditableSurface(prompt) ? MANAGED_MESSAGE : READ_ONLY_MESSAGE,
       data: {
         original: prompt.content,
         rendered: prompt.content,

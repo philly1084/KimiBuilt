@@ -200,6 +200,94 @@ class SessionManager extends EventTarget {
         }
     }
 
+    hydrateBackendMessage(message = {}) {
+        const metadata = message?.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata)
+            ? message.metadata
+            : {};
+
+        return {
+            ...metadata,
+            ...message,
+            metadata,
+            id: message.id || this.generateLocalId(),
+            timestamp: message.timestamp || new Date().toISOString(),
+        };
+    }
+
+    mergeBackendMessages(sessionId, backendMessages = []) {
+        const localMessages = this.getMessages(sessionId);
+        const mergedMessages = backendMessages.map((message) => {
+            const localMatch = localMessages.find((entry) => entry.id === message.id);
+            return localMatch
+                ? {
+                    ...localMatch,
+                    ...message,
+                    metadata: message.metadata || localMatch.metadata || {},
+                }
+                : message;
+        });
+
+        const backendIds = new Set(backendMessages.map((message) => message.id).filter(Boolean));
+        const preservedLocalMessages = localMessages.filter((message) => (
+            message?.clientOnly === true
+            && message?.id
+            && !backendIds.has(message.id)
+        ));
+
+        return [...mergedMessages, ...preservedLocalMessages]
+            .sort((left, right) => new Date(left.timestamp || 0).getTime() - new Date(right.timestamp || 0).getTime());
+    }
+
+    async syncMessagesToBackend(sessionId, messages = []) {
+        if (!sessionId || this.isLocalSession(sessionId) || !Array.isArray(messages) || messages.length === 0) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}/messages`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ messages }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            return true;
+        } catch (error) {
+            console.warn('Failed to sync backend session messages:', error);
+            return false;
+        }
+    }
+
+    async syncMessageToBackend(sessionId, message) {
+        if (!sessionId || this.isLocalSession(sessionId) || !message?.id) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(message.id)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            return true;
+        } catch (error) {
+            console.warn('Failed to sync backend session message:', error);
+            return false;
+        }
+    }
+
     async loadSessionMessagesFromBackend(sessionId, options = {}) {
         if (!sessionId || this.isLocalSession(sessionId)) {
             return this.getMessages(sessionId);
@@ -214,13 +302,10 @@ class SessionManager extends EventTarget {
             }
 
             const data = await response.json();
-            const messages = Array.isArray(data.messages)
-                ? data.messages.map((message) => ({
-                    ...message,
-                    id: message.id || this.generateLocalId(),
-                    timestamp: message.timestamp || new Date().toISOString(),
-                }))
+            const backendMessages = Array.isArray(data.messages)
+                ? data.messages.map((message) => this.hydrateBackendMessage(message))
                 : [];
+            const messages = this.mergeBackendMessages(sessionId, backendMessages);
 
             this.sessionMessages.set(sessionId, messages);
             this.saveToStorage();
