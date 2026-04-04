@@ -74,6 +74,7 @@ class ChatApp {
         this.isRefreshingSessionSummaries = false;
         this.isLoadingWorkloads = false;
         this.isSavingWorkload = false;
+        this.sharedSessionSyncTimer = null;
         
         this.init();
     }
@@ -102,6 +103,7 @@ class ChatApp {
         
         // Start periodic health checks
         this.startHealthCheckInterval();
+        this.startSharedSessionSyncInterval();
         
         // Load models in background
         uiHelpers.loadModels();
@@ -280,7 +282,16 @@ class ChatApp {
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
                 this.checkConnection();
+                void this.refreshSharedSessionState().catch((error) => {
+                    console.warn('Failed to refresh shared session state:', error);
+                });
             }
+        });
+
+        window.addEventListener('focus', () => {
+            void this.refreshSharedSessionState().catch((error) => {
+                console.warn('Failed to refresh shared session state:', error);
+            });
         });
     }
 
@@ -297,6 +308,7 @@ class ChatApp {
         });
         
         sessionManager.addEventListener('sessionCreated', (e) => {
+            apiClient.setSessionId(e.detail.session.id);
             uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
             this.loadSessionMessages(e.detail.session.id);
             this.subscribeToSessionUpdates(e.detail.session.id);
@@ -305,6 +317,7 @@ class ChatApp {
         });
         
         sessionManager.addEventListener('sessionSwitched', (e) => {
+            apiClient.setSessionId(e.detail.sessionId);
             this.loadSessionMessages(e.detail.sessionId)
                 .finally(() => {
                     this.subscribeToSessionUpdates(e.detail.sessionId);
@@ -315,6 +328,7 @@ class ChatApp {
         });
         
         sessionManager.addEventListener('sessionDeleted', (e) => {
+            apiClient.setSessionId(e.detail.newCurrentSessionId || null);
             if (e.detail.newCurrentSessionId) {
                 this.loadSessionMessages(e.detail.newCurrentSessionId);
                 this.subscribeToSessionUpdates(e.detail.newCurrentSessionId);
@@ -484,6 +498,7 @@ class ChatApp {
     async loadSessions() {
         try {
             await sessionManager.loadSessions();
+            apiClient.setSessionId(sessionManager.currentSessionId || null);
             
             // If we have a current session, load its messages
             if (sessionManager.currentSessionId) {
@@ -3679,6 +3694,53 @@ class ChatApp {
         this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
         return health;
     }
+
+    async refreshSharedSessionState() {
+        if (this.isProcessing) {
+            return;
+        }
+
+        const previousSessionId = sessionManager.currentSessionId;
+        const previousMessages = previousSessionId ? sessionManager.getMessages(previousSessionId) : [];
+        const previousMessageCount = previousMessages.length;
+        const previousLastTimestamp = previousMessages[previousMessages.length - 1]?.timestamp || '';
+
+        await sessionManager.loadSessions();
+
+        const currentSessionId = sessionManager.currentSessionId;
+        apiClient.setSessionId(currentSessionId || null);
+
+        if (!currentSessionId) {
+            if (previousSessionId) {
+                uiHelpers.clearMessages();
+                this.subscribeToSessionUpdates(null);
+                this.currentSessionWorkloads = [];
+                this.workloadRunsById.clear();
+                this.hiddenCompletedWorkloadCount = 0;
+                this.renderWorkloadsPanel();
+                this.updateSessionInfo();
+            }
+            return;
+        }
+
+        if (currentSessionId !== previousSessionId) {
+            await this.loadSessionMessages(currentSessionId);
+            this.subscribeToSessionUpdates(currentSessionId);
+            await this.loadSessionWorkloads(currentSessionId, { force: true });
+            this.updateSessionInfo();
+            return;
+        }
+
+        const refreshedMessages = await sessionManager.loadSessionMessagesFromBackend(currentSessionId);
+        const refreshedCount = refreshedMessages.length;
+        const refreshedLastTimestamp = refreshedMessages[refreshedMessages.length - 1]?.timestamp || '';
+
+        if (refreshedCount !== previousMessageCount || refreshedLastTimestamp !== previousLastTimestamp) {
+            const messages = this.syncAnnotatedSurveyStates(currentSessionId);
+            this.renderMessages(messages);
+            this.updateSessionInfo();
+        }
+    }
     
     startHealthCheckInterval() {
         // Check every 30 seconds
@@ -3686,6 +3748,18 @@ class ChatApp {
             const health = await apiClient.checkHealth();
             this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
         }, 30000);
+    }
+
+    startSharedSessionSyncInterval() {
+        this.sharedSessionSyncTimer = setInterval(() => {
+            if (document.hidden) {
+                return;
+            }
+
+            this.refreshSharedSessionState().catch((error) => {
+                console.warn('Failed to refresh shared session state:', error);
+            });
+        }, 15000);
     }
 }
 
