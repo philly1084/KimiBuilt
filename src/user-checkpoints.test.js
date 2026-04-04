@@ -1,5 +1,6 @@
 const {
     buildUserCheckpointAskedPatch,
+    buildUserCheckpointInstructions,
     buildUserCheckpointMessage,
     buildUserCheckpointPolicy,
     buildUserCheckpointResponseMessage,
@@ -55,6 +56,18 @@ describe('user checkpoint helpers', () => {
         expect(message).toContain('```survey');
         expect(message).toContain('"id": "checkpoint-1"');
         expect(message).toContain('Choose an option below');
+    });
+
+    test('checkpoint instructions explicitly forbid plain-text multiple-choice questions in web-chat', () => {
+        const instructions = buildUserCheckpointInstructions({
+            enabled: true,
+            maxQuestions: 2,
+            remaining: 2,
+            pending: null,
+        });
+
+        expect(instructions).toContain('do not ask a blocking multiple-choice question as plain assistant text');
+        expect(instructions).toContain('use the tool so the UI can render inline options');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {

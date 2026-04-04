@@ -2401,6 +2401,84 @@ class ChatApp {
         return match?.[1] ? String(match[1]).trim() : '';
     }
 
+    buildSurveyFenceContent(checkpoint = null) {
+        if (!checkpoint || typeof checkpoint !== 'object') {
+            return '';
+        }
+
+        try {
+            return `\`\`\`survey\n${JSON.stringify(checkpoint, null, 2)}\n\`\`\``;
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    extractSurveyDisplayContentFromToolEvents(toolEvents = []) {
+        const checkpointEvent = [...(Array.isArray(toolEvents) ? toolEvents : [])]
+            .reverse()
+            .find((event) => (
+                (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'user-checkpoint'
+                && event?.result?.success !== false
+            ));
+
+        if (!checkpointEvent) {
+            return '';
+        }
+
+        const data = checkpointEvent?.result?.data || {};
+        const message = String(data.message || '').trim();
+        if (/```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(message)) {
+            return message;
+        }
+
+        const checkpoint = data.checkpoint && typeof data.checkpoint === 'object'
+            ? data.checkpoint
+            : (data && typeof data === 'object' ? data : null);
+        const surveyFence = this.buildSurveyFenceContent(checkpoint);
+        if (!surveyFence) {
+            return '';
+        }
+
+        const preamble = String(
+            checkpoint?.preamble
+            || 'I need one decision before I continue with the main work.',
+        ).trim();
+        const whyThisMatters = String(
+            checkpoint?.whyThisMatters
+            || checkpoint?.context
+            || checkpoint?.rationale
+            || '',
+        ).trim();
+
+        return [
+            preamble,
+            whyThisMatters,
+            surveyFence,
+            'Choose an option below and I will continue from there.',
+        ].filter(Boolean).join('\n\n');
+    }
+
+    attachSurveyDisplayContent(message = null, toolEvents = []) {
+        if (!message || message.role !== 'assistant') {
+            return message;
+        }
+
+        const existingContent = String(message.displayContent ?? message.content ?? '');
+        if (/```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(existingContent)) {
+            return message;
+        }
+
+        const surveyDisplayContent = this.extractSurveyDisplayContentFromToolEvents(toolEvents);
+        if (!surveyDisplayContent) {
+            return message;
+        }
+
+        return {
+            ...message,
+            displayContent: surveyDisplayContent,
+        };
+    }
+
     annotateSurveyStates(messages = []) {
         const responseLookup = new Map();
 
@@ -2922,7 +3000,15 @@ class ChatApp {
         
         // Hide typing indicator
         uiHelpers.hideTypingIndicator();
-        
+
+        const currentMessage = this.getSessionMessage(sessionId, parentMessageId);
+        if (currentMessage && Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
+            const updatedMessage = this.attachSurveyDisplayContent(currentMessage, chunk.toolEvents);
+            if (updatedMessage !== currentMessage) {
+                this.upsertSessionMessage(sessionId, updatedMessage);
+            }
+        }
+
         // Update UI
         const messages = this.syncAnnotatedSurveyStates(sessionId);
         const lastMessage = messages[messages.length - 1];
