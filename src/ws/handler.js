@@ -1,5 +1,6 @@
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
+const { config } = require('../config');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { executeConversationRuntime, resolveConversationExecutorFlag } = require('../runtime-execution');
 const {
@@ -38,7 +39,7 @@ const {
 // Admin dashboard event emitter
 const EventEmitter = require('events');
 const adminEvents = new EventEmitter();
-const WORKLOAD_PREFLIGHT_RECENT_LIMIT = 12;
+const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
 
 async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {

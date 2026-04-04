@@ -32,8 +32,8 @@ const { hasWorkloadIntent } = require('./workloads/natural-language');
 const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
-const MAX_TOOL_RESULT_CHARS = 12000;
-const RECENT_TRANSCRIPT_LIMIT = 12;
+const MAX_TOOL_RESULT_CHARS = config.memory.toolResultCharLimit;
+const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const MAX_STEP_SIGNATURE_REPEATS = 3;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const REMOTE_BLOCKING_ERROR_PATTERNS = [
@@ -155,6 +155,14 @@ function inferRecallProfileFromText(text = '') {
     return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized)
         ? 'research'
         : 'default';
+}
+
+function normalizeResearchFollowupPageCount() {
+    return Math.max(2, Math.min(config.memory.researchFollowupPages, 8));
+}
+
+function normalizeResearchSearchResultCount() {
+    return Math.max(8, Math.min(config.memory.researchSearchLimit, config.search.maxLimit));
 }
 
 function extractExplicitWebResearchQuery(text = '') {
@@ -375,6 +383,7 @@ function findSearchResultByUrl(searchResults = [], url = '') {
 function extractResearchSourceExcerpt(event = {}) {
     const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
     const data = event?.result?.data || {};
+    const excerptLimit = config.memory.researchSourceExcerptChars;
 
     if (toolId === 'web-scrape') {
         const direct = [
@@ -385,13 +394,13 @@ function extractResearchSourceExcerpt(event = {}) {
         ].find((value) => typeof value === 'string' && value.trim());
 
         if (direct) {
-            return truncateText(normalizeInlineText(direct), 900);
+            return truncateText(normalizeInlineText(direct), excerptLimit);
         }
 
-        return truncateText(normalizeInlineText(stripHtmlToText(JSON.stringify(data?.data || {}))), 900);
+        return truncateText(normalizeInlineText(stripHtmlToText(JSON.stringify(data?.data || {}))), excerptLimit);
     }
 
-    return truncateText(normalizeInlineText(extractFetchBodyText(event?.result || {})), 900);
+    return truncateText(normalizeInlineText(extractFetchBodyText(event?.result || {})), excerptLimit);
 }
 
 function shouldIncludeDocumentWorkflowContent(text = '') {
@@ -1575,7 +1584,7 @@ function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = 
         return [];
     }
 
-    const maxPages = Math.max(2, Math.min(config.memory.researchFollowupPages, 6));
+    const maxPages = normalizeResearchFollowupPageCount();
     const followupCandidates = [];
     const seen = new Set();
 
@@ -2608,8 +2617,11 @@ function buildResearchMemoryNotesFromToolEvents({ objective = '', toolEvents = [
             const snippet = String(searchMeta.snippet || '').replace(/\s+/g, ' ').trim();
             const sourceNotes = (result.toolId === 'web-fetch'
                 ? stripHtmlToText(String(result?.data?.body || ''))
-                : stripHtmlToText(JSON.stringify(result?.data?.data || {})))
-                .slice(0, 1200)
+                : (
+                    String(result?.data?.content || result?.data?.text || '').trim()
+                    || stripHtmlToText(JSON.stringify(result?.data?.data || {}))
+                ))
+                .slice(0, config.memory.researchSourceExcerptChars)
                 .trim();
 
             if (!title && !snippet && !sourceNotes) {
@@ -2626,7 +2638,7 @@ function buildResearchMemoryNotesFromToolEvents({ objective = '', toolEvents = [
             ].filter(Boolean).join('\n');
         })
         .filter(Boolean)
-        .slice(0, Math.max(2, Math.min(config.memory.researchFollowupPages, 4)));
+        .slice(0, normalizeResearchFollowupPageCount());
 }
 
 function buildSyntheticResponse({ output, responseId, model, metadata = {} }) {
@@ -3893,7 +3905,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     query: researchQuery,
                     engine: 'perplexity',
-                    limit: Math.max(8, Math.min(config.memory.researchSearchLimit, 12)),
+                    limit: normalizeResearchSearchResultCount(),
                     region: 'us-en',
                     timeRange: 'all',
                     includeSnippets: true,
@@ -4045,7 +4057,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     query,
                     engine: 'perplexity',
-                    limit: Math.max(8, Math.min(config.memory.researchSearchLimit, 12)),
+                    limit: normalizeResearchSearchResultCount(),
                     region: 'us-en',
                     timeRange: 'all',
                     includeSnippets: true,

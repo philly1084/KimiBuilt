@@ -107,8 +107,8 @@ describe('SessionStore recent message continuity', () => {
         expect(listed).toHaveLength(30);
         expect(listed[0]).toEqual(expect.objectContaining({ content: 'message-1' }));
         expect(listed[29]).toEqual(expect.objectContaining({ content: 'message-30' }));
-        expect(recent).toHaveLength(24);
-        expect(recent[0]).toEqual(expect.objectContaining({ content: 'message-7' }));
+        expect(recent).toHaveLength(30);
+        expect(recent[0]).toEqual(expect.objectContaining({ content: 'message-1' }));
     });
 
     test('preserves long html content in transcript persistence while trimming only recent continuity', async () => {

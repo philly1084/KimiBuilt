@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const { config } = require('../config');
 const { validate } = require('../middleware/validate');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
@@ -29,7 +30,7 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { buildContinuityInstructions } = require('../runtime-prompts');
 
 const router = Router();
-const WORKLOAD_PREFLIGHT_RECENT_LIMIT = 12;
+const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
 
 function normalizeClientNow(value = '') {
     const normalized = String(value || '').trim();

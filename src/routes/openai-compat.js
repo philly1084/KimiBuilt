@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const { config } = require('../config');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { generateImage, listModels } = require('../openai-client');
@@ -44,7 +45,7 @@ const {
 
 const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
-const WORKLOAD_PREFLIGHT_RECENT_LIMIT = 12;
+const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
 
 function normalizeClientNow(value = '') {
     const normalized = String(value || '').trim();

@@ -11,8 +11,8 @@ const {
     normalizeRuntimeControlState,
 } = require('./runtime-control-state');
 
-const MAX_RECENT_MESSAGES = 24;
-const MAX_RECENT_MESSAGE_LENGTH = 4000;
+const MAX_RECENT_MESSAGES = config.memory.recentMessageWindow;
+const MAX_RECENT_MESSAGE_LENGTH = config.memory.recentMessageCharLimit;
 
 class SessionStore {
     constructor() {

@@ -1183,11 +1183,11 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
 }
 
 function normalizeResearchFollowupPageCount() {
-    return Math.max(2, Math.min(config.memory.researchFollowupPages, 6));
+    return Math.max(2, Math.min(config.memory.researchFollowupPages, 8));
 }
 
 function normalizeResearchSearchResultCount() {
-    return Math.max(8, Math.min(config.memory.researchSearchLimit, 16));
+    return Math.max(8, Math.min(config.memory.researchSearchLimit, config.search.maxLimit));
 }
 
 function stripHtmlToText(html = '') {
@@ -1239,9 +1239,12 @@ function buildResearchMemoryNote({ query = '', candidate = {}, result = {} } = {
     const title = String(candidate?.title || result?.data?.title || '').trim();
     const snippet = String(candidate?.snippet || '').replace(/\s+/g, ' ').trim();
     const textBody = result?.toolId === 'web-scrape'
-        ? stripHtmlToText(JSON.stringify(result?.data?.data || {}))
+        ? (
+            String(result?.data?.content || result?.data?.text || '').trim()
+            || stripHtmlToText(JSON.stringify(result?.data?.data || {}))
+        )
         : extractFetchBodyText(result);
-    const excerpt = textBody.slice(0, 2000).trim();
+    const excerpt = textBody.slice(0, config.memory.researchSourceExcerptChars).trim();
 
     if (!sourceUrl || (!title && !snippet && !excerpt)) {
         return null;
@@ -1299,9 +1302,9 @@ function findSearchMetadataForUrl(searchResults = [], url = '') {
 }
 
 function buildResearchDossier(toolEvents = [], {
-    maxSearchResults = 8,
-    maxSources = 6,
-    excerptChars = 1000,
+    maxSearchResults = 12,
+    maxSources = 8,
+    excerptChars = config.memory.researchSourceExcerptChars,
 } = {}) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
     const searchEvent = [...events].reverse().find((event) => (

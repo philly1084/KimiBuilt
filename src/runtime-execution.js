@@ -2,8 +2,9 @@ const { sessionStore } = require('./session-store');
 const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
 const { getSessionControlState } = require('./runtime-control-state');
+const { config } = require('./config');
 
-const RECENT_TRANSCRIPT_LIMIT = 12;
+const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';

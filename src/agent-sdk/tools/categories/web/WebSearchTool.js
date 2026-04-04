@@ -5,6 +5,8 @@
 const { ToolBase } = require('../../ToolBase');
 const { config } = require('../../../../config');
 
+const DEFAULT_SEARCH_LIMIT = Math.min(config.search.defaultLimit, config.search.maxLimit);
+
 class WebSearchTool extends ToolBase {
   constructor() {
     super({
@@ -35,8 +37,8 @@ class WebSearchTool extends ToolBase {
           limit: {
             type: 'integer',
             description: 'Number of results',
-            default: 10,
-            maximum: 20,
+            default: DEFAULT_SEARCH_LIMIT,
+            maximum: config.search.maxLimit,
           },
           safeSearch: {
             type: 'boolean',
@@ -93,7 +95,7 @@ class WebSearchTool extends ToolBase {
     const {
       query,
       engine = 'perplexity',
-      limit = 10,
+      limit = DEFAULT_SEARCH_LIMIT,
       safeSearch = true,
       region = 'us-en',
       timeRange = 'all',
@@ -153,7 +155,7 @@ class WebSearchTool extends ToolBase {
       },
       body: JSON.stringify({
         query,
-        max_results: Math.max(1, Math.min(Number(limit) || 10, 20)),
+        max_results: Math.max(1, Math.min(Number(limit) || DEFAULT_SEARCH_LIMIT, config.search.maxLimit)),
         search_domain_filter: [],
         country: this.mapRegionToCountry(region),
         search_recency_filter: this.mapTimeRange(timeRange),

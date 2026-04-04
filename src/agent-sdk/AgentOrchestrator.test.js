@@ -395,26 +395,30 @@ describe('AgentOrchestrator', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(memoryService.recall).toHaveBeenCalledWith('Search for the latest update.', {
+        expect(memoryService.recall).toHaveBeenCalledWith('Search for the latest update.', expect.objectContaining({
             sessionId: 'session-3',
-        });
-        expect(sessionStore.getRecentMessages).toHaveBeenCalledWith('session-3', 12);
+            ownerId: null,
+            profile: 'research',
+        }));
+        expect(sessionStore.getRecentMessages).toHaveBeenCalledWith('session-3', 20);
         expect(sessionStore.recordResponse).toHaveBeenCalledWith('session-3', 'resp_2');
         expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-3', expect.arrayContaining([
             expect.objectContaining({ role: 'user', content: 'Search for the latest update.' }),
             expect.objectContaining({ role: 'tool' }),
             expect.objectContaining({ role: 'assistant', content: 'Here is the result.' }),
         ]));
-        expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-3', 'Here is the result.');
+        expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-3', 'Here is the result.', {});
         expect(memoryService.remember).toHaveBeenCalledWith(
             'session-3',
             'Search for the latest update.',
             'user',
+            {},
         );
         expect(memoryService.remember).toHaveBeenCalledWith(
             'session-3',
             expect.stringContaining('"tool":"web-search"'),
             'tool',
+            {},
         );
     });
 

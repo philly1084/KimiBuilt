@@ -11,7 +11,7 @@ describe('MemoryService recall profiles', () => {
         expect(service.getRecallOptions({
             profile: DEFAULT_RECALL_PROFILE,
         })).toEqual({
-            topK: 8,
+            topK: 12,
             scoreThreshold: 0.7,
         });
     });
@@ -22,7 +22,7 @@ describe('MemoryService recall profiles', () => {
         expect(service.getRecallOptions({
             profile: RESEARCH_RECALL_PROFILE,
         })).toEqual({
-            topK: 10,
+            topK: 16,
             scoreThreshold: 0.64,
         });
     });

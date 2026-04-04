@@ -69,30 +69,65 @@ const config = {
         provider: process.env.SEARCH_PROVIDER || 'perplexity',
         perplexityApiKey: process.env.PERPLEXITY_API_KEY || '',
         perplexityBaseURL: process.env.PERPLEXITY_BASE_URL || 'https://api.perplexity.ai',
+        defaultLimit: Math.max(
+            1,
+            parseInt(process.env.WEB_SEARCH_DEFAULT_LIMIT, 10) || 12,
+        ),
+        maxLimit: Math.max(
+            8,
+            parseInt(process.env.WEB_SEARCH_MAX_LIMIT, 10) || 20,
+        ),
+    },
+
+    scrape: {
+        contentCharLimit: Math.max(
+            500,
+            parseInt(process.env.WEB_SCRAPE_CONTENT_CHAR_LIMIT, 10) || 12000,
+        ),
     },
 
     memory: {
+        recentMessageWindow: Math.max(
+            1,
+            parseInt(process.env.MEMORY_RECENT_MESSAGE_WINDOW, 10) || 40,
+        ),
+        recentTranscriptLimit: Math.max(
+            1,
+            parseInt(process.env.MEMORY_RECENT_TRANSCRIPT_LIMIT, 10) || 20,
+        ),
+        recentMessageCharLimit: Math.max(
+            500,
+            parseInt(process.env.MEMORY_RECENT_MESSAGE_CHAR_LIMIT, 10) || 6000,
+        ),
         recallTopK: Math.max(
             1,
-            parseInt(process.env.MEMORY_RECALL_TOP_K, 10) || 8,
+            parseInt(process.env.MEMORY_RECALL_TOP_K, 10) || 12,
         ),
         recallScoreThreshold: Number.isFinite(parseFloat(process.env.MEMORY_RECALL_SCORE_THRESHOLD))
             ? parseFloat(process.env.MEMORY_RECALL_SCORE_THRESHOLD)
             : 0.7,
         researchRecallTopK: Math.max(
             1,
-            parseInt(process.env.MEMORY_RESEARCH_RECALL_TOP_K, 10) || 10,
+            parseInt(process.env.MEMORY_RESEARCH_RECALL_TOP_K, 10) || 16,
         ),
         researchRecallScoreThreshold: Number.isFinite(parseFloat(process.env.MEMORY_RESEARCH_RECALL_SCORE_THRESHOLD))
             ? parseFloat(process.env.MEMORY_RESEARCH_RECALL_SCORE_THRESHOLD)
             : 0.64,
         researchSearchLimit: Math.max(
             1,
-            parseInt(process.env.WEB_RESEARCH_SEARCH_LIMIT, 10) || 12,
+            parseInt(process.env.WEB_RESEARCH_SEARCH_LIMIT, 10) || 16,
         ),
         researchFollowupPages: Math.max(
             1,
-            parseInt(process.env.WEB_RESEARCH_FOLLOWUP_PAGES, 10) || 4,
+            parseInt(process.env.WEB_RESEARCH_FOLLOWUP_PAGES, 10) || 6,
+        ),
+        researchSourceExcerptChars: Math.max(
+            500,
+            parseInt(process.env.WEB_RESEARCH_SOURCE_EXCERPT_CHARS, 10) || 2000,
+        ),
+        toolResultCharLimit: Math.max(
+            1000,
+            parseInt(process.env.TOOL_RESULT_CHAR_LIMIT, 10) || 18000,
         ),
     },
 

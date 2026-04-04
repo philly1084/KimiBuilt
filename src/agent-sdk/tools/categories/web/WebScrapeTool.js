@@ -119,6 +119,8 @@ class WebScrapeTool extends ToolBase {
         properties: {
           url: { type: 'string' },
           title: { type: 'string' },
+          content: { type: 'string' },
+          contentLength: { type: 'integer' },
           data: { type: 'object' },
           extractedAt: { type: 'string' },
           method: { type: 'string' }
@@ -183,6 +185,7 @@ class WebScrapeTool extends ToolBase {
     // Extract title
     const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : '';
+    const content = this.extractPageText(html);
 
     let extractedData = {};
     let method = 'static';
@@ -221,12 +224,15 @@ class WebScrapeTool extends ToolBase {
     return {
       url: finalUrl,
       title,
+      content,
+      contentLength: content.length,
       data: extractedData,
       imageCapture,
       extractedAt: new Date().toISOString(),
       method,
       stats: {
         htmlSize: html.length,
+        contentChars: content.length,
         fieldsExtracted: Object.keys(extractedData).length,
         imagesCaptured: imageCapture?.count || 0,
       }
@@ -643,6 +649,25 @@ class WebScrapeTool extends ToolBase {
 
   stripHtml(html) {
     return html.replace(/<[^>]*>/g, '');
+  }
+
+  extractPageText(html = '') {
+    const text = String(html || '')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, '\'')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return text.slice(0, config.scrape.contentCharLimit);
   }
 
   resolveUrl(url) {
