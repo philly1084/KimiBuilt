@@ -94,4 +94,29 @@ describe('project-memory', () => {
         expect(instructions).toContain('Researched the brief structure.');
         expect(instructions).toContain('artifact references, not guaranteed local workspace files');
     });
+
+    test('surfaces up to twenty remembered image urls in session instructions', () => {
+        const imageUrls = Array.from({ length: 22 }, (_entry, index) => ({
+            url: `https://images.example.com/photo-${index + 1}.jpg`,
+            source: 'tool',
+            kind: 'image',
+            title: `Photo ${index + 1}`,
+        }));
+
+        const instructions = buildProjectMemoryInstructions({
+            metadata: {
+                projectMemory: {
+                    urls: imageUrls,
+                    artifacts: [],
+                    tasks: [],
+                },
+            },
+        });
+
+        expect(instructions).toContain('Remembered image URLs:');
+        expect(instructions).toContain('https://images.example.com/photo-22.jpg');
+        expect(instructions).toContain('https://images.example.com/photo-3.jpg');
+        expect(instructions).not.toContain('https://images.example.com/photo-1.jpg');
+        expect(instructions).not.toContain('https://images.example.com/photo-2.jpg');
+    });
 });

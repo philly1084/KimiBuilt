@@ -3516,7 +3516,8 @@ class UIHelpers {
         const menu = document.getElementById('mobile-chat-menu');
         const sheet = menu?.querySelector('.mobile-chat-menu__sheet');
         const trigger = document.getElementById('mobile-chat-menu-btn');
-        if (!menu || !sheet || !window.matchMedia('(max-width: 768px)').matches) {
+        const allowCompactActionSheet = window.matchMedia('(max-width: 768px)').matches || this.isMinimalistMode();
+        if (!menu || !sheet || !allowCompactActionSheet) {
             return;
         }
 
@@ -3790,7 +3791,7 @@ class UIHelpers {
         });
 
         window.addEventListener('resize', () => {
-            if (!window.matchMedia('(max-width: 768px)').matches) {
+            if (!(window.matchMedia('(max-width: 768px)').matches || this.isMinimalistMode())) {
                 this.closeMobileActionSheet();
             }
             this.syncSidebarState();

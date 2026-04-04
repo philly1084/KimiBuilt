@@ -1950,15 +1950,16 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-search-unsplash')) {
-        guidance.push('- Use `image-search-unsplash` to find reference or stock images with attribution when the user asks for visuals, photography, or inspiration.');
+        guidance.push('- Use `image-search-unsplash` to find reference or stock images with attribution when the user asks for visuals, photography, or inspiration. For document creation, gather up to 20 relevant Unsplash images when the user wants real-image coverage.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-from-url')) {
-        guidance.push('- Use `image-from-url` when the user provides or requests a direct image URL to embed in the answer.');
+        guidance.push('- Use `image-from-url` when the user provides or requests a direct image URL to embed in the answer. It can verify and normalize batches of up to 20 direct image URLs so the session can reuse them later.');
     }
 
     if (automaticTools.some((entry) => ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(entry.id))) {
         guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
+        guidance.push('- For HTML, PDF, and DOCX document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-read')) {

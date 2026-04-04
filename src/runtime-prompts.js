@@ -7,6 +7,7 @@ function buildContinuityInstructions(extra = '') {
         'Do not claim you lack access to prior conversation if session transcript or recalled context is available in the prompt.',
         'Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that.',
         'For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying.',
+        'When the user requests real images for a document or page, gather verified image URLs first and reuse those saved references instead of defaulting to one or two generated visuals or placeholder blocks.',
         'If runtime tools are attached or listed as available, treat them as available for this request and use them when relevant instead of claiming they are unavailable.',
         'Use verified tool results as the source of truth over guesses.',
         'When calling file-write, always include both a path and the full file contents in the same call. Do not try to write a file from a path alone.',

@@ -1,6 +1,8 @@
 const MAX_PROJECT_URLS = 40;
 const MAX_PROJECT_TASKS = 24;
 const MAX_PROJECT_ARTIFACTS = 24;
+const MAX_PROJECT_IMAGE_URL_INSTRUCTIONS = 20;
+const MAX_PROJECT_REFERENCE_URL_INSTRUCTIONS = 8;
 
 function sanitizeText(value = '', limit = 280) {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -327,12 +329,30 @@ function buildProjectMemoryInstructions(session = null) {
     }
 
     if (Array.isArray(memory.urls) && memory.urls.length > 0) {
-        lines.push('');
-        lines.push('Remembered URLs:');
-        memory.urls.slice(-8).forEach((entry) => {
-            const label = entry.title ? `${entry.title} -> ` : '';
-            lines.push(`- ${label}${entry.url}`);
-        });
+        const imageUrls = memory.urls
+            .filter((entry) => String(entry?.kind || '').trim().toLowerCase() === 'image')
+            .slice(-MAX_PROJECT_IMAGE_URL_INSTRUCTIONS);
+        const referenceUrls = memory.urls
+            .filter((entry) => String(entry?.kind || '').trim().toLowerCase() !== 'image')
+            .slice(-MAX_PROJECT_REFERENCE_URL_INSTRUCTIONS);
+
+        if (imageUrls.length > 0) {
+            lines.push('');
+            lines.push('Remembered image URLs:');
+            imageUrls.forEach((entry) => {
+                const label = entry.title ? `${entry.title} -> ` : '';
+                lines.push(`- ${label}${entry.url}`);
+            });
+        }
+
+        if (referenceUrls.length > 0) {
+            lines.push('');
+            lines.push('Remembered URLs:');
+            referenceUrls.forEach((entry) => {
+                const label = entry.title ? `${entry.title} -> ` : '';
+                lines.push(`- ${label}${entry.url}`);
+            });
+        }
     }
 
     if (Array.isArray(memory.artifacts) && memory.artifacts.length > 0) {

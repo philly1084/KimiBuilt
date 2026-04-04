@@ -476,12 +476,13 @@ describe('ArtifactService', () => {
         });
 
         expect(searchImages).toHaveBeenCalledWith(expect.stringContaining('atlantic canada axe throwing venues'), expect.objectContaining({
-            perPage: 8,
+            perPage: 20,
             orientation: 'landscape',
         }));
         const instructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
         expect(instructions).toContain('https://images.unsplash.com/photo-999');
         expect(instructions).toContain('[Verified image references]');
+        expect(instructions).toContain('up to 20 images');
     });
 
     test('ignores internal artifact image links and prefers external urls for document visuals', async () => {

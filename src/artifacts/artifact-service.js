@@ -16,7 +16,7 @@ const {
 } = require('../documents/document-creativity');
 const { resolveDocumentTheme } = require('../documents/document-design-engine');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
-const DEFAULT_DOCUMENT_IMAGE_TARGET = 8;
+const DEFAULT_DOCUMENT_IMAGE_TARGET = 20;
 const COMPOSITION_PLANNING_PATTERNS = [
     /\bpage layout plan\b/i,
     /\bcredits? and source register\b/i,
@@ -530,7 +530,7 @@ function extractImageReferencesFromSession(session = null) {
         });
     });
 
-    return Array.from(unique.values()).slice(-8);
+    return Array.from(unique.values()).slice(-DEFAULT_DOCUMENT_IMAGE_TARGET);
 }
 
 function extractImageReferencesFromArtifacts(artifacts = []) {
@@ -561,13 +561,14 @@ function extractImageReferencesFromArtifacts(artifacts = []) {
         });
     });
 
-    return Array.from(unique.values()).slice(0, 8);
+    return Array.from(unique.values()).slice(0, DEFAULT_DOCUMENT_IMAGE_TARGET);
 }
 
 function buildDocumentImageInstructions() {
     return [
         'When verified image URLs are available in session memory or prompt context, use those real images with standard HTML <img> tags.',
         'Prefer remembered direct image URLs and Unsplash image URLs over generated decorative placeholders.',
+        `When the user asks for real or image-rich output, reuse as many as ${DEFAULT_DOCUMENT_IMAGE_TARGET} verified image references across the document before falling back to text-only sections.`,
         'Prefer standard HTML <img src="..."> elements over background-image-only treatments when the image is meaningful content.',
         'For HTML, PDF, and DOCX designs, distribute real images throughout the document instead of clustering them in a single appendix or final page.',
         'Use a strong visual rhythm: opening hero image, repeated section visuals, image cards, and galleries when enough verified image URLs exist.',
@@ -1352,6 +1353,7 @@ class ArtifactService {
         return [
             '[Verified image references]',
             'Use these real image URLs when the output benefits from visuals.',
+            `These verified references can be reused throughout the document, up to ${DEFAULT_DOCUMENT_IMAGE_TARGET} images when the request supports it.`,
             'Prefer standard HTML <img src="..."> elements that point to these URLs.',
             ...imageReferences.map((entry, index) => {
                 const label = entry.title || `Image ${index + 1}`;

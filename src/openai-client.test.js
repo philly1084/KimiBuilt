@@ -559,6 +559,18 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('confirm the action first');
     });
 
+    test('image guidance encourages saving verified real images for documents', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'image-generate' },
+            { id: 'image-search-unsplash' },
+            { id: 'image-from-url' },
+        ]);
+
+        expect(guidance).toContain('up to 20 relevant Unsplash images');
+        expect(guidance).toContain('batches of up to 20 direct image URLs');
+        expect(guidance).toContain('prefer `image-search-unsplash` and `image-from-url` over `image-generate`');
+    });
+
     test('extracts explicit web research queries for deterministic preflight', () => {
         expect(
             __testUtils.extractExplicitWebResearchQuery('Still not working, can you web research tigers and cats differences.'),

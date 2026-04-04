@@ -18,6 +18,9 @@ const {
   extractWorkloadScenarioSource,
 } = require('../../workloads/request-builder');
 
+const MAX_VERIFIED_REFERENCE_IMAGES = 20;
+const IMAGE_REFERENCE_VERIFY_TIMEOUT_MS = 15000;
+
 // Tool categories
 const { registerWebTools } = require('./categories/web');
 const { registerDesignTools } = require('./categories/design');
@@ -72,6 +75,93 @@ function deriveImageAltText(urlString = '', fallback = 'image') {
   } catch (_error) {
     return fallback;
   }
+}
+
+function hasLikelyImageExtension(urlString = '') {
+  return /\.(png|jpe?g|gif|webp|svg|avif)(?:[?#].*)?$/i.test(String(urlString || '').trim());
+}
+
+function isImageMimeType(mimeType = '') {
+  return String(mimeType || '').trim().toLowerCase().startsWith('image/');
+}
+
+function readImageMimeType(response) {
+  return String(response?.headers?.get?.('content-type') || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+}
+
+async function cancelResponseBody(response) {
+  try {
+    if (typeof response?.body?.cancel === 'function') {
+      await response.body.cancel();
+    }
+  } catch (_error) {
+    // Ignore best-effort cleanup failures.
+  }
+}
+
+async function verifyDirectImageUrl(urlString = '', timeoutMs = IMAGE_REFERENCE_VERIFY_TIMEOUT_MS) {
+  if (typeof fetch !== 'function') {
+    throw new Error('Image URL verification requires fetch support in the runtime.');
+  }
+
+  const headers = {
+    'User-Agent': 'KimiBuilt-Agent/1.0',
+    Accept: 'image/*,*/*;q=0.8',
+  };
+  const attempts = [
+    { method: 'HEAD', headers },
+    {
+      method: 'GET',
+      headers: {
+        ...headers,
+        Range: 'bytes=0-0',
+      },
+    },
+  ];
+
+  let lastError = null;
+
+  for (const attempt of attempts) {
+    let response;
+
+    try {
+      response = await fetch(urlString, {
+        method: attempt.method,
+        headers: attempt.headers,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const finalUrl = response.url || urlString;
+      const mimeType = readImageMimeType(response);
+      const verified = isImageMimeType(mimeType) || (!mimeType && hasLikelyImageExtension(finalUrl));
+      await cancelResponseBody(response);
+
+      if (!verified) {
+        throw new Error(
+          `URL did not resolve to a verified image file (content-type: ${mimeType || 'unknown'})`,
+        );
+      }
+
+      return {
+        url: finalUrl,
+        mimeType: mimeType || null,
+        verificationMethod: attempt.method,
+      };
+    } catch (error) {
+      await cancelResponseBody(response);
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Failed to verify image URL.');
 }
 
 function normalizeInlineFileContent(value) {
@@ -692,7 +782,7 @@ class ToolManager {
         id: 'image-search-unsplash',
         name: 'Unsplash Image Search',
         category: 'system',
-        description: 'Search Unsplash for reference or stock images and return image URLs with attribution',
+        description: 'Search Unsplash for up to 20 verified stock images and return reusable image URLs with attribution',
         backend: {
           handler: async (params) => {
             if (!isUnsplashConfigured()) {
@@ -701,7 +791,7 @@ class ToolManager {
 
             const results = await searchImages(params.query, {
               page: params.page || 1,
-              perPage: Math.min(Math.max(params.perPage || 6, 1), 12),
+              perPage: Math.min(Math.max(params.perPage || 10, 1), MAX_VERIFIED_REFERENCE_IMAGES),
               orientation: params.orientation,
             });
 
@@ -735,7 +825,7 @@ class ToolManager {
           properties: {
             query: { type: 'string' },
             page: { type: 'integer', minimum: 1 },
-            perPage: { type: 'integer', minimum: 1, maximum: 12 },
+            perPage: { type: 'integer', minimum: 1, maximum: MAX_VERIFIED_REFERENCE_IMAGES },
             orientation: { type: 'string', enum: ['landscape', 'portrait', 'squarish'] },
           },
         },
@@ -752,37 +842,98 @@ class ToolManager {
         id: 'image-from-url',
         name: 'Image URL Reference',
         category: 'system',
-        description: 'Validate and normalize a direct image URL so it can be embedded in the final output',
+        description: 'Validate, verify, and normalize up to 20 direct image URLs so they can be saved and reused in document output',
         backend: {
           handler: async (params) => {
-            const normalizedUrl = normalizeCandidateUrl(params.url);
-            const parsed = new URL(normalizedUrl);
-            if (!['http:', 'https:'].includes(parsed.protocol)) {
-              throw new Error('Only http and https image URLs are supported.');
+            const urlCandidates = [
+              ...(Array.isArray(params.urls) ? params.urls : []),
+              ...(params.url ? [params.url] : []),
+            ];
+            const normalizedUrls = urlCandidates
+              .map((value) => {
+                try {
+                  return normalizeCandidateUrl(value);
+                } catch (_error) {
+                  return null;
+                }
+              })
+              .filter((value, index, array) => value && array.indexOf(value) === index)
+              .slice(0, MAX_VERIFIED_REFERENCE_IMAGES);
+
+            if (normalizedUrls.length === 0) {
+              throw new Error('Provide a direct image `url` or up to 20 image `urls`.');
             }
 
-            const alt = params.alt || deriveImageAltText(parsed.toString(), 'image');
-            return {
-              source: 'url',
-              image: {
-                url: parsed.toString(),
+            const results = await Promise.allSettled(normalizedUrls.map(async (candidateUrl, index) => {
+              const parsed = new URL(candidateUrl);
+              if (!['http:', 'https:'].includes(parsed.protocol)) {
+                throw new Error('Only http and https image URLs are supported.');
+              }
+
+              const verified = await verifyDirectImageUrl(parsed.toString());
+              const alt = Array.isArray(params.alts) && typeof params.alts[index] === 'string'
+                ? params.alts[index]
+                : (params.alt || deriveImageAltText(verified.url, 'image'));
+
+              return {
+                url: verified.url,
                 alt,
                 title: params.title || '',
-                host: parsed.host,
-              },
-              normalizedUrl: parsed.toString(),
-              markdownImage: `![${alt}](${parsed.toString()})`,
+                host: new URL(verified.url).host,
+                mimeType: verified.mimeType,
+                verified: true,
+                verificationMethod: verified.verificationMethod,
+              };
+            }));
+
+            const images = [];
+            const rejected = [];
+            results.forEach((result, index) => {
+              if (result.status === 'fulfilled') {
+                images.push(result.value);
+                return;
+              }
+
+              rejected.push({
+                inputIndex: index + 1,
+                error: result.reason?.message || 'Image verification failed.',
+              });
+            });
+
+            if (images.length === 0) {
+              throw new Error(rejected[0]?.error || 'Image verification failed.');
+            }
+
+            const primaryImage = images[0];
+            return {
+              source: 'url',
+              verified: true,
+              verifiedCount: images.length,
+              image: primaryImage,
+              images,
+              rejected,
+              normalizedUrl: primaryImage.url,
+              markdownImage: `![${primaryImage.alt}](${primaryImage.url})`,
+              markdownImages: images.map((image) => `![${image.alt}](${image.url})`),
             };
           },
-          sideEffects: ['read'],
-          timeout: 5000,
+          sideEffects: ['network'],
+          timeout: 30000,
         },
         inputSchema: {
           type: 'object',
-          required: ['url'],
+          required: [],
           properties: {
             url: { type: 'string' },
+            urls: {
+              type: 'array',
+              description: 'Optional batch of up to 20 direct image URLs to verify and normalize in one call.',
+            },
             alt: { type: 'string' },
+            alts: {
+              type: 'array',
+              description: 'Optional alt-text array matching the order of `urls`.',
+            },
             title: { type: 'string' },
           },
         },

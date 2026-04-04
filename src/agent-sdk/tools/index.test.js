@@ -4,6 +4,16 @@ const os = require('os');
 const path = require('path');
 
 describe('ToolManager image tools', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
   test('registers restricted git and k3s deploy tools', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
@@ -15,6 +25,18 @@ describe('ToolManager image tools', () => {
   test('normalizes markdown-wrapped image URLs before validation', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
+    global.fetch = jest.fn(async (url, options = {}) => ({
+      ok: true,
+      url,
+      headers: {
+        get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/jpeg' : null),
+      },
+      body: options.method === 'HEAD'
+        ? null
+        : {
+          cancel: jest.fn(async () => {}),
+        },
+    }));
 
     const result = await toolManager.executeTool('image-from-url', {
       url: '![Hero image](https://images.unsplash.com/photo-12345?fit=crop&w=1200).',
@@ -22,7 +44,38 @@ describe('ToolManager image tools', () => {
 
     expect(result.success).toBe(true);
     expect(result.data.image.url).toBe('https://images.unsplash.com/photo-12345?fit=crop&w=1200');
+    expect(result.data.image.verified).toBe(true);
     expect(result.data.markdownImage).toContain('https://images.unsplash.com/photo-12345?fit=crop&w=1200');
+  });
+
+  test('verifies and normalizes batches of direct image urls', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+    global.fetch = jest.fn(async (url, options = {}) => ({
+      ok: true,
+      url,
+      headers: {
+        get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/png' : null),
+      },
+      body: options.method === 'HEAD'
+        ? null
+        : {
+          cancel: jest.fn(async () => {}),
+        },
+    }));
+
+    const result = await toolManager.executeTool('image-from-url', {
+      urls: [
+        'https://cdn.example.com/photo-one',
+        'https://cdn.example.com/photo-two',
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.verifiedCount).toBe(2);
+    expect(result.data.images).toHaveLength(2);
+    expect(result.data.markdownImages).toHaveLength(2);
+    expect(result.data.rejected).toEqual([]);
   });
 
   test('accepts file-write content aliases and writes the file body', async () => {
