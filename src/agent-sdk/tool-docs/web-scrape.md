@@ -12,11 +12,15 @@ Key params:
 - `browser`
 - `javascript`
 - `waitForSelector`
+- `actions`
+- `captureScreenshot`
 
 Patterns:
 - Static page: use selectors only.
 - Dynamic page: set `browser: true` or `javascript: true`.
 - Cert/TLS problems: browser mode is the preferred fallback.
+- Interactive page: use `browser: true` plus `actions` like `click`, `fill`, `type`, `press`, `wait_for_selector`, `wait_for_timeout`, `hover`, `scroll`, or `select_option`.
+- Visual review: add `captureScreenshot: true` in browser mode to persist a screenshot artifact.
 
 Selector format:
 - `selector`

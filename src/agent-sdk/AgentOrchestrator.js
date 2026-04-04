@@ -109,7 +109,7 @@ function inferRecallProfileFromObjective(text = '') {
     return 'default';
   }
 
-  return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized)
+  return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news|headlines?|weather|forecast|temperature)\b/.test(normalized)
     ? 'research'
     : 'default';
 }

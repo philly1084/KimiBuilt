@@ -131,6 +131,15 @@ function hasExplicitWebResearchIntentText(text = '') {
     return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online)\b/.test(normalized);
 }
 
+function hasCurrentInfoIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(latest|current|today|news|headlines?|weather|forecast|temperature)\b/.test(normalized);
+}
+
 function hasDocumentWorkflowIntentText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -152,7 +161,7 @@ function inferRecallProfileFromText(text = '') {
         return 'default';
     }
 
-    return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized)
+    return /\b(web research|research|look up|search for|search the web|browse the web|search online|browse online|latest|current|today|news|headlines?|weather|forecast|temperature)\b/.test(normalized)
         ? 'research'
         : 'default';
 }
@@ -163,6 +172,27 @@ function normalizeResearchFollowupPageCount() {
 
 function normalizeResearchSearchResultCount() {
     return Math.max(8, Math.min(config.memory.researchSearchLimit, config.search.maxLimit));
+}
+
+function inferResearchTimeRangeFromText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'all';
+    }
+
+    if (/\b(today|latest|current|breaking|news|headlines?|weather|forecast|temperature)\b/.test(normalized)) {
+        return 'day';
+    }
+
+    if (/\b(this week|weekly|past week|last week)\b/.test(normalized)) {
+        return 'week';
+    }
+
+    if (/\b(this month|monthly|past month|last month)\b/.test(normalized)) {
+        return 'month';
+    }
+
+    return 'all';
 }
 
 function extractExplicitWebResearchQuery(text = '') {
@@ -183,7 +213,7 @@ function extractExplicitWebResearchQuery(text = '') {
     for (const pattern of patterns) {
         const match = prompt.match(pattern);
         if (match?.[1]) {
-            return match[1].trim();
+            return match[1].trim().replace(/[.?!]+$/g, '').trim();
         }
     }
 
@@ -193,6 +223,18 @@ function extractExplicitWebResearchQuery(text = '') {
 
     return prompt
         .replace(/^(please|can you|could you|would you|help me|i need you to)\s+/i, '')
+        .replace(/[.?!]+$/g, '')
+        .trim();
+}
+
+function extractImplicitCurrentInfoQuery(text = '') {
+    const prompt = String(text || '').trim();
+    if (!prompt || !hasCurrentInfoIntentText(prompt)) {
+        return null;
+    }
+
+    return prompt
+        .replace(/^(please|can you|could you|would you|help me|i need you to|tell me|show me|find me|get me)\s+/i, '')
         .replace(/[.?!]+$/g, '')
         .trim();
 }
@@ -1572,7 +1614,7 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
 }
 
 function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = {}, toolEvents = [] } = {}) {
-    if (!hasExplicitWebResearchIntentText(objective)) {
+    if (!hasExplicitWebResearchIntentText(objective) && !hasCurrentInfoIntentText(objective)) {
         return [];
     }
 
@@ -1603,6 +1645,19 @@ function buildResearchFollowupPlanFromToolEvents({ objective = '', toolPolicy = 
 
     if (followupCandidates.length === 0) {
         return [];
+    }
+
+    const preferRenderedFollowups = hasCurrentInfoIntentText(objective);
+    if (preferRenderedFollowups && toolPolicy.candidateToolIds.includes('web-scrape')) {
+        return followupCandidates.map((url) => ({
+            tool: 'web-scrape',
+            reason: 'Current-information research follow-up should verify top search results with rendered page scraping.',
+            params: {
+                url,
+                browser: true,
+                timeout: 20000,
+            },
+        }));
     }
 
     if (toolPolicy.candidateToolIds.includes('web-fetch')) {
@@ -3741,7 +3796,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (remoteToolId && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
                 candidates.add(remoteToolId);
             }
-            if ((hasExplicitWebResearchIntent || /\b(latest|current|today|news|research|look up|search|browse)\b/.test(prompt)) && allowedToolIds.includes('web-search')) {
+            if ((hasExplicitWebResearchIntent || /\b(latest|current|today|news|headlines?|weather|forecast|temperature|research|look up|search|browse)\b/.test(prompt)) && allowedToolIds.includes('web-search')) {
                 candidates.add('web-search');
             }
             if (hasExplicitScrapeIntent) {
@@ -3835,6 +3890,8 @@ class ConversationOrchestrator extends EventEmitter {
 
     buildDirectAction({ objective = '', session = null, recentMessages = [], toolPolicy = {}, toolContext = {}, toolEvents = [] }) {
         const researchQuery = extractExplicitWebResearchQuery(objective);
+        const currentInfoQuery = !researchQuery ? extractImplicitCurrentInfoQuery(objective) : null;
+        const searchQuery = researchQuery || currentInfoQuery;
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const documentWorkflowParams = buildDocumentWorkflowGenerateParams({
@@ -3898,16 +3955,18 @@ class ConversationOrchestrator extends EventEmitter {
         }
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
-            && researchQuery) {
+            && searchQuery) {
             return {
                 tool: 'web-search',
-                reason: 'Explicit research request should start with Perplexity-backed web search.',
+                reason: researchQuery
+                    ? 'Explicit research request should start with Perplexity-backed web search.'
+                    : 'Current-information request should start with Perplexity-backed web search.',
                 params: {
-                    query: researchQuery,
+                    query: searchQuery,
                     engine: 'perplexity',
                     limit: normalizeResearchSearchResultCount(),
                     region: 'us-en',
-                    timeRange: 'all',
+                    timeRange: inferResearchTimeRangeFromText(objective),
                     includeSnippets: true,
                     includeUrls: true,
                 },
@@ -3926,7 +3985,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)
             && hasDocumentWorkflowIntentText(objective)
-            && !researchQuery
+            && !searchQuery
             && !(firstUrl && /\b(scrape|extract|selector|structured|parse)\b/i.test(objective))) {
             return {
                 tool: DOCUMENT_WORKFLOW_TOOL_ID,
@@ -4726,6 +4785,8 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes('web-scrape')) {
             parts.push('Use `web-scrape` for structured extraction from URLs. Prefer `browser: true` for JS-heavy pages or certificate/TLS problems.');
+            parts.push('When browser rendering is enabled, `web-scrape` can execute `actions` such as click, fill, type, press, wait_for_selector, wait_for_timeout, hover, scroll, and select_option before extracting the final page state.');
+            parts.push('Use `captureScreenshot: true` in browser mode when a visual snapshot of the rendered page would help later review or UI verification.');
             parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');
         }
 

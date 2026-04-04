@@ -4,27 +4,9 @@
  */
 
 const { ToolBase } = require('../../ToolBase');
-const fs = require('fs/promises');
-const os = require('os');
-const path = require('path');
-const { execFile } = require('child_process');
-const { promisify } = require('util');
 const { config } = require('../../../../config');
 const { artifactService } = require('../../../../artifacts/artifact-service');
-
-const execFileAsync = promisify(execFile);
-const DEFAULT_BROWSER_CANDIDATES = [
-  config.artifacts.browserPath,
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/snap/bin/chromium',
-  'chromium',
-  'chromium-browser',
-  'google-chrome',
-  'google-chrome-stable',
-];
+const { browsePage, normalizeBrowserUrl } = require('./browser-runtime');
 
 class WebScrapeTool extends ToolBase {
   constructor() {
@@ -108,6 +90,23 @@ class WebScrapeTool extends ToolBase {
             description: 'Force backend headless-browser rendering, useful for dynamic pages and certificate/TLS fetch failures',
             default: false
           },
+          actions: {
+            type: 'array',
+            description: 'Optional browser actions to execute before extracting content, such as click, fill, type, press, wait_for_selector, wait_for_timeout, hover, scroll, or select_option',
+            items: {
+              type: 'object',
+            },
+          },
+          captureScreenshot: {
+            type: 'boolean',
+            description: 'Capture a screenshot artifact of the rendered page when browser mode is used',
+            default: false,
+          },
+          fullPageScreenshot: {
+            type: 'boolean',
+            description: 'Capture the full page when captureScreenshot is enabled',
+            default: true,
+          },
           timeout: {
             type: 'integer',
             default: 30000
@@ -122,6 +121,9 @@ class WebScrapeTool extends ToolBase {
           content: { type: 'string' },
           contentLength: { type: 'integer' },
           data: { type: 'object' },
+          links: { type: 'array' },
+          headings: { type: 'array' },
+          screenshot: { type: ['object', 'null'] },
           extractedAt: { type: 'string' },
           method: { type: 'string' }
         }
@@ -141,21 +143,38 @@ class WebScrapeTool extends ToolBase {
       imageLimit = 12,
       javascript = false,
       browser = false,
+      actions = [],
+      captureScreenshot = false,
+      fullPageScreenshot = true,
       timeout = 30000
     } = params;
 
-    // For JavaScript-heavy sites, we'd need Puppeteer/Playwright
-    // For now, implement static scraping with cheerio-like parsing
-    
     let html;
     let finalUrl = url;
+    let title = '';
+    let content = '';
+    let links = [];
+    let headings = [];
+    let browserData = null;
     
     if (browser || javascript) {
-      html = await this.fetchWithBrowser(url, {
+      browserData = await browsePage(url, {
         timeout,
         waitForSelector,
+        selectors,
+        actions,
+        captureScreenshot,
+        fullPageScreenshot,
+        sessionId: context?.sessionId || null,
+        imageLimit,
+        contentCharLimit: config.scrape.contentCharLimit,
       });
-      finalUrl = this.normalizeUrl(url);
+      html = browserData.html;
+      finalUrl = browserData.url || this.normalizeUrl(url);
+      title = browserData.title || '';
+      content = browserData.text || '';
+      links = Array.isArray(browserData.links) ? browserData.links : [];
+      headings = Array.isArray(browserData.headings) ? browserData.headings : [];
     } else {
       // Static fetch
       const fetchTool = this.resolveFetchTool(context);
@@ -166,11 +185,23 @@ class WebScrapeTool extends ToolBase {
       const fetchResult = await fetchTool.execute({ url, timeout }, context);
       if (!fetchResult.success) {
         if (this.shouldFallbackToBrowser(fetchResult.error)) {
-          html = await this.fetchWithBrowser(url, {
+          browserData = await browsePage(url, {
             timeout,
             waitForSelector,
+            selectors,
+            actions,
+            captureScreenshot,
+            fullPageScreenshot,
+            sessionId: context?.sessionId || null,
+            imageLimit,
+            contentCharLimit: config.scrape.contentCharLimit,
           });
-          finalUrl = this.normalizeUrl(url);
+          html = browserData.html;
+          finalUrl = browserData.url || this.normalizeUrl(url);
+          title = browserData.title || '';
+          content = browserData.text || '';
+          links = Array.isArray(browserData.links) ? browserData.links : [];
+          headings = Array.isArray(browserData.headings) ? browserData.headings : [];
         } else {
           throw new Error(`Failed to fetch: ${fetchResult.error}`);
         }
@@ -182,18 +213,25 @@ class WebScrapeTool extends ToolBase {
 
     tracker.recordRead(url, { type: 'html', size: html.length });
 
-    // Extract title
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : '';
-    const content = this.extractPageText(html);
+    if (!title) {
+      const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+      title = titleMatch ? titleMatch[1].trim() : '';
+    }
+    if (!content) {
+      content = this.extractPageText(html);
+    }
 
     let extractedData = {};
-    let method = 'static';
+    let method = browserData ? `${browserData.engine}-rendered` : 'static';
 
     // CSS Selector extraction
     if (selectors) {
-      extractedData = await this.extractWithSelectors(html, selectors);
-      method = browser || javascript ? 'browser-css-selectors' : 'css-selectors';
+      extractedData = browserData?.selectorData && Object.keys(browserData.selectorData).length > 0
+        ? browserData.selectorData
+        : await this.extractWithSelectors(html, selectors);
+      method = browserData
+        ? `${browserData.engine}-css-selectors`
+        : (browser || javascript ? 'browser-css-selectors' : 'css-selectors');
     }
 
     // XPath extraction (if implemented)
@@ -213,6 +251,7 @@ class WebScrapeTool extends ToolBase {
     if (captureImages || blindImageCapture) {
       imageCapture = await this.captureImages({
         html,
+        imageUrls: browserData?.images,
         pageUrl: finalUrl,
         context,
         blindImageCapture,
@@ -227,6 +266,16 @@ class WebScrapeTool extends ToolBase {
       content,
       contentLength: content.length,
       data: extractedData,
+      links,
+      headings,
+      browser: browserData
+        ? {
+          engine: browserData.engine,
+          actions: browserData.actions || [],
+          warnings: browserData.warnings || [],
+        }
+        : null,
+      screenshot: browserData?.screenshot || null,
       imageCapture,
       extractedAt: new Date().toISOString(),
       method,
@@ -235,13 +284,17 @@ class WebScrapeTool extends ToolBase {
         contentChars: content.length,
         fieldsExtracted: Object.keys(extractedData).length,
         imagesCaptured: imageCapture?.count || 0,
+        linksCaptured: links.length,
+        headingsCaptured: headings.length,
       }
     };
   }
 
-  async captureImages({ html, pageUrl, context = {}, blindImageCapture = false, imageLimit = 12, timeout = 30000 }) {
-    const imageUrls = this.extractImageUrls(html, pageUrl, imageLimit);
-    if (imageUrls.length === 0) {
+  async captureImages({ html, imageUrls = null, pageUrl, context = {}, blindImageCapture = false, imageLimit = 12, timeout = 30000 }) {
+    const normalizedImageUrls = Array.isArray(imageUrls) && imageUrls.length > 0
+      ? imageUrls.slice(0, Math.max(1, Math.min(Number(imageLimit) || 12, 50)))
+      : this.extractImageUrls(html, pageUrl, imageLimit);
+    if (normalizedImageUrls.length === 0) {
       return {
         mode: blindImageCapture ? 'blind-artifacts' : 'listed',
         count: 0,
@@ -252,8 +305,8 @@ class WebScrapeTool extends ToolBase {
     if (!blindImageCapture) {
       return {
         mode: 'listed',
-        count: imageUrls.length,
-        items: imageUrls.map((url, index) => ({
+        count: normalizedImageUrls.length,
+        items: normalizedImageUrls.map((url, index) => ({
           index: index + 1,
           sourceUrl: url,
         })),
@@ -266,8 +319,8 @@ class WebScrapeTool extends ToolBase {
     }
 
     const items = [];
-    for (let index = 0; index < imageUrls.length; index += 1) {
-      const sourceUrl = imageUrls[index];
+    for (let index = 0; index < normalizedImageUrls.length; index += 1) {
+      const sourceUrl = normalizedImageUrls[index];
       const downloaded = await this.downloadImageBinary(sourceUrl, timeout);
       const extension = this.resolveImageExtension(sourceUrl, downloaded.mimeType);
       const filename = `blind-image-${String(index + 1).padStart(2, '0')}.${extension}`;
@@ -352,95 +405,13 @@ class WebScrapeTool extends ToolBase {
       'certificate',
       'ssl',
       'tls',
+      'cloudflare',
+      'javascript challenge',
     ].some((token) => normalized.includes(token));
   }
 
-  async fetchWithBrowser(url, options = {}) {
-    const browserPath = await this.resolveBrowserPath();
-    if (!browserPath) {
-      throw new Error('Headless browser is not installed in the backend container');
-    }
-
-    const normalizedUrl = this.normalizeUrl(url);
-    const timeout = options.timeout || 30000;
-    const virtualTimeBudget = Math.min(Math.max(timeout, 3000), 45000);
-    const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-browser-'));
-
-    try {
-      const { stdout, stderr } = await execFileAsync(browserPath, [
-        '--headless',
-        '--disable-gpu',
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-background-networking',
-        '--disable-features=Translate,BackForwardCache',
-        '--allow-running-insecure-content',
-        '--ignore-certificate-errors',
-        '--user-data-dir=' + userDataDir,
-        `--virtual-time-budget=${virtualTimeBudget}`,
-        '--dump-dom',
-        normalizedUrl,
-      ], {
-        timeout,
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-
-      const html = String(stdout || '').trim();
-      if (!html) {
-        const detail = String(stderr || '').trim();
-        throw new Error(detail || `Browser returned empty DOM for ${normalizedUrl}`);
-      }
-
-      if (options.waitForSelector) {
-        this.assertSelectorPresent(html, options.waitForSelector);
-      }
-
-      return html;
-    } catch (error) {
-      const detail = String(error.stderr || error.stdout || error.message || '').trim();
-      throw new Error(`Browser fetch failed for ${normalizedUrl}: ${detail}`);
-    } finally {
-      await fs.rm(userDataDir, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-
-  async resolveBrowserPath() {
-    for (const candidate of DEFAULT_BROWSER_CANDIDATES) {
-      if (!candidate) continue;
-
-      if (candidate.includes(path.sep)) {
-        try {
-          await fs.access(candidate);
-          return candidate;
-        } catch {
-          continue;
-        }
-      }
-
-      return candidate;
-    }
-
-    return null;
-  }
-
   normalizeUrl(url) {
-    const value = String(url || '').trim();
-    if (!value) {
-      throw new Error('URL is required');
-    }
-
-    const withScheme = /^[a-z]+:\/\//i.test(value) ? value : `https://${value}`;
-
-    try {
-      const parsed = new URL(withScheme);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        throw new Error(`Unsupported protocol: ${parsed.protocol}`);
-      }
-      return parsed.toString();
-    } catch (error) {
-      throw new Error(`Invalid URL '${value}': ${error.message}`);
-    }
+    return normalizeBrowserUrl(url);
   }
 
   extractImageUrls(html, pageUrl, imageLimit = 12) {
@@ -553,13 +524,6 @@ class WebScrapeTool extends ToolBase {
       return new URL(url).hostname.replace(/^www\./i, '');
     } catch (_error) {
       return '';
-    }
-  }
-
-  assertSelectorPresent(html, selector) {
-    const regex = this.selectorToRegex(selector);
-    if (!regex.test(html)) {
-      throw new Error(`Selector '${selector}' was not found in the rendered page`);
     }
   }
 

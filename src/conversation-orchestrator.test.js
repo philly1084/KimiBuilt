@@ -3082,6 +3082,44 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('forces a direct Perplexity-backed web-search action for current-info prompts like weather', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'web-search'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'What is the weather in Halifax today?';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('web-search');
+        expect(directAction).toEqual({
+            tool: 'web-search',
+            reason: 'Current-information request should start with Perplexity-backed web search.',
+            params: expect.objectContaining({
+                engine: 'perplexity',
+                query: 'What is the weather in Halifax today',
+                timeRange: 'day',
+            }),
+        });
+    });
+
     test('prefers document-workflow once verified research pages exist for a requested slide deck', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
