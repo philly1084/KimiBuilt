@@ -2196,6 +2196,17 @@ select.form-control,
     font-size: var(--text-xs);
 }
 
+.workload-row-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.workload-row-actions .btn {
+    min-width: 72px;
+}
+
 .workload-run-detail {
     display: grid;
     gap: var(--space-md);

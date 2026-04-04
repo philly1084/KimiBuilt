@@ -475,6 +475,27 @@ class ApiClient {
     }
 
     /**
+     * Pause a deferred workload from the admin dashboard
+     */
+    async pauseAdminWorkload(id) {
+        return this.post(`/api/admin/workloads/${id}/pause`);
+    }
+
+    /**
+     * Resume a deferred workload from the admin dashboard
+     */
+    async resumeAdminWorkload(id) {
+        return this.post(`/api/admin/workloads/${id}/resume`);
+    }
+
+    /**
+     * Delete a deferred workload from the admin dashboard
+     */
+    async deleteAdminWorkload(id) {
+        return this.delete(`/api/admin/workloads/${id}`);
+    }
+
+    /**
      * Get deferred workload runs
      */
     async getAdminRuns(limit = 100) {

@@ -202,6 +202,30 @@ class WorkloadStore {
         return this.mapWorkload(result.rows[0]);
     }
 
+    async getAdminWorkloadById(id) {
+        await this.ensureAvailable();
+        const result = await postgres.query(
+            `
+                SELECT workloads.*,
+                       COALESCE((
+                           SELECT jsonb_build_object(
+                               'queued', COUNT(*) FILTER (WHERE runs.status = 'queued'),
+                               'running', COUNT(*) FILTER (WHERE runs.status = 'running'),
+                               'failed', COUNT(*) FILTER (WHERE runs.status = 'failed')
+                           )
+                           FROM agent_runs runs
+                           WHERE runs.workload_id = workloads.id
+                       ), '{}'::jsonb) AS run_summary
+                FROM agent_workloads workloads
+                WHERE workloads.id = $1
+                LIMIT 1
+            `,
+            [id],
+        );
+
+        return this.mapWorkload(result.rows[0]);
+    }
+
     async getWorkloadByCallableSlug(slug, ownerId) {
         await this.ensureAvailable();
         const result = await postgres.query(
@@ -247,9 +271,18 @@ class WorkloadStore {
         await this.ensureAvailable();
         const result = await postgres.query(
             `
-                SELECT *
-                FROM agent_workloads
-                ORDER BY updated_at DESC
+                SELECT workloads.*,
+                       COALESCE((
+                           SELECT jsonb_build_object(
+                               'queued', COUNT(*) FILTER (WHERE runs.status = 'queued'),
+                               'running', COUNT(*) FILTER (WHERE runs.status = 'running'),
+                               'failed', COUNT(*) FILTER (WHERE runs.status = 'failed')
+                           )
+                           FROM agent_runs runs
+                           WHERE runs.workload_id = workloads.id
+                       ), '{}'::jsonb) AS run_summary
+                FROM agent_workloads workloads
+                ORDER BY workloads.updated_at DESC
                 LIMIT $1
             `,
             [limit],

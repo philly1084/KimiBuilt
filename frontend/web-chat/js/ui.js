@@ -1736,6 +1736,7 @@ class UIHelpers {
         
         if (label) label.textContent = displayName;
         if (inputLabel) inputLabel.textContent = displayName;
+        this.updateMobileActionSheetUI();
     }
 
     normalizeReasoningEffort(value) {
@@ -2272,6 +2273,7 @@ class UIHelpers {
         const appInstance = options.appInstance || window.chatApp;
 
         this.layoutMode = normalizedMode;
+        this.closeMobileActionSheet();
 
         document.body.classList.toggle('layout-minimal', normalizedMode === 'minimal');
         document.documentElement.setAttribute('data-layout-mode', normalizedMode);
@@ -2360,6 +2362,7 @@ class UIHelpers {
         if (sidebarButton) {
             this.reinitializeIcons(sidebarButton);
         }
+        this.updateMobileActionSheetUI();
     }
 
     syncSidebarState() {
@@ -2420,6 +2423,8 @@ class UIHelpers {
             if (themeText) themeText.textContent = 'Dark Mode';
             if (prismTheme) prismTheme.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css');
         }
+
+        this.updateMobileActionSheetUI();
     }
 
     toggleTheme() {
@@ -3494,6 +3499,123 @@ class UIHelpers {
         this.syncSidebarState();
     }
 
+    toggleMobileActionSheet() {
+        const menu = document.getElementById('mobile-chat-menu');
+        if (!menu) {
+            return;
+        }
+
+        if (menu.classList.contains('hidden')) {
+            this.openMobileActionSheet();
+        } else {
+            this.closeMobileActionSheet();
+        }
+    }
+
+    openMobileActionSheet() {
+        const menu = document.getElementById('mobile-chat-menu');
+        const sheet = menu?.querySelector('.mobile-chat-menu__sheet');
+        const trigger = document.getElementById('mobile-chat-menu-btn');
+        if (!menu || !sheet || !window.matchMedia('(max-width: 768px)').matches) {
+            return;
+        }
+
+        this.closeSidebar();
+        this.closeSearch();
+        this.closeModelSelector();
+        this.updateMobileActionSheetUI();
+
+        this.lastFocusedElement = document.activeElement;
+        menu.classList.remove('hidden');
+        menu.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('mobile-chat-menu-open');
+        trigger?.setAttribute('aria-expanded', 'true');
+        this.trapFocus(sheet);
+    }
+
+    closeMobileActionSheet() {
+        const menu = document.getElementById('mobile-chat-menu');
+        const trigger = document.getElementById('mobile-chat-menu-btn');
+        if (!menu) {
+            return;
+        }
+
+        menu.classList.add('hidden');
+        menu.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('mobile-chat-menu-open');
+        trigger?.setAttribute('aria-expanded', 'false');
+
+        if (this.lastFocusedElement && typeof this.lastFocusedElement.focus === 'function') {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
+    }
+
+    updateMobileActionSheetUI() {
+        const modelValue = document.getElementById('mobile-chat-menu-model-value');
+        const themeValue = document.getElementById('mobile-chat-menu-theme-value');
+        const layoutIcon = document.getElementById('mobile-chat-menu-layout-icon');
+        const layoutLabel = document.getElementById('mobile-chat-menu-layout-label');
+        const layoutValue = document.getElementById('mobile-chat-menu-layout-value');
+        const displayName = this.getModelDisplayName({ id: this.currentModel });
+        const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        const isMinimal = this.isMinimalistMode();
+
+        if (modelValue) {
+            modelValue.textContent = displayName;
+        }
+
+        if (themeValue) {
+            themeValue.textContent = theme === 'light' ? 'Light mode' : 'Dark mode';
+        }
+
+        if (layoutLabel) {
+            layoutLabel.textContent = isMinimal ? 'Full interface' : 'Focus mode';
+        }
+
+        if (layoutValue) {
+            layoutValue.textContent = isMinimal ? 'Bring back menus and tools' : 'Show chat first';
+        }
+
+        if (layoutIcon) {
+            layoutIcon.setAttribute('data-lucide', isMinimal ? 'maximize-2' : 'minimize-2');
+            this.reinitializeIcons(layoutIcon.parentElement || layoutIcon);
+        }
+    }
+
+    handleMobileActionSheetAction(action = '') {
+        this.closeMobileActionSheet();
+
+        switch (action) {
+            case 'search':
+                this.openSearch();
+                break;
+            case 'models':
+                this.openModelSelector();
+                break;
+            case 'workloads':
+                window.chatApp?.toggleWorkloadsPanel();
+                break;
+            case 'files':
+                window.fileManager?.open?.();
+                break;
+            case 'export':
+                this.openExportModal();
+                break;
+            case 'theme':
+                this.toggleTheme();
+                break;
+            case 'layout':
+                this.toggleMinimalistMode();
+                break;
+            case 'clear':
+                window.chatApp?.clearCurrentSession();
+                break;
+            default:
+                break;
+        }
+    }
+
     // ============================================
     // Icon Management
     // ============================================
@@ -3575,6 +3697,22 @@ class UIHelpers {
             });
         });
 
+        document.getElementById('mobile-chat-menu-btn')?.addEventListener('click', () => {
+            this.toggleMobileActionSheet();
+        });
+
+        document.getElementById('mobile-chat-menu')?.addEventListener('click', (event) => {
+            const actionNode = event.target.closest('[data-mobile-menu-action]');
+            if (actionNode) {
+                this.handleMobileActionSheetAction(actionNode.dataset.mobileMenuAction || '');
+                return;
+            }
+
+            if (event.target.closest('[data-mobile-menu-close="true"]')) {
+                this.closeMobileActionSheet();
+            }
+        });
+
         // Command palette input
         const commandInput = document.getElementById('command-input');
         if (commandInput) {
@@ -3639,6 +3777,7 @@ class UIHelpers {
                 this.closeModelSelector();
                 this.closeShortcutsModal();
                 this.closeImportModal();
+                this.closeMobileActionSheet();
             }
         });
         
@@ -3651,6 +3790,9 @@ class UIHelpers {
         });
 
         window.addEventListener('resize', () => {
+            if (!window.matchMedia('(max-width: 768px)').matches) {
+                this.closeMobileActionSheet();
+            }
             this.syncSidebarState();
         });
     }

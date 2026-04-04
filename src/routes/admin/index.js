@@ -97,6 +97,60 @@ router.get('/workloads', async (req, res, next) => {
   }
 });
 
+router.post('/workloads/:id/pause', async (req, res, next) => {
+  try {
+    const service = req.app.locals.agentWorkloadService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Deferred workloads require Postgres persistence' });
+    }
+
+    const workload = await service.pauseAdminWorkload(req.params.id);
+    if (!workload) {
+      return res.status(404).json({ success: false, error: 'Workload not found' });
+    }
+
+    res.json({ success: true, data: workload });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/workloads/:id/resume', async (req, res, next) => {
+  try {
+    const service = req.app.locals.agentWorkloadService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Deferred workloads require Postgres persistence' });
+    }
+
+    const workload = await service.resumeAdminWorkload(req.params.id);
+    if (!workload) {
+      return res.status(404).json({ success: false, error: 'Workload not found' });
+    }
+
+    res.json({ success: true, data: workload });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/workloads/:id', async (req, res, next) => {
+  try {
+    const service = req.app.locals.agentWorkloadService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Deferred workloads require Postgres persistence' });
+    }
+
+    const deleted = await service.deleteAdminWorkload(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Workload not found' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/runs', async (req, res, next) => {
   try {
     const service = req.app.locals.agentWorkloadService;

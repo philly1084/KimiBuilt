@@ -20,6 +20,7 @@ describe('AgentWorkloadService', () => {
             enqueueRun: jest.fn(),
             addRunEvent: jest.fn(),
             getWorkloadById: jest.fn(),
+            getAdminWorkloadById: jest.fn(),
             getWorkloadByCallableSlug: jest.fn(),
             updateWorkload: jest.fn(),
             deleteWorkload: jest.fn(),
@@ -376,6 +377,54 @@ describe('AgentWorkloadService', () => {
         }, 'phill')).rejects.toThrow('Failed to enqueue workload run.');
 
         expect(store.deleteWorkload).toHaveBeenCalledWith('workload-cleanup-1', 'phill');
+    });
+
+    test('pauses an admin workload using the stored owner id', async () => {
+        const workload = {
+            id: 'workload-admin-1',
+            ownerId: 'ops-admin',
+            sessionId: 'session-1',
+            title: 'Nightly review',
+            prompt: 'Review the queue.',
+            enabled: true,
+            trigger: { type: 'cron', expression: '0 2 * * *', timezone: 'UTC' },
+        };
+
+        store.getAdminWorkloadById.mockResolvedValue(workload);
+        store.updateWorkload.mockResolvedValue({
+            ...workload,
+            enabled: false,
+        });
+
+        const paused = await service.pauseAdminWorkload('workload-admin-1');
+
+        expect(store.getAdminWorkloadById).toHaveBeenCalledWith('workload-admin-1');
+        expect(store.updateWorkload).toHaveBeenCalledWith('workload-admin-1', 'ops-admin', { enabled: false });
+        expect(store.cancelQueuedRunsForWorkload).toHaveBeenCalledWith('workload-admin-1');
+        expect(paused.enabled).toBe(false);
+    });
+
+    test('deletes an admin workload using the stored owner id', async () => {
+        const workload = {
+            id: 'workload-admin-2',
+            ownerId: 'ops-admin',
+            sessionId: 'session-1',
+            title: 'Nightly review',
+            prompt: 'Review the queue.',
+            enabled: false,
+            trigger: { type: 'cron', expression: '0 2 * * *', timezone: 'UTC' },
+        };
+
+        store.getAdminWorkloadById.mockResolvedValue(workload);
+        store.getWorkloadById.mockResolvedValue(workload);
+        store.deleteWorkload.mockResolvedValue(true);
+
+        const deleted = await service.deleteAdminWorkload('workload-admin-2');
+
+        expect(store.getAdminWorkloadById).toHaveBeenCalledWith('workload-admin-2');
+        expect(store.getWorkloadById).toHaveBeenCalledWith('workload-admin-2', 'ops-admin');
+        expect(store.deleteWorkload).toHaveBeenCalledWith('workload-admin-2', 'ops-admin');
+        expect(deleted).toBe(true);
     });
 
     test('extracts structured execution when creating a workload from a remote scenario request', async () => {

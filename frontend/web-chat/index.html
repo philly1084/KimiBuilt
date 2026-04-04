@@ -451,11 +451,6 @@
             </div>
         </aside>
         
-        <!-- Mobile Sidebar Toggle -->
-        <button id="sidebar-toggle" class="mobile-only fixed top-4 left-4 z-50 p-2 rounded-lg bg-bg-secondary border border-border shadow-lg" aria-label="Toggle sidebar">
-            <i data-lucide="menu" class="w-5 h-5" aria-hidden="true"></i>
-        </button>
-        
         <!-- Sidebar Overlay (mobile) -->
         <div id="sidebar-overlay" class="sidebar-overlay hidden fixed inset-0 bg-black/50 z-40 backdrop-blur-sm" onclick="uiHelpers.closeSidebar()"></div>
         
@@ -464,6 +459,9 @@
             <!-- Chat Header -->
             <header class="chat-header chat-header-shell bg-bg-secondary/80 backdrop-blur border-b border-border px-6 py-4 flex items-center justify-between">
                 <div class="chat-header-brand flex items-center gap-3">
+                    <button id="sidebar-toggle" class="mobile-header-btn mobile-only" aria-label="Toggle sidebar">
+                        <i data-lucide="menu" class="w-5 h-5" aria-hidden="true"></i>
+                    </button>
                     <div class="chat-brand-mark w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20" aria-hidden="true">
                         <i data-lucide="bot" class="w-5 h-5 text-white"></i>
                     </div>
@@ -476,6 +474,9 @@
                     </div>
                 </div>
                 <div class="chat-header-actions flex items-center gap-2">
+                    <button id="mobile-chat-menu-btn" class="mobile-header-btn mobile-only" title="Chat controls" aria-label="Open chat controls" aria-haspopup="dialog" aria-expanded="false">
+                        <i data-lucide="ellipsis" class="w-5 h-5" aria-hidden="true"></i>
+                    </button>
                     <div class="header-control-group header-control-group--workspace">
                         <button id="minimalist-toggle-btn" class="btn-icon minimalist-toggle-btn px-3 rounded-lg" title="Enter minimalist mode" aria-label="Enter minimalist mode" aria-pressed="false">
                             <i data-lucide="minimize-2" class="w-4 h-4" id="minimalist-toggle-icon" aria-hidden="true"></i>
@@ -675,6 +676,79 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <div id="mobile-chat-menu" class="mobile-chat-menu hidden" aria-hidden="true">
+        <div class="mobile-chat-menu__overlay" data-mobile-menu-close="true"></div>
+        <div class="mobile-chat-menu__sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-chat-menu-title">
+            <div class="mobile-chat-menu__header">
+                <div>
+                    <p class="mobile-chat-menu__eyebrow">Mobile controls</p>
+                    <h2 id="mobile-chat-menu-title">Chat actions</h2>
+                </div>
+                <button class="btn-icon mobile-chat-menu__close" data-mobile-menu-close="true" aria-label="Close chat controls">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="mobile-chat-menu__actions">
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="search">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Search messages</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value">Find in thread</span>
+                </button>
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="models">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Model</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-model-value">GPT-4o</span>
+                </button>
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="workloads">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="calendar-clock" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Workloads</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value">Schedules and follow-ups</span>
+                </button>
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="files">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="folder-open" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Files</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value">Attachments and local files</span>
+                </button>
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="export">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Export chat</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value">Save this conversation</span>
+                </button>
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="theme">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="sun-medium" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Appearance</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-theme-value">Dark mode</span>
+                </button>
+                <button class="mobile-chat-menu__action" data-mobile-menu-action="layout">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="minimize-2" class="w-4 h-4" id="mobile-chat-menu-layout-icon" aria-hidden="true"></i>
+                        <span id="mobile-chat-menu-layout-label">Focus mode</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-layout-value">Chat only</span>
+                </button>
+                <button class="mobile-chat-menu__action mobile-chat-menu__action--danger" data-mobile-menu-action="clear">
+                    <span class="mobile-chat-menu__action-main">
+                        <i data-lucide="trash-2" class="w-4 h-4" aria-hidden="true"></i>
+                        <span>Clear chat</span>
+                    </span>
+                    <span class="mobile-chat-menu__action-value">Remove messages from this session</span>
+                </button>
+            </div>
+        </div>
     </div>
     
     <!-- Toast Container -->

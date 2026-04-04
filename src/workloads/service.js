@@ -315,6 +315,34 @@ class AgentWorkloadService {
         return this.store.listAdminWorkloads(limit);
     }
 
+    async getAdminWorkload(id) {
+        return this.store.getAdminWorkloadById(id);
+    }
+
+    async pauseAdminWorkload(id) {
+        const workload = await this.getAdminWorkload(id);
+        if (!workload) {
+            return null;
+        }
+        return this.pauseWorkload(id, workload.ownerId);
+    }
+
+    async resumeAdminWorkload(id) {
+        const workload = await this.getAdminWorkload(id);
+        if (!workload) {
+            return null;
+        }
+        return this.resumeWorkload(id, workload.ownerId);
+    }
+
+    async deleteAdminWorkload(id) {
+        const workload = await this.getAdminWorkload(id);
+        if (!workload) {
+            return false;
+        }
+        return this.deleteWorkload(id, workload.ownerId);
+    }
+
     async listAdminRuns(limit = 100) {
         return this.store.listAdminRuns(limit);
     }

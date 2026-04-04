@@ -1052,7 +1052,7 @@ class Dashboard {
         if (!workloads.length) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="empty-state">No deferred workloads are persisted yet.</td>
+                    <td colspan="8" class="empty-state">No deferred workloads are persisted yet.</td>
                 </tr>
             `;
             return;
@@ -1070,6 +1070,14 @@ class Dashboard {
                 <td class="col-tokens">${Number(workload.workloadSummary?.queued || 0)}</td>
                 <td class="col-tokens">${Number(workload.workloadSummary?.running || 0)}</td>
                 <td class="col-tokens">${Number(workload.workloadSummary?.failed || 0)}</td>
+                <td>
+                    <div class="workload-row-actions">
+                        ${workload.enabled
+                            ? `<button class="btn btn-sm btn-secondary" onclick="dashboard.pauseAdminWorkload(event, '${workload.id}')">Pause</button>`
+                            : `<button class="btn btn-sm btn-ghost" onclick="dashboard.resumeAdminWorkload(event, '${workload.id}')">Resume</button>`}
+                        <button class="btn btn-sm btn-danger" onclick="dashboard.deleteAdminWorkload(event, '${workload.id}')">Delete</button>
+                    </div>
+                </td>
             </tr>
         `).join('');
     }
@@ -1391,6 +1399,59 @@ class Dashboard {
             if (!existing) {
                 this.renderAdminRunDetails(null, error);
             }
+        }
+    }
+
+    async pauseAdminWorkload(event, id) {
+        event?.stopPropagation?.();
+        const workload = this.state.workloads.find((entry) => entry.id === id);
+        const title = workload?.title || 'this workload';
+
+        if (!confirm(`Pause "${title}" and cancel any queued runs?`)) {
+            return;
+        }
+
+        try {
+            await apiClient.pauseAdminWorkload(id);
+            this.showToast(`Paused ${title}`, 'success');
+            await this.loadWorkloads();
+        } catch (error) {
+            this.showToast(error.userMessage || error.message || 'Failed to pause workload', 'error');
+        }
+    }
+
+    async resumeAdminWorkload(event, id) {
+        event?.stopPropagation?.();
+        const workload = this.state.workloads.find((entry) => entry.id === id);
+        const title = workload?.title || 'this workload';
+
+        try {
+            await apiClient.resumeAdminWorkload(id);
+            this.showToast(`Resumed ${title}`, 'success');
+            await this.loadWorkloads();
+        } catch (error) {
+            this.showToast(error.userMessage || error.message || 'Failed to resume workload', 'error');
+        }
+    }
+
+    async deleteAdminWorkload(event, id) {
+        event?.stopPropagation?.();
+        const workload = this.state.workloads.find((entry) => entry.id === id);
+        const title = workload?.title || 'this workload';
+
+        if (!confirm(`Delete "${title}"? This also removes queued runs.`)) {
+            return;
+        }
+
+        try {
+            await apiClient.deleteAdminWorkload(id);
+            if (this.state.selectedRun?.workloadId === id) {
+                this.state.selectedRun = null;
+            }
+            this.showToast(`Deleted ${title}`, 'success');
+            await this.loadWorkloads();
+        } catch (error) {
+            this.showToast(error.userMessage || error.message || 'Failed to delete workload', 'error');
         }
     }
     
