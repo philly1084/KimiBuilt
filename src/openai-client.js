@@ -900,6 +900,20 @@ function hasExplicitWebResearchIntent(prompt = '') {
     ].some((pattern) => pattern.test(text));
 }
 
+function hasExplicitQuestionnaireToolTestIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    const mentionsQuestionnaire = /\b(questionnaire|survey|multiple[- ]choice|multiple choice)\b/i.test(text);
+    const mentionsTesting = /\b(test|try|exercise|demo)\b/i.test(text);
+    const asksToBeAsked = /\bask me\b/i.test(text) || /\bask that as\b/i.test(text);
+    const mentionsTool = /\btool\b/i.test(text);
+
+    return mentionsQuestionnaire && (mentionsTesting || asksToBeAsked || mentionsTool);
+}
+
 function extractExplicitWebResearchQuery(prompt = '') {
     const text = String(prompt || '').trim();
     if (!text) {
@@ -1920,6 +1934,15 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         return 'agent-workload';
     }
 
+    const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
+    if (availableToolIds.has(USER_CHECKPOINT_TOOL_ID)
+        && checkpointPolicy.enabled === true
+        && Number(checkpointPolicy.remaining || 0) > 0
+        && !checkpointPolicy.pending
+        && hasExplicitQuestionnaireToolTestIntent(prompt)) {
+        return USER_CHECKPOINT_TOOL_ID;
+    }
+
     if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {
         return 'k3s-deploy';
     }
@@ -2064,6 +2087,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Do not tell the user that a questionnaire tool failed or expose internal mode/tool errors. If `user-checkpoint` is attached, use it directly.');
         guidance.push('- Do not claim that the inline survey card rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.');
         guidance.push('- Keep the checkpoint to one question with 2 to 4 strong options, and leave the built-in free-text path available so the user can type their own answer.');
+        guidance.push('- If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not write a multi-question quiz or personality test as assistant text.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'git-safe')) {

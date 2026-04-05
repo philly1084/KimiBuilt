@@ -245,6 +245,59 @@ Approved page plan:
         expect(agent._shouldForcePageEditActions(question, context, {})).toBe(true);
     });
 
+    test('includes page content and design criteria in the system prompt', () => {
+        const agent = loadAgent();
+        const prompt = agent._buildSystemPrompt({
+            title: 'Penguin Notes',
+            pageId: 'page_penguins',
+            blockCount: 5,
+            wordCount: 180,
+            readingTime: 1,
+            defaultModel: 'gpt-4o',
+            properties: [],
+            lastUpdated: '2026-04-05T10:00:00.000Z',
+            outline: [
+                { id: 'block_h1', content: 'Overview' },
+            ],
+            blocks: [
+                { id: 'block_1', type: 'heading_1', content: 'Penguin Notes', depth: 0 },
+                { id: 'block_2', type: 'text', content: 'Penguins are flightless birds adapted to life in cold oceans.', depth: 0 },
+                { id: 'block_3', type: 'heading_2', content: 'Overview', depth: 0 },
+                { id: 'block_4', type: 'text', content: 'They swim efficiently and live in large colonies.', depth: 0 },
+                { id: 'block_5', type: 'text', content: 'Their diet includes fish, squid, and krill.', depth: 0 },
+            ],
+        });
+
+        expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
+        expect(prompt).toContain('PAGE DESIGN CRITERIA:');
+        expect(prompt).toContain('Top-level flow');
+        expect(prompt).toContain('Do not return a single giant text block');
+    });
+
+    test('expands oversized single-block rebuild actions into multiple page blocks', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [{
+                    type: 'text',
+                    content: '# Penguins\n\n## Habitat\nPenguins live in cold climates and gather in large colonies.\n\n- Antarctica\n- Southern Ocean\n- Rocky coastal islands'
+                }],
+            },
+        ], 'Create a page about penguins with sections and supporting bullets.', {
+            blockCount: 0,
+            outline: [],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_1', content: 'Penguins' }),
+            expect.objectContaining({ type: 'heading_2', content: 'Habitat' }),
+            expect.objectContaining({ type: 'bulleted_list', content: 'Antarctica' }),
+        ]));
+        expect(normalizedActions[0].blocks.length).toBeGreaterThan(1);
+    });
+
     test('suppresses inferred html artifacts for notes page build requests unless file delivery is explicit', () => {
         const agent = loadAgent();
         const context = {

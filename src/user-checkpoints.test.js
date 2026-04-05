@@ -72,6 +72,7 @@ describe('user checkpoint helpers', () => {
         expect(instructions).toContain('keep the free-text field available');
         expect(instructions).toContain('Do not call or mention `request_user_input`');
         expect(instructions).toContain('Do not claim that the questionnaire rendered');
+        expect(instructions).toContain('Do not turn that into a multi-question quiz');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {

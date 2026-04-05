@@ -345,6 +345,7 @@ function buildUserCheckpointInstructions(policy = {}) {
         'Do not call or mention `request_user_input` in this runtime. Use `user-checkpoint` for web-chat questionnaires.',
         'On the web-chat surface, do not ask a blocking multiple-choice question as plain assistant text when `user-checkpoint` is available; use the tool so the UI can render inline options.',
         'Do not claim that the questionnaire rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.',
+        'If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not turn that into a multi-question quiz, personality test, or numbered prose form.',
         'Use a checkpoint only when the answer would materially change the plan, architecture, implementation scope, or final output.',
         'Do not use a checkpoint for small clarifications or details you can infer reasonably.',
         'Keep the checkpoint concise: one question, 2 to 4 strong options, short descriptions, and keep the free-text field available so the user can add their own input when needed.',

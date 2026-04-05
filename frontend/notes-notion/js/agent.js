@@ -316,6 +316,87 @@ const Agent = (function() {
         }).join('\n');
     }
 
+    function buildTopLevelLayoutSnapshot(pageContext) {
+        if (!pageContext?.blocks?.length) {
+            return '- Page is empty. Start with a clear top-level structure.';
+        }
+
+        const rootBlocks = pageContext.blocks.filter((block) => Number(block.depth || 0) === 0);
+        if (!rootBlocks.length) {
+            return '- No root-level blocks detected.';
+        }
+
+        const flow = rootBlocks
+            .slice(0, 12)
+            .map((block, index) => `${index + 1}. [${block.id}] ${block.type}: ${truncateText(block.content, 120) || '(empty)'}`)
+            .join('\n');
+
+        const typeCounts = rootBlocks.reduce((counts, block) => {
+            const key = String(block.type || 'unknown');
+            counts[key] = (counts[key] || 0) + 1;
+            return counts;
+        }, {});
+        const mix = Object.entries(typeCounts)
+            .map(([type, count]) => `${type} x${count}`)
+            .join(', ');
+
+        return [
+            `Top-level flow (${rootBlocks.length} blocks):`,
+            flow,
+            mix ? `Top-level mix: ${mix}` : '',
+        ].filter(Boolean).join('\n');
+    }
+
+    function buildPageDesignCriteria(pageContext) {
+        const blocks = Array.isArray(pageContext?.blocks) ? pageContext.blocks : [];
+        const headings = blocks.filter((block) => String(block?.type || '').startsWith('heading_'));
+        const textBlocks = blocks.filter((block) => ['text', 'quote', 'callout'].includes(block?.type));
+        const listBlocks = blocks.filter((block) => ['bulleted_list', 'numbered_list', 'todo'].includes(block?.type));
+        const callouts = blocks.filter((block) => block?.type === 'callout');
+        const dividers = blocks.filter((block) => block?.type === 'divider');
+        const longTextBlocks = textBlocks.filter((block) => String(block?.content || '').trim().length >= 280);
+
+        const criteria = [
+            '- Design the note as a sequence of purposeful blocks, not one long paragraph dump.',
+            '- For full-page writing, build a scannable structure first, then fill in details.',
+            '- Use headings to define sections before adding supporting text.',
+            '- Keep paragraphs short. Split dense writing into multiple text blocks.',
+            '- Use lists for grouped facts, steps, examples, or comparisons instead of burying them in prose.',
+            '- Use callouts, quotes, dividers, and visual rhythm intentionally when they improve clarity.',
+            '- Do not return a single giant text block for a substantial page unless the user explicitly asks for one paragraph.',
+        ];
+
+        if (!blocks.length) {
+            criteria.push('- The page is empty, so create a complete top-level structure instead of appending a loose paragraph.');
+        }
+
+        if (blocks.length > 0 && headings.length === 0) {
+            criteria.push('- The current page has no headings. Add section headings so the layout becomes navigable.');
+        }
+
+        if (longTextBlocks.length > 0) {
+            criteria.push(`- The current page already has ${longTextBlocks.length} dense text block${longTextBlocks.length === 1 ? '' : 's'}. Break long content into smaller blocks.`);
+        }
+
+        if (textBlocks.length > 0 && listBlocks.length === 0) {
+            criteria.push('- The page is text-heavy. Introduce list blocks where content can be chunked.');
+        }
+
+        if (headings.length > 0) {
+            criteria.push(`- Preserve and strengthen the existing hierarchy across ${headings.length} heading block${headings.length === 1 ? '' : 's'} when it helps.`);
+        }
+
+        if (callouts.length === 0) {
+            criteria.push('- Consider at least one callout for the key takeaway, status, warning, or decision when the content warrants it.');
+        }
+
+        if (dividers.length === 0 && blocks.length >= 6) {
+            criteria.push('- Use dividers sparingly to separate major sections if the page starts to feel visually dense.');
+        }
+
+        return criteria.join('\n');
+    }
+
     function getSelectionSnapshot(pageContext) {
         const selectedBlockId = window.Selection?.getSelectedBlockId?.() || null;
         const selectedText = truncateText(window.Selection?.getSelectedText?.() || '', 300);
@@ -378,7 +459,9 @@ const Agent = (function() {
     function buildSystemPrompt(pageContext) {
         const pageSetup = buildPageSetupSummary(pageContext);
         const blockMap = buildPageContentSnapshot(pageContext);
-        const pageContent = (getFullPageContent() || '').slice(0, 6000);
+        const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
+        const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
+        const designCriteria = buildPageDesignCriteria(pageContext);
         const outline = pageContext?.outline?.length
             ? pageContext.outline.map((heading) => `- [${heading.id}] ${heading.content}`).join('\n')
             : '- No headings yet';
@@ -394,11 +477,20 @@ Reference blocks by their ID when editing or inserting content.
 BLOCKS IN THIS PAGE:
 ${blockMap || '(page is empty)'}
 
+TOP-LEVEL LAYOUT:
+${topLevelLayout}
+
 OUTLINE (Headings):
 ${outline}
 
+CURRENT PAGE CONTENT (excerpt):
+${pageContent || '(page is empty)'}
+
 PAGE STATS:
 ${pageSetup}
+
+PAGE DESIGN CRITERIA:
+${designCriteria}
 
 AVAILABLE ACTIONS - Respond with JSON:
 When the user asks you to edit, create, delete, or reorganize content, respond with a JSON action block like this:
@@ -478,6 +570,8 @@ GUIDELINES:
 - Ask the user only when blocked by missing secrets or credentials, a genuinely ambiguous product decision, or a destructive action that needs approval.
 - For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
+- For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
+- If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
 - Prefer structural edits over append-only edits when the page needs organization: use update_block to convert block types, replace_block to rebuild a section, move_block to reorder sections, and rebuild_page when the current layout should be replaced wholesale.
 - It is acceptable to replace a single block with multiple blocks, or to rebuild the full page, if that is the clearest way to satisfy the request.
 - In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.
@@ -1537,6 +1631,151 @@ GUIDELINES:
         };
     }
 
+    function splitPlainTextIntoParagraphBlocks(sourceText = '') {
+        const normalized = stripUnsafeNullCharacters(sourceText).replace(/\s+/g, ' ').trim();
+        if (!normalized || normalized.length < 320) {
+            return [];
+        }
+
+        const sentences = normalized.match(/[^.!?]+(?:[.!?]+|$)/g)
+            ?.map((sentence) => sentence.trim())
+            .filter(Boolean) || [];
+        if (sentences.length < 2) {
+            return [];
+        }
+
+        const blocks = [];
+        let currentChunk = '';
+
+        sentences.forEach((sentence) => {
+            const nextChunk = currentChunk ? `${currentChunk} ${sentence}` : sentence;
+            const sentenceCount = currentChunk ? currentChunk.match(/[^.!?]+(?:[.!?]+|$)/g)?.length || 0 : 0;
+            if (currentChunk && (nextChunk.length > 260 || sentenceCount >= 2)) {
+                blocks.push({
+                    type: 'text',
+                    content: currentChunk.trim()
+                });
+                currentChunk = sentence;
+                return;
+            }
+
+            currentChunk = nextChunk;
+        });
+
+        if (currentChunk.trim()) {
+            blocks.push({
+                type: 'text',
+                content: currentChunk.trim()
+            });
+        }
+
+        return blocks.length > 1 ? blocks : [];
+    }
+
+    function shouldExpandSingleBlockText(sourceText = '', question = '', context = null) {
+        const normalized = stripUnsafeNullCharacters(sourceText).trim();
+        if (!normalized) {
+            return false;
+        }
+
+        if (/\n\s*\n/.test(normalized) || /^#{1,3}\s+/m.test(normalized) || /^[-*]\s+/m.test(normalized) || /^\d+\.\s+/m.test(normalized)) {
+            return true;
+        }
+
+        return shouldForcePageEditActions(question, context, {}) && normalized.length >= 320;
+    }
+
+    function expandStructuredPageTextIntoBlocks(sourceText = '', question = '', context = null) {
+        const normalized = stripUnsafeNullCharacters(sourceText).trim();
+        if (!normalized) {
+            return [];
+        }
+
+        const preferredBlocks = extractPreferredBlocksFromSourceText(normalized).blocks;
+        if (preferredBlocks.length > 1 || preferredBlocks.some((block) => block?.type !== 'text')) {
+            return preferredBlocks;
+        }
+
+        if (!shouldExpandSingleBlockText(normalized, question, context)) {
+            return preferredBlocks;
+        }
+
+        const paragraphBlocks = splitPlainTextIntoParagraphBlocks(normalized);
+        return paragraphBlocks.length > 1 ? paragraphBlocks : preferredBlocks;
+    }
+
+    function normalizeStructuredPageActions(actions = [], question = '', context = null) {
+        if (!Array.isArray(actions) || actions.length === 0) {
+            return [];
+        }
+
+        return actions.map((action) => {
+            if (!action || typeof action !== 'object') {
+                return action;
+            }
+
+            const op = String(action.op || '').trim().toLowerCase();
+            const blockDefinitions = Array.isArray(action.blocks)
+                ? action.blocks
+                : (action.block && typeof action.block === 'object' ? [action.block] : []);
+
+            const getSingleTextSource = (block) => {
+                if (!block || typeof block !== 'object') {
+                    return '';
+                }
+
+                const type = canonicalizeBlockType(block.type || action.type || 'text');
+                if (type !== 'text') {
+                    return '';
+                }
+
+                if (typeof block.content === 'string') {
+                    return block.content;
+                }
+
+                if (typeof block.text === 'string') {
+                    return block.text;
+                }
+
+                return '';
+            };
+
+            if (op === 'update_block') {
+                const sourceText = typeof action.content === 'string'
+                    ? action.content
+                    : (typeof action.text === 'string' ? action.text : '');
+                const expandedBlocks = expandStructuredPageTextIntoBlocks(sourceText, question, context);
+                if (expandedBlocks.length > 1) {
+                    return {
+                        ...action,
+                        op: 'replace_block',
+                        blocks: expandedBlocks,
+                    };
+                }
+                return action;
+            }
+
+            if (!['replace_block', 'rebuild_page', 'append_to_page', 'prepend_to_page', 'insert_after', 'insert_before'].includes(op)) {
+                return action;
+            }
+
+            if (blockDefinitions.length !== 1) {
+                return action;
+            }
+
+            const sourceText = getSingleTextSource(blockDefinitions[0]);
+            const expandedBlocks = expandStructuredPageTextIntoBlocks(sourceText, question, context);
+            if (expandedBlocks.length <= 1) {
+                return action;
+            }
+
+            return {
+                ...action,
+                blocks: expandedBlocks,
+            };
+        });
+    }
+
     async function repairNotesPageEditResponse({
         apiClient,
         model,
@@ -2255,6 +2494,36 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         }
     }
 
+    function looksLikeBlockTypeToken(value = '') {
+        const normalized = String(value || '').trim();
+        if (!normalized || /\s/.test(normalized)) {
+            return false;
+        }
+
+        const canonical = canonicalizeBlockType(normalized);
+        return [
+            'text',
+            'heading_1',
+            'heading_2',
+            'heading_3',
+            'bulleted_list',
+            'numbered_list',
+            'todo',
+            'code',
+            'quote',
+            'callout',
+            'divider',
+            'mermaid',
+            'image',
+            'ai_image',
+            'bookmark',
+            'database',
+            'ai',
+            'toggle',
+            'math',
+        ].includes(canonical);
+    }
+
     function extractFunctionPayloadText(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) {
             return null;
@@ -2315,6 +2584,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                 return parsedPayload.displayText;
             }
 
+            if (looksLikeBlockTypeToken(trimmed)) {
+                return null;
+            }
+
             return (isAssistantReplyPlaceholderText(trimmed) || looksLikeInternalNotesScaffold(trimmed)) ? null : trimmed;
         }
 
@@ -2347,7 +2620,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         let primaryText = null;
         for (const key of directKeys) {
             if (typeof value[key] === 'string' && value[key].trim() && !isAssistantReplyPlaceholderText(value[key])) {
-                const candidateText = stripUnsafeNullCharacters(value[key]).trim();
+                const candidateText = extractGenericWrapperContent(value[key])
+                    || stripUnsafeNullCharacters(value[key]).trim();
                 if (!looksLikeInternalNotesScaffold(candidateText)) {
                     primaryText = candidateText;
                     break;
@@ -2402,6 +2676,9 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         try {
             const payload = JSON.parse(cleanedText);
             if (payload && typeof payload === 'object' && Array.isArray(payload.actions)) {
+                return null;
+            }
+            if (Array.isArray(payload) && payload.every((item) => typeof item === 'string' && looksLikeBlockTypeToken(item))) {
                 return null;
             }
             if (Array.isArray(payload) && payload.some((item) => isNotesBlockDefinition(item))) {
@@ -3095,10 +3372,15 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return { appliedCount, focusBlockId };
     }
 
-    function prepareAssistantResponse(responseText) {
+    function prepareAssistantResponse(responseText, options = {}) {
+        const {
+            question = '',
+            context = null
+        } = options;
         const parsed = extractNotesActionPlan(responseText);
-        const applied = applyNotesActions(parsed.actions);
-        const actionCount = Array.isArray(parsed.actions) ? parsed.actions.length : 0;
+        const normalizedActions = normalizeStructuredPageActions(parsed.actions, question, context);
+        const applied = applyNotesActions(normalizedActions);
+        const actionCount = Array.isArray(normalizedActions) ? normalizedActions.length : 0;
 
         if (actionCount > 0 || parsed.parseFailed) {
             const detail = {
@@ -3127,7 +3409,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             }
         }
 
-        const fallbackReply = summarizeAppliedNotesActions(parsed.actions, applied.appliedCount);
+        const fallbackReply = summarizeAppliedNotesActions(normalizedActions, applied.appliedCount);
         const shouldUseFallbackReply = !parsed.displayText || looksLikeShortAcknowledgement(parsed.displayText);
 
         return {
@@ -4023,8 +4305,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         return content;
     }
     
-    function getFullPageContent() {
-        const context = getPageContext();
+    function buildFullPageContentFromContext(context = null) {
         if (!context) return '';
 
         let content = '';
@@ -4079,6 +4360,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         });
 
         return content;
+    }
+
+    function getFullPageContent() {
+        const context = getPageContext();
+        return buildFullPageContentFromContext(context);
     }
 
     function getOutline() {
@@ -5031,7 +5317,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                     let preparedResponse;
                     try {
-                        preparedResponse = prepareAssistantResponse(responseText);
+                        preparedResponse = prepareAssistantResponse(responseText, {
+                            question,
+                            context
+                        });
                     } catch (parseError) {
                         console.warn('Failed to parse structured response, using raw text:', parseError);
                         const cleanedText = stripStructuredResponseText(responseText);
@@ -5060,7 +5349,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
                                 if (repairedResponseText && repairedResponseText !== responseText) {
                                     responseText = repairedResponseText;
-                                    preparedResponse = prepareAssistantResponse(repairedResponseText);
+                                    preparedResponse = prepareAssistantResponse(repairedResponseText, {
+                                        question,
+                                        context
+                                    });
                                 }
 
                                 if (preparedResponse.appliedCount === 0) {
@@ -5208,7 +5500,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             await yieldToBrowser();
             
             // Add assistant message
-            const preparedResponse = prepareAssistantResponse(responseText);
+            const preparedResponse = prepareAssistantResponse(responseText, {
+                question,
+                context
+            });
             const visibleResponse = resolveVisibleAssistantText(preparedResponse.displayText, responseText);
 
             const assistantMessage = hiddenAssistantMessage
@@ -5742,6 +6037,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         _buildSystemPrompt: buildSystemPrompt,
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,
+        _normalizeStructuredPageActions: normalizeStructuredPageActions,
         _hasNonPageRuntimeIntent: hasNonPageRuntimeIntent,
         _shouldForcePageEditActions: shouldForcePageEditActions,
         _shouldSuppressRequestedArtifactFormat: shouldSuppressRequestedArtifactFormat

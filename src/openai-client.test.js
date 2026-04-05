@@ -628,6 +628,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('do not call or mention `request_user_input`');
         expect(guidance).toContain('Do not tell the user that a questionnaire tool failed');
         expect(guidance).toContain('Do not claim that the inline survey card rendered');
+        expect(guidance).toContain('Do not write a multi-question quiz or personality test as assistant text');
     });
 
     test('extracts explicit web research queries for deterministic preflight', () => {
@@ -802,6 +803,62 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toContain('user-checkpoint');
+    });
+
+    test('forces user-checkpoint for explicit questionnaire tool testing prompts', () => {
+        const toolManager = createToolManager();
+        const prompt = 'To test our tool can you ask me a multiple choice questionnaire?';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        const toolChoice = __testUtils.buildAutomaticToolChoice(
+            selectedTools,
+            'responses',
+            {
+                prompt,
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('user-checkpoint');
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'user-checkpoint',
+        });
     });
 
     test('offers document-workflow for research-backed deck generation when document service is available', () => {

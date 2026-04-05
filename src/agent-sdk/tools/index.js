@@ -1669,7 +1669,7 @@ class ToolManager {
           additionalProperties: false,
         },
         skill: {
-          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question'],
+          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question', 'questionnaire tool', 'survey tool', 'test the questionnaire tool'],
           requiresConfirmation: false,
         },
         frontend: {
