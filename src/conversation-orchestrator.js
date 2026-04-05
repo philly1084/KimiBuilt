@@ -840,7 +840,10 @@ function buildNotesSynthesisInstructions() {
     return [
         'You are editing a Lilly-style block-based notes document.',
         'In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, repo file, or server page.',
+        'Your default job here is to edit the current page itself through block updates, not to create standalone HTML, artifact links, or workspace files.',
         'If the user is asking to add, place, insert, rewrite, reorganize, or polish content on the page, answer as a notes-page edit, not as a workspace/file task.',
+        'When the user asks for page changes, the final content should land on the page blocks, not in a separate artifact description.',
+        'Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.',
         'Prefer returning `notes-actions` or page-ready notes content over raw standalone HTML, local file paths, workspace write steps, or filesystem commentary.',
         'Do not use `file-write` or `file-mkdir` to satisfy a notes-page edit. Apply the content to the current page instead.',
         'When you return `notes-actions`, use this exact payload shape: `{ "assistant_reply": "...", "actions": [{ "op": "append_to_page", "blocks": [...] }] }`.',

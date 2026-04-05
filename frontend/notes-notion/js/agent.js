@@ -459,6 +459,10 @@ GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
 - assistant_reply should be brief and user-friendly (not mention the JSON actions)
 - The editor will automatically apply your actions and show the assistant_reply to the user
+- Your default job in this interface is to edit the current notes page itself through block updates.
+- When the user asks for page changes, put the final content into page blocks instead of replying with standalone HTML, artifact info, download links, or chat-only prose.
+- Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.
+- Only switch to standalone HTML/file/artifact output when the user explicitly asks for an export, download, link, attachment, or standalone file.
 - You are free to change block types, replace weak sections, move blocks, delete redundant content, and rebuild the page structure when that produces a better result.
 - In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
 - If the user says "put this on the page", "add this to the page", "insert this into the page", or similar, treat that as a request to edit the current notes page using notes-actions, not a request to inspect a remote server or codebase.
@@ -540,7 +544,7 @@ GUIDELINES:
     }
 
     function shouldUseMultiPassNotesDraft(question = '', context = null, requestOptions = {}) {
-        if (requestOptions?.outputFormat) {
+        if (requestOptions?.outputFormat || isPlanningConversationIntent(question, context)) {
             return false;
         }
 
@@ -602,6 +606,26 @@ GUIDELINES:
         return externalTarget && externalVerb;
     }
 
+    function isPlanningConversationIntent(question = '', context = null) {
+        const normalized = String(question || '').trim().toLowerCase();
+        if (!normalized) {
+            return false;
+        }
+
+        const planningPatterns = [
+            /\b(help me|let'?s|lets|can we|could we|i want to|we should)\s+(plan|outline|brainstorm|think through|talk through|discuss|ideate|sketch out|map out)\b/,
+            /\b(just|only)\s+(plan|outline|brainstorm|discuss)\b/,
+            /\b(plan|outline|brainstorm|think through|talk through|discuss|ideate|sketch out|map out)\b[\s\S]{0,40}\b(before|first)\b/,
+            /\b(before|first)\b[\s\S]{0,30}\b(edit|update|rewrite|apply|write|change|rebuild)\b/,
+            /\b(do not|don't|dont|not)\b[\s\S]{0,20}\b(edit|update|rewrite|apply|write|change|rebuild)\b[\s\S]{0,20}\b(yet|first)\b/,
+        ];
+        const planningTarget = /\b(page|notes?|document|doc|brief|report|spec|guide|proposal|outline|section|content|html page|web page|landing page|website)\b/.test(normalized)
+            || (context?.blockCount || 0) > 0
+            || (context?.outline?.length || 0) > 0;
+
+        return planningTarget && planningPatterns.some((pattern) => pattern.test(normalized));
+    }
+
     function hasNonPageRuntimeIntent(question = '', requestOptions = {}) {
         if (requestOptions?.outputFormat) {
             return true;
@@ -635,7 +659,7 @@ GUIDELINES:
     }
 
     function shouldForcePageEditActions(question = '', context = null, requestOptions = {}) {
-        if (hasNonPageRuntimeIntent(question, requestOptions)) {
+        if (isPlanningConversationIntent(question, context) || hasNonPageRuntimeIntent(question, requestOptions)) {
             return false;
         }
 
@@ -1523,6 +1547,7 @@ GUIDELINES:
 Repair pass: the previous assistant reply did not apply changes to the current notes page.
 Return only a valid JSON notes-actions payload.
 Do not return plain chat prose outside the JSON payload.
+If the previous reply drifted into HTML, artifact creation, download links, or standalone file language, ignore that and convert the answer into direct page edits.
 If the request is for a substantial page, brief, report, plan, or rewrite, prefer rebuild_page or replace_block over a tiny append.`;
 
         const repairResponse = await apiClient.chat([
@@ -1676,7 +1701,8 @@ Return JSON only in this shape:
 Use the hidden planning work below as internal guidance.
 For this final pass, return the finished answer only.
 Do not mention local file writes, /app paths, or filesystem errors.
-If the user is editing the page, return notes-actions as needed.`
+If the user is editing the page, return notes-actions as needed.
+Do not switch this final pass into standalone HTML, artifact output, or download-link language unless the user explicitly asked for that.`
             },
             {
                 role: 'user',
@@ -4412,6 +4438,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             return false;
         }
 
+        if (isPlanningConversationIntent(question, context)) {
+            return true;
+        }
+
         if (shouldPreferInlineMermaidBlock(question, context, requestedArtifactFormat)) {
             return true;
         }
@@ -4877,7 +4907,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     && shouldUseMultiPassNotesDraft(question, context, requestOptions);
                 const forcePageEditActions = shouldForcePageEditActions(question, context, requestOptions);
                 const effectiveQuestion = forcePageEditActions
-                    ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Do not reply with chat prose alone.`
+                    ? `${question}\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Put the result into page blocks. Do not reply with chat prose alone. Do not create standalone HTML, file, export, artifact, or download-link output unless the user explicitly asked for that.`
                     : question;
                 let messages = [
                     { role: 'system', content: systemPrompt },

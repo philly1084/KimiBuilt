@@ -3395,7 +3395,9 @@ describe('ConversationOrchestrator', () => {
         });
 
         expect(instructions).toContain('Lilly-style block-based notes document');
+        expect(instructions).toContain('edit the current page itself through block updates');
         expect(instructions).toContain('Prefer returning `notes-actions` or page-ready notes content');
+        expect(instructions).toContain('Only stay in planning/chat mode');
         expect(instructions).toContain('Do not mention `/app`');
         expect(instructions).toContain('Do not use `file-write` or `file-mkdir`');
     });

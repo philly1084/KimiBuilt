@@ -195,6 +195,24 @@ function hasExplicitArtifactDeliveryIntent(text = '') {
     return /\b(export|download|save|artifact|file|link|share|attachment)\b/i.test(normalized);
 }
 
+function hasPlanningConversationIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const planningPatterns = [
+        /\b(help me|let'?s|lets|can we|could we|i want to|we should)\s+(plan|outline|brainstorm|think through|talk through|discuss|ideate|sketch out|map out)\b/,
+        /\b(just|only)\s+(plan|outline|brainstorm|discuss)\b/,
+        /\b(plan|outline|brainstorm|think through|talk through|discuss|ideate|sketch out|map out)\b[\s\S]{0,40}\b(before|first)\b/,
+        /\b(before|first)\b[\s\S]{0,30}\b(edit|update|rewrite|apply|write|change|rebuild)\b/,
+        /\b(do not|don't|dont|not)\b[\s\S]{0,20}\b(edit|update|rewrite|apply|write|change|rebuild)\b[\s\S]{0,20}\b(yet|first)\b/,
+    ];
+    const planningTarget = /\b(page|notes?|document|doc|brief|report|spec|guide|proposal|outline|section|content|html page|web page|landing page|website)\b/.test(normalized);
+
+    return planningTarget && planningPatterns.some((pattern) => pattern.test(normalized));
+}
+
 function hasExplicitNotesPageEditIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -240,7 +258,7 @@ function shouldSuppressNotesSurfaceArtifact({
         return !hasExplicitArtifactDeliveryIntent(text);
     }
 
-    return (hasExplicitNotesPageEditIntent(text) || hasImplicitNotesPageBuildIntent(text))
+    return (hasPlanningConversationIntent(text) || hasExplicitNotesPageEditIntent(text) || hasImplicitNotesPageBuildIntent(text))
         && !hasExplicitArtifactDeliveryIntent(text);
 }
 
@@ -983,6 +1001,7 @@ module.exports = {
     shouldDeferArtifactGenerationToWorkload,
     hasExplicitMermaidArtifactIntent,
     hasExplicitMermaidFileIntent,
+    hasPlanningConversationIntent,
     hasExplicitNotesPageEditIntent,
     hasImplicitNotesPageBuildIntent,
     hasExplicitImageGenerationIntent,

@@ -26,6 +26,7 @@ const {
     hasExplicitArtifactDeliveryIntent,
     hasExplicitImageGenerationIntent,
     hasExplicitMermaidFileIntent,
+    hasPlanningConversationIntent,
     hasImplicitNotesPageBuildIntent,
     hasExplicitNotesPageEditIntent,
     inferRequestedOutputFormat,
@@ -221,6 +222,8 @@ describe('ai-route-utils', () => {
     test('distinguishes notes page edits from explicit artifact delivery requests', () => {
         expect(hasExplicitNotesPageEditIntent('Put this on the page as a polished hypercar brochure.')).toBe(true);
         expect(hasImplicitNotesPageBuildIntent('Can you make me an HTML page about tropical fish with sections for habitat and care?')).toBe(true);
+        expect(hasPlanningConversationIntent('Help me plan the structure for an HTML page about tropical fish before you write it.')).toBe(true);
+        expect(hasPlanningConversationIntent('Put this implementation plan on the page as a structured brief.')).toBe(false);
         expect(hasExplicitArtifactDeliveryIntent('Export a PDF file and add the download link to the page.')).toBe(true);
         expect(hasExplicitArtifactDeliveryIntent('Put this on the page as a polished hypercar brochure.')).toBe(false);
     });
@@ -298,6 +301,13 @@ describe('ai-route-utils', () => {
             outputFormat: 'html',
             outputFormatProvided: false,
         })).toBe(false);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Help me plan the structure for an HTML page about tropical fish before you write it.',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(true);
     });
 
     test('shouldSuppressNotesSurfaceArtifact keeps Power Query inline on notes unless file delivery was explicit', () => {
