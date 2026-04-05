@@ -147,6 +147,58 @@ const Agent = (function() {
             ],
         }),
     ]);
+    const NOTES_BLOCK_PLAYBOOK = Object.freeze([
+        Object.freeze({
+            type: 'callout',
+            whenToUse: 'Key takeaways, warnings, decisions, definitions, highlighted facts, project snapshots.',
+            guidance: 'Use near the top or at turning points so the page has an obvious focal point.',
+        }),
+        Object.freeze({
+            type: 'database',
+            whenToUse: 'Comparisons, trackers, status boards, matrices, owners, metrics, timelines, repeated fields.',
+            guidance: 'Prefer this over long repeated bullet lists when content is tabular or operational.',
+        }),
+        Object.freeze({
+            type: 'bookmark',
+            whenToUse: 'Sources, references, products, articles, documentation links, research citations.',
+            guidance: 'When web research produced useful links, surface the best ones as page blocks instead of hiding them in prose.',
+        }),
+        Object.freeze({
+            type: 'image / ai_image',
+            whenToUse: 'Hero visuals, reference photos, concept visuals, mood-setting illustrations, explainer diagrams.',
+            guidance: 'Use `image` for known URLs and `ai_image` for generated or curated visual ideas that belong on the page.',
+        }),
+        Object.freeze({
+            type: 'mermaid',
+            whenToUse: 'Processes, systems, workflows, relationships, architectures, state changes, decision paths.',
+            guidance: 'Prefer a Mermaid block when the user is describing flow or structure that is easier to scan visually than in paragraphs.',
+        }),
+        Object.freeze({
+            type: 'toggle',
+            whenToUse: 'FAQs, optional details, appendix material, deep dives, raw notes beneath a clean summary.',
+            guidance: 'Use toggles to keep the page compact while still preserving detail for interactive reading.',
+        }),
+        Object.freeze({
+            type: 'quote',
+            whenToUse: 'Excerpts, notable lines, testimonials, definitions, memorable phrasing, cited statements.',
+            guidance: 'Use for emphasis when a line should stand apart from the surrounding copy.',
+        }),
+        Object.freeze({
+            type: 'todo',
+            whenToUse: 'Action items, next steps, follow-ups, checklists, punch lists.',
+            guidance: 'Prefer todo blocks over plain bullets when the page should remain actionable.',
+        }),
+        Object.freeze({
+            type: 'code / math',
+            whenToUse: 'Examples, commands, formulas, equations, technical references.',
+            guidance: 'Do not bury technical snippets inside text blocks when dedicated blocks would read better.',
+        }),
+        Object.freeze({
+            type: 'divider',
+            whenToUse: 'Separating major sections or changing page rhythm on dense pages.',
+            guidance: 'Use sparingly to create breathing room, not after every heading.',
+        }),
+    ]);
     let initPromise = null;
 
     // ============================================
@@ -636,6 +688,71 @@ const Agent = (function() {
         ].join('\n')).join('\n\n');
     }
 
+    function buildBlockCapabilityPlaybook() {
+        return NOTES_BLOCK_PLAYBOOK.map((entry) => [
+            `- ${entry.type}: ${entry.whenToUse}`,
+            `  Use guidance: ${entry.guidance}`,
+        ].join('\n')).join('\n');
+    }
+
+    function buildBlockOpportunityGuidance(question = '', pageContext = null, templateMatches = []) {
+        const signalText = buildTemplateSignalText(question, pageContext);
+        const currentTypes = new Set((pageContext?.blocks || []).map((block) => String(block?.type || '').trim().toLowerCase()));
+        const templateIds = new Set((templateMatches || []).map((template) => template.id));
+        const opportunities = [];
+
+        if ((/\b(takeaway|summary|overview|warning|important|decision|snapshot|why it matters)\b/.test(signalText) || templateIds.has('brief'))
+            && !currentTypes.has('callout')) {
+            opportunities.push('- Add a `callout` for the key takeaway or headline insight instead of leaving it buried in text.');
+        }
+
+        if ((/\b(compare|comparison|status|tracker|metrics?|kpis?|owners?|timeline|matrix|table|database)\b/.test(signalText) || templateIds.has('dashboard') || templateIds.has('project'))
+            && !currentTypes.has('database')) {
+            opportunities.push('- Consider a `database` block if the page has repeated structured data, status items, comparisons, or ownership.');
+        }
+
+        if ((/\b(source|sources|reference|references|links?|citations?|research|article|documentation)\b/.test(signalText) || templateIds.has('research'))
+            && !currentTypes.has('bookmark')) {
+            opportunities.push('- Use `bookmark` blocks for the most important links or sources instead of mentioning them only inline.');
+        }
+
+        if ((/\b(process|workflow|flow|system|architecture|how it works|pipeline|steps?)\b/.test(signalText) || templateIds.has('documentation'))
+            && !currentTypes.has('mermaid')) {
+            opportunities.push('- A `mermaid` block may communicate process or structure better than another paragraph.');
+        }
+
+        if ((/\b(photo|visual|image|hero|animal|place|product|look|appearance|species)\b/.test(signalText) || templateIds.has('research'))
+            && !currentTypes.has('image')
+            && !currentTypes.has('ai_image')) {
+            opportunities.push('- Add an `image` or `ai_image` block when the topic benefits from a strong visual on the page.');
+        }
+
+        if ((/\b(faq|questions|appendix|details|background|deep dive|extra context)\b/.test(signalText) || templateIds.has('documentation'))
+            && !currentTypes.has('toggle')) {
+            opportunities.push('- Use `toggle` blocks to keep optional details interactive instead of crowding the main flow.');
+        }
+
+        if ((/\b(action items?|next steps?|follow up|todo|checklist)\b/.test(signalText) || templateIds.has('project') || templateIds.has('meeting'))
+            && !currentTypes.has('todo')) {
+            opportunities.push('- Convert operational follow-ups into `todo` blocks so the page stays actionable.');
+        }
+
+        if ((/\b(quote|said|statement|definition|notable line|verbatim)\b/.test(signalText))
+            && !currentTypes.has('quote')) {
+            opportunities.push('- Use a `quote` block if there is a line or definition that deserves emphasis.');
+        }
+
+        if ((pageContext?.blockCount || 0) >= 6 && !currentTypes.has('divider')) {
+            opportunities.push('- Add a `divider` between major sections if the page feels visually dense.');
+        }
+
+        if (!opportunities.length) {
+            opportunities.push('- Do a palette audit before finalizing: if headings + text + lists are all you used, check whether one richer block type would improve the page.');
+        }
+
+        return opportunities.join('\n');
+    }
+
     function getSelectionSnapshot(pageContext) {
         const selectedBlockId = window.Selection?.getSelectedBlockId?.() || null;
         const selectedText = truncateText(window.Selection?.getSelectedText?.() || '', 300);
@@ -702,6 +819,8 @@ const Agent = (function() {
         const blockMap = buildPageContentSnapshot(pageContext);
         const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
+        const blockPlaybook = buildBlockCapabilityPlaybook();
+        const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -736,6 +855,12 @@ ${pageSetup}
 
 BEST-FIT PAGE TEMPLATES:
 ${templateGuidance}
+
+BLOCK CAPABILITY PLAYBOOK:
+${blockPlaybook}
+
+BLOCK OPPORTUNITIES FOR THIS REQUEST:
+${blockOpportunities}
 
 PAGE DESIGN CRITERIA:
 ${designCriteria}
@@ -794,6 +919,8 @@ BLOCK DESIGN HEURISTICS:
 - Use image or ai_image blocks when visuals should live on the page, not in chat.
 - Use mermaid blocks for flows, processes, systems, org charts, and diagrams.
 - Use database blocks for comparison tables, trackers, or structured matrices.
+- If headings, text, and bullets are the only blocks in a substantial page draft, you almost certainly have not used the full page palette yet.
+- Before finalizing notes-actions, do a palette audit and check whether callout, database, bookmark, image/ai_image, mermaid, toggle, quote, todo, divider, code, or math would improve the page.
 
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
@@ -822,6 +949,8 @@ GUIDELINES:
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
+- Do not ship a substantial page as only \`heading_*\` + \`text\` + list blocks unless the user explicitly asked for a minimal/plain layout.
+- Research pages should usually use at least one richer support block such as \`callout\`, \`bookmark\`, \`image\`, \`ai_image\`, \`toggle\`, or \`database\` when the content supports it.
 - Prefer structural edits over append-only edits when the page needs organization: use update_block to convert block types, replace_block to rebuild a section, move_block to reorder sections, and rebuild_page when the current layout should be replaced wholesale.
 - It is acceptable to replace a single block with multiple blocks, or to rebuild the full page, if that is the clearest way to satisfy the request.
 - In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.

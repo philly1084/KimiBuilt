@@ -3404,6 +3404,8 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('Only stay in planning/chat mode');
         expect(instructions).toContain('Do not mention `/app`');
         expect(instructions).toContain('Do not use `file-write` or `file-mkdir`');
+        expect(instructions).toContain('Available block palette includes');
+        expect(instructions).toContain('If a substantial notes page only uses headings');
     });
 
     test('notes tool policy is restricted to web research tools for page-edit requests', () => {

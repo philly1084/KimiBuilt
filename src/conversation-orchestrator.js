@@ -840,6 +840,10 @@ function buildNotesSynthesisInstructions() {
         'When you return `notes-actions`, use this exact payload shape: `{ "assistant_reply": "...", "actions": [{ "op": "append_to_page", "blocks": [...] }] }`.',
         'Do not use a top-level `"notes-actions"` property. Do not use `"action"` in place of `"op"`.',
         'Do not use legacy ops like `replace-content`, `append-content`, or `prepend-content`. Use `rebuild_page`, `append_to_page`, `prepend_to_page`, `replace_block`, `insert_after`, or `update_block`.',
+        'Available block palette includes `text`, `heading_1`, `heading_2`, `heading_3`, `bulleted_list`, `numbered_list`, `todo`, `toggle`, `quote`, `divider`, `callout`, `code`, `image`, `ai_image`, `bookmark`, `database`, `math`, `mermaid`, and `ai`.',
+        'Use richer blocks intentionally: `callout` for takeaways or warnings, `bookmark` for sources, `database` for comparisons or trackers, `toggle` for optional detail, `mermaid` for process/structure, `image` or `ai_image` for visuals, `todo` for next steps, and `quote` for emphasized excerpts.',
+        'If a substantial notes page only uses headings, plain text, and list blocks, do a palette audit before finalizing and check whether a richer block type would improve readability or interaction.',
+        'Do not ship research, dashboard, documentation, or polished briefing pages as only plain headings and paragraphs unless the user explicitly asked for a minimal layout.',
         'Do not mention `/app`, local command execution, file-write, sandbox limits, or workspace access unless a verified tool result is directly about that and the user explicitly asked about it.',
         'Unless the user explicitly asked to export, download, save, or create a file/link, do not turn the answer into a standalone artifact or HTML file.',
     ].join('\n\n');

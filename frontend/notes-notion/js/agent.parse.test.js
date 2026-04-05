@@ -273,10 +273,14 @@ Approved page plan:
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
+        expect(prompt).toContain('BLOCK CAPABILITY PLAYBOOK:');
+        expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
+        expect(prompt).toContain('callout: Key takeaways');
+        expect(prompt).toContain('database: Comparisons, trackers');
     });
 
     test('selects a project-oriented template for project planning requests', () => {
