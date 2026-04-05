@@ -63,7 +63,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260405d">
+    <link rel="stylesheet" href="css/styles.css?v=20260405e">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
@@ -371,6 +371,13 @@
             </div>
             <div class="model-selector-settings">
                 <div class="model-selector-setting">
+                    <label for="assistant-model-select" class="model-selector-setting__label">AI model</label>
+                    <select id="assistant-model-select" class="reasoning-select reasoning-select--panel assistant-model-select" title="AI model" aria-label="AI model">
+                        <option value="gpt-4o">GPT-4o</option>
+                    </select>
+                    <p class="model-selector-setting__hint">Choose the model for the next messages in this chat.</p>
+                </div>
+                <div class="model-selector-setting">
                     <label for="reasoning-effort-select" class="model-selector-setting__label">Reasoning effort</label>
                     <select id="reasoning-effort-select" class="reasoning-select reasoning-select--panel" title="Reasoning effort" aria-label="Reasoning effort">
                         <option value="">Reasoning: Default</option>
@@ -417,15 +424,17 @@
                     </div>
                 </div>
             </div>
-            <div class="model-selector-list-header">
-                <div class="model-selector-list-header__title">
-                    <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
-                    <span class="model-selector-setting__label">Model</span>
+            <div class="model-selector-advanced">
+                <button id="model-list-toggle" class="model-selector-advanced__toggle" type="button" aria-expanded="false" aria-controls="model-list">
+                    <span class="model-selector-list-header__title">
+                        <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
+                        <span class="model-selector-setting__label">Browse all models</span>
+                    </span>
+                    <i data-lucide="chevron-down" class="w-4 h-4 model-selector-advanced__chevron" aria-hidden="true"></i>
+                </button>
+                <div id="model-list" class="model-list hidden" role="listbox">
+                    <!-- Models will be rendered here -->
                 </div>
-                <span class="model-selector-setting__hint">Choose the chat model for new messages in this thread.</span>
-            </div>
-            <div id="model-list" class="model-list" role="listbox">
-                <!-- Models will be rendered here -->
             </div>
         </div>
     </div>
@@ -943,14 +952,14 @@
     </div>
     
     <!-- Scripts -->
-    <script src="js/api.js?v=20260405d"></script>
-    <script src="js/session.js?v=20260405d"></script>
-    <script src="js/sound-manager.js?v=20260405d"></script>
-    <script src="js/import-export.js?v=20260405d"></script>
-    <script src="js/file-manager.js?v=20260405d"></script>
-    <script src="js/sidebar-resize.js?v=20260405d"></script>
-    <script src="js/ui.js?v=20260405d"></script>
-    <script src="js/app.js?v=20260405d"></script>
-    <script src="js/artifacts.js?v=20260405d"></script>
+    <script src="js/api.js?v=20260405e"></script>
+    <script src="js/session.js?v=20260405e"></script>
+    <script src="js/sound-manager.js?v=20260405e"></script>
+    <script src="js/import-export.js?v=20260405e"></script>
+    <script src="js/file-manager.js?v=20260405e"></script>
+    <script src="js/sidebar-resize.js?v=20260405e"></script>
+    <script src="js/ui.js?v=20260405e"></script>
+    <script src="js/app.js?v=20260405e"></script>
+    <script src="js/artifacts.js?v=20260405e"></script>
 </body>
 </html>

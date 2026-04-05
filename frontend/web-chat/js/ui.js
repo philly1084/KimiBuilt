@@ -2082,10 +2082,15 @@ class UIHelpers {
             if (modelBtn) modelBtn.classList.add('loading');
             
             const response = await apiClient.getModels();
-            this.availableModels = response.data || [];
+            const models = Array.isArray(response?.data) ? response.data : [];
+            this.availableModels = typeof apiClient.filterChatModels === 'function'
+                ? apiClient.filterChatModels(models)
+                : models;
             
             // Remove loading state
             if (modelBtn) modelBtn.classList.remove('loading');
+
+            this.updateAssistantModelSelect();
             
             return this.availableModels;
         } catch (error) {
@@ -2093,6 +2098,8 @@ class UIHelpers {
             
             // Remove loading state
             if (modelBtn) modelBtn.classList.remove('loading');
+
+            this.updateAssistantModelSelect();
             
             return [];
         }
@@ -2138,6 +2145,7 @@ class UIHelpers {
             await this.loadModels();
         }
         
+        this.updateAssistantModelSelect();
         this.renderModelList();
         
         // Trap focus
@@ -2168,6 +2176,11 @@ class UIHelpers {
 
     renderModelList() {
         const listContainer = document.getElementById('model-list');
+        if (!listContainer) {
+            return;
+        }
+
+        this.updateAssistantModelSelect();
         
         if (this.availableModels.length === 0) {
             listContainer.innerHTML = `
@@ -2286,13 +2299,68 @@ class UIHelpers {
         return descriptions[model.id] || model.owned_by || 'AI Model';
     }
 
-    selectModel(modelId) {
+    getSelectableModels() {
+        const models = Array.isArray(this.availableModels) ? [...this.availableModels] : [];
+        if (this.currentModel && !models.some((model) => model?.id === this.currentModel)) {
+            models.unshift({ id: this.currentModel, owned_by: '' });
+        }
+        return models;
+    }
+
+    updateAssistantModelSelect() {
+        const select = document.getElementById('assistant-model-select');
+        if (!select) {
+            return;
+        }
+
+        const models = this.getSelectableModels();
+        if (models.length === 0) {
+            select.innerHTML = `<option value="${this.escapeHtmlAttr(this.currentModel)}">${this.escapeHtml(this.getModelDisplayName({ id: this.currentModel }))}</option>`;
+            select.value = this.currentModel;
+            return;
+        }
+
+        select.innerHTML = models.map((model) => {
+            const provider = this.getModelProviderName(model);
+            const displayName = this.getModelDisplayName(model);
+            const optionLabel = provider && provider !== 'Other'
+                ? `${displayName} | ${provider}`
+                : displayName;
+            return `<option value="${this.escapeHtmlAttr(model.id)}">${this.escapeHtml(optionLabel)}</option>`;
+        }).join('');
+        select.value = this.currentModel;
+    }
+
+    toggleModelListVisibility(forceExpanded = null) {
+        const toggle = document.getElementById('model-list-toggle');
+        const list = document.getElementById('model-list');
+        if (!toggle || !list) {
+            return;
+        }
+
+        const shouldExpand = forceExpanded == null
+            ? list.classList.contains('hidden')
+            : forceExpanded === true;
+
+        list.classList.toggle('hidden', !shouldExpand);
+        toggle.setAttribute('aria-expanded', shouldExpand ? 'true' : 'false');
+    }
+
+    selectModel(modelId, options = {}) {
         this.currentModel = modelId;
         window.sessionManager?.safeStorageSet?.('kimibuilt_default_model', modelId);
         this.updateModelUI();
-        this.closeModelSelector({ silent: true });
-        this.playMenuCue('menu-select');
-        this.showToast(`Model changed to ${this.getModelDisplayName({ id: modelId })}`, 'success');
+        this.updateAssistantModelSelect();
+
+        if (options?.closeModal !== false) {
+            this.closeModelSelector({ silent: true });
+        }
+        if (options?.playCue !== false) {
+            this.playMenuCue('menu-select');
+        }
+        if (options?.showToast !== false) {
+            this.showToast(`Model changed to ${this.getModelDisplayName({ id: modelId })}`, 'success');
+        }
         
         // Dispatch event for app to know model changed
         window.dispatchEvent(new CustomEvent('modelChanged', { detail: { modelId } }));
@@ -2305,6 +2373,7 @@ class UIHelpers {
         
         if (label) label.textContent = displayName;
         if (inputLabel) inputLabel.textContent = displayName;
+        this.updateAssistantModelSelect();
         this.updateMobileActionSheetUI();
     }
 
@@ -4411,10 +4480,25 @@ class UIHelpers {
             });
         }
 
+        const assistantModelSelect = document.getElementById('assistant-model-select');
+        if (assistantModelSelect) {
+            assistantModelSelect.addEventListener('change', (e) => {
+                this.selectModel(e.target.value, { closeModal: false, showToast: true, playCue: true });
+            });
+        }
+
         const remoteAutonomyBtn = document.getElementById('remote-autonomy-btn');
         if (remoteAutonomyBtn) {
             remoteAutonomyBtn.addEventListener('click', () => {
                 this.toggleRemoteBuildAutonomy();
+            });
+        }
+
+        const modelListToggle = document.getElementById('model-list-toggle');
+        if (modelListToggle) {
+            modelListToggle.addEventListener('click', () => {
+                this.toggleModelListVisibility();
+                this.playMenuCue('menu-select');
             });
         }
 
