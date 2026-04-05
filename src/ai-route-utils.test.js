@@ -30,6 +30,7 @@ const {
     hasPlanningConversationIntent,
     hasImplicitNotesPageBuildIntent,
     hasExplicitNotesPageEditIntent,
+    stripInjectedNotesPageEditDirective,
     inferRequestedOutputFormat,
     inferOutputFormatFromSession,
     maybePrepareImagesForArtifactPrompt,
@@ -364,6 +365,12 @@ describe('ai-route-utils', () => {
                 lastGeneratedArtifactId: 'artifact-1',
             },
         }, [], 'another pass, keep refining that html file')).toEqual(['artifact-1']);
+    });
+
+    test('stripInjectedNotesPageEditDirective removes frontend notes routing instructions from the user turn', () => {
+        expect(stripInjectedNotesPageEditDirective(
+            'Create a page about penguins.\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Put the result into page blocks. Do not reply with chat prose alone. Do not create standalone HTML, file, export, artifact, or download-link output unless the user explicitly asked for that.',
+        )).toBe('Create a page about penguins.');
     });
 
     test('resolveArtifactContextIds prefers the last generated image artifacts for image follow-ups', () => {

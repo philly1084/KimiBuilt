@@ -2324,10 +2324,25 @@ function normalizeQuestionnaireLine(value = '') {
         .trim();
 }
 
+function normalizeQuestionnaireSource(text = '') {
+    return String(text || '')
+        .replace(/\r/g, '')
+        .replace(/\s+(Question\s+\d+\s*:)/gi, '\n$1')
+        .replace(/\s+([A-E](?:[.)]|:)\s+)/g, '\n$1')
+        .replace(/\s+(Reply\s+(?:with|like)\b[\s\S]*$)/i, '\n$1')
+        .replace(/\s+(If you(?:[’']|â€™)d like\b[\s\S]*$)/i, '\n$1')
+        .trim();
+}
+
 function extractQuestionnaireQuestion(line = '') {
     const normalized = normalizeQuestionnaireLine(line);
-    if (!normalized || /^reply like:/i.test(normalized)) {
+    if (!normalized || /^reply (?:like|with)\b/i.test(normalized)) {
         return null;
+    }
+
+    const labeledMatch = normalized.match(/^question\s+\d+\s*:\s*(.+?\?)$/i);
+    if (labeledMatch?.[1]) {
+        return labeledMatch[1].trim();
     }
 
     const numberedMatch = normalized.match(/^\d+[.)]\s+(.+?\?)$/);
@@ -2375,7 +2390,7 @@ function extractQuestionnaireOption(line = '') {
 }
 
 function extractQuestionnaireCheckpointFromText(text = '') {
-    const source = String(text || '').replace(/\r/g, '').trim();
+    const source = normalizeQuestionnaireSource(text);
     if (!source) {
         return null;
     }
@@ -2398,6 +2413,10 @@ function extractQuestionnaireCheckpointFromText(text = '') {
         const options = [];
         for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
             const line = lines[cursor];
+
+            if (/^reply with\b/i.test(line)) {
+                break;
+            }
 
             if (/^reply like:/i.test(line) || /^if you[’']d like/i.test(line) || /^---+$/.test(line)) {
                 break;

@@ -14,6 +14,7 @@ const {
     resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    stripInjectedNotesPageEditDirective,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -200,17 +201,18 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             taskType,
             clientSurface,
         }, session);
+        const artifactIntentText = stripInjectedNotesPageEditDirective(message);
         effectiveRequestMetadata = {
             ...effectiveRequestMetadata,
             clientSurface,
             memoryScope,
         };
         let effectiveOutputFormat = outputFormat
-            || inferRequestedOutputFormat(message)
-            || inferOutputFormatFromSession(message, session);
+            || inferRequestedOutputFormat(artifactIntentText)
+            || inferOutputFormatFromSession(artifactIntentText, session);
         if (shouldSuppressImplicitMermaidArtifact({
             taskType,
-            text: message,
+            text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(outputFormat),
         })) {
@@ -218,7 +220,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
         if (shouldSuppressNotesSurfaceArtifact({
             taskType,
-            text: message,
+            text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(outputFormat),
         })) {
@@ -228,7 +230,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
             : [];
         const workloadPreflight = resolveDeferredWorkloadPreflight({
-            text: message,
+            text: artifactIntentText,
             recentMessages: recentMessagesForWorkloadPreflight,
             timezone: requestTimezone,
             now: requestNow,

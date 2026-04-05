@@ -836,6 +836,34 @@ class UIHelpers {
             .trim();
     }
 
+    normalizePlainSurveySource(value = '') {
+        return String(value || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\s+(Question\s+\d+\s*:)/gi, '\n$1')
+            .replace(/\s+([A-E](?:[.)]|:)\s+)/g, '\n$1')
+            .replace(/\s+(Reply\s+(?:with|like)\b[\s\S]*$)/i, '\n$1')
+            .replace(/\s+(If you(?:[’']|â€™)d like\b[\s\S]*$)/i, '\n$1')
+            .trim();
+    }
+
+    stripSurveyQuestionPrefix(value = '') {
+        return this.cleanPlainSurveyText(value)
+            .replace(/^question\s+\d+\s*:\s*/i, '')
+            .trim();
+    }
+
+    isSurveyWrapperLine(value = '') {
+        const normalized = this.cleanPlainSurveyText(value).toLowerCase();
+        if (!normalized) {
+            return true;
+        }
+
+        return /^(yes|yeah|yep|sure|ok|okay|absolutely|certainly|of course|no problem)[.!]?$/.test(normalized)
+            || /^reply (?:with|like)\b/.test(normalized)
+            || /^if you'd like\b/.test(normalized)
+            || /\bone question at a time\b/.test(normalized);
+    }
+
     normalizePlainSurveyOption(line = '', index = 0) {
         const match = String(line || '').match(/^(?:[-*•]\s+|(?:option\s+)?(?:\d+|[A-Ea-e])[.):]\s+)(.+)$/);
         if (!match?.[1]) {
@@ -859,7 +887,7 @@ class UIHelpers {
     }
 
     extractPlainSurveyDefinition(content = '', fallbackId = '') {
-        const source = String(content || '').replace(/\r\n/g, '\n').trim();
+        const source = this.normalizePlainSurveySource(content);
         if (!source || /```(?:survey|kb-survey)/i.test(source)) {
             return null;
         }
@@ -897,7 +925,9 @@ class UIHelpers {
             return null;
         }
 
-        const question = this.cleanPlainSurveyText(preLines[preLines.length - 1].replace(/[:\s]+$/, ''));
+        const meaningfulPreLines = preLines.filter((line) => !this.isSurveyWrapperLine(line));
+        const questionLine = meaningfulPreLines[meaningfulPreLines.length - 1] || preLines[preLines.length - 1];
+        const question = this.stripSurveyQuestionPrefix(String(questionLine || '').replace(/[:\s]+$/, ''));
         const promptContext = preLines.join(' ');
         if (!question) {
             return null;
@@ -909,15 +939,16 @@ class UIHelpers {
             return null;
         }
 
-        const titleCandidate = preLines.length > 1
-            ? this.cleanPlainSurveyText(preLines[0].replace(/[:\s]+$/, ''))
+        const contextCandidates = meaningfulPreLines.slice(0, -1);
+        const titleCandidate = contextCandidates.length > 0
+            ? this.cleanPlainSurveyText(contextCandidates[0].replace(/[:\s]+$/, ''))
             : '';
         const title = titleCandidate && titleCandidate !== question && titleCandidate.length <= 72
             ? titleCandidate
             : 'Choose a direction';
         const contextLines = title === titleCandidate
-            ? preLines.slice(1, -1)
-            : preLines.slice(0, -1);
+            ? contextCandidates.slice(1)
+            : contextCandidates;
 
         return this.normalizeSurveyDefinition({
             id: String(fallbackId || `survey-${Date.now().toString(36)}`).trim(),

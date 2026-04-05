@@ -15,6 +15,7 @@ const {
     resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    stripInjectedNotesPageEditDirective,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -101,7 +102,7 @@ function normalizeMessageText(content = '') {
 function inferOutputFormatFromTranscript(messages = [], session = null) {
     const normalizedMessages = Array.isArray(messages) ? messages : [];
     const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
-    const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
+    const lastUserText = stripInjectedNotesPageEditDirective(normalizeMessageText(lastUserMessage?.content || ''));
     const mermaidContinuationIntent = /\b(mermaid|diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram|artifact|file|export)\b/i.test(lastUserText);
 
     if (!isArtifactContinuationPrompt(lastUserText)) {
@@ -110,7 +111,7 @@ function inferOutputFormatFromTranscript(messages = [], session = null) {
 
     for (let index = normalizedMessages.length - 1; index >= 0; index -= 1) {
         const message = normalizedMessages[index];
-        const format = inferRequestedOutputFormat(normalizeMessageText(message?.content || ''));
+        const format = inferRequestedOutputFormat(stripInjectedNotesPageEditDirective(normalizeMessageText(message?.content || '')));
         if (format === 'mermaid' && !mermaidContinuationIntent) {
             continue;
         }
@@ -617,6 +618,7 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         const sshContext = resolveSshRequestContext(lastUserText, session);
         const effectiveInput = sshContext.effectivePrompt || lastUserText;
+        const artifactIntentText = stripInjectedNotesPageEditDirective(lastUserText);
         const taskType = resolveConversationTaskType(req.body, session);
         const effectiveMessages = messages.map((message) => (
             message.role === 'user' && message === lastUserMessage
@@ -633,11 +635,11 @@ router.post('/chat/completions', async (req, res, next) => {
         const chatControlState = getSessionControlState(session);
         console.log(`[OpenAICompat] chat/completions routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(chatControlState?.lastToolIntent || chatControlState?.lastSshTarget?.host || chatControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(chatControlState?.lastRemoteObjective || '')}`);
         let effectiveOutputFormat = output_format
-            || inferRequestedOutputFormat(lastUserText)
+            || inferRequestedOutputFormat(artifactIntentText)
             || inferOutputFormatFromTranscript(messages, session);
         if (shouldSuppressImplicitMermaidArtifact({
             taskType,
-            text: lastUserText,
+            text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
@@ -645,7 +647,7 @@ router.post('/chat/completions', async (req, res, next) => {
         }
         if (shouldSuppressNotesSurfaceArtifact({
             taskType,
-            text: lastUserText,
+            text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
@@ -655,7 +657,7 @@ router.post('/chat/completions', async (req, res, next) => {
             ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
             : [];
         const workloadPreflight = resolveDeferredWorkloadPreflight({
-            text: lastUserText,
+            text: artifactIntentText,
             recentMessages: recentMessagesForWorkloadPreflight,
             timezone: requestTimezone,
             now: requestNow,
@@ -1241,6 +1243,7 @@ router.post('/responses', async (req, res, next) => {
             : normalizeMessageText(input.filter((item) => item.role === 'user').pop()?.content || '');
         const sshContext = resolveSshRequestContext(userInput, session);
         const effectiveUserInput = sshContext.effectivePrompt || userInput;
+        const artifactIntentText = stripInjectedNotesPageEditDirective(userInput);
         const taskType = resolveConversationTaskType(req.body, session);
         const clientSurface = resolveClientSurface(req.body, session);
         const memoryScope = resolveSessionScope({
@@ -1254,11 +1257,11 @@ router.post('/responses', async (req, res, next) => {
             memoryScope,
         };
         let effectiveOutputFormat = output_format
-            || inferRequestedOutputFormat(userInput)
+            || inferRequestedOutputFormat(artifactIntentText)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
         if (shouldSuppressImplicitMermaidArtifact({
             taskType,
-            text: userInput,
+            text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
@@ -1266,7 +1269,7 @@ router.post('/responses', async (req, res, next) => {
         }
         if (shouldSuppressNotesSurfaceArtifact({
             taskType,
-            text: userInput,
+            text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
@@ -1276,7 +1279,7 @@ router.post('/responses', async (req, res, next) => {
             ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
             : [];
         const workloadPreflight = resolveDeferredWorkloadPreflight({
-            text: userInput,
+            text: artifactIntentText,
             recentMessages: recentMessagesForWorkloadPreflight,
             timezone: requestTimezone,
             now: requestNow,

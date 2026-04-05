@@ -957,6 +957,28 @@ describe('openai-client automatic tool orchestration helpers', () => {
         }));
     });
 
+    test('extracts a checkpoint from conversational question-1 prose with a reply footer', () => {
+        const checkpoint = __testUtils.extractQuestionnaireCheckpointFromText([
+            'Yes. We can do it one question at a time.',
+            'Question 1: What do you want this questionnaire to be about?',
+            'A. Planning',
+            'B. Building',
+            'C. Troubleshooting',
+            'D. Just testing it',
+            'Reply with A, B, C, or D.',
+        ].join('\n'));
+
+        expect(checkpoint).toEqual(expect.objectContaining({
+            question: 'What do you want this questionnaire to be about?',
+            options: [
+                expect.objectContaining({ id: 'a', label: 'Planning' }),
+                expect.objectContaining({ id: 'b', label: 'Building' }),
+                expect.objectContaining({ id: 'c', label: 'Troubleshooting' }),
+                expect.objectContaining({ id: 'd', label: 'Just testing it' }),
+            ],
+        }));
+    });
+
     test('recovers a real user-checkpoint response from prose questionnaire output', () => {
         const recovered = __testUtils.maybeRecoverUserCheckpointResponse({
             response: {

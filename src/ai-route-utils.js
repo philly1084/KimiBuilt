@@ -253,6 +253,28 @@ function hasImplicitNotesPageBuildIntent(text = '') {
     return (pageWritingVerb && pageTarget) || asksForFullerContent;
 }
 
+function stripInjectedNotesPageEditDirective(text = '') {
+    const source = String(text || '');
+    if (!source) {
+        return '';
+    }
+
+    const patterns = [
+        /\n+\s*Interpret ["']page["'] as the current notes page shown in this editor\.[\s\S]*$/i,
+        /\n+\s*This is a direct page edit request, so return notes-actions[\s\S]*$/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = source.match(pattern);
+        if (match?.index >= 0) {
+            const stripped = source.slice(0, match.index).trimEnd();
+            return stripped || source.trim();
+        }
+    }
+
+    return source;
+}
+
 function shouldSuppressNotesSurfaceArtifact({
     taskType = '',
     text = '',
@@ -1022,6 +1044,7 @@ module.exports = {
     hasPlanningConversationIntent,
     hasExplicitNotesPageEditIntent,
     hasImplicitNotesPageBuildIntent,
+    stripInjectedNotesPageEditDirective,
     hasExplicitImageGenerationIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,
