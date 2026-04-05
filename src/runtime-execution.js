@@ -271,6 +271,8 @@ async function executeConversationRuntime(app, params = {}) {
                 profile: inferRecallProfile(recallInput),
                 ownerId: params.ownerId || null,
                 memoryScope,
+                memoryKeywords: params.metadata?.memoryKeywords || params.toolContext?.memoryKeywords || [],
+                sourceSurface: clientSurface || memoryScope || null,
             })
     );
     const recentMessages = params.recentMessages || (

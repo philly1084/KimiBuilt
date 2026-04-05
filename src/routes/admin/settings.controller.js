@@ -226,7 +226,9 @@ class SettingsController {
       this.settings = this.deepMerge(this.getDefaultSettings(), JSON.parse(data));
     } catch (error) {
       // Use defaults if file doesn't exist
-      console.log('Using default settings');
+      if (process.env.NODE_ENV !== 'test') {
+        console.log('Using default settings');
+      }
     }
   }
 

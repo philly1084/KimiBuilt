@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const { config } = require('./config');
+const { runtimeDiagnostics } = require('./runtime-diagnostics');
 const settingsController = require('./routes/admin/settings.controller');
 const { normalizeReasoningEffort } = require('./ai-route-utils');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
@@ -3505,6 +3506,10 @@ async function createResponse({
         input: buildResponsesInput(messages),
         stream,
     };
+    if (previousResponseId && apiMode === 'responses') {
+        params.previous_response_id = previousResponseId;
+        runtimeDiagnostics.incrementResponseThreadChains();
+    }
     const effectiveToolContext = {
         ...(toolContext || {}),
         recentMessages: Array.isArray(toolContext?.recentMessages)

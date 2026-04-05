@@ -41,6 +41,8 @@ class ConversationRunService {
         return {
             ...(ownerId ? { ownerId } : {}),
             ...(memoryScope ? { memoryScope } : {}),
+            ...(metadata?.memoryKeywords ? { memoryKeywords: metadata.memoryKeywords } : {}),
+            ...(metadata?.clientSurface ? { sourceSurface: metadata.clientSurface } : {}),
         };
     }
 
@@ -416,6 +418,17 @@ class ConversationRunService {
                 artifactMessage,
                 this.buildMemoryMetadata(ownerId, metadata, artifactSession),
             );
+        }
+        if (this.memoryService?.rememberArtifactResult) {
+            await Promise.all(artifacts.map((artifact) => this.memoryService.rememberArtifactResult(sessionId, {
+                artifact,
+                summary: artifactMessage,
+                sourceText: outputText,
+                metadata: {
+                    ...this.buildMemoryMetadata(ownerId, metadata, artifactSession),
+                    sourcePrompt: message,
+                },
+            })));
         }
         await this.updateProjectMemory(sessionId, ownerId, {
             userText: message,

@@ -29,6 +29,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -52,10 +53,11 @@ function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
 
-function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
     return {
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...extra,
     };
 }
 
@@ -110,6 +112,7 @@ const chatSchema = {
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
     metadata: { required: false, type: 'object' },
+    memoryKeywords: { required: false, type: 'array' },
 };
 
 function resolveConversationTaskType(metadata = {}, session = null) {
@@ -144,6 +147,9 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
+        const memoryKeywords = normalizeMemoryKeywords(
+            req.body.memoryKeywords || req.body?.metadata?.memoryKeywords || [],
+        );
         const requestedTaskType = resolveConversationTaskType(requestMetadata);
         const ownerId = getRequestOwnerId(req);
         const requestTimezone = String(
@@ -162,6 +168,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             ...requestMetadata,
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
+            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
         };
         const requestedClientSurface = resolveClientSurface(req.body || {}, null, requestedTaskType);
         const requestedSessionMetadata = buildScopedSessionMetadata({
@@ -254,6 +261,18 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         if (effectiveOutputFormat) {
             const toolManager = await ensureRuntimeToolManager(req.app);
+            const artifactMemory = await memoryService.process(sessionId, message, {
+                ownerId,
+                memoryScope,
+                sourceSurface: clientSurface || taskType,
+                memoryKeywords,
+                profile: 'default',
+                returnDetails: true,
+            });
+            const artifactRecentMessages = await sessionStore.getRecentMessages(
+                sessionId,
+                WORKLOAD_PREFLIGHT_RECENT_LIMIT,
+            );
             const preparedImages = await maybePrepareImagesForArtifactPrompt({
                 toolManager,
                 sessionId,
@@ -276,6 +295,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 artifactIds: preparedImages.artifactIds,
                 model,
                 reasoningEffort,
+                contextMessages: Array.isArray(artifactMemory)
+                    ? artifactMemory
+                    : (artifactMemory.contextMessages || []),
+                recentMessages: artifactRecentMessages,
             });
             const responseArtifacts = [
                 ...preparedImages.artifacts,
@@ -305,8 +328,33 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             memoryService.rememberResponse(
                 sessionId,
                 generationArtifacts.assistantMessage,
-                buildOwnerMemoryMetadata(ownerId, memoryScope),
+                buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                }),
             );
+            await memoryService.rememberArtifactResult(sessionId, {
+                artifact: generationArtifacts.artifact,
+                summary: generationArtifacts.assistantMessage,
+                sourceText: generationArtifacts.outputText,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                    sourcePrompt: message,
+                    artifactFormat: effectiveOutputFormat,
+                    artifactFilename: generationArtifacts.artifact?.filename || '',
+                }),
+            });
+            await memoryService.rememberLearnedSkill(sessionId, {
+                objective: message,
+                assistantText: generationArtifacts.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifact: generationArtifacts.artifact,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                }),
+            });
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
                 userText: message,
                 assistantText: generationArtifacts.assistantMessage,
@@ -387,6 +435,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     ownerId,
                     clientSurface,
                     memoryScope,
+                    memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -423,7 +472,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, event.response.id);
-                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            memoryKeywords,
+                        }));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -442,7 +494,30 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         artifactIds,
                         model,
                         reasoningEffort,
+                        recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
                     });
+                    if (artifacts.length > 0) {
+                        await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
+                            artifact,
+                            summary: `Created the ${artifact.format || effectiveOutputFormat || 'generated'} artifact (${artifact.filename}).`,
+                            sourceText: fullText,
+                            metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                                sourceSurface: clientSurface || taskType,
+                                memoryKeywords,
+                                sourcePrompt: message,
+                            }),
+                        })));
+                        await memoryService.rememberLearnedSkill(sessionId, {
+                            objective: message,
+                            assistantText: fullText,
+                            toolEvents,
+                            artifact: artifacts[artifacts.length - 1],
+                            metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                                sourceSurface: clientSurface || taskType,
+                                memoryKeywords,
+                            }),
+                        });
+                    }
                     await updateSessionProjectMemory(sessionId, {
                         userText: message,
                         assistantText: fullText,
@@ -491,6 +566,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -511,7 +587,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || taskType,
+                memoryKeywords,
+            }));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -530,7 +609,30 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             artifactIds,
             model,
             reasoningEffort,
+            recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
         });
+        if (artifacts.length > 0) {
+            await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
+                artifact,
+                summary: `Created the ${artifact.format || effectiveOutputFormat || 'generated'} artifact (${artifact.filename}).`,
+                sourceText: outputText,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                    sourcePrompt: message,
+                }),
+            })));
+            await memoryService.rememberLearnedSkill(sessionId, {
+                objective: message,
+                assistantText: outputText,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifact: artifacts[artifacts.length - 1],
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                }),
+            });
+        }
         await updateSessionProjectMemory(sessionId, {
             userText: message,
             assistantText: outputText,

@@ -2971,21 +2971,34 @@ class ConversationOrchestrator extends EventEmitter {
             ...toolContext,
             ...(clientSurface ? { clientSurface } : {}),
             ...(memoryScope ? { memoryScope } : {}),
+            ...(Array.isArray(toolContext?.memoryKeywords) ? { memoryKeywords: toolContext.memoryKeywords } : {}),
         };
-        const resolvedContextMessages = contextMessages.length > 0
-            ? contextMessages
-            : loadContextMessages !== false && this.memoryService?.process
-                ? await this.memoryService.process(sessionId, memoryInput || rawObjective, {
-                    profile: inferRecallProfileFromText(memoryInput || rawObjective),
-                    ownerId,
-                    memoryScope,
-                })
-                : [];
         const resolvedRecentMessages = recentMessages.length > 0
             ? recentMessages
             : loadRecentMessages !== false && this.sessionStore?.getRecentMessages
                 ? await this.sessionStore.getRecentMessages(sessionId, RECENT_TRANSCRIPT_LIMIT)
                 : [];
+        const memoryKeywords = Array.isArray(toolContext?.memoryKeywords)
+            ? toolContext.memoryKeywords
+            : (Array.isArray(metadata?.memoryKeywords) ? metadata.memoryKeywords : []);
+        const memoryRecall = contextMessages.length > 0
+            ? { contextMessages, trace: null }
+            : loadContextMessages !== false && this.memoryService?.process
+                ? await this.memoryService.process(sessionId, memoryInput || rawObjective, {
+                    profile: inferRecallProfileFromText(memoryInput || rawObjective),
+                    ownerId,
+                    memoryScope,
+                    memoryKeywords,
+                    sourceSurface: clientSurface || memoryScope || null,
+                    returnDetails: true,
+                })
+                : { contextMessages: [], trace: null };
+        const resolvedContextMessages = Array.isArray(memoryRecall)
+            ? memoryRecall
+            : Array.isArray(memoryRecall?.contextMessages)
+                ? memoryRecall.contextMessages
+            : [];
+        const memoryTrace = Array.isArray(memoryRecall) ? null : (memoryRecall?.trace || null);
         const remoteResolvedObjective = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
             ? resolveRemoteObjectiveFromSession(rawObjective, session, resolvedRecentMessages)
             : rawObjective;
@@ -3191,6 +3204,9 @@ class ConversationOrchestrator extends EventEmitter {
                     finalResponse,
                     startedAt,
                     metadata,
+                    clientSurface,
+                    memoryKeywords,
+                    memoryTrace,
                     autonomyApproved,
                     executionTrace,
                     stream,
@@ -3622,6 +3638,9 @@ class ConversationOrchestrator extends EventEmitter {
                         finalResponse,
                         startedAt,
                         metadata,
+                        clientSurface,
+                        memoryKeywords,
+                        memoryTrace,
                         autonomyApproved,
                         executionTrace,
                         stream,
@@ -3790,6 +3809,9 @@ class ConversationOrchestrator extends EventEmitter {
                 finalResponse,
                 startedAt,
                 metadata,
+                clientSurface,
+                memoryKeywords,
+                memoryTrace,
                 autonomyApproved,
                 executionTrace,
                 stream,
@@ -5063,20 +5085,31 @@ class ConversationOrchestrator extends EventEmitter {
         finalResponse = {},
         startedAt = Date.now(),
         metadata = {},
+        clientSurface = '',
+        memoryKeywords = [],
+        memoryTrace = null,
         autonomyApproved = false,
         executionTrace = [],
         stream = false,
         controlStatePatch = {},
     } = {}) {
+        const tracedResponse = memoryTrace && config.memory.debugTrace
+            ? this.withResponseMetadata(finalResponse, {
+                memoryTrace,
+                runtimeDiagnostics: this.memoryService?.getDiagnostics?.() || null,
+            })
+            : finalResponse;
         await this.persistConversationState({
             sessionId,
             ownerId,
             userText: userText || objective,
             objective,
             assistantText: output,
-            responseId: finalResponse.id,
+            responseId: tracedResponse.id,
             toolEvents,
             executionProfile,
+            clientSurface,
+            memoryKeywords,
             autonomyApproved,
             controlStatePatch,
         });
@@ -5092,6 +5125,12 @@ class ConversationOrchestrator extends EventEmitter {
             timestamp: new Date().toISOString(),
             autonomyApproved,
             executionTrace,
+            ...(memoryTrace && config.memory.debugTrace
+                ? {
+                    memoryTrace,
+                    runtimeDiagnostics: this.memoryService?.getDiagnostics?.() || null,
+                }
+                : {}),
         };
 
         this.emit('task:complete', {
@@ -5101,7 +5140,7 @@ class ConversationOrchestrator extends EventEmitter {
             result: {
                 success: true,
                 output,
-                responseId: finalResponse.id,
+                responseId: tracedResponse.id,
                 trace,
                 duration: trace.duration,
             },
@@ -5111,7 +5150,7 @@ class ConversationOrchestrator extends EventEmitter {
             return {
                 success: true,
                 sessionId,
-                response: createSyntheticStream(finalResponse),
+                response: createSyntheticStream(tracedResponse),
                 output,
                 trace,
             };
@@ -5121,7 +5160,7 @@ class ConversationOrchestrator extends EventEmitter {
             success: true,
             sessionId,
             output,
-            response: finalResponse,
+            response: tracedResponse,
             trace,
         };
     }
@@ -5136,6 +5175,8 @@ class ConversationOrchestrator extends EventEmitter {
         responseId,
         toolEvents = [],
         executionProfile = DEFAULT_EXECUTION_PROFILE,
+        clientSurface = '',
+        memoryKeywords = [],
         autonomyApproved = false,
         controlStatePatch = {},
     }) {
@@ -5159,6 +5200,8 @@ class ConversationOrchestrator extends EventEmitter {
             this.memoryService.rememberResponse(sessionId, assistantText, {
                 ...(ownerId ? { ownerId } : {}),
                 ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
+                ...(clientSurface ? { sourceSurface: clientSurface } : {}),
+                ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
             });
         }
 
@@ -5173,8 +5216,24 @@ class ConversationOrchestrator extends EventEmitter {
                 {
                     ...(ownerId ? { ownerId } : {}),
                     ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
+                    ...(clientSurface ? { sourceSurface: clientSurface } : {}),
+                    ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
                 },
             )));
+        }
+
+        if (this.memoryService?.rememberLearnedSkill) {
+            await this.memoryService.rememberLearnedSkill(sessionId, {
+                objective,
+                assistantText,
+                toolEvents,
+                metadata: {
+                    ...(ownerId ? { ownerId } : {}),
+                    ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
+                    ...(clientSurface ? { sourceSurface: clientSurface } : {}),
+                    ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                },
+            });
         }
 
         if (this.sessionStore?.appendMessages) {

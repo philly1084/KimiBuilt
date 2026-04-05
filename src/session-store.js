@@ -950,7 +950,11 @@ class SessionStore {
                 );
             }
 
-            return current;
+            return this.update(id, {
+                metadata: {
+                    recentMessages: this.normalizeRecentMessages(await this.listMessages(id, MAX_RECENT_MESSAGES)),
+                },
+            });
         }
 
         const current = await this.get(id);

@@ -1,6 +1,8 @@
 const express = require('express');
 const request = require('supertest');
 
+jest.spyOn(console, 'log').mockImplementation(() => {});
+
 jest.mock('../middleware/validate', () => ({
     validate: () => (_req, _res, next) => next(),
 }));
@@ -21,6 +23,16 @@ jest.mock('../memory/memory-service', () => ({
     memoryService: {
         rememberResponse: jest.fn(),
     },
+}));
+
+jest.mock('../artifacts/artifact-service', () => ({
+    extractResponseText: jest.fn(() => 'Scoped response'),
+    resolveCompletedResponseText: jest.fn(() => 'Scoped response'),
+    getMissingCompletionDelta: jest.fn(() => 0),
+}));
+
+jest.mock('../routes/admin/settings.controller', () => ({
+    getSettings: jest.fn(() => ({})),
 }));
 
 jest.mock('../runtime-tool-manager', () => ({
@@ -148,6 +160,40 @@ describe('/api/chat scope wiring', () => {
                 metadata: expect.objectContaining({
                     clientSurface: 'web-chat',
                     memoryScope: 'web-chat',
+                }),
+            }),
+        );
+    });
+
+    test('forwards memoryKeywords to the runtime metadata without changing scope isolation', async () => {
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                message: 'Revise the html output',
+                stream: false,
+                memoryKeywords: ['html', 'section-3'],
+                metadata: {
+                    clientSurface: 'web-chat',
+                },
+            });
+
+        expect(response.status).toBe(200);
+        expect(executeConversationRuntime).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                clientSurface: 'web-chat',
+                memoryScope: 'web-chat',
+                metadata: expect.objectContaining({
+                    clientSurface: 'web-chat',
+                    memoryScope: 'web-chat',
+                    memoryKeywords: ['html', 'section-3'],
+                }),
+                toolContext: expect.objectContaining({
+                    memoryKeywords: ['html', 'section-3'],
                 }),
             }),
         );

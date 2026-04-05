@@ -6,6 +6,7 @@ const { executeConversationRuntime, resolveConversationExecutorFlag } = require(
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReasoningEffort } = require('../ai-route-utils');
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -28,10 +29,11 @@ function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
 
-function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
     return {
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...extra,
     };
 }
 
@@ -49,6 +51,7 @@ const notationSchema = {
     enableConversationExecutor: { required: false, type: 'boolean' },
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
+    memoryKeywords: { required: false, type: 'array' },
 };
 
 router.post('/', validate(notationSchema), async (req, res, next) => {
@@ -68,6 +71,9 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
+        const memoryKeywords = normalizeMemoryKeywords(
+            req.body.memoryKeywords || req.body?.metadata?.memoryKeywords || [],
+        );
         const ownerId = getRequestOwnerId(req);
         const requestTimezone = String(
             req.body?.metadata?.timezone
@@ -85,6 +91,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             ...(req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {}),
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
+            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
         };
         const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'notation');
         const requestedSessionMetadata = buildScopedSessionMetadata({
@@ -143,6 +150,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -165,7 +173,10 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || 'notation',
+                memoryKeywords,
+            }));
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: notation },
                 { role: 'assistant', content: outputText },
@@ -185,7 +196,30 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             existingContent: context,
             model,
             reasoningEffort,
+            recentMessages: await sessionStore.getRecentMessages(sessionId),
         });
+        if (artifacts.length > 0) {
+            await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
+                artifact,
+                summary: `Created the ${artifact.format || outputFormat || 'generated'} artifact (${artifact.filename}).`,
+                sourceText: structured.result,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'notation',
+                    memoryKeywords,
+                    sourcePrompt: notation,
+                }),
+            })));
+            await memoryService.rememberLearnedSkill(sessionId, {
+                objective: notation,
+                assistantText: structured.result,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifact: artifacts[artifacts.length - 1],
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'notation',
+                    memoryKeywords,
+                }),
+            });
+        }
 
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,

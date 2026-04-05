@@ -302,7 +302,7 @@ function resolveCreativeDirectionId(direction = '') {
   return match?.id || '';
 }
 
-function summarizeContinuity(session = null) {
+function summarizeContinuity(session = null, recentMessages = []) {
   const memory = session?.metadata?.projectMemory || {};
   const recentArtifactEntries = Array.isArray(memory.artifacts)
     ? memory.artifacts.slice(-4)
@@ -337,23 +337,24 @@ function summarizeContinuity(session = null) {
       };
     })
     .filter(Boolean);
-  const recentMessages = Array.isArray(session?.metadata?.recentMessages)
-    ? session.metadata.recentMessages
+  const resolvedRecentMessages = Array.isArray(recentMessages) && recentMessages.length > 0
+    ? recentMessages
+    : (Array.isArray(session?.metadata?.recentMessages) ? session.metadata.recentMessages : []);
+  const summarizedRecentMessages = resolvedRecentMessages
       .slice(-6)
       .map((entry) => {
         const role = entry?.role === 'assistant' ? 'Assistant' : 'User';
         const content = summarizeLine(entry?.content || '', 150);
         return content ? `${role}: ${content}` : '';
       })
-      .filter(Boolean)
-    : [];
+      .filter(Boolean);
 
   return {
     recentTasks,
     recentArtifacts,
     recentDirections,
     recentDirectionIds: Array.from(new Set(recentDirections.map((entry) => entry.id).filter(Boolean))),
-    recentMessages,
+    recentMessages: summarizedRecentMessages,
   };
 }
 
@@ -412,10 +413,10 @@ function inferDocumentTypeFromPrompt(prompt = '') {
   return normalizeDocumentType(normalized);
 }
 
-function pickCreativeDirection({ prompt = '', documentType = 'document', format = 'html', existingContent = '', session = null } = {}) {
+function pickCreativeDirection({ prompt = '', documentType = 'document', format = 'html', existingContent = '', session = null, recentMessages = [] } = {}) {
   const blueprint = resolveDocumentBlueprint(documentType);
   const sampleSignals = analyzeTemplateSignals(existingContent);
-  const continuity = summarizeContinuity(session);
+  const continuity = summarizeContinuity(session, recentMessages);
   const candidateIds = resolveDirectionCandidates(blueprint.id, format);
   const seed = [
     blueprint.id,
@@ -443,16 +444,18 @@ function buildDocumentCreativityPacket({
   format = 'html',
   existingContent = '',
   session = null,
+  recentMessages = [],
 } = {}) {
   const blueprint = resolveDocumentBlueprint(documentType || inferDocumentTypeFromPrompt(prompt));
   const sampleSignals = analyzeTemplateSignals(existingContent);
-  const continuity = summarizeContinuity(session);
+  const continuity = summarizeContinuity(session, recentMessages);
   const direction = pickCreativeDirection({
     prompt,
     documentType: blueprint.id,
     format,
     existingContent,
     session,
+    recentMessages,
   });
 
   return {

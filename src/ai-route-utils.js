@@ -60,6 +60,8 @@ async function maybeGenerateOutputArtifact({
     existingContent = '',
     model = null,
     reasoningEffort = null,
+    contextMessages = [],
+    recentMessages = [],
 }) {
     if (!outputFormat) {
         return [];
@@ -77,6 +79,8 @@ async function maybeGenerateOutputArtifact({
                 existingContent,
                 model,
                 reasoningEffort,
+                contextMessages,
+                recentMessages,
             });
             return [result.artifact];
         }
@@ -968,6 +972,8 @@ async function generateOutputArtifactFromPrompt({
     model = null,
     reasoningEffort = null,
     parentArtifactId = null,
+    contextMessages = [],
+    recentMessages = [],
 }) {
     if (!outputFormat) {
         return null;
@@ -990,6 +996,8 @@ async function generateOutputArtifactFromPrompt({
         model,
         reasoningEffort,
         parentArtifactId,
+        contextMessages,
+        recentMessages,
     });
 
     return {

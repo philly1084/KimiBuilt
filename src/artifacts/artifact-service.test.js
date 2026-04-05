@@ -248,6 +248,73 @@ describe('ArtifactService', () => {
         expect(result.responseId).toBe('resp-compose');
     });
 
+    test('threads recalled context, recent transcript, and response chaining through multi-pass artifact generation', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Continuity Report',
+                        sections: [
+                            { heading: 'Overview', purpose: 'Summarize the request', keyPoints: ['Continuity'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Continuity Report',
+                        sections: [
+                            { heading: 'Overview', content: 'Expanded continuity content', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>Continuity Report</h1></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-session', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create the same HTML report, but update section 3 from the previous version.',
+            format: 'html',
+            artifactIds: [],
+            model: 'gpt-5.3',
+            contextMessages: ['Relevant prior artifacts:\n- report-v1.html: Existing section 3 summary'],
+            recentMessages: [
+                { role: 'user', content: 'Create the first version of the report.' },
+                { role: 'assistant', content: 'Created report-v1.html.' },
+            ],
+        });
+
+        expect(createResponse).toHaveBeenCalledTimes(3);
+        expect(createResponse.mock.calls[0][0]).toEqual(expect.objectContaining({
+            previousResponseId: 'prev-session',
+            contextMessages: ['Relevant prior artifacts:\n- report-v1.html: Existing section 3 summary'],
+            recentMessages: expect.arrayContaining([
+                expect.objectContaining({ role: 'user', content: 'Create the first version of the report.' }),
+            ]),
+        }));
+        expect(createResponse.mock.calls[1][0]).toEqual(expect.objectContaining({
+            previousResponseId: 'resp-plan',
+            contextMessages: ['Relevant prior artifacts:\n- report-v1.html: Existing section 3 summary'],
+        }));
+        expect(createResponse.mock.calls[2][0]).toEqual(expect.objectContaining({
+            previousResponseId: 'resp-expand',
+            contextMessages: ['Relevant prior artifacts:\n- report-v1.html: Existing section 3 summary'],
+        }));
+    });
+
     test('uses single-pass frontend-demo generation for html landing-page requests', async () => {
         createResponse.mockResolvedValueOnce({
             id: 'resp-frontend-1',

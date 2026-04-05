@@ -28,6 +28,7 @@ const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -58,10 +59,11 @@ function isNotesSurfaceValue(value = '') {
     ].includes(normalized);
 }
 
-function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
     return {
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...extra,
     };
 }
 
@@ -236,6 +238,9 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     let runtimeTask = null;
     const startedAt = Date.now();
     const { message, model = null, artifactIds = [], outputFormat = null, executionProfile = null } = payload;
+    const memoryKeywords = normalizeMemoryKeywords(
+        payload.memoryKeywords || payload?.metadata?.memoryKeywords || [],
+    );
     const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
     const requestTimezone = String(
@@ -255,6 +260,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
         ...(requestTimezone ? { timezone: requestTimezone } : {}),
         ...(requestNow ? { clientNow: requestNow } : {}),
+        ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
     };
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -335,6 +341,18 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
 
         if (effectiveOutputFormat) {
+            const artifactMemory = await memoryService.process(session.id, message, {
+                ownerId,
+                memoryScope,
+                sourceSurface: clientSurface || taskType,
+                memoryKeywords,
+                profile: 'default',
+                returnDetails: true,
+            });
+            const artifactRecentMessages = await sessionStore.getRecentMessages(
+                session.id,
+                WORKLOAD_PREFLIGHT_RECENT_LIMIT,
+            );
             const preparedImages = await maybePrepareImagesForArtifactPrompt({
                 toolManager: runtimeToolManager,
                 sessionId: session.id,
@@ -357,6 +375,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 artifactIds: preparedImages.artifactIds,
                 model,
                 reasoningEffort,
+                contextMessages: Array.isArray(artifactMemory)
+                    ? artifactMemory
+                    : (artifactMemory.contextMessages || []),
+                recentMessages: artifactRecentMessages,
             });
             const responseArtifacts = [
                 ...preparedImages.artifacts,
@@ -379,8 +401,33 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             memoryService.rememberResponse(
                 session.id,
                 generation.assistantMessage,
-                buildOwnerMemoryMetadata(ownerId, memoryScope),
+                buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                }),
             );
+            await memoryService.rememberArtifactResult(session.id, {
+                artifact: generation.artifact,
+                summary: generation.assistantMessage,
+                sourceText: generation.outputText,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                    sourcePrompt: message,
+                    artifactFormat: effectiveOutputFormat,
+                    artifactFilename: generation.artifact?.filename || '',
+                }),
+            });
+            await memoryService.rememberLearnedSkill(session.id, {
+                objective: message,
+                assistantText: generation.assistantMessage,
+                toolEvents: preparedImages.toolEvents,
+                artifact: generation.artifact,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    memoryKeywords,
+                }),
+            });
             await sessionStore.appendMessages(session.id, buildWebChatSessionMessages({
                 userText: message,
                 assistantText: generation.assistantMessage,
@@ -440,6 +487,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 ownerId,
                 clientSurface,
                 memoryScope,
+                memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: ws.app.locals.agentWorkloadService,
@@ -475,7 +523,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
 
                 if (!execution.handledPersistence) {
                     await sessionStore.recordResponse(session.id, event.response.id);
-                    memoryService.rememberResponse(session.id, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+                    memoryService.rememberResponse(session.id, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                        sourceSurface: clientSurface || taskType,
+                        memoryKeywords,
+                    }));
                 }
                 const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
                 if (sshMetadata) {
@@ -494,7 +545,30 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     artifactIds,
                     model,
                     reasoningEffort,
+                    recentMessages: await sessionStore.getRecentMessages(session.id, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
                 });
+                if (artifacts.length > 0) {
+                    await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
+                        artifact,
+                        summary: `Created the ${artifact.format || effectiveOutputFormat || 'generated'} artifact (${artifact.filename}).`,
+                        sourceText: fullText,
+                        metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            memoryKeywords,
+                            sourcePrompt: message,
+                        }),
+                    })));
+                    await memoryService.rememberLearnedSkill(session.id, {
+                        objective: message,
+                        assistantText: fullText,
+                        toolEvents: event.response?.metadata?.toolEvents || [],
+                        artifact: artifacts[artifacts.length - 1],
+                        metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            memoryKeywords,
+                        }),
+                    });
+                }
                 await updateSessionProjectMemory(session.id, {
                     userText: message,
                     assistantText: fullText,
@@ -546,6 +620,9 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
         outputFormat = null,
         executionProfile = null,
     } = payload;
+    const memoryKeywords = normalizeMemoryKeywords(
+        payload.memoryKeywords || payload?.metadata?.memoryKeywords || [],
+    );
     const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
     const clientSurface = resolveClientSurface(payload || {}, session, 'canvas');
@@ -590,7 +667,22 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
             taskType: 'canvas',
             clientSurface,
             memoryScope,
+            metadata: {
+                ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+                ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                clientSurface,
+            },
             ownerId,
+            toolContext: {
+                sessionId: session.id,
+                route: '/ws',
+                transport: 'ws',
+                memoryService,
+                ownerId,
+                clientSurface,
+                memoryScope,
+                memoryKeywords,
+            },
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -599,7 +691,10 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || 'canvas',
+                memoryKeywords,
+            }));
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },
@@ -618,7 +713,30 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
             existingContent,
             model,
             reasoningEffort,
+            recentMessages: await sessionStore.getRecentMessages(session.id),
         });
+        if (artifacts.length > 0) {
+            await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
+                artifact,
+                summary: `Created the ${artifact.format || outputFormat || 'generated'} artifact (${artifact.filename}).`,
+                sourceText: outputText,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'canvas',
+                    memoryKeywords,
+                    sourcePrompt: message,
+                }),
+            })));
+            await memoryService.rememberLearnedSkill(session.id, {
+                objective: message,
+                assistantText: outputText,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifact: artifacts[artifacts.length - 1],
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'canvas',
+                    memoryKeywords,
+                }),
+            });
+        }
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,
@@ -661,6 +779,9 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
         outputFormat = null,
         executionProfile = null,
     } = payload;
+    const memoryKeywords = normalizeMemoryKeywords(
+        payload.memoryKeywords || payload?.metadata?.memoryKeywords || [],
+    );
     const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
     const clientSurface = resolveClientSurface(payload || {}, session, 'notation');
@@ -705,7 +826,22 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             taskType: 'notation',
             clientSurface,
             memoryScope,
+            metadata: {
+                ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+                ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                clientSurface,
+            },
             ownerId,
+            toolContext: {
+                sessionId: session.id,
+                route: '/ws',
+                transport: 'ws',
+                memoryService,
+                ownerId,
+                clientSurface,
+                memoryScope,
+                memoryKeywords,
+            },
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
@@ -714,7 +850,10 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || 'notation',
+                memoryKeywords,
+            }));
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: notation },
                 { role: 'assistant', content: outputText },
@@ -733,7 +872,30 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             existingContent: context,
             model,
             reasoningEffort,
+            recentMessages: await sessionStore.getRecentMessages(session.id),
         });
+        if (artifacts.length > 0) {
+            await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
+                artifact,
+                summary: `Created the ${artifact.format || outputFormat || 'generated'} artifact (${artifact.filename}).`,
+                sourceText: outputText,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'notation',
+                    memoryKeywords,
+                    sourcePrompt: notation,
+                }),
+            })));
+            await memoryService.rememberLearnedSkill(session.id, {
+                objective: notation,
+                assistantText: outputText,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifact: artifacts[artifacts.length - 1],
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'notation',
+                    memoryKeywords,
+                }),
+            });
+        }
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
             output: outputText,

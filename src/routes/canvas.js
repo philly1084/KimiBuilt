@@ -7,6 +7,7 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReas
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildDashboardTemplatePromptContext, isDashboardRequest } = require('../dashboard-template-catalog');
+const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -29,10 +30,11 @@ function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
 
-function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
     return {
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...extra,
     };
 }
 
@@ -50,6 +52,7 @@ const canvasSchema = {
     enableConversationExecutor: { required: false, type: 'boolean' },
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
+    memoryKeywords: { required: false, type: 'array' },
 };
 
 function inferFrontendTitle(content = '') {
@@ -215,6 +218,9 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
+        const memoryKeywords = normalizeMemoryKeywords(
+            req.body.memoryKeywords || req.body?.metadata?.memoryKeywords || [],
+        );
         const ownerId = getRequestOwnerId(req);
         const requestTimezone = String(
             req.body?.metadata?.timezone
@@ -232,6 +238,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             ...(req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {}),
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
+            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
         };
         const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'canvas');
         const requestedSessionMetadata = buildScopedSessionMetadata({
@@ -290,6 +297,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -312,7 +320,10 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || 'canvas',
+                memoryKeywords,
+            }));
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },
@@ -332,7 +343,30 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             existingContent,
             model,
             reasoningEffort,
+            recentMessages: await sessionStore.getRecentMessages(sessionId),
         });
+        if (artifacts.length > 0) {
+            await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
+                artifact,
+                summary: `Created the ${artifact.format || outputFormat || 'generated'} artifact (${artifact.filename}).`,
+                sourceText: structured.content,
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'canvas',
+                    memoryKeywords,
+                    sourcePrompt: message,
+                }),
+            })));
+            await memoryService.rememberLearnedSkill(sessionId, {
+                objective: message,
+                assistantText: structured.content,
+                toolEvents: response?.metadata?.toolEvents || [],
+                artifact: artifacts[artifacts.length - 1],
+                metadata: buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || 'canvas',
+                    memoryKeywords,
+                }),
+            });
+        }
 
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,

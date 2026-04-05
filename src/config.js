@@ -129,6 +129,7 @@ const config = {
             1000,
             parseInt(process.env.TOOL_RESULT_CHAR_LIMIT, 10) || 18000,
         ),
+        debugTrace: process.env.MEMORY_DEBUG_TRACE === 'true',
     },
 
     deploy: {

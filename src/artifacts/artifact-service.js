@@ -1262,12 +1262,14 @@ class ArtifactService {
         model = null,
         reasoningEffort = null,
         previousResponseId = null,
+        contextMessages = [],
+        recentMessages = [],
     }) {
         const response = await requestModelResponse({
             input,
             previousResponseId,
-            contextMessages: [],
-            recentMessages: [],
+            contextMessages,
+            recentMessages,
             instructions,
             stream: false,
             model,
@@ -1473,6 +1475,8 @@ class ArtifactService {
         imageReferences = [],
         imageReferenceContext = '',
         creativityPacket = null,
+        contextMessages = [],
+        recentMessages = [],
     }) {
         const resolvedImageReferences = Array.isArray(imageReferences) ? imageReferences : [];
         const resolvedImageReferenceContext = imageReferenceContext || this.formatImageReferenceContext(resolvedImageReferences);
@@ -1487,6 +1491,8 @@ class ArtifactService {
             model,
             reasoningEffort,
             previousResponseId: session?.previousResponseId || null,
+            contextMessages,
+            recentMessages,
         });
 
         const parsedPlan = safeJsonParse(planPass.outputText) || {};
@@ -1535,6 +1541,9 @@ class ArtifactService {
             ),
             model,
             reasoningEffort,
+            previousResponseId: planPass.responseId || null,
+            contextMessages,
+            recentMessages,
         });
 
         const parsedExpanded = safeJsonParse(expansionPass.outputText) || {};
@@ -1568,6 +1577,9 @@ class ArtifactService {
             ),
             model,
             reasoningEffort,
+            previousResponseId: expansionPass.responseId || planPass.responseId || null,
+            contextMessages,
+            recentMessages,
         });
 
         const usedCompositionRecovery = shouldRecoverCompositionOutput(compositionPass.outputText, expandedDocument);
@@ -1615,6 +1627,8 @@ class ArtifactService {
         model = null,
         reasoningEffort = null,
         parentArtifactId = null,
+        contextMessages = [],
+        recentMessages = [],
     }) {
         const normalizedFormat = normalizeFormat(format);
         const frontendDemoRequest = normalizedFormat === 'html' && isFrontendDemoArtifactRequest(prompt);
@@ -1646,6 +1660,7 @@ class ArtifactService {
             format: normalizedFormat,
             existingContent: combinedExistingContent,
             session,
+            recentMessages,
         });
         const instructionSession = this.sanitizeDocumentInstructionSession(session);
         const generated = frontendDemoRequest
@@ -1666,6 +1681,8 @@ class ArtifactService {
                     model,
                     reasoningEffort,
                     previousResponseId: session?.previousResponseId || null,
+                    contextMessages,
+                    recentMessages,
                 })),
                 title: inferDocumentTitle(prompt, 'Frontend Demo'),
                 metadata: {
@@ -1684,6 +1701,8 @@ class ArtifactService {
                 imageReferences,
                 imageReferenceContext,
                 creativityPacket,
+                contextMessages,
+                recentMessages,
             })
             : await this.runGenerationPass({
                 session: instructionSession,
@@ -1701,6 +1720,8 @@ class ArtifactService {
                 model,
                 reasoningEffort,
                 previousResponseId: session?.previousResponseId || null,
+                contextMessages,
+                recentMessages,
             });
 
         const outputText = generated.outputText;
