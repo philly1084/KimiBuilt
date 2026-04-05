@@ -104,6 +104,64 @@ describe('SessionStore recent message continuity', () => {
         expect(ids).not.toContain('owned-b');
     });
 
+    test('tracks active owned sessions independently per scope', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({ mode: 'chat', clientSurface: 'web-chat', ownerId: 'phill' }, 'web-chat-session');
+        await store.create({ mode: 'notes', clientSurface: 'notes', ownerId: 'phill' }, 'notes-session');
+
+        await store.setActiveSession('phill', 'web-chat-session', 'web-chat');
+        await store.setActiveSession('phill', 'notes-session', 'notes');
+
+        await expect(store.getActiveOwnedSession('phill', 'web-chat')).resolves.toEqual(expect.objectContaining({
+            id: 'web-chat-session',
+        }));
+        await expect(store.getActiveOwnedSession('phill', 'notes')).resolves.toEqual(expect.objectContaining({
+            id: 'notes-session',
+        }));
+        await expect(store.getUserSessionState('phill')).resolves.toEqual(expect.objectContaining({
+            scopedActiveSessionIds: expect.objectContaining({
+                'web-chat': 'web-chat-session',
+                notes: 'notes-session',
+            }),
+        }));
+    });
+
+    test('resolveOwnedSession does not reuse an active session from another scope', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({ mode: 'notes', clientSurface: 'notes', ownerId: 'phill' }, 'notes-session');
+        await store.setActiveSession('phill', 'notes-session', 'notes');
+
+        const resolved = await store.resolveOwnedSession(null, {
+            mode: 'chat',
+            clientSurface: 'web-chat',
+        }, 'phill');
+
+        expect(resolved.id).not.toBe('notes-session');
+        expect(resolved.metadata.memoryScope).toBe('web-chat');
+    });
+
+    test('list filters sessions by scope key', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({ mode: 'chat', clientSurface: 'web-chat', ownerId: 'phill' }, 'web-chat-session');
+        await store.create({ mode: 'chat', clientSurface: 'cli', ownerId: 'phill' }, 'cli-session');
+
+        const sessions = await store.list({
+            ownerId: 'phill',
+            scopeKey: 'web-chat',
+        });
+
+        expect(sessions.map((session) => session.id)).toEqual(['web-chat-session']);
+    });
+
     test('listMessages returns the full persisted transcript, not just the recent continuity window', async () => {
         const store = new SessionStore();
         store.initialized = true;

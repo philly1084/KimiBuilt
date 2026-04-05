@@ -56,6 +56,7 @@ describe('user checkpoint helpers', () => {
         expect(message).toContain('```survey');
         expect(message).toContain('"id": "checkpoint-1"');
         expect(message).toContain('Choose an option below');
+        expect(message).toContain('"allowFreeText": true');
     });
 
     test('checkpoint instructions explicitly forbid plain-text multiple-choice questions in web-chat', () => {
@@ -68,6 +69,7 @@ describe('user checkpoint helpers', () => {
 
         expect(instructions).toContain('do not ask a blocking multiple-choice question as plain assistant text');
         expect(instructions).toContain('use the tool so the UI can render inline options');
+        expect(instructions).toContain('keep the free-text field available');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {

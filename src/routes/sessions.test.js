@@ -109,7 +109,60 @@ describe('/api/sessions route', () => {
 
         expect(response.status).toBe(200);
         expect(sessionStore.getOwned).toHaveBeenCalledWith('session-1', 'phill');
-        expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', 'session-1');
+        expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', 'session-1', null);
+        expect(sessionStore.getActiveOwnedSession).toHaveBeenCalledWith('phill', null);
         expect(response.body.activeSessionId).toBe('session-1');
+    });
+
+    test('filters session state by requested client surface', async () => {
+        sessionStore.list.mockResolvedValue([]);
+        sessionStore.getActiveOwnedSession.mockResolvedValue(null);
+
+        const app = express();
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app).get('/api/sessions?clientSurface=web-chat&taskType=chat');
+
+        expect(response.status).toBe(200);
+        expect(sessionStore.list).toHaveBeenCalledWith({
+            ownerId: 'phill',
+            scopeKey: 'web-chat',
+        });
+        expect(sessionStore.getActiveOwnedSession).toHaveBeenCalledWith('phill', 'web-chat');
+    });
+
+    test('persists scoped active session state for the authenticated user', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill', memoryScope: 'web-chat' },
+        });
+        sessionStore.setActiveSession.mockResolvedValue({
+            ownerId: 'phill',
+            activeSessionId: 'session-1',
+        });
+        sessionStore.getActiveOwnedSession.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill', memoryScope: 'web-chat' },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app)
+            .put('/api/sessions/state')
+            .send({ activeSessionId: 'session-1', clientSurface: 'web-chat', taskType: 'chat' });
+
+        expect(response.status).toBe(200);
+        expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', 'session-1', 'web-chat');
+        expect(sessionStore.getActiveOwnedSession).toHaveBeenCalledWith('phill', 'web-chat');
     });
 });

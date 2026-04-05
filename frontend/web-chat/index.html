@@ -386,6 +386,35 @@
                         <span id="remote-autonomy-label">Automatic remote steps</span>
                     </button>
                 </div>
+                <div class="model-selector-setting">
+                    <span class="model-selector-setting__label">Robot sound cues</span>
+                    <div class="assistant-sound-stack">
+                        <button id="sound-cues-btn" class="btn-icon remote-autonomy-btn remote-autonomy-btn--panel" title="Enable robot-style acknowledgments and agent chimes" aria-label="Enable robot-style acknowledgments and agent chimes" aria-pressed="false">
+                            <i data-lucide="volume-2" class="w-5 h-5" aria-hidden="true"></i>
+                            <span id="sound-cues-label">Cute robot cues: Off</span>
+                        </button>
+                        <div class="assistant-sound-preview-row" role="group" aria-label="Preview sound cues">
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="ack">Ack</button>
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="response">Reply</button>
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="survey">Checkpoint</button>
+                        </div>
+                        <p class="model-selector-setting__hint">Reply and checkpoint cues stay distinct so you can tell whether the agent is done or needs a decision.</p>
+                    </div>
+                </div>
+                <div class="model-selector-setting">
+                    <span class="model-selector-setting__label">Menu motion sounds</span>
+                    <div class="assistant-sound-stack">
+                        <button id="menu-sounds-btn" class="btn-icon remote-autonomy-btn remote-autonomy-btn--panel" title="Enable subtle menu movement sounds" aria-label="Enable subtle menu movement sounds" aria-pressed="false">
+                            <i data-lucide="sparkles" class="w-5 h-5" aria-hidden="true"></i>
+                            <span id="menu-sounds-label">Menu sounds: Off</span>
+                        </button>
+                        <div class="assistant-sound-preview-row" role="group" aria-label="Preview menu sounds">
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="menu-open">Open</button>
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="menu-select">Select</button>
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="menu-close">Close</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div id="model-list" class="model-list" role="listbox">
                 <!-- Models will be rendered here -->
@@ -908,6 +937,7 @@
     <!-- Scripts -->
     <script src="js/api.js"></script>
     <script src="js/session.js"></script>
+    <script src="js/sound-manager.js"></script>
     <script src="js/import-export.js"></script>
     <script src="js/file-manager.js"></script>
     <script src="js/sidebar-resize.js"></script>

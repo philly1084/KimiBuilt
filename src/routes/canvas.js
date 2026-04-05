@@ -7,6 +7,11 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReas
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildDashboardTemplatePromptContext, isDashboardRequest } = require('../dashboard-template-catalog');
+const {
+    buildScopedSessionMetadata,
+    resolveClientSurface,
+    resolveSessionScope,
+} = require('../session-scope');
 
 const router = Router();
 
@@ -22,6 +27,13 @@ function normalizeClientNow(value = '') {
 
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
+}
+
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+    return {
+        ...(ownerId ? { ownerId } : {}),
+        ...(memoryScope ? { memoryScope } : {}),
+    };
 }
 
 const canvasSchema = {
@@ -221,10 +233,18 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
         };
+        const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'canvas');
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            ...effectiveRequestMetadata,
+            mode: 'canvas',
+            taskType: 'canvas',
+            canvasType,
+            clientSurface: requestedClientSurface,
+        });
 
         const session = await sessionStore.resolveOwnedSession(
             sessionId,
-            { mode: 'canvas', canvasType, ownerId },
+            requestedSessionMetadata,
             ownerId,
         );
         if (session) {
@@ -233,6 +253,11 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        const clientSurface = resolveClientSurface(req.body || {}, session, 'canvas');
+        const memoryScope = resolveSessionScope({
+            ...requestedSessionMetadata,
+            clientSurface,
+        }, session);
 
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -263,6 +288,8 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
                 transport: 'http',
                 memoryService,
                 ownerId,
+                clientSurface,
+                memoryScope,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -270,7 +297,12 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
-            metadata: effectiveRequestMetadata,
+            clientSurface,
+            memoryScope,
+            metadata: {
+                ...effectiveRequestMetadata,
+                clientSurface,
+            },
             ownerId,
         });
         const response = execution.response;
@@ -280,7 +312,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },

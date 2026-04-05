@@ -29,6 +29,11 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildWebChatSessionMessages } = require('../web-chat-message-state');
 const {
+    buildScopedSessionMetadata,
+    resolveClientSurface,
+    resolveSessionScope,
+} = require('../session-scope');
+const {
     broadcastToAdmins,
     broadcastToSession,
     registerAdminConnection,
@@ -41,6 +46,13 @@ const {
 const EventEmitter = require('events');
 const adminEvents = new EventEmitter();
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
+
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+    return {
+        ...(ownerId ? { ownerId } : {}),
+        ...(memoryScope ? { memoryScope } : {}),
+    };
+}
 
 async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
@@ -154,15 +166,22 @@ function setupWebSocket(wss, app = null) {
                 }
 
                 const requestedSessionId = sessionId;
+                const requestedSessionMetadata = buildScopedSessionMetadata({
+                    ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+                    mode: type,
+                    taskType: type,
+                    transport: 'ws',
+                    clientSurface: resolveClientSurface(payload || {}, null, type),
+                });
                 const session = ownerId
                     ? await sessionStore.resolveOwnedSession(
                         requestedSessionId,
-                        { mode: type, transport: 'ws' },
+                        requestedSessionMetadata,
                         ownerId,
                     )
                     : requestedSessionId
-                        ? await sessionStore.getOrCreate(requestedSessionId, { mode: type, transport: 'ws' })
-                        : await sessionStore.create({ mode: type, transport: 'ws' });
+                        ? await sessionStore.getOrCreate(requestedSessionId, requestedSessionMetadata)
+                        : await sessionStore.create(requestedSessionMetadata);
                 if (!session) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
                     return;
@@ -235,6 +254,18 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     const sshContext = resolveSshRequestContext(message, session);
     const effectiveMessage = sshContext.effectivePrompt || message;
     const taskType = resolveConversationTaskType(payload, session);
+    const clientSurface = resolveClientSurface(payload || {}, session, taskType);
+    const memoryScope = resolveSessionScope({
+        ...effectiveRequestMetadata,
+        mode: taskType,
+        taskType,
+        clientSurface,
+    }, session);
+    effectiveRequestMetadata = {
+        ...effectiveRequestMetadata,
+        clientSurface,
+        memoryScope,
+    };
     let effectiveOutputFormat = outputFormat
         || inferRequestedOutputFormat(message)
         || inferOutputFormatFromSession(message, session);
@@ -330,10 +361,15 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     lastOutputFormat: effectiveOutputFormat,
                     lastGeneratedArtifactId: generation.artifact.id,
                     taskType,
-                    clientSurface: taskType,
+                    clientSurface: clientSurface || taskType,
+                    memoryScope,
                 },
             });
-            memoryService.rememberResponse(session.id, generation.assistantMessage, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(
+                session.id,
+                generation.assistantMessage,
+                buildOwnerMemoryMetadata(ownerId, memoryScope),
+            );
             await sessionStore.appendMessages(session.id, buildWebChatSessionMessages({
                 userText: message,
                 assistantText: generation.assistantMessage,
@@ -391,6 +427,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 transport: 'ws',
                 memoryService,
                 ownerId,
+                clientSurface,
+                memoryScope,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: ws.app.locals.agentWorkloadService,
@@ -399,6 +437,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            clientSurface,
+            memoryScope,
             metadata: effectiveRequestMetadata,
             ownerId,
         });
@@ -424,7 +464,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
 
                 if (!execution.handledPersistence) {
                     await sessionStore.recordResponse(session.id, event.response.id);
-                    memoryService.rememberResponse(session.id, fullText, ownerId ? { ownerId } : {});
+                    memoryService.rememberResponse(session.id, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
                 }
                 const sshMetadata = extractSshSessionMetadataFromToolEvents(event.response?.metadata?.toolEvents);
                 if (sshMetadata) {
@@ -497,6 +537,13 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
     } = payload;
     const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
+    const clientSurface = resolveClientSurface(payload || {}, session, 'canvas');
+    const memoryScope = resolveSessionScope({
+        ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+        mode: 'canvas',
+        taskType: 'canvas',
+        clientSurface,
+    }, session);
 
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -530,6 +577,8 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
             executionProfile,
             enableConversationExecutor,
             taskType: 'canvas',
+            clientSurface,
+            memoryScope,
             ownerId,
         });
         const response = execution.response;
@@ -539,7 +588,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(session.id, outputText, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: message },
                 { role: 'assistant', content: outputText },
@@ -603,6 +652,13 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
     } = payload;
     const reasoningEffort = resolveReasoningEffort(payload);
     const enableConversationExecutor = resolveConversationExecutorFlag(payload);
+    const clientSurface = resolveClientSurface(payload || {}, session, 'notation');
+    const memoryScope = resolveSessionScope({
+        ...(payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+        mode: 'notation',
+        taskType: 'notation',
+        clientSurface,
+    }, session);
 
     if (!notation) {
         ws.send(JSON.stringify({ type: 'error', message: "'notation' is required" }));
@@ -636,6 +692,8 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
+            clientSurface,
+            memoryScope,
             ownerId,
         });
         const response = execution.response;
@@ -645,7 +703,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(session.id, outputText, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(session.id, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
             await sessionStore.appendMessages(session.id, [
                 { role: 'user', content: notation },
                 { role: 'assistant', content: outputText },

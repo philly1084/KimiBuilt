@@ -572,8 +572,12 @@ class WebCLIAPI {
     }
 
     async getSessionState() {
+        const params = new URLSearchParams({
+            taskType: WEB_CLI_TASK_TYPE,
+            clientSurface: WEB_CLI_CLIENT_SURFACE,
+        });
         const response = await this.fetchWithTimeout(
-            `${BASE_URL_WITHOUT_API}/api/sessions`,
+            `${BASE_URL_WITHOUT_API}/api/sessions?${params.toString()}`,
             {
                 method: 'GET',
                 headers: { 'Accept': 'application/json' },
@@ -596,6 +600,8 @@ class WebCLIAPI {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     activeSessionId: sessionId || null,
+                    taskType: WEB_CLI_TASK_TYPE,
+                    clientSurface: WEB_CLI_CLIENT_SURFACE,
                 }),
             },
             10000

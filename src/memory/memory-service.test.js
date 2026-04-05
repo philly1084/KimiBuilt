@@ -26,4 +26,28 @@ describe('MemoryService recall profiles', () => {
             scoreThreshold: 0.64,
         });
     });
+
+    test('process forwards memory scope to persistence and recall', async () => {
+        const service = new MemoryService();
+        const rememberSpy = jest.spyOn(service, 'remember').mockResolvedValue('point-1');
+        const recallSpy = jest.spyOn(service, 'recall').mockResolvedValue(['ctx']);
+
+        const context = await service.process('session-1', 'hello world', {
+            ownerId: 'phill',
+            memoryScope: 'web-chat',
+            profile: DEFAULT_RECALL_PROFILE,
+        });
+
+        expect(context).toEqual(['ctx']);
+        expect(rememberSpy).toHaveBeenCalledWith('session-1', 'hello world', 'user', {
+            ownerId: 'phill',
+            memoryScope: 'web-chat',
+        });
+        expect(recallSpy).toHaveBeenCalledWith('hello world', expect.objectContaining({
+            sessionId: null,
+            ownerId: 'phill',
+            memoryScope: 'web-chat',
+            profile: DEFAULT_RECALL_PROFILE,
+        }));
+    });
 });

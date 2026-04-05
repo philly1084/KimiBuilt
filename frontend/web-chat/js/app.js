@@ -531,10 +531,14 @@ class ChatApp {
         }
     }
 
-    async loadSessionMessages(sessionId) {
+    async loadSessionMessages(sessionId, options = {}) {
         await sessionManager.loadSessionMessagesFromBackend(sessionId);
         const messages = this.syncAnnotatedSurveyStates(sessionId);
         this.renderMessages(messages);
+        if (options.notifyNewAssistant === true && Array.isArray(options.previousMessages)) {
+            this.playCueForNewAssistantMessages(options.previousMessages, messages);
+        }
+        return messages;
     }
 
     async loadSessionWorkloads(sessionId, options = {}) {
@@ -1582,7 +1586,11 @@ class ChatApp {
         await this.refreshSessionSummaries();
 
         if (sessionManager.currentSessionId === sessionId) {
-            await this.loadSessionMessages(sessionId);
+            const previousMessages = [...sessionManager.getMessages(sessionId)];
+            await this.loadSessionMessages(sessionId, {
+                notifyNewAssistant: true,
+                previousMessages,
+            });
             await this.loadSessionWorkloads(sessionId, { force: true });
         }
     }
@@ -1648,6 +1656,7 @@ class ChatApp {
 
         const userMessageEl = uiHelpers.renderMessage(userMessage);
         this.messagesContainer.appendChild(userMessageEl);
+        uiHelpers.playAcknowledgementCue();
         uiHelpers.scrollToBottom();
 
         // Show typing indicator
@@ -1759,6 +1768,13 @@ class ChatApp {
         }
 
         const notes = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
+        const requiresNotes = selectedOptions.length === 1 && selectedOptions.some((option) => option.id === 'custom-input');
+        if (requiresNotes && !notes) {
+            uiHelpers.showToast('Type your answer for the Other option', 'info');
+            card.querySelector('.agent-survey-card__notes')?.focus();
+            return;
+        }
+
         const responseContent = this.buildSurveyResponseContent({
             checkpointId: surveyId,
             selectedOptions,
@@ -2471,36 +2487,16 @@ class ChatApp {
         }
 
         const data = checkpointEvent?.result?.data || {};
-        const message = String(data.message || '').trim();
-        if (/```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(message)) {
-            return message;
-        }
-
         const checkpoint = data.checkpoint && typeof data.checkpoint === 'object'
             ? data.checkpoint
             : (data && typeof data === 'object' ? data : null);
         const surveyFence = this.buildSurveyFenceContent(checkpoint);
         if (!surveyFence) {
-            return '';
+            const message = String(data.message || '').trim();
+            return /```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(message) ? message : '';
         }
 
-        const preamble = String(
-            checkpoint?.preamble
-            || 'I need one decision before I continue with the main work.',
-        ).trim();
-        const whyThisMatters = String(
-            checkpoint?.whyThisMatters
-            || checkpoint?.context
-            || checkpoint?.rationale
-            || '',
-        ).trim();
-
-        return [
-            preamble,
-            whyThisMatters,
-            surveyFence,
-            'Choose an option below and I will continue from there.',
-        ].filter(Boolean).join('\n\n');
+        return surveyFence;
     }
 
     attachSurveyDisplayContent(message = null, toolEvents = []) {
@@ -2575,6 +2571,42 @@ class ChatApp {
         sessionManager.sessionMessages.set(sessionId, annotatedMessages);
         sessionManager.saveToStorage();
         return annotatedMessages;
+    }
+
+    hasSurveyToolEvent(toolEvents = []) {
+        return (Array.isArray(toolEvents) ? toolEvents : []).some((event) => (
+            (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'user-checkpoint'
+            && event?.result?.success !== false
+        ));
+    }
+
+    getAssistantCueType(message = null, toolEvents = []) {
+        if (this.hasSurveyToolEvent(toolEvents)) {
+            return 'survey';
+        }
+
+        const survey = this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? '');
+        return survey ? 'survey' : 'response';
+    }
+
+    playCueForAssistantMessage(message = null, toolEvents = []) {
+        if (!message || message.role !== 'assistant' || message.isLoading) {
+            return;
+        }
+
+        uiHelpers.playAgentCue(this.getAssistantCueType(message, toolEvents));
+    }
+
+    playCueForNewAssistantMessages(previousMessages = [], nextMessages = []) {
+        const previousCount = Array.isArray(previousMessages) ? previousMessages.length : 0;
+        const addedMessages = (Array.isArray(nextMessages) ? nextMessages : []).slice(previousCount);
+        const lastAssistantMessage = [...addedMessages]
+            .reverse()
+            .find((message) => message?.role === 'assistant' && message?.isLoading !== true);
+
+        if (lastAssistantMessage) {
+            this.playCueForAssistantMessage(lastAssistantMessage);
+        }
     }
 
     buildSurveyResponseContent({ checkpointId = '', selectedOptions = [], notes = '' } = {}) {
@@ -3065,6 +3097,7 @@ class ChatApp {
         
         if (lastMessage) {
             this.renderOrReplaceMessage(lastMessage);
+            this.playCueForAssistantMessage(lastMessage, chunk.toolEvents);
         }
         
         this.isProcessing = false;
@@ -3773,6 +3806,7 @@ class ChatApp {
         if (refreshedCount !== previousMessageCount || refreshedLastTimestamp !== previousLastTimestamp) {
             const messages = this.syncAnnotatedSurveyStates(currentSessionId);
             this.renderMessages(messages);
+            this.playCueForNewAssistantMessages(previousMessages, messages);
             this.updateSessionInfo();
         }
     }

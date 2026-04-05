@@ -2,6 +2,11 @@ const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { artifactService } = require('../artifacts/artifact-service');
+const {
+    buildScopedSessionMetadata,
+    hasSessionScopeHints,
+    resolveSessionScope,
+} = require('../session-scope');
 
 const router = Router();
 
@@ -14,15 +19,63 @@ function normalizeSessionId(value = null) {
     return normalized || null;
 }
 
+function extractScopeHints(source = {}) {
+    const value = source && typeof source === 'object' && !Array.isArray(source)
+        ? source
+        : {};
+
+    return {
+        clientSurface: value.clientSurface,
+        client_surface: value.client_surface,
+        taskType: value.taskType,
+        task_type: value.task_type,
+        mode: value.mode,
+        memoryScope: value.memoryScope,
+        memory_scope: value.memory_scope,
+        projectScope: value.projectScope,
+        project_scope: value.project_scope,
+        projectId: value.projectId,
+        project_id: value.project_id,
+        projectKey: value.projectKey,
+        project_key: value.project_key,
+        workspaceId: value.workspaceId,
+        workspace_id: value.workspace_id,
+        workspaceKey: value.workspaceKey,
+        workspace_key: value.workspace_key,
+        namespace: value.namespace,
+    };
+}
+
+function buildSessionMetadataFromRequest(source = {}, metadata = {}) {
+    return buildScopedSessionMetadata({
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        ...extractScopeHints(source),
+    });
+}
+
+function getRequestedScopeKey(source = {}) {
+    const metadata = source?.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata)
+        ? source.metadata
+        : {};
+    const scopeInput = {
+        ...extractScopeHints(source),
+        metadata,
+    };
+
+    return hasSessionScopeHints(scopeInput)
+        ? resolveSessionScope(scopeInput)
+        : null;
+}
+
 router.post('/', async (req, res, next) => {
     try {
         const ownerId = getRequestOwnerId(req);
         const { metadata } = req.body || {};
         const session = await sessionStore.create({
-            ...(metadata || {}),
+            ...buildSessionMetadataFromRequest(req.body || {}, metadata || {}),
             ownerId,
         });
-        await sessionStore.setActiveSession(ownerId, session.id);
+        await sessionStore.setActiveSession(ownerId, session.id, session?.metadata?.memoryScope || null);
         res.status(201).json(session);
     } catch (err) {
         next(err);
@@ -32,8 +85,10 @@ router.post('/', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
     try {
         const ownerId = getRequestOwnerId(req);
+        const scopeKey = getRequestedScopeKey(req.query || {});
         const sessions = await sessionStore.list({
             ownerId,
+            ...(scopeKey ? { scopeKey } : {}),
         });
         const workloadService = req.app?.locals?.agentWorkloadService;
         const summaries = workloadService?.isAvailable?.()
@@ -50,7 +105,7 @@ router.get('/', async (req, res, next) => {
                 failed: 0,
             },
         }));
-        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId, scopeKey);
         res.json({
             sessions: enrichedSessions,
             count: enrichedSessions.length,
@@ -64,7 +119,8 @@ router.get('/', async (req, res, next) => {
 router.get('/state', async (req, res, next) => {
     try {
         const ownerId = getRequestOwnerId(req);
-        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+        const scopeKey = getRequestedScopeKey(req.query || {});
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId, scopeKey);
         res.json({
             activeSessionId: activeSession?.id || null,
             session: activeSession,
@@ -78,6 +134,7 @@ router.put('/state', async (req, res, next) => {
     try {
         const ownerId = getRequestOwnerId(req);
         const activeSessionId = normalizeSessionId(req.body?.activeSessionId);
+        const scopeKey = getRequestedScopeKey(req.body || {});
 
         if (activeSessionId) {
             const session = await sessionStore.getOwned(activeSessionId, ownerId);
@@ -86,8 +143,8 @@ router.put('/state', async (req, res, next) => {
             }
         }
 
-        await sessionStore.setActiveSession(ownerId, activeSessionId);
-        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
+        await sessionStore.setActiveSession(ownerId, activeSessionId, scopeKey);
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId, scopeKey);
 
         res.json({
             activeSessionId: activeSession?.id || null,
@@ -201,7 +258,12 @@ router.patch('/:id', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const session = await sessionStore.update(req.params.id, { metadata: metadata || {} });
+        const session = await sessionStore.update(req.params.id, {
+            metadata: buildScopedSessionMetadata({
+                ...(existing.metadata || {}),
+                ...buildSessionMetadataFromRequest(req.body || {}, metadata || {}),
+            }, existing),
+        });
         res.json(session);
     } catch (err) {
         next(err);
@@ -212,19 +274,22 @@ router.delete('/:id', async (req, res, next) => {
     try {
         const { id } = req.params;
         const ownerId = getRequestOwnerId(req);
-        const activeSession = await sessionStore.getActiveOwnedSession(ownerId);
         const session = await sessionStore.getOwned(id, ownerId);
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        const deletedScopeKey = session?.metadata?.memoryScope || null;
+        const activeSession = await sessionStore.getActiveOwnedSession(ownerId, deletedScopeKey);
 
         await artifactService.deleteArtifactsForSession(id);
         await memoryService.forget(id);
         await sessionStore.delete(id);
 
         if (activeSession?.id === id) {
-            const nextSession = await sessionStore.getLatestOwnedSession(ownerId);
-            await sessionStore.setActiveSession(ownerId, nextSession?.id || null);
+            const nextSession = await sessionStore.getLatestOwnedSession(ownerId, {
+                scopeKey: deletedScopeKey,
+            });
+            await sessionStore.setActiveSession(ownerId, nextSession?.id || null, deletedScopeKey);
         }
 
         res.status(204).end();

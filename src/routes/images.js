@@ -5,6 +5,11 @@ const { generateImage, listImageModels } = require('../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { persistGeneratedImages } = require('../generated-image-artifacts');
+const {
+    buildScopedSessionMetadata,
+    resolveClientSurface,
+    resolveSessionScope,
+} = require('../session-scope');
 
 const router = Router();
 
@@ -56,16 +61,27 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         } = req.body;
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
+        const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'image');
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            mode: 'image',
+            taskType: 'image',
+            clientSurface: requestedClientSurface,
+        });
 
         const session = ownerId
-            ? await sessionStore.resolveOwnedSession(sessionId, { mode: 'image' }, ownerId)
+            ? await sessionStore.resolveOwnedSession(sessionId, requestedSessionMetadata, ownerId)
             : sessionId
-                ? await sessionStore.getOrCreate(sessionId, { mode: 'image' })
-                : await sessionStore.create({ mode: 'image' });
+                ? await sessionStore.getOrCreate(sessionId, requestedSessionMetadata)
+                : await sessionStore.create(requestedSessionMetadata);
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
         sessionId = session.id;
+        const clientSurface = resolveClientSurface(req.body || {}, session, 'image');
+        const memoryScope = resolveSessionScope({
+            ...requestedSessionMetadata,
+            clientSurface,
+        }, session);
 
         console.log(`[Images] Generating image with ${model || 'gateway-default'}: "${prompt.substring(0, 50)}..."`);
 
@@ -105,6 +121,12 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
                 reason: 'Image generation request',
             }],
         }, ownerId);
+        await sessionStore.update(sessionId, {
+            metadata: {
+                clientSurface,
+                memoryScope,
+            },
+        });
 
         res.json({
             sessionId,

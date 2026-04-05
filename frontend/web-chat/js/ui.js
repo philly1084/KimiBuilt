@@ -29,9 +29,14 @@ class UIHelpers {
         this.currentModel = savedModel || 'gpt-4o';
         this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
         this.remoteBuildAutonomyApproved = this.parseRemoteBuildAutonomyPreference(savedRemoteAutonomy);
+        this.soundManager = window.WebChatSoundManager
+            ? new window.WebChatSoundManager()
+            : null;
         this.updateModelUI();
         this.updateReasoningUI();
         this.updateRemoteBuildAutonomyUI();
+        this.updateSoundCuesUI();
+        this.updateMenuSoundsUI();
         
         // Track last focused element for focus management
         this.lastFocusedElement = null;
@@ -459,6 +464,10 @@ class UIHelpers {
             .replace(/>/g, '&gt;');
     }
 
+    escapeRegExp(text) {
+        return String(text == null ? '' : text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     // ============================================
     // Message Rendering
     // ============================================
@@ -495,6 +504,22 @@ class UIHelpers {
         };
     }
 
+    resolveSurveyAllowFreeText(value = null) {
+        if (!value || typeof value !== 'object') {
+            return true;
+        }
+
+        if (value.allowFreeText === false || value.allowText === false) {
+            return false;
+        }
+
+        if (value.allowFreeText === true || value.allowText === true) {
+            return true;
+        }
+
+        return true;
+    }
+
     normalizeSurveyDefinition(value = null) {
         if (!value || typeof value !== 'object') {
             return null;
@@ -514,7 +539,7 @@ class UIHelpers {
         const maxSelections = allowMultiple
             ? Math.min(options.length, Math.max(1, Number(value.maxSelections) || Math.min(2, options.length)))
             : 1;
-        const allowFreeText = value.allowFreeText === true || value.allowText === true;
+        const allowFreeText = this.resolveSurveyAllowFreeText(value);
 
         return {
             id: String(value.id || `survey-${Date.now().toString(36)}`).trim(),
@@ -525,7 +550,7 @@ class UIHelpers {
             maxSelections,
             allowFreeText,
             freeTextLabel: allowFreeText
-                ? (String(value.freeTextLabel || value.freeTextPrompt || 'Add context (optional)').trim() || 'Add context (optional)')
+                ? (String(value.freeTextLabel || value.freeTextPrompt || 'Add your own input (optional)').trim() || 'Add your own input (optional)')
                 : '',
             options,
         };
@@ -665,6 +690,55 @@ class UIHelpers {
         return parts.join('. ');
     }
 
+    getSurveyCustomOption() {
+        return {
+            id: 'custom-input',
+            label: 'Other',
+            description: 'Type your own answer below.',
+        };
+    }
+
+    buildRenderedSurveyOptions(survey = {}) {
+        const options = Array.isArray(survey.options)
+            ? survey.options.map((option) => ({ ...option }))
+            : [];
+        if (!survey.allowFreeText) {
+            return options;
+        }
+
+        const customOption = this.getSurveyCustomOption();
+        const hasExistingCustomOption = options.some((option) => (
+            String(option?.id || '').trim() === customOption.id
+            || String(option?.label || '').trim().toLowerCase() === customOption.label.toLowerCase()
+        ));
+
+        if (!hasExistingCustomOption) {
+            options.push(customOption);
+        }
+
+        return options;
+    }
+
+    updateSurveySubmitState(card) {
+        if (!card) {
+            return;
+        }
+
+        const allOptions = Array.from(card.querySelectorAll('.agent-survey-option'));
+        const selectedOptions = allOptions.filter((entry) => entry.classList.contains('is-selected'));
+        const submitButton = card.querySelector('.agent-survey-card__submit');
+        const notes = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
+        const customOptionId = this.getSurveyCustomOption().id;
+        const customSelected = selectedOptions.some((entry) => String(entry.dataset.optionId || '').trim() === customOptionId);
+        const hasSelection = selectedOptions.length > 0;
+        const customNeedsNotes = customSelected && selectedOptions.length === 1 && !notes;
+        const canSubmit = hasSelection && !customNeedsNotes;
+
+        if (submitButton) {
+            submitButton.disabled = !canSubmit;
+        }
+    }
+
     renderSurveyBlock(survey = null, message = {}) {
         if (!survey) {
             return '';
@@ -688,93 +762,127 @@ class UIHelpers {
         const selectionHint = survey.allowMultiple
             ? `Choose up to ${survey.maxSelections}`
             : 'Choose one option';
-        const optionsHtml = survey.options.map((option) => {
+        const renderedOptions = this.buildRenderedSurveyOptions(survey);
+        const optionsHtml = renderedOptions.map((option) => {
             const selected = selectedOptionIds.has(option.id);
-            return `
-                <button
-                    type="button"
-                    class="agent-survey-option ${selected ? 'is-selected' : ''}"
-                    data-option-id="${this.escapeHtmlAttr(option.id)}"
-                    data-option-label="${this.escapeHtmlAttr(option.label)}"
-                    onclick="uiHelpers.toggleSurveyOption(this)"
-                    ${isAnswered ? 'disabled' : ''}
-                    aria-checked="${selected ? 'true' : 'false'}"
-                >
-                    <span class="agent-survey-option__title">${this.escapeHtml(option.label)}</span>
-                    ${option.description ? `<span class="agent-survey-option__description">${this.escapeHtml(option.description)}</span>` : ''}
-                </button>
-            `;
+            return [
+                `<button type="button" class="agent-survey-option ${selected ? 'is-selected' : ''}"`,
+                ` data-option-id="${this.escapeHtmlAttr(option.id)}"`,
+                ` data-option-label="${this.escapeHtmlAttr(option.label)}"`,
+                ' onclick="uiHelpers.toggleSurveyOption(this)"',
+                isAnswered ? ' disabled' : '',
+                ` aria-checked="${selected ? 'true' : 'false'}">`,
+                `<span class="agent-survey-option__title">${this.escapeHtml(option.label)}</span>`,
+                option.description ? `<span class="agent-survey-option__description">${this.escapeHtml(option.description)}</span>` : '',
+                '</button>',
+            ].join('');
         }).join('');
 
-        return `
-            <div
-                class="agent-survey-card ${isAnswered ? 'is-answered' : ''}"
-                data-message-id="${this.escapeHtmlAttr(messageId)}"
-                data-survey-id="${this.escapeHtmlAttr(survey.id)}"
-                data-allow-multiple="${survey.allowMultiple ? 'true' : 'false'}"
-                data-max-selections="${String(survey.maxSelections)}"
-                data-submitted="${isAnswered ? 'true' : 'false'}"
-            >
-                <div class="agent-survey-card__eyebrow">Decision checkpoint</div>
-                <div class="agent-survey-card__title-row">
-                    <h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>
-                    <span class="agent-survey-card__meta">${this.escapeHtml(selectionHint)}</span>
-                </div>
-                <p class="agent-survey-card__question">${this.escapeHtml(survey.question)}</p>
-                ${survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : ''}
-                <div class="agent-survey-card__options">
-                    ${optionsHtml}
-                </div>
-                ${survey.allowFreeText ? `
-                    <label class="agent-survey-card__notes-label">
-                        <span>${this.escapeHtml(survey.freeTextLabel || 'Add context (optional)')}</span>
-                        <textarea
-                            class="agent-survey-card__notes"
-                            rows="3"
-                            maxlength="500"
-                            placeholder="Add a short note for the agent"
-                            ${isAnswered ? 'disabled' : ''}
-                        >${this.escapeHtml(surveyState?.notes || '')}</textarea>
-                    </label>
-                ` : ''}
-                <div class="agent-survey-card__footer">
-                    ${isAnswered ? `
-                        <div class="agent-survey-card__answered">
-                            <span class="agent-survey-card__answered-badge">Answered</span>
-                            <span class="agent-survey-card__answered-text">${this.escapeHtml(answeredSummary || 'Response sent back to the agent.')}</span>
-                        </div>
-                    ` : `
-                        <div class="agent-survey-card__actions">
-                            <button type="button" class="agent-survey-card__submit" onclick="window.chatApp.submitAgentSurvey(this)" disabled>
-                                Continue with this choice
-                            </button>
-                            <span class="agent-survey-card__hint">The agent will continue once you answer.</span>
-                        </div>
-                    `}
-                </div>
-            </div>
-        `;
+        return [
+            `<div class="agent-survey-card ${isAnswered ? 'is-answered' : ''}"`,
+            ` data-message-id="${this.escapeHtmlAttr(messageId)}"`,
+            ` data-survey-id="${this.escapeHtmlAttr(survey.id)}"`,
+            ` data-allow-multiple="${survey.allowMultiple ? 'true' : 'false'}"`,
+            ` data-max-selections="${String(survey.maxSelections)}"`,
+            ` data-submitted="${isAnswered ? 'true' : 'false'}">`,
+            '<div class="agent-survey-card__eyebrow">Decision checkpoint</div>',
+            '<div class="agent-survey-card__title-row">',
+            `<h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>`,
+            `<span class="agent-survey-card__meta">${this.escapeHtml(selectionHint)}</span>`,
+            '</div>',
+            `<p class="agent-survey-card__question">${this.escapeHtml(survey.question)}</p>`,
+            survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : '',
+            `<div class="agent-survey-card__options">${optionsHtml}</div>`,
+            survey.allowFreeText
+                ? [
+                    '<label class="agent-survey-card__notes-label">',
+                    `<span>${this.escapeHtml(survey.freeTextLabel || 'Add your own input (optional)')}</span>`,
+                    `<textarea class="agent-survey-card__notes" rows="3" maxlength="500" placeholder="Type your own answer or extra context for the agent" oninput="uiHelpers.syncSurveyFreeText(this)" ${isAnswered ? 'disabled' : ''}>${this.escapeHtml(surveyState?.notes || '')}</textarea>`,
+                    '</label>',
+                ].join('')
+                : '',
+            '<div class="agent-survey-card__footer">',
+            isAnswered
+                ? [
+                    '<div class="agent-survey-card__answered">',
+                    '<span class="agent-survey-card__answered-badge">Answered</span>',
+                    `<span class="agent-survey-card__answered-text">${this.escapeHtml(answeredSummary || 'Response sent back to the agent.')}</span>`,
+                    '</div>',
+                ].join('')
+                : [
+                    '<div class="agent-survey-card__actions">',
+                    '<button type="button" class="agent-survey-card__submit" onclick="window.chatApp.submitAgentSurvey(this)" disabled>',
+                    'Continue with this choice',
+                    '</button>',
+                    '<span class="agent-survey-card__hint">The agent will continue once you answer.</span>',
+                    '</div>',
+                ].join(''),
+            '</div>',
+            '</div>',
+        ].filter(Boolean).join('');
     }
 
-    renderSurveyMarkdownBlocks(content = '', message = {}) {
+    buildSurveyRenderPlan(content = '', message = {}) {
         const source = String(content || '');
         if (!/```(?:survey|kb-survey)/i.test(source)) {
             const inferredSurvey = this.extractPlainSurveyDefinition(source, message?.id || '');
             if (inferredSurvey) {
-                return this.renderSurveyBlock(inferredSurvey, message);
+                const token = `KB_SURVEY_TOKEN_${String(message?.id || 'message').replace(/[^a-z0-9_-]/gi, '_')}_0`;
+                return {
+                    markdown: token,
+                    surveys: [{
+                        token,
+                        html: this.renderSurveyBlock(inferredSurvey, message),
+                    }],
+                };
             }
 
-            return source;
+            return {
+                markdown: source,
+                surveys: [],
+            };
         }
 
-        return source.replace(/```(?:survey|kb-survey)\s*([\s\S]*?)```/gi, (_match, rawJson) => {
-            const survey = this.extractSurveyDefinitionFromContent(_match, message?.id || '');
+        let surveyIndex = 0;
+        const surveys = [];
+        const markdown = source.replace(/```(?:survey|kb-survey)\s*([\s\S]*?)```/gi, (match) => {
+            const survey = this.extractSurveyDefinitionFromContent(match, message?.id || '');
             if (!survey) {
-                return _match;
+                return match;
             }
 
-            return this.renderSurveyBlock(survey, message);
+            const token = `KB_SURVEY_TOKEN_${String(message?.id || 'message').replace(/[^a-z0-9_-]/gi, '_')}_${surveyIndex}`;
+            surveyIndex += 1;
+            surveys.push({
+                token,
+                html: this.renderSurveyBlock(survey, message),
+            });
+            return `\n\n${token}\n\n`;
         });
+
+        return {
+            markdown,
+            surveys,
+        };
+    }
+
+    replaceSurveyRenderTokens(html = '', surveys = []) {
+        let rendered = String(html || '');
+
+        (Array.isArray(surveys) ? surveys : []).forEach((survey) => {
+            const token = String(survey?.token || '').trim();
+            const surveyHtml = String(survey?.html || '').trim();
+            if (!token || !surveyHtml) {
+                return;
+            }
+
+            const escapedToken = this.escapeRegExp(token);
+            rendered = rendered
+                .replace(new RegExp(`<p>\\s*${escapedToken}\\s*</p>`, 'g'), surveyHtml)
+                .replace(new RegExp(escapedToken, 'g'), surveyHtml);
+        });
+
+        return rendered;
     }
 
     renderMessage(message, isStreaming = false) {
@@ -873,10 +981,10 @@ class UIHelpers {
         const content = message.displayContent ?? message.content;
         if (!content) return '';
 
-        const renderedContent = this.renderSurveyMarkdownBlocks(content, message);
+        const surveyRenderPlan = this.buildSurveyRenderPlan(content, message);
         
         // Parse markdown
-        let html = marked.parse(renderedContent);
+        let html = marked.parse(surveyRenderPlan.markdown);
         
         // Sanitize HTML with stricter config
         html = DOMPurify.sanitize(html, {
@@ -902,6 +1010,8 @@ class UIHelpers {
             ],
             ALLOW_DATA_ATTR: false
         });
+
+        html = this.replaceSurveyRenderTokens(html, surveyRenderPlan.surveys);
 
         // Add streaming cursor if needed
         if (isStreaming) {
@@ -943,11 +1053,39 @@ class UIHelpers {
             optionButton.setAttribute('aria-checked', isSelected ? 'false' : 'true');
         }
 
-        const submitButton = card.querySelector('.agent-survey-card__submit');
-        if (submitButton) {
-            const hasSelection = allOptions.some((entry) => entry.classList.contains('is-selected'));
-            submitButton.disabled = !hasSelection;
+        const customOptionId = this.getSurveyCustomOption().id;
+        if (String(optionButton.dataset.optionId || '').trim() === customOptionId) {
+            card.querySelector('.agent-survey-card__notes')?.focus();
         }
+
+        this.updateSurveySubmitState(card);
+        this.playMenuCue('menu-select');
+    }
+
+    syncSurveyFreeText(input) {
+        const notesField = input?.closest?.('.agent-survey-card__notes') || input;
+        const card = notesField?.closest?.('.agent-survey-card');
+        if (!notesField || !card || card.dataset.submitted === 'true') {
+            return;
+        }
+
+        const customOptionId = this.getSurveyCustomOption().id;
+        const customOption = card.querySelector(`.agent-survey-option[data-option-id="${customOptionId}"]`);
+        if (!customOption) {
+            this.updateSurveySubmitState(card);
+            return;
+        }
+
+        const notes = String(notesField.value || '').trim();
+        const hasAnySelection = Array.from(card.querySelectorAll('.agent-survey-option'))
+            .some((entry) => entry.classList.contains('is-selected'));
+
+        if (notes && !hasAnySelection) {
+            customOption.classList.add('is-selected');
+            customOption.setAttribute('aria-checked', 'true');
+        }
+
+        this.updateSurveySubmitState(card);
     }
 
     renderImageMessage(message) {
@@ -1982,11 +2120,12 @@ class UIHelpers {
             return;
         }
 
-        this.closeSearch();
+        this.closeSearch({ silent: true });
         this.closeSidebar();
-        this.closeMobileActionSheet();
+        this.closeMobileActionSheet({ silent: true });
         dropdown.classList.remove('hidden');
         dropdown.setAttribute('aria-hidden', 'false');
+        this.playMenuCue('menu-open');
         
         // Update ARIA
         this.updateModelSelectorAria(true);
@@ -2005,13 +2144,17 @@ class UIHelpers {
         this.trapFocus(dropdown);
     }
 
-    closeModelSelector() {
+    closeModelSelector(options = {}) {
         const dropdown = document.getElementById('model-selector-dropdown');
         if (!dropdown) {
             return;
         }
         dropdown.classList.add('hidden');
         dropdown.setAttribute('aria-hidden', 'true');
+
+        if (options?.silent !== true) {
+            this.playMenuCue('menu-close');
+        }
         
         // Update ARIA
         this.updateModelSelectorAria(false);
@@ -2147,7 +2290,8 @@ class UIHelpers {
         this.currentModel = modelId;
         window.sessionManager?.safeStorageSet?.('kimibuilt_default_model', modelId);
         this.updateModelUI();
-        this.closeModelSelector();
+        this.closeModelSelector({ silent: true });
+        this.playMenuCue('menu-select');
         this.showToast(`Model changed to ${this.getModelDisplayName({ id: modelId })}`, 'success');
         
         // Dispatch event for app to know model changed
@@ -2224,6 +2368,7 @@ class UIHelpers {
             window.sessionManager?.safeStorageRemove?.('kimibuilt_reasoning_effort');
         }
         this.updateReasoningUI();
+        this.playMenuCue('menu-select');
         window.dispatchEvent(new CustomEvent('reasoningChanged', {
             detail: { reasoningEffort: this.currentReasoningEffort || null }
         }));
@@ -2264,6 +2409,115 @@ class UIHelpers {
 
     toggleRemoteBuildAutonomy() {
         this.setRemoteBuildAutonomyApproved(!this.isRemoteBuildAutonomyApproved());
+        this.playMenuCue('menu-select');
+    }
+
+    isSoundCuesEnabled() {
+        return this.soundManager?.isEnabled?.() === true;
+    }
+
+    isMenuSoundsEnabled() {
+        return this.soundManager?.isMenuEnabled?.() === true;
+    }
+
+    updateSoundCuesUI() {
+        const button = document.getElementById('sound-cues-btn');
+        const label = document.getElementById('sound-cues-label');
+        const enabled = this.isSoundCuesEnabled();
+
+        if (!button) {
+            return;
+        }
+
+        button.classList.toggle('is-active', enabled);
+        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        button.title = enabled
+            ? 'Robot sound cues: On'
+            : 'Robot sound cues: Off';
+        if (label) {
+            label.textContent = enabled
+                ? 'Cute robot cues: On'
+                : 'Cute robot cues: Off';
+        }
+    }
+
+    updateMenuSoundsUI() {
+        const button = document.getElementById('menu-sounds-btn');
+        const label = document.getElementById('menu-sounds-label');
+        const enabled = this.isMenuSoundsEnabled();
+
+        if (!button) {
+            return;
+        }
+
+        button.classList.toggle('is-active', enabled);
+        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        button.title = enabled
+            ? 'Menu motion sounds: On'
+            : 'Menu motion sounds: Off';
+        if (label) {
+            label.textContent = enabled
+                ? 'Menu sounds: On'
+                : 'Menu sounds: Off';
+        }
+    }
+
+    setSoundCuesEnabled(value) {
+        this.soundManager?.setEnabled?.(value === true);
+        this.updateSoundCuesUI();
+    }
+
+    setMenuSoundsEnabled(value) {
+        if (value === true && !this.isSoundCuesEnabled()) {
+            this.soundManager?.setEnabled?.(true);
+            this.updateSoundCuesUI();
+        }
+        this.soundManager?.setMenuEnabled?.(value === true);
+        this.updateMenuSoundsUI();
+    }
+
+    toggleSoundCues() {
+        const nextValue = !this.isSoundCuesEnabled();
+        this.setSoundCuesEnabled(nextValue);
+        this.showToast(
+            nextValue ? 'Robot sound cues enabled' : 'Robot sound cues disabled',
+            'success',
+            'Sound cues',
+        );
+
+        if (nextValue) {
+            this.previewSoundCue('response');
+        }
+    }
+
+    toggleMenuSounds() {
+        const nextValue = !this.isMenuSoundsEnabled();
+        this.setMenuSoundsEnabled(nextValue);
+        this.showToast(
+            nextValue ? 'Menu sounds enabled' : 'Menu sounds disabled',
+            'success',
+            'Menu sounds',
+        );
+
+        if (nextValue) {
+            this.previewSoundCue('menu-open');
+        }
+    }
+
+    previewSoundCue(kind = 'response') {
+        this.soundManager?.play?.(kind, { preview: true });
+    }
+
+    playAgentCue(kind = 'response') {
+        this.soundManager?.play?.(kind);
+    }
+
+    playMenuCue(kind = 'menu-select') {
+        this.soundManager?.play?.(kind);
+    }
+
+    playAcknowledgementCue() {
+        this.soundManager?.play?.('ack');
     }
 
     getCurrentModel() {
@@ -2866,6 +3120,7 @@ class UIHelpers {
         const currentTheme = document.documentElement.getAttribute('data-theme');
         const newTheme = currentTheme === 'light' ? 'dark' : 'light';
         this.setTheme(newTheme);
+        this.playMenuCue('menu-select');
     }
 
     // ============================================
@@ -2924,18 +3179,19 @@ class UIHelpers {
             return;
         }
 
-        this.closeModelSelector();
+        this.closeModelSelector({ silent: true });
         this.closeSidebar();
-        this.closeMobileActionSheet();
+        this.closeMobileActionSheet({ silent: true });
 
         this.searchLastFocusedElement = document.activeElement;
         searchBar.classList.remove('hidden');
         searchBar.setAttribute('aria-hidden', 'false');
+        this.playMenuCue('menu-open');
         this.trapFocus(searchPanel || searchBar);
         searchInput.focus();
     }
 
-    closeSearch() {
+    closeSearch(options = {}) {
         const searchBar = document.getElementById('search-bar');
         const searchInput = document.getElementById('search-input');
         if (!searchBar || !searchInput) {
@@ -2948,6 +3204,10 @@ class UIHelpers {
         this.clearSearchHighlights();
         this.searchResults = [];
         this.currentSearchIndex = -1;
+
+        if (options?.silent !== true) {
+            this.playMenuCue('menu-close');
+        }
 
         if (this.searchLastFocusedElement && typeof this.searchLastFocusedElement.focus === 'function') {
             this.searchLastFocusedElement.focus();
@@ -3091,6 +3351,7 @@ class UIHelpers {
         input.value = '';
         input.focus();
         this.renderCommandResults('');
+        this.playMenuCue('menu-open');
         
         // Save last focused element
         this.lastFocusedElement = document.activeElement;
@@ -3099,10 +3360,14 @@ class UIHelpers {
         this.trapFocus(palette);
     }
 
-    closeCommandPalette() {
+    closeCommandPalette(options = {}) {
         const palette = document.getElementById('command-palette');
         palette.classList.add('hidden');
         palette.setAttribute('aria-hidden', 'true');
+
+        if (options?.silent !== true) {
+            this.playMenuCue('menu-close');
+        }
         
         // Return focus to trigger button
         if (this.lastFocusedElement) {
@@ -3341,7 +3606,8 @@ class UIHelpers {
     }
 
     executeCommand(action) {
-        this.closeCommandPalette();
+        this.closeCommandPalette({ silent: true });
+        this.playMenuCue('menu-select');
         
         // Handle set-model action
         if (action.startsWith('set-model:')) {
@@ -3978,8 +4244,8 @@ class UIHelpers {
         }
 
         this.closeSidebar();
-        this.closeSearch();
-        this.closeModelSelector();
+        this.closeSearch({ silent: true });
+        this.closeModelSelector({ silent: true });
         this.updateMobileActionSheetUI();
 
         this.lastFocusedElement = document.activeElement;
@@ -3987,10 +4253,11 @@ class UIHelpers {
         menu.setAttribute('aria-hidden', 'false');
         document.body.classList.add('mobile-chat-menu-open');
         trigger?.setAttribute('aria-expanded', 'true');
+        this.playMenuCue('menu-open');
         this.trapFocus(sheet);
     }
 
-    closeMobileActionSheet() {
+    closeMobileActionSheet(options = {}) {
         const menu = document.getElementById('mobile-chat-menu');
         const trigger = document.getElementById('mobile-chat-menu-btn');
         if (!menu) {
@@ -4001,6 +4268,10 @@ class UIHelpers {
         menu.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('mobile-chat-menu-open');
         trigger?.setAttribute('aria-expanded', 'false');
+
+        if (options?.silent !== true) {
+            this.playMenuCue('menu-close');
+        }
 
         if (this.lastFocusedElement && typeof this.lastFocusedElement.focus === 'function') {
             this.lastFocusedElement.focus();
@@ -4042,7 +4313,7 @@ class UIHelpers {
     }
 
     handleMobileActionSheetAction(action = '') {
-        this.closeMobileActionSheet();
+        this.closeMobileActionSheet({ silent: true });
 
         switch (action) {
             case 'search':
@@ -4064,9 +4335,11 @@ class UIHelpers {
                 this.toggleTheme();
                 break;
             case 'layout':
+                this.playMenuCue('menu-select');
                 this.toggleMinimalistMode();
                 break;
             case 'clear':
+                this.playMenuCue('menu-select');
                 window.chatApp?.clearCurrentSession();
                 break;
             default:
@@ -4144,6 +4417,26 @@ class UIHelpers {
                 this.toggleRemoteBuildAutonomy();
             });
         }
+
+        const soundCuesBtn = document.getElementById('sound-cues-btn');
+        if (soundCuesBtn) {
+            soundCuesBtn.addEventListener('click', () => {
+                this.toggleSoundCues();
+            });
+        }
+
+        const menuSoundsBtn = document.getElementById('menu-sounds-btn');
+        if (menuSoundsBtn) {
+            menuSoundsBtn.addEventListener('click', () => {
+                this.toggleMenuSounds();
+            });
+        }
+
+        document.querySelectorAll('[data-sound-preview]').forEach((button) => {
+            button.addEventListener('click', () => {
+                this.previewSoundCue(button.dataset.soundPreview || 'response');
+            });
+        });
 
         const minimalistButtons = [
             document.getElementById('minimalist-toggle-btn'),

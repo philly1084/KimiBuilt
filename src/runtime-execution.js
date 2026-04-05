@@ -3,6 +3,7 @@ const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
 const { getSessionControlState } = require('./runtime-control-state');
 const { config } = require('./config');
+const { resolveSessionScope } = require('./session-scope');
 
 const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const DEFAULT_EXECUTION_PROFILE = 'default';
@@ -223,6 +224,28 @@ async function executeConversationRuntime(app, params = {}) {
         model: params?.toolContext?.model || params.model || null,
         documentService: params?.toolContext?.documentService || app?.locals?.documentService || null,
     };
+    const clientSurface = String(
+        params.clientSurface
+        || effectiveToolContext.clientSurface
+        || params.metadata?.clientSurface
+        || params.metadata?.client_surface
+        || '',
+    ).trim();
+    const memoryScope = resolveSessionScope({
+        mode: params.taskType || '',
+        taskType: params.taskType || '',
+        clientSurface,
+        memoryScope: params.memoryScope
+            || params.metadata?.memoryScope
+            || params.metadata?.memory_scope
+            || '',
+        metadata: params.metadata,
+    }, params.session || null);
+    const scopedToolContext = {
+        ...effectiveToolContext,
+        ...(clientSurface ? { clientSurface } : {}),
+        ...(memoryScope ? { memoryScope } : {}),
+    };
     const orchestrator = app?.locals?.conversationOrchestrator
         || app?.locals?.agentOrchestrator
         || null;
@@ -231,7 +254,9 @@ async function executeConversationRuntime(app, params = {}) {
         return {
             ...(await orchestrator.executeConversation({
                 ...params,
-                toolContext: effectiveToolContext,
+                clientSurface,
+                memoryScope,
+                toolContext: scopedToolContext,
                 executionProfile,
             })),
             handledPersistence: true,
@@ -246,6 +271,7 @@ async function executeConversationRuntime(app, params = {}) {
             : await memoryService.process(params.sessionId, recallInput, {
                 profile: inferRecallProfile(recallInput),
                 ownerId: params.ownerId || null,
+                memoryScope,
             })
     );
     const recentMessages = params.recentMessages || (
@@ -257,7 +283,9 @@ async function executeConversationRuntime(app, params = {}) {
     return {
         response: await createResponse({
             ...params,
-            toolContext: effectiveToolContext,
+            clientSurface,
+            memoryScope,
+            toolContext: scopedToolContext,
             executionProfile,
             contextMessages,
             recentMessages,

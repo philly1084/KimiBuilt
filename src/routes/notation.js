@@ -6,6 +6,11 @@ const { executeConversationRuntime, resolveConversationExecutorFlag } = require(
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReasoningEffort } = require('../ai-route-utils');
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const {
+    buildScopedSessionMetadata,
+    resolveClientSurface,
+    resolveSessionScope,
+} = require('../session-scope');
 
 const router = Router();
 
@@ -21,6 +26,13 @@ function normalizeClientNow(value = '') {
 
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
+}
+
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+    return {
+        ...(ownerId ? { ownerId } : {}),
+        ...(memoryScope ? { memoryScope } : {}),
+    };
 }
 
 const notationSchema = {
@@ -74,10 +86,18 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
         };
+        const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'notation');
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            ...effectiveRequestMetadata,
+            mode: 'notation',
+            taskType: 'notation',
+            helperMode,
+            clientSurface: requestedClientSurface,
+        });
 
         const session = await sessionStore.resolveOwnedSession(
             sessionId,
-            { mode: 'notation', helperMode, ownerId },
+            requestedSessionMetadata,
             ownerId,
         );
         if (session) {
@@ -86,6 +106,11 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
+        const clientSurface = resolveClientSurface(req.body || {}, session, 'notation');
+        const memoryScope = resolveSessionScope({
+            ...requestedSessionMetadata,
+            clientSurface,
+        }, session);
 
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -116,6 +141,8 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
                 transport: 'http',
                 memoryService,
                 ownerId,
+                clientSurface,
+                memoryScope,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -123,7 +150,12 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             executionProfile,
             enableConversationExecutor,
             taskType: 'notation',
-            metadata: effectiveRequestMetadata,
+            clientSurface,
+            memoryScope,
+            metadata: {
+                ...effectiveRequestMetadata,
+                clientSurface,
+            },
             ownerId,
         });
         const response = execution.response;
@@ -133,7 +165,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
 
         const outputText = extractResponseText(response);
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
             await sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: notation },
                 { role: 'assistant', content: outputText },

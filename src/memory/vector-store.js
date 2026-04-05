@@ -9,7 +9,12 @@ const { v4: uuidv4 } = require('uuid');
  */
 class VectorStore {
     constructor() {
-        this.client = new QdrantClient({ url: config.qdrant.url });
+        // The explicit compatibility probe runs out-of-band and leaves noisy
+        // post-test logs; normal collection/search operations still fail fast.
+        this.client = new QdrantClient({
+            url: config.qdrant.url,
+            checkCompatibility: false,
+        });
         this.collection = config.qdrant.collection;
         this.vectorSize = config.qdrant.vectorSize;
         this.initialized = false;
@@ -88,6 +93,7 @@ class VectorStore {
         const {
             sessionId = null,
             ownerId = null,
+            memoryScope = null,
             topK = config.memory.recallTopK,
             scoreThreshold = config.memory.recallScoreThreshold,
         } = options;
@@ -99,6 +105,9 @@ class VectorStore {
             must.push({ key: 'sessionId', match: { value: sessionId } });
         } else if (ownerId) {
             must.push({ key: 'ownerId', match: { value: ownerId } });
+        }
+        if (memoryScope) {
+            must.push({ key: 'memoryScope', match: { value: memoryScope } });
         }
 
         const filter = must.length > 0 ? { must } : undefined;

@@ -55,36 +55,16 @@ function buildSurveyDisplayContentFromToolEvents(toolEvents = []) {
     }
 
     const data = checkpointEvent?.result?.data || {};
-    const message = String(data.message || '').trim();
-    if (/```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(message)) {
-        return message;
-    }
-
     const checkpoint = data.checkpoint && typeof data.checkpoint === 'object'
         ? data.checkpoint
         : (data && typeof data === 'object' ? data : null);
     const surveyFence = buildSurveyFenceContent(checkpoint);
     if (!surveyFence) {
-        return '';
+        const message = String(data.message || '').trim();
+        return /```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(message) ? message : '';
     }
 
-    const preamble = String(
-        checkpoint?.preamble
-        || 'I need one decision before I continue with the main work.',
-    ).trim();
-    const whyThisMatters = String(
-        checkpoint?.whyThisMatters
-        || checkpoint?.context
-        || checkpoint?.rationale
-        || '',
-    ).trim();
-
-    return [
-        preamble,
-        whyThisMatters,
-        surveyFence,
-        'Choose an option below and I will continue from there.',
-    ].filter(Boolean).join('\n\n');
+    return surveyFence;
 }
 
 function shouldCollapseArtifactTranscript(artifact) {

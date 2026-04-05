@@ -873,7 +873,11 @@ class NotesAPIClient {
     }
 
     async getSessionState() {
-        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions`, {
+        const params = new URLSearchParams({
+            taskType: NOTES_TASK_TYPE,
+            clientSurface: NOTES_CLIENT_SURFACE,
+        });
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/sessions?${params.toString()}`, {
             method: 'GET',
             headers: { 'Accept': 'application/json' },
         });
@@ -891,6 +895,8 @@ class NotesAPIClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 activeSessionId: sessionId || null,
+                taskType: NOTES_TASK_TYPE,
+                clientSurface: NOTES_CLIENT_SURFACE,
             }),
         });
 

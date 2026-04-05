@@ -3,6 +3,9 @@
  * Updated: Uses OpenAI SDK to connect to LillyBuilt backend at /v1
  */
 
+const CANVAS_EXCALIDRAW_TASK_TYPE = 'canvas';
+const CANVAS_EXCALIDRAW_CLIENT_SURFACE = 'canvas-excalidraw';
+
 class OpenAICanvasAPI {
     constructor(baseUrl = 'http://localhost:3000/v1') {
         this.baseURL = baseUrl;
@@ -57,6 +60,12 @@ class OpenAICanvasAPI {
             model: this.selectedModel,
             messages,
             stream: false,
+            taskType: CANVAS_EXCALIDRAW_TASK_TYPE,
+            clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
+            metadata: {
+                taskType: CANVAS_EXCALIDRAW_TASK_TYPE,
+                clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
+            },
         };
 
         if (this.sessionId) {
@@ -117,6 +126,12 @@ class OpenAICanvasAPI {
             model: this.selectedModel,
             messages,
             stream: false,
+            taskType: CANVAS_EXCALIDRAW_TASK_TYPE,
+            clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
+            metadata: {
+                taskType: CANVAS_EXCALIDRAW_TASK_TYPE,
+                clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
+            },
         };
 
         if (this.sessionId) {
@@ -263,7 +278,11 @@ class OpenAICanvasAPI {
 
     async getSessionState() {
         const baseUrl = this.baseURL.replace(/\/v1$/, '');
-        const response = await fetch(`${baseUrl}/api/sessions`);
+        const params = new URLSearchParams({
+            taskType: CANVAS_EXCALIDRAW_TASK_TYPE,
+            clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
+        });
+        const response = await fetch(`${baseUrl}/api/sessions?${params.toString()}`);
         if (!response.ok) {
             throw await this.buildRequestError(response);
         }
@@ -277,6 +296,8 @@ class OpenAICanvasAPI {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 activeSessionId: sessionId || null,
+                taskType: CANVAS_EXCALIDRAW_TASK_TYPE,
+                clientSurface: CANVAS_EXCALIDRAW_CLIENT_SURFACE,
             }),
         });
 

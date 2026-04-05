@@ -256,7 +256,18 @@ class OpenAIClient {
   async createSession(metadata = {}) {
     // Sessions are managed via custom LillyBuilt endpoints
     // Fall back to HTTP request for session management
-    return this._legacyRequest('/api/sessions', { method: 'POST', body: { metadata } });
+    return this._legacyRequest('/api/sessions', {
+      method: 'POST',
+      body: {
+        taskType: CLI_TASK_TYPE,
+        clientSurface: CLI_CLIENT_SURFACE,
+        metadata: {
+          ...metadata,
+          taskType: CLI_TASK_TYPE,
+          clientSurface: CLI_CLIENT_SURFACE,
+        },
+      },
+    });
   }
 
   /**
@@ -264,7 +275,11 @@ class OpenAIClient {
    * @returns {Promise<Object>} Sessions list
    */
   async listSessions() {
-    return this._legacyRequest('/api/sessions', { method: 'GET' });
+    const params = new URLSearchParams({
+      taskType: CLI_TASK_TYPE,
+      clientSurface: CLI_CLIENT_SURFACE,
+    });
+    return this._legacyRequest(`/api/sessions?${params.toString()}`, { method: 'GET' });
   }
 
   /**

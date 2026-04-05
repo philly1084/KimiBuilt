@@ -1194,6 +1194,49 @@ body.mobile-chat-menu-open {
     color: var(--text-secondary);
 }
 
+.model-selector-setting__hint {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--text-tertiary);
+}
+
+.assistant-sound-stack {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.assistant-sound-preview-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.assistant-preview-btn {
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 0.42rem 0.72rem;
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.assistant-preview-btn:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.assistant-preview-btn:focus-visible {
+    outline: 2px solid rgba(96, 165, 250, 0.55);
+    outline-offset: 2px;
+}
+
 #remote-autonomy-label {
     min-width: 0;
     overflow: hidden;

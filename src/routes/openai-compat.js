@@ -35,6 +35,10 @@ const { buildContinuityInstructions: buildBaseContinuityInstructions } = require
 const { getSessionControlState } = require('../runtime-control-state');
 const { buildWebChatSessionMessages } = require('../web-chat-message-state');
 const {
+    buildScopedSessionMetadata,
+    resolveSessionScope,
+} = require('../session-scope');
+const {
     buildUserCheckpointAnsweredPatch,
     buildUserCheckpointAskedPatch,
     buildUserCheckpointInstructions,
@@ -47,6 +51,13 @@ const {
 const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
+
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+    return {
+        ...(ownerId ? { ownerId } : {}),
+        ...(memoryScope ? { memoryScope } : {}),
+    };
+}
 
 function normalizeClientNow(value = '') {
     const normalized = String(value || '').trim();
@@ -553,9 +564,16 @@ router.post('/chat/completions', async (req, res, next) => {
         let sessionId = resolveSessionId(req);
         let session;
         const requestedTaskType = resolveConversationTaskType(req.body);
+        const requestedClientSurface = resolveClientSurface(req.body, null);
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            ...effectiveRequestMetadata,
+            mode: requestedTaskType,
+            taskType: requestedTaskType,
+            clientSurface: requestedClientSurface,
+        });
         session = await sessionStore.resolveOwnedSession(
             sessionId,
-            { mode: requestedTaskType, ownerId },
+            requestedSessionMetadata,
             ownerId,
         );
         if (session) {
@@ -571,6 +589,16 @@ router.post('/chat/completions', async (req, res, next) => {
         }
 
         const clientSurface = resolveClientSurface(req.body, session);
+        const memoryScope = resolveSessionScope({
+            ...requestedSessionMetadata,
+            taskType: requestedTaskType,
+            clientSurface,
+        }, session);
+        effectiveRequestMetadata = {
+            ...effectiveRequestMetadata,
+            clientSurface,
+            memoryScope,
+        };
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
         const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
         const answeredCheckpointResult = await applyAnsweredUserCheckpointState(sessionId, session, lastUserText);
@@ -711,9 +739,14 @@ router.post('/chat/completions', async (req, res, next) => {
                     lastGeneratedArtifactId: generation.artifact.id,
                     taskType,
                     clientSurface: clientSurface || taskType,
+                    memoryScope,
                 },
             });
-            memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(
+                sessionId,
+                generation.assistantMessage,
+                buildOwnerMemoryMetadata(ownerId, memoryScope),
+            );
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
                 userText: lastUserText,
                 assistantText: generation.assistantMessage,
@@ -835,6 +868,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     clientSurface,
                     memoryService,
                     ownerId,
+                    memoryScope,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -844,6 +878,8 @@ router.post('/chat/completions', async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
+                clientSurface,
+                memoryScope,
                 metadata: effectiveRequestMetadata,
                 ownerId,
             });
@@ -890,7 +926,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const toolEvents = resolvedCompletion.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
-                        memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
+                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -971,6 +1007,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 clientSurface,
                 memoryService,
                 ownerId,
+                memoryScope,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -980,6 +1017,8 @@ router.post('/chat/completions', async (req, res, next) => {
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            clientSurface,
+            memoryScope,
             metadata: effectiveRequestMetadata,
             ownerId,
         });
@@ -1022,6 +1061,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     clientSurface,
                     memoryService,
                     ownerId,
+                    memoryScope,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1031,6 +1071,8 @@ router.post('/chat/completions', async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
+                clientSurface,
+                memoryScope,
                 metadata: {
                     ...effectiveRequestMetadata,
                     remoteBuildAutonomyApproved: true,
@@ -1041,7 +1083,7 @@ router.post('/chat/completions', async (req, res, next) => {
             outputText = extractResponseText(response);
         }
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -1157,9 +1199,16 @@ router.post('/responses', async (req, res, next) => {
         let sessionId = resolveSessionId(req);
         let session;
         const requestedTaskType = resolveConversationTaskType(req.body);
+        const requestedClientSurface = resolveClientSurface(req.body, null);
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            ...effectiveRequestMetadata,
+            mode: requestedTaskType,
+            taskType: requestedTaskType,
+            clientSurface: requestedClientSurface,
+        });
         session = await sessionStore.resolveOwnedSession(
             sessionId,
-            { mode: requestedTaskType, ownerId },
+            requestedSessionMetadata,
             ownerId,
         );
         if (session) {
@@ -1185,6 +1234,17 @@ router.post('/responses', async (req, res, next) => {
         const sshContext = resolveSshRequestContext(userInput, session);
         const effectiveUserInput = sshContext.effectivePrompt || userInput;
         const taskType = resolveConversationTaskType(req.body, session);
+        const clientSurface = resolveClientSurface(req.body, session);
+        const memoryScope = resolveSessionScope({
+            ...requestedSessionMetadata,
+            taskType,
+            clientSurface,
+        }, session);
+        effectiveRequestMetadata = {
+            ...effectiveRequestMetadata,
+            clientSurface,
+            memoryScope,
+        };
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(userInput)
             || inferOutputFormatFromTranscript(normalizedInputMessages, session);
@@ -1287,9 +1347,14 @@ router.post('/responses', async (req, res, next) => {
                     lastGeneratedArtifactId: generation.artifact.id,
                     taskType,
                     clientSurface: clientSurface || taskType,
+                    memoryScope,
                 },
             });
-            memoryService.rememberResponse(sessionId, generation.assistantMessage, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(
+                sessionId,
+                generation.assistantMessage,
+                buildOwnerMemoryMetadata(ownerId, memoryScope),
+            );
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
                 userText: userInput,
                 assistantText: generation.assistantMessage,
@@ -1401,8 +1466,10 @@ router.post('/responses', async (req, res, next) => {
                     sessionId,
                     route: '/v1/responses',
                     transport: 'http',
+                    clientSurface,
                     memoryService,
                     ownerId,
+                    memoryScope,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1411,6 +1478,8 @@ router.post('/responses', async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
+                clientSurface,
+                memoryScope,
                 metadata: effectiveRequestMetadata,
                 ownerId,
             });
@@ -1440,7 +1509,7 @@ router.post('/responses', async (req, res, next) => {
 
                     if (!execution.handledPersistence) {
                         await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
-                        memoryService.rememberResponse(sessionId, fullText, ownerId ? { ownerId } : {});
+                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -1506,8 +1575,10 @@ router.post('/responses', async (req, res, next) => {
                 sessionId,
                 route: '/v1/responses',
                 transport: 'http',
+                clientSurface,
                 memoryService,
                 ownerId,
+                memoryScope,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -1516,6 +1587,8 @@ router.post('/responses', async (req, res, next) => {
             enableAutomaticToolCalls: true,
             enableConversationExecutor,
             taskType,
+            clientSurface,
+            memoryScope,
             metadata: effectiveRequestMetadata,
             ownerId,
         });
@@ -1555,8 +1628,10 @@ router.post('/responses', async (req, res, next) => {
                     sessionId,
                     route: '/v1/responses',
                     transport: 'http',
+                    clientSurface,
                     memoryService,
                     ownerId,
+                    memoryScope,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1565,6 +1640,8 @@ router.post('/responses', async (req, res, next) => {
                 enableAutomaticToolCalls: true,
                 enableConversationExecutor,
                 taskType,
+                clientSurface,
+                memoryScope,
                 metadata: {
                     ...effectiveRequestMetadata,
                     remoteBuildAutonomyApproved: true,
@@ -1575,7 +1652,7 @@ router.post('/responses', async (req, res, next) => {
             outputText = extractResponseText(response);
         }
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -1645,9 +1722,14 @@ router.post('/images/generations', async (req, res, next) => {
 
         let sessionId = resolveSessionId(req);
         const ownerId = getRequestOwnerId(req);
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            mode: 'image',
+            taskType: 'image',
+            clientSurface: resolveClientSurface(req.body, null) || 'image',
+        });
         const session = await sessionStore.resolveOwnedSession(
             sessionId,
-            { mode: 'image', ownerId },
+            requestedSessionMetadata,
             ownerId,
         );
         if (session) {

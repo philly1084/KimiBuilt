@@ -3,6 +3,10 @@ const { sessionStore } = require('../session-store');
 const { artifactService } = require('../artifacts/artifact-service');
 const { parseMultipartRequest } = require('../utils/multipart');
 const { validate } = require('../middleware/validate');
+const {
+    buildScopedSessionMetadata,
+    resolveClientSurface,
+} = require('../session-scope');
 
 const router = Router();
 
@@ -44,11 +48,16 @@ router.post('/upload', async (req, res, next) => {
         const label = fields.label || '';
         const tags = fields.tags || [];
         const ownerId = getRequestOwnerId(req);
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            mode,
+            taskType: fields.taskType || mode,
+            clientSurface: resolveClientSurface(fields, null, mode),
+        });
         const session = ownerId
-            ? await sessionStore.resolveOwnedSession(sessionId, { mode }, ownerId)
+            ? await sessionStore.resolveOwnedSession(sessionId, requestedSessionMetadata, ownerId)
             : sessionId
-                ? await sessionStore.getOrCreate(sessionId, { mode })
-                : await sessionStore.create({ mode });
+                ? await sessionStore.getOrCreate(sessionId, requestedSessionMetadata)
+                : await sessionStore.create(requestedSessionMetadata);
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -82,11 +91,16 @@ router.post('/generate', validate(generationSchema), async (req, res, next) => {
         } = req.body;
 
         const ownerId = getRequestOwnerId(req);
+        const requestedSessionMetadata = buildScopedSessionMetadata({
+            mode,
+            taskType: req.body?.taskType || mode,
+            clientSurface: resolveClientSurface(req.body || {}, null, mode),
+        });
         const session = ownerId
-            ? await sessionStore.resolveOwnedSession(requestedSessionId, { mode }, ownerId)
+            ? await sessionStore.resolveOwnedSession(requestedSessionId, requestedSessionMetadata, ownerId)
             : requestedSessionId
-                ? await sessionStore.getOrCreate(requestedSessionId, { mode })
-                : await sessionStore.create({ mode });
+                ? await sessionStore.getOrCreate(requestedSessionId, requestedSessionMetadata)
+                : await sessionStore.create(requestedSessionMetadata);
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }

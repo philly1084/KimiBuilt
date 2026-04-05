@@ -4,6 +4,9 @@
  */
 
 const API = (function() {
+    const NOTES_TASK_TYPE = 'notes';
+    const NOTES_CLIENT_SURFACE = 'notes';
+
     // Auto-detect backend URL
     const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]']);
     const currentHost = window.location.hostname;
@@ -257,6 +260,12 @@ const API = (function() {
             model: model || 'gpt-4o',
             messages: buildMessages(message, context),
             stream: true,
+            taskType: NOTES_TASK_TYPE,
+            clientSurface: NOTES_CLIENT_SURFACE,
+            metadata: {
+                taskType: NOTES_TASK_TYPE,
+                clientSurface: NOTES_CLIENT_SURFACE,
+            },
         };
 
         if (sessionId || currentSessionId) {
@@ -328,6 +337,12 @@ const API = (function() {
             model: model || 'gpt-4o',
             messages: buildMessages(message, context),
             stream: false,
+            taskType: NOTES_TASK_TYPE,
+            clientSurface: NOTES_CLIENT_SURFACE,
+            metadata: {
+                taskType: NOTES_TASK_TYPE,
+                clientSurface: NOTES_CLIENT_SURFACE,
+            },
         };
 
         if (sessionId || currentSessionId) {

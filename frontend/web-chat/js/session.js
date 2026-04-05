@@ -4,6 +4,9 @@
  * Now works client-side only with OpenAI SDK backend
  */
 
+const WEB_CHAT_TASK_TYPE = 'chat';
+const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
+
 class SessionManager extends EventTarget {
     constructor() {
         super();
@@ -13,9 +16,9 @@ class SessionManager extends EventTarget {
         this.apiBaseUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3000/api'
             : `${window.location.protocol}//${window.location.host}/api`;
-        this.storageKey = 'kimibuilt_sessions_v3';
-        this.currentSessionKey = 'kimibuilt_current_session';
-        this.version = '3.0';
+        this.storageKey = 'kimibuilt_web_chat_sessions_v4';
+        this.currentSessionKey = 'kimibuilt_web_chat_current_session';
+        this.version = '4.0';
         this.storageAvailable = this.checkStorageAvailability();
         
         this.loadFromStorage();
@@ -94,7 +97,11 @@ class SessionManager extends EventTarget {
 
     async loadSessions() {
         try {
-            const response = await fetch(`${this.apiBaseUrl}/sessions`);
+            const params = new URLSearchParams({
+                taskType: WEB_CHAT_TASK_TYPE,
+                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            });
+            const response = await fetch(`${this.apiBaseUrl}/sessions?${params.toString()}`);
             if (response.ok) {
                 const data = await response.json();
                 const storedSessions = new Map(this.sessions.map((session) => [session.id, session]));
@@ -193,6 +200,8 @@ class SessionManager extends EventTarget {
                 },
                 body: JSON.stringify({
                     activeSessionId: normalizedSessionId || null,
+                    taskType: WEB_CHAT_TASK_TYPE,
+                    clientSurface: WEB_CHAT_CLIENT_SURFACE,
                 }),
             });
         } catch (error) {
@@ -376,8 +385,12 @@ class SessionManager extends EventTarget {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
+                    taskType: WEB_CHAT_TASK_TYPE,
+                    clientSurface: WEB_CHAT_CLIENT_SURFACE,
                     metadata: {
                         mode,
+                        taskType: WEB_CHAT_TASK_TYPE,
+                        clientSurface: WEB_CHAT_CLIENT_SURFACE,
                     },
                 }),
             });

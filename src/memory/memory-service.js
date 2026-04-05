@@ -60,7 +60,14 @@ class MemoryService {
         };
     }
 
-    async recall(query, { sessionId = null, ownerId = null, topK, scoreThreshold, profile = DEFAULT_RECALL_PROFILE } = {}) {
+    async recall(query, {
+        sessionId = null,
+        ownerId = null,
+        memoryScope = null,
+        topK,
+        scoreThreshold,
+        profile = DEFAULT_RECALL_PROFILE,
+    } = {}) {
         const recallOptions = this.getRecallOptions({
             profile,
             topK,
@@ -69,6 +76,7 @@ class MemoryService {
         const results = await this.store.search(query, {
             sessionId,
             ownerId,
+            memoryScope: String(memoryScope || '').trim() || null,
             topK: recallOptions.topK,
             scoreThreshold: recallOptions.scoreThreshold,
         });
@@ -100,8 +108,12 @@ class MemoryService {
      */
     async process(sessionId, message, options = {}) {
         const ownerId = String(options?.ownerId || '').trim() || null;
+        const memoryScope = String(options?.memoryScope || '').trim() || null;
         // Store the user message (fire and forget — don't block on it)
-        this.remember(sessionId, message, 'user', ownerId ? { ownerId } : {}).catch((err) => {
+        this.remember(sessionId, message, 'user', {
+            ...(ownerId ? { ownerId } : {}),
+            ...(memoryScope ? { memoryScope } : {}),
+        }).catch((err) => {
             console.error('[Memory] Failed to store message:', err.message);
         });
 
@@ -110,6 +122,7 @@ class MemoryService {
             const context = await this.recall(message, {
                 sessionId: ownerId ? null : sessionId,
                 ownerId,
+                memoryScope,
                 ...options,
             });
             return context;

@@ -5,6 +5,12 @@ const { postgres } = require('./postgres');
 const { config } = require('./config');
 const { stripNullCharacters } = require('./utils/text');
 const {
+    buildScopedSessionMetadata,
+    normalizeSessionScopeKey,
+    resolveSessionScope,
+    sessionMatchesScope,
+} = require('./session-scope');
+const {
     buildLegacyControlMetadata,
     getSessionControlState,
     mergeControlState,
@@ -206,6 +212,21 @@ class SessionStore {
         return normalized || null;
     }
 
+    normalizeScopedActiveSessionIds(scopedActiveSessionIds = {}) {
+        if (!scopedActiveSessionIds || typeof scopedActiveSessionIds !== 'object' || Array.isArray(scopedActiveSessionIds)) {
+            return {};
+        }
+
+        return Object.fromEntries(
+            Object.entries(scopedActiveSessionIds)
+                .map(([scopeKey, sessionId]) => [
+                    normalizeSessionScopeKey(scopeKey),
+                    this.normalizeSessionId(sessionId),
+                ])
+                .filter(([, sessionId]) => Boolean(sessionId)),
+        );
+    }
+
     getSessionOwnerId(sessionOrMetadata = null) {
         const metadata = sessionOrMetadata?.metadata || sessionOrMetadata || {};
         const ownerId = this.normalizeOwnerId(
@@ -221,6 +242,9 @@ class SessionStore {
         return {
             ownerId: this.normalizeOwnerId(state?.ownerId || state?.owner_id),
             activeSessionId: this.normalizeSessionId(state?.activeSessionId || state?.active_session_id),
+            scopedActiveSessionIds: this.normalizeScopedActiveSessionIds(
+                state?.scopedActiveSessionIds || state?.scoped_active_session_ids || {},
+            ),
             updatedAt: state?.updatedAt instanceof Date
                 ? state.updatedAt.toISOString()
                 : (state?.updatedAt || state?.updated_at || new Date().toISOString()),
@@ -237,15 +261,16 @@ class SessionStore {
     }
 
     buildOwnedMetadata(metadata = {}, ownerId = null) {
+        const scopedMetadata = buildScopedSessionMetadata(metadata);
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
         if (!normalizedOwnerId) {
-            return this.normalizeMetadata(metadata);
+            return this.normalizeMetadata(scopedMetadata);
         }
 
         return this.normalizeMetadata({
-            ...metadata,
+            ...scopedMetadata,
             ownerId: normalizedOwnerId,
-            ownerType: metadata?.ownerType || 'user',
+            ownerType: metadata?.ownerType || scopedMetadata?.ownerType || 'user',
         });
     }
 
@@ -392,13 +417,14 @@ class SessionStore {
             return existing;
         }
         const now = new Date().toISOString();
+        const normalizedMetadata = this.normalizeMetadata(buildScopedSessionMetadata(metadata));
         const session = {
             id,
             previousResponseId: null,
             createdAt: now,
             updatedAt: now,
             messageCount: 0,
-            metadata: this.normalizeMetadata(metadata),
+            metadata: normalizedMetadata,
             controlState: this.normalizeControlState(metadata?.controlState || {}),
         };
 
@@ -535,7 +561,7 @@ class SessionStore {
 
         const result = await postgres.query(
             `
-                SELECT owner_id, active_session_id, updated_at
+                SELECT owner_id, active_session_id, scoped_active_session_ids, updated_at
                 FROM user_session_state
                 WHERE owner_id = $1
             `,
@@ -545,7 +571,7 @@ class SessionStore {
         return this.toUserSessionState(result.rows[0]);
     }
 
-    async setActiveSession(ownerId = null, sessionId = null) {
+    async setActiveSession(ownerId = null, sessionId = null, scopeKey = null) {
         await this.initialize();
 
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
@@ -561,9 +587,31 @@ class SessionStore {
             }
         }
 
+        const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+        const currentState = await this.getUserSessionState(normalizedOwnerId);
+        const scopedActiveSessionIds = {
+            ...(currentState?.scopedActiveSessionIds || {}),
+        };
+
+        if (normalizedSessionId) {
+            scopedActiveSessionIds[normalizedScopeKey] = normalizedSessionId;
+        } else {
+            delete scopedActiveSessionIds[normalizedScopeKey];
+        }
+
+        let nextGlobalActiveSessionId = normalizedSessionId || currentState?.activeSessionId || null;
+        const removedScopedActiveSessionId = currentState?.scopedActiveSessionIds?.[normalizedScopeKey] || null;
+        if (!normalizedSessionId
+            && currentState?.activeSessionId
+            && removedScopedActiveSessionId
+            && currentState.activeSessionId === removedScopedActiveSessionId) {
+            nextGlobalActiveSessionId = Object.values(scopedActiveSessionIds)[0] || null;
+        }
+
         const nextState = this.normalizeUserSessionState({
             ownerId: normalizedOwnerId,
-            activeSessionId: normalizedSessionId,
+            activeSessionId: nextGlobalActiveSessionId,
+            scopedActiveSessionIds,
             updatedAt: new Date().toISOString(),
         });
 
@@ -575,27 +623,36 @@ class SessionStore {
 
         const result = await postgres.query(
             `
-                INSERT INTO user_session_state (owner_id, active_session_id, updated_at)
-                VALUES ($1, $2, NOW())
+                INSERT INTO user_session_state (owner_id, active_session_id, scoped_active_session_ids, updated_at)
+                VALUES ($1, $2, $3::jsonb, NOW())
                 ON CONFLICT (owner_id) DO UPDATE
                 SET active_session_id = EXCLUDED.active_session_id,
+                    scoped_active_session_ids = EXCLUDED.scoped_active_session_ids,
                     updated_at = NOW()
-                RETURNING owner_id, active_session_id, updated_at
+                RETURNING owner_id, active_session_id, scoped_active_session_ids, updated_at
             `,
-            [normalizedOwnerId, normalizedSessionId],
+            [
+                normalizedOwnerId,
+                nextState.activeSessionId,
+                JSON.stringify(nextState.scopedActiveSessionIds || {}),
+            ],
         );
 
         return this.toUserSessionState(result.rows[0]);
     }
 
-    async getActiveOwnedSession(ownerId = null) {
+    async getActiveOwnedSession(ownerId = null, scopeKey = null) {
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
         if (!normalizedOwnerId) {
             return null;
         }
 
         const state = await this.getUserSessionState(normalizedOwnerId);
-        const activeSessionId = this.normalizeSessionId(state?.activeSessionId);
+        const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+        const activeSessionId = this.normalizeSessionId(
+            state?.scopedActiveSessionIds?.[normalizedScopeKey]
+            || (normalizedScopeKey === normalizeSessionScopeKey() ? state?.activeSessionId : null),
+        );
         if (!activeSessionId) {
             return null;
         }
@@ -605,13 +662,21 @@ class SessionStore {
             return session;
         }
 
-        await this.setActiveSession(normalizedOwnerId, null);
+        await this.setActiveSession(normalizedOwnerId, null, normalizedScopeKey);
         return null;
     }
 
-    async getLatestOwnedSession(ownerId = null) {
+    async getLatestOwnedSession(ownerId = null, options = {}) {
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
-        const sessions = await this.list(normalizedOwnerId ? { ownerId: normalizedOwnerId } : {});
+        const normalizedScopeKey = options?.scopeKey
+            ? normalizeSessionScopeKey(options.scopeKey)
+            : null;
+        const sessions = await this.list(normalizedOwnerId ? {
+            ownerId: normalizedOwnerId,
+            ...(normalizedScopeKey ? { scopeKey: normalizedScopeKey } : {}),
+        } : {
+            ...(normalizedScopeKey ? { scopeKey: normalizedScopeKey } : {}),
+        });
         const latest = sessions[0] || null;
 
         if (!latest) {
@@ -628,6 +693,7 @@ class SessionStore {
     async resolveOwnedSession(sessionId = null, metadata = {}, ownerId = null) {
         const normalizedOwnerId = this.normalizeOwnerId(ownerId);
         const normalizedSessionId = this.normalizeSessionId(sessionId);
+        const normalizedScopeKey = resolveSessionScope(metadata);
 
         if (normalizedSessionId) {
             const session = await this.getOrCreateOwned(
@@ -637,21 +703,23 @@ class SessionStore {
             );
 
             if (session && normalizedOwnerId) {
-                await this.setActiveSession(normalizedOwnerId, session.id);
+                await this.setActiveSession(normalizedOwnerId, session.id, normalizedScopeKey);
             }
 
             return session;
         }
 
         if (normalizedOwnerId) {
-            const activeSession = await this.getActiveOwnedSession(normalizedOwnerId);
+            const activeSession = await this.getActiveOwnedSession(normalizedOwnerId, normalizedScopeKey);
             if (activeSession) {
                 return activeSession;
             }
 
-            const latestSession = await this.getLatestOwnedSession(normalizedOwnerId);
+            const latestSession = await this.getLatestOwnedSession(normalizedOwnerId, {
+                scopeKey: normalizedScopeKey,
+            });
             if (latestSession) {
-                await this.setActiveSession(normalizedOwnerId, latestSession.id);
+                await this.setActiveSession(normalizedOwnerId, latestSession.id, normalizedScopeKey);
                 return latestSession;
             }
         }
@@ -661,7 +729,7 @@ class SessionStore {
         );
 
         if (session && normalizedOwnerId) {
-            await this.setActiveSession(normalizedOwnerId, session.id);
+            await this.setActiveSession(normalizedOwnerId, session.id, normalizedScopeKey);
         }
 
         return session;
@@ -1030,16 +1098,20 @@ class SessionStore {
     async list(options = {}) {
         await this.initialize();
         const ownerId = this.normalizeOwnerId(options?.ownerId);
+        const scopeKey = options?.scopeKey
+            ? normalizeSessionScopeKey(options.scopeKey)
+            : null;
 
         if (!this.usePostgres) {
             return Array.from(this.sessions.values())
                 .filter((session) => {
                     if (!ownerId) {
-                        return true;
+                        return !scopeKey || sessionMatchesScope(session, scopeKey);
                     }
 
                     const sessionOwnerId = this.getSessionOwnerId(session);
-                    return !sessionOwnerId || sessionOwnerId === ownerId;
+                    return (!sessionOwnerId || sessionOwnerId === ownerId)
+                        && (!scopeKey || sessionMatchesScope(session, scopeKey));
                 })
                 .sort((a, b) => {
                     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
@@ -1069,7 +1141,10 @@ class SessionStore {
                 `,
             );
 
-        return result.rows.map((row) => this.toSession(row));
+        const sessions = result.rows.map((row) => this.toSession(row));
+        return scopeKey
+            ? sessions.filter((session) => sessionMatchesScope(session, scopeKey))
+            : sessions;
     }
 
     async listMessages(id, limit = MAX_RECENT_MESSAGES, ownerId = null) {

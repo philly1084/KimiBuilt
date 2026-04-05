@@ -1440,6 +1440,7 @@ async function maybeStoreResearchMemoryNote({ toolContext = {}, query = '', cand
         sourceTitle: String(candidate?.title || result?.data?.title || '').trim(),
         query,
         ...(toolContext.ownerId ? { ownerId: toolContext.ownerId } : {}),
+        ...(toolContext.memoryScope ? { memoryScope: toolContext.memoryScope } : {}),
     });
 }
 

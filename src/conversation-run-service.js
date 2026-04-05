@@ -16,6 +16,7 @@ const {
 const { extractResponseText } = require('./artifacts/artifact-service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('./project-memory');
 const { buildContinuityInstructions } = require('./runtime-prompts');
+const { resolveSessionScope } = require('./session-scope');
 
 class ConversationRunService {
     constructor({
@@ -26,6 +27,21 @@ class ConversationRunService {
         this.app = app;
         this.sessionStore = sessionStore;
         this.memoryService = memoryService;
+    }
+
+    buildMemoryMetadata(ownerId = null, metadata = {}, session = null) {
+        const memoryScope = resolveSessionScope({
+            mode: metadata?.taskType || metadata?.mode || 'chat',
+            taskType: metadata?.taskType || metadata?.mode || 'chat',
+            clientSurface: metadata?.clientSurface || metadata?.client_surface || '',
+            memoryScope: metadata?.memoryScope || metadata?.memory_scope || '',
+            metadata,
+        }, session || null);
+
+        return {
+            ...(ownerId ? { ownerId } : {}),
+            ...(memoryScope ? { memoryScope } : {}),
+        };
     }
 
     async runChatTurn({
@@ -92,11 +108,12 @@ class ConversationRunService {
         const response = execution.response;
         const outputText = extractResponseText(response);
         const toolEvents = response?.metadata?.toolEvents || [];
+        const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, resolvedSession);
 
         if (!execution.handledPersistence) {
             await this.sessionStore.recordResponse(sessionId, response.id);
             if (outputText) {
-                this.memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+                this.memoryService.rememberResponse(sessionId, outputText, memoryMetadata);
             }
             await this.sessionStore.appendMessages(sessionId, [
                 { role: 'user', content: message },
@@ -257,10 +274,11 @@ class ConversationRunService {
                 port: params.port || null,
             })
             : JSON.stringify(result.data || {}, null, 2);
+        const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, resolvedSession);
 
         if (outputText) {
             if (this.memoryService?.rememberResponse) {
-                this.memoryService.rememberResponse(sessionId, outputText, ownerId ? { ownerId } : {});
+                this.memoryService.rememberResponse(sessionId, outputText, memoryMetadata);
             }
             await this.sessionStore.appendMessages(sessionId, [
                 { role: 'assistant', content: outputText },
@@ -393,7 +411,11 @@ class ConversationRunService {
         });
         await this.appendSyntheticMessage(sessionId, 'assistant', artifactMessage);
         if (artifactMessage && this.memoryService?.rememberResponse) {
-            this.memoryService.rememberResponse(sessionId, artifactMessage, ownerId ? { ownerId } : {});
+            this.memoryService.rememberResponse(
+                sessionId,
+                artifactMessage,
+                this.buildMemoryMetadata(ownerId, metadata, artifactSession),
+            );
         }
         await this.updateProjectMemory(sessionId, ownerId, {
             userText: message,

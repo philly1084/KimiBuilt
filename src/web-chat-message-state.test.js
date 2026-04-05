@@ -24,4 +24,43 @@ describe('buildWebChatSessionMessages', () => {
         expect(timestamps[0]).toBeLessThan(timestamps[1]);
         expect(timestamps[1]).toBeLessThan(timestamps[2]);
     });
+
+    test('stores checkpoint fallback display content as a bare survey fence without duplicated prose', () => {
+        const messages = buildWebChatSessionMessages({
+            userText: 'Please redesign the page.',
+            assistantText: 'I need one decision before I continue.',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'user-checkpoint',
+                        arguments: JSON.stringify({
+                            title: 'Choose a direction',
+                            question: 'What visual and functional style should the new HTML follow?',
+                        }),
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'user-checkpoint',
+                    data: {
+                        checkpoint: {
+                            id: 'checkpoint-redesign-style',
+                            title: 'Choose a direction',
+                            question: 'What visual and functional style should the new HTML follow?',
+                            preamble: 'I need one decision before I continue with the main work.',
+                            options: [
+                                { id: 'minimal-modern', label: 'Minimal Modern' },
+                                { id: 'bold-tech', label: 'Bold Tech' },
+                            ],
+                        },
+                    },
+                },
+            }],
+            timestamp: '2026-04-05T12:00:00.000Z',
+        });
+
+        expect(messages[1].metadata.displayContent.trim().startsWith('```survey')).toBe(true);
+        expect(messages[1].metadata.displayContent).toContain('"question": "What visual and functional style should the new HTML follow?"');
+        expect(messages[1].metadata.displayContent).not.toContain('Choose an option below and I will continue from there.');
+    });
 });

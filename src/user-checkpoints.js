@@ -5,6 +5,7 @@ const USER_CHECKPOINT_TOOL_ID = 'user-checkpoint';
 const USER_CHECKPOINT_SURFACE = 'web-chat';
 const USER_CHECKPOINT_FENCE_LANGUAGE = 'survey';
 const USER_CHECKPOINT_RESPONSE_PREFIX = 'Survey response';
+const DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL = 'Add your own input (optional)';
 
 function trimText(value = '') {
     return String(value || '').trim();
@@ -29,6 +30,22 @@ function clampInteger(value, minimum, maximum, fallback) {
     }
 
     return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+function resolveAllowFreeText(value = {}) {
+    if (!value || typeof value !== 'object') {
+        return true;
+    }
+
+    if (value.allowFreeText === false || value.allowText === false) {
+        return false;
+    }
+
+    if (value.allowFreeText === true || value.allowText === true) {
+        return true;
+    }
+
+    return true;
 }
 
 function isUserCheckpointSurface(clientSurface = '') {
@@ -90,9 +107,9 @@ function normalizePendingCheckpoint(value = null) {
     const title = trimText(value.title || 'Choose a direction');
     const whyThisMatters = trimText(value.whyThisMatters || value.context || value.rationale || '');
     const preamble = trimText(value.preamble || value.message || '');
-    const allowFreeText = value.allowFreeText === true || value.allowText === true;
+    const allowFreeText = resolveAllowFreeText(value);
     const freeTextLabel = allowFreeText
-        ? trimText(value.freeTextLabel || value.freeTextPrompt || 'Add context (optional)')
+        ? trimText(value.freeTextLabel || value.freeTextPrompt || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL)
         : '';
 
     return {
@@ -174,7 +191,7 @@ function normalizeCheckpointRequest(params = {}) {
     const maxSelections = allowMultiple
         ? clampInteger(params.maxSelections, 1, options.length, Math.min(2, options.length))
         : 1;
-    const allowFreeText = params.allowFreeText === true || params.allowText === true;
+    const allowFreeText = resolveAllowFreeText(params);
 
     return {
         id: trimText(params.id || `checkpoint-${Date.now().toString(36)}`),
@@ -190,7 +207,7 @@ function normalizeCheckpointRequest(params = {}) {
         maxSelections,
         allowFreeText,
         ...(allowFreeText
-            ? { freeTextLabel: trimText(params.freeTextLabel || params.freeTextPrompt || 'Add context (optional)') || 'Add context (optional)' }
+            ? { freeTextLabel: trimText(params.freeTextLabel || params.freeTextPrompt || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL) || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL }
             : {}),
         options,
     };
@@ -328,7 +345,7 @@ function buildUserCheckpointInstructions(policy = {}) {
         'On the web-chat surface, do not ask a blocking multiple-choice question as plain assistant text when `user-checkpoint` is available; use the tool so the UI can render inline options.',
         'Use a checkpoint only when the answer would materially change the plan, architecture, implementation scope, or final output.',
         'Do not use a checkpoint for small clarifications or details you can infer reasonably.',
-        'Keep the checkpoint concise: one question, 2 to 4 strong options, short descriptions, and optional note field.',
+        'Keep the checkpoint concise: one question, 2 to 4 strong options, short descriptions, and keep the free-text field available so the user can add their own input when needed.',
         'If there are no checkpoint questions remaining, proceed with the best reasonable assumption and state that assumption briefly.',
         'When the user sends a message starting with `Survey response (` treat it as the answer to the checkpoint and continue the work.',
     ];
@@ -342,6 +359,7 @@ module.exports = {
     USER_CHECKPOINT_RESPONSE_PREFIX,
     USER_CHECKPOINT_SURFACE,
     USER_CHECKPOINT_TOOL_ID,
+    DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL,
     buildUserCheckpointAnsweredPatch,
     buildUserCheckpointAskedPatch,
     buildUserCheckpointInstructions,

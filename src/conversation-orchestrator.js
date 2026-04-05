@@ -21,6 +21,11 @@ const {
     getSessionControlState,
     mergeControlState,
 } = require('./runtime-control-state');
+const {
+    buildScopedSessionMetadata,
+    resolveClientSurface,
+    resolveSessionScope,
+} = require('./session-scope');
 const { USER_CHECKPOINT_TOOL_ID } = require('./user-checkpoints');
 const { stripNullCharacters } = require('./utils/text');
 const {
@@ -2895,20 +2900,43 @@ class ConversationOrchestrator extends EventEmitter {
         const resolvedProfile = normalizeExecutionProfile(executionProfile);
         const rawObjective = extractObjective(input, memoryInput);
         const runtimeToolManager = toolManager || this.toolManager;
+        const clientSurface = resolveClientSurface({
+            taskType,
+            clientSurface: toolContext?.clientSurface || metadata?.clientSurface || metadata?.client_surface || '',
+            metadata,
+        }, null, taskType);
+        const scopedSessionMetadata = buildScopedSessionMetadata({
+            mode: taskType,
+            taskType,
+            clientSurface,
+            memoryScope: toolContext?.memoryScope || metadata?.memoryScope || metadata?.memory_scope || '',
+            transport: toolContext?.transport || metadata?.transport || '',
+            metadata,
+        });
         let executionTrace = [];
         const session = ownerId && this.sessionStore?.getOrCreateOwned
-            ? await this.sessionStore.getOrCreateOwned(sessionId, { mode: taskType }, ownerId)
+            ? await this.sessionStore.getOrCreateOwned(sessionId, scopedSessionMetadata, ownerId)
             : this.sessionStore?.getOrCreate
-                ? await this.sessionStore.getOrCreate(sessionId, { mode: taskType })
+                ? await this.sessionStore.getOrCreate(sessionId, scopedSessionMetadata)
                 : ownerId && this.sessionStore?.getOwned
                     ? await this.sessionStore.getOwned(sessionId, ownerId)
                     : (this.sessionStore?.get ? await this.sessionStore.get(sessionId) : null);
+        const memoryScope = resolveSessionScope({
+            ...scopedSessionMetadata,
+            memoryScope: toolContext?.memoryScope || metadata?.memoryScope || metadata?.memory_scope || '',
+        }, session || null);
+        toolContext = {
+            ...toolContext,
+            ...(clientSurface ? { clientSurface } : {}),
+            ...(memoryScope ? { memoryScope } : {}),
+        };
         const resolvedContextMessages = contextMessages.length > 0
             ? contextMessages
             : loadContextMessages !== false && this.memoryService?.process
                 ? await this.memoryService.process(sessionId, memoryInput || rawObjective, {
                     profile: inferRecallProfileFromText(memoryInput || rawObjective),
                     ownerId,
+                    memoryScope,
                 })
                 : [];
         const resolvedRecentMessages = recentMessages.length > 0
@@ -4385,7 +4413,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `user-checkpoint` step must include a non-empty `params.question` string and 2 to 4 concise `params.options` entries.',
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
             'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
-            'Keep `user-checkpoint` to one question with mutually exclusive, actionable options. Do not bundle multiple decisions into one checkpoint.',
+            'Keep `user-checkpoint` to one question with mutually exclusive, actionable options. Leave the free-text field enabled so the user can supply a custom answer when needed. Do not bundle multiple decisions into one checkpoint.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
@@ -4875,7 +4903,7 @@ class ConversationOrchestrator extends EventEmitter {
         if (canUseUserCheckpoint) {
             parts.push('Use `user-checkpoint` when one high-impact decision would materially change the plan before major implementation, refactoring, or other long multi-step work.');
             parts.push('On web-chat, `user-checkpoint` renders as an inline popup-style survey card with clickable choices, so prefer it over a plain-text multiple-choice question.');
-            parts.push('Keep checkpoint surveys concise: one question, 2 to 4 strong options, short descriptions, and optional free-text only when it materially helps.');
+            parts.push('Keep checkpoint surveys concise: one question, 2 to 4 strong options, short descriptions, and leave the free-text field available so the user can supply their own input when needed.');
         } else if (userCheckpointPolicy.enabled === true && userCheckpointPolicy.pending) {
             parts.push('A `user-checkpoint` is already pending for this session. Do not ask another survey question until the user answers it.');
         }
@@ -5053,6 +5081,7 @@ class ConversationOrchestrator extends EventEmitter {
     async persistConversationState({
         sessionId,
         ownerId = null,
+        memoryScope = null,
         userText,
         objective = '',
         assistantText,
@@ -5062,12 +5091,27 @@ class ConversationOrchestrator extends EventEmitter {
         autonomyApproved = false,
         controlStatePatch = {},
     }) {
+        const currentSession = ownerId && this.sessionStore?.getOwned
+            ? await this.sessionStore.getOwned(sessionId, ownerId)
+            : this.sessionStore?.get
+                ? await this.sessionStore.get(sessionId)
+                : null;
+        const resolvedMemoryScope = resolveSessionScope({
+            mode: currentSession?.metadata?.taskType || currentSession?.metadata?.mode || '',
+            taskType: currentSession?.metadata?.taskType || '',
+            clientSurface: currentSession?.metadata?.clientSurface || currentSession?.metadata?.client_surface || '',
+            memoryScope,
+        }, currentSession || null);
+
         if (this.sessionStore?.recordResponse) {
             await this.sessionStore.recordResponse(sessionId, responseId);
         }
 
         if (this.memoryService?.rememberResponse) {
-            this.memoryService.rememberResponse(sessionId, assistantText, ownerId ? { ownerId } : {});
+            this.memoryService.rememberResponse(sessionId, assistantText, {
+                ...(ownerId ? { ownerId } : {}),
+                ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
+            });
         }
 
         if (this.memoryService?.rememberResearchNote) {
@@ -5078,7 +5122,10 @@ class ConversationOrchestrator extends EventEmitter {
             await Promise.all(researchNotes.map((note) => this.memoryService.rememberResearchNote(
                 sessionId,
                 note,
-                ownerId ? { ownerId } : {},
+                {
+                    ...(ownerId ? { ownerId } : {}),
+                    ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
+                },
             )));
         }
 
@@ -5111,11 +5158,6 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (this.sessionStore?.update) {
-            const currentSession = ownerId && this.sessionStore?.getOwned
-                ? await this.sessionStore.getOwned(sessionId, ownerId)
-                : this.sessionStore?.get
-                    ? await this.sessionStore.get(sessionId)
-                    : null;
             const projectMemory = mergeProjectMemory(
                 currentSession?.metadata?.projectMemory || {},
                 buildProjectMemoryUpdate({
