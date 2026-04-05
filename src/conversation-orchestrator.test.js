@@ -3405,6 +3405,7 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('Do not mention `/app`');
         expect(instructions).toContain('Do not use `file-write` or `file-mkdir`');
         expect(instructions).toContain('Available block palette includes');
+        expect(instructions).toContain('Think in page roles, not just paragraphs');
         expect(instructions).toContain('If a substantial notes page only uses headings');
     });
 

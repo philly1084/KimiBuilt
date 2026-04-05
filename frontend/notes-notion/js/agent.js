@@ -199,6 +199,58 @@ const Agent = (function() {
             guidance: 'Use sparingly to create breathing room, not after every heading.',
         }),
     ]);
+    const NOTES_TEMPLATE_DESIGN_PRESETS = Object.freeze({
+        brief: Object.freeze({
+            pageIcon: '📌',
+            calloutIcon: '⚡',
+            calloutColor: 'yellow',
+            sourceHeading: 'Supporting Notes',
+        }),
+        research: Object.freeze({
+            pageIcon: '🔎',
+            calloutIcon: '🧭',
+            calloutColor: 'blue',
+            sourceHeading: 'Verified Sources',
+        }),
+        project: Object.freeze({
+            pageIcon: '🚀',
+            calloutIcon: '📍',
+            calloutColor: 'green',
+            sourceHeading: 'Working References',
+        }),
+        meeting: Object.freeze({
+            pageIcon: '🗒️',
+            calloutIcon: '👥',
+            calloutColor: 'gray',
+            sourceHeading: 'Follow-up Links',
+        }),
+        documentation: Object.freeze({
+            pageIcon: '🧩',
+            calloutIcon: 'ℹ️',
+            calloutColor: 'blue',
+            sourceHeading: 'References',
+        }),
+        dashboard: Object.freeze({
+            pageIcon: '📊',
+            calloutIcon: '📈',
+            calloutColor: 'green',
+            sourceHeading: 'Reference Links',
+        }),
+        journal: Object.freeze({
+            pageIcon: '📔',
+            calloutIcon: '🌤️',
+            calloutColor: 'purple',
+            sourceHeading: 'Context',
+        }),
+    });
+    const NOTES_PAGE_DESIGN_MANUAL = Object.freeze([
+        'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive details, sources, and next steps.',
+        'Avoid a long ladder of heading followed by paragraph repeated all the way down the page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
+        'Research pages should usually feel like a small knowledge hub: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of hiding them in prose.',
+        'Operational pages should feel usable, not literary: use databases for repeated fields, todos for actions, and visible status or decision callouts near the top.',
+        'Use toggles for optional depth, appendices, research notes, or background material so the main page stays scannable but still interactive.',
+        'When a page is meant to look polished, upgrade page metadata too: title, icon, and section rhythm should feel intentional, not accidental.',
+    ]);
     let initPromise = null;
 
     // ============================================
@@ -753,6 +805,557 @@ const Agent = (function() {
         return opportunities.join('\n');
     }
 
+    function buildNotesPageDesignManual() {
+        return NOTES_PAGE_DESIGN_MANUAL.map((line) => `- ${line}`).join('\n');
+    }
+
+    function getTemplateDesignPreset(templateId = 'brief') {
+        return NOTES_TEMPLATE_DESIGN_PRESETS[templateId] || NOTES_TEMPLATE_DESIGN_PRESETS.brief;
+    }
+
+    function extractBlockDefinitionText(block) {
+        if (!block || typeof block !== 'object') {
+            return '';
+        }
+
+        const type = canonicalizeBlockType(block.type || 'text');
+        const content = Object.prototype.hasOwnProperty.call(block, 'content')
+            ? block.content
+            : (Object.prototype.hasOwnProperty.call(block, 'text') ? block.text : '');
+
+        if (typeof content === 'string') {
+            return stripUnsafeNullCharacters(content);
+        }
+
+        if (!content || typeof content !== 'object') {
+            return '';
+        }
+
+        switch (type) {
+            case 'todo':
+                return stripUnsafeNullCharacters(String(content.text || ''));
+            case 'callout':
+                return coerceTextValue(content.text || content.content || content.message || '');
+            case 'code':
+                return stripUnsafeNullCharacters(String(content.text || ''));
+            case 'math':
+                return stripUnsafeNullCharacters(String(content.text || content.latex || ''));
+            case 'mermaid':
+                return stripUnsafeNullCharacters(String(content.text || ''));
+            case 'ai':
+                return coerceTextValue(content.result || content.prompt || '');
+            case 'image':
+                return coerceTextValue(content.caption || content.alt || content.url || '');
+            case 'ai_image':
+                return coerceTextValue(content.caption || content.prompt || content.imageUrl || '');
+            case 'bookmark':
+                return coerceTextValue(content.title || content.description || content.url || '');
+            default:
+                return coerceTextValue(
+                    content.text
+                    || content.prompt
+                    || content.result
+                    || content.caption
+                    || content.url
+                    || ''
+                );
+        }
+    }
+
+    function cloneStructuredValue(value) {
+        if (value == null) {
+            return value;
+        }
+
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_error) {
+            return value;
+        }
+    }
+
+    function truncateStructuredSummary(text = '', maxChars = 180) {
+        const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!normalized || normalized.length <= maxChars) {
+            return normalized;
+        }
+
+        const clipped = normalized.slice(0, maxChars + 1);
+        const boundary = clipped.lastIndexOf(' ');
+        return `${(boundary >= 90 ? clipped.slice(0, boundary) : clipped.slice(0, maxChars)).trim()}...`;
+    }
+
+    function stripHtmlToPlainText(value = '') {
+        return String(value || '')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function analyzeStructuredBlocks(blocks = []) {
+        const typeCounts = {};
+        let textChars = 0;
+        let longTextCount = 0;
+
+        blocks.forEach((block) => {
+            const type = canonicalizeBlockType(block?.type || 'text');
+            typeCounts[type] = (typeCounts[type] || 0) + 1;
+
+            const text = extractBlockDefinitionText(block).trim();
+            textChars += text.length;
+            if (['text', 'quote', 'callout', 'toggle'].includes(type) && text.length >= 220) {
+                longTextCount += 1;
+            }
+        });
+
+        const layoutSupportTypes = ['callout', 'bookmark', 'database', 'image', 'ai_image', 'mermaid', 'toggle', 'divider', 'todo'];
+        const layoutSupportCount = layoutSupportTypes.reduce((total, type) => total + (typeCounts[type] || 0), 0);
+
+        return {
+            blockCount: blocks.length,
+            textChars,
+            longTextCount,
+            typeCounts,
+            layoutSupportCount,
+        };
+    }
+
+    function buildPageContextFromGeneratedBlocks(blocks = [], context = null) {
+        const outline = blocks
+            .filter((block) => /^heading_/.test(canonicalizeBlockType(block?.type || '')))
+            .map((block, index) => ({
+                id: block?.id || `generated_heading_${index}`,
+                content: extractBlockDefinitionText(block),
+            }));
+
+        return {
+            ...(context || {}),
+            blocks,
+            blockCount: blocks.length,
+            outline,
+        };
+    }
+
+    function inferStructuredPageTitle({ blocks = [], action = null, context = null, question = '' } = {}) {
+        const heading = blocks.find((block) => canonicalizeBlockType(block?.type || '') === 'heading_1');
+        const headingText = extractBlockDefinitionText(heading).trim();
+        if (headingText) {
+            return headingText;
+        }
+
+        const actionTitle = String(action?.title || '').trim();
+        if (actionTitle) {
+            return actionTitle;
+        }
+
+        const contextTitle = String(context?.title || '').trim();
+        if (contextTitle && !/^untitled$/i.test(contextTitle)) {
+            return contextTitle;
+        }
+
+        const aboutMatch = String(question || '').match(/\b(?:about|on|regarding|for)\s+(.+?)(?:[?.!,]|$)/i);
+        return aboutMatch ? aboutMatch[1].trim() : '';
+    }
+
+    function inferStructuredPageSubject(options = {}) {
+        const title = inferStructuredPageTitle(options);
+        if (!title) {
+            return '';
+        }
+
+        const subject = title.split(/[:\-–—|]/)[0].trim();
+        return subject || title;
+    }
+
+    function buildFallbackCalloutText(templateId = 'brief', subject = '') {
+        const safeSubject = subject || 'This page';
+        switch (templateId) {
+            case 'research':
+                return `${safeSubject} at a glance: the page should surface the strongest themes, the clearest evidence, and why the topic matters.`;
+            case 'project':
+                return `${safeSubject}: lead with the goal, current status, and the next actions that move the work forward.`;
+            case 'dashboard':
+                return `${safeSubject}: keep the operating picture visible with a clear status read, key highlights, and immediate watchouts.`;
+            case 'documentation':
+                return `${safeSubject}: clarify scope, the core workflow, and the warnings or prerequisites a reader should notice first.`;
+            case 'meeting':
+                return `${safeSubject}: separate context, decisions, and follow-up actions so the page works after the meeting is over.`;
+            case 'journal':
+                return `${safeSubject}: keep the main theme visible, then support it with highlights, reflections, and next moves.`;
+            default:
+                return `${safeSubject}: lead with the bottom line and keep the page scannable before adding deeper detail.`;
+        }
+    }
+
+    function buildCalloutBlock(text = '', preset = {}) {
+        return {
+            type: 'callout',
+            content: {
+                text: truncateStructuredSummary(text, 220),
+                icon: preset.calloutIcon || '💡',
+            },
+            color: preset.calloutColor || null,
+        };
+    }
+
+    function ensureTemplateCalloutBlock(blocks = [], { template = null, preset = null, action = null, context = null, question = '' } = {}) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return blocks;
+        }
+
+        const typeCounts = analyzeStructuredBlocks(blocks).typeCounts;
+        if (typeCounts.callout > 0) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        const introIndex = nextBlocks.findIndex((block, index) => {
+            if (index === 0) {
+                return false;
+            }
+
+            const type = canonicalizeBlockType(block?.type || '');
+            if (!['quote', 'text'].includes(type)) {
+                return false;
+            }
+
+            const text = extractBlockDefinitionText(block).trim();
+            return text.length >= 24 && text.length <= 260;
+        });
+
+        const designPreset = preset || getTemplateDesignPreset(template?.id);
+        if (introIndex >= 0) {
+            nextBlocks[introIndex] = buildCalloutBlock(extractBlockDefinitionText(nextBlocks[introIndex]), designPreset);
+            return nextBlocks;
+        }
+
+        const subject = inferStructuredPageSubject({ blocks: nextBlocks, action, context, question });
+        const fallbackText = buildFallbackCalloutText(template?.id || 'brief', subject);
+        const calloutBlock = buildCalloutBlock(fallbackText, designPreset);
+        const firstHeadingIndex = nextBlocks.findIndex((block) => canonicalizeBlockType(block?.type || '') === 'heading_1');
+
+        if (firstHeadingIndex >= 0) {
+            nextBlocks.splice(firstHeadingIndex + 1, 0, calloutBlock);
+            return nextBlocks;
+        }
+
+        return [calloutBlock, ...nextBlocks];
+    }
+
+    function looksLikeSourceHeadingText(text = '') {
+        return /\b(sources?|references?|citations?|links?|verified sources?|source note|research note)\b/i.test(String(text || ''));
+    }
+
+    function maybeConvertSupportNoteToToggle(blocks = [], { template = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length < 2) {
+            return blocks;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        if (stats.typeCounts.toggle > 0 || !['research', 'documentation'].includes(template?.id)) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        for (let index = 0; index < nextBlocks.length - 1; index++) {
+            const current = nextBlocks[index];
+            const next = nextBlocks[index + 1];
+            const currentType = canonicalizeBlockType(current?.type || '');
+            const nextType = canonicalizeBlockType(next?.type || '');
+            const headingText = extractBlockDefinitionText(current).trim();
+            const nextText = extractBlockDefinitionText(next).trim();
+
+            if (!/^heading_/.test(currentType) || nextType !== 'text') {
+                continue;
+            }
+
+            if (!/\b(source note|research note|background|appendix|deep dive|extra context|verification note)\b/i.test(headingText)) {
+                continue;
+            }
+
+            if (nextText.length < 120) {
+                continue;
+            }
+
+            let headingIndex = index;
+            if (headingIndex > 0 && canonicalizeBlockType(nextBlocks[headingIndex - 1]?.type || '') !== 'divider' && nextBlocks.length >= 7) {
+                nextBlocks.splice(headingIndex, 0, { type: 'divider', content: '' });
+                headingIndex += 1;
+            }
+
+            nextBlocks[headingIndex + 1] = {
+                type: 'toggle',
+                content: nextText,
+                color: 'gray',
+            };
+            return nextBlocks;
+        }
+
+        return blocks;
+    }
+
+    function ensureSupportSectionDivider(blocks = [], { template = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length < 6) {
+            return blocks;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        if (stats.typeCounts.divider > 0 || !['research', 'documentation', 'meeting'].includes(template?.id)) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        const dividerIndex = nextBlocks.findIndex((block, index) => {
+            if (index < 2) {
+                return false;
+            }
+
+            const type = canonicalizeBlockType(block?.type || '');
+            if (!/^heading_/.test(type)) {
+                return false;
+            }
+
+            return /\b(source note|research note|sources?|references?|appendix|deep dive|follow[- ]?up|faq|next upgrade)\b/i.test(extractBlockDefinitionText(block));
+        });
+
+        if (dividerIndex >= 2) {
+            nextBlocks.splice(dividerIndex, 0, { type: 'divider', content: '' });
+            return nextBlocks;
+        }
+
+        return blocks;
+    }
+
+    function extractSourceBookmarksFromToolEvents(toolEvents = []) {
+        if (!Array.isArray(toolEvents) || toolEvents.length === 0) {
+            return [];
+        }
+
+        const searchMetaByUrl = new Map();
+        toolEvents.forEach((event) => {
+            const toolId = event?.result?.toolId || event?.toolCall?.function?.name || '';
+            if (toolId !== 'web-search' || event?.result?.success === false) {
+                return;
+            }
+
+            const results = Array.isArray(event?.result?.data?.results) ? event.result.data.results : [];
+            results.forEach((entry) => {
+                const url = String(entry?.url || '').trim();
+                if (!/^https?:\/\//i.test(url) || searchMetaByUrl.has(url)) {
+                    return;
+                }
+
+                searchMetaByUrl.set(url, {
+                    title: String(entry?.title || '').trim(),
+                    description: truncateStructuredSummary(String(entry?.snippet || '').replace(/\s+/g, ' ').trim(), 180),
+                });
+            });
+        });
+
+        const seen = new Set();
+        const bookmarks = [];
+
+        toolEvents.forEach((event) => {
+            const toolId = event?.result?.toolId || event?.toolCall?.function?.name || '';
+            if (!['web-fetch', 'web-scrape'].includes(toolId) || event?.result?.success === false) {
+                return;
+            }
+
+            const args = parseToolArguments(event?.toolCall?.function?.arguments);
+            const data = event?.result?.data || {};
+            const url = String(data.url || args.url || '').trim();
+            if (!/^https?:\/\//i.test(url) || seen.has(url)) {
+                return;
+            }
+
+            const searchMeta = searchMetaByUrl.get(url) || {};
+            const rawExcerpt = toolId === 'web-fetch'
+                ? stripHtmlToPlainText(data.body || '')
+                : stripHtmlToPlainText(data.content || data.text || JSON.stringify(data.data || ''));
+
+            bookmarks.push({
+                url,
+                title: String(data.title || searchMeta.title || '').trim(),
+                description: truncateStructuredSummary(searchMeta.description || rawExcerpt, 180),
+            });
+            seen.add(url);
+        });
+
+        if (bookmarks.length < 3) {
+            for (const [url, meta] of searchMetaByUrl.entries()) {
+                if (seen.has(url)) {
+                    continue;
+                }
+
+                bookmarks.push({
+                    url,
+                    title: meta.title || '',
+                    description: meta.description || '',
+                });
+                seen.add(url);
+
+                if (bookmarks.length >= 3) {
+                    break;
+                }
+            }
+        }
+
+        return bookmarks
+            .filter((bookmark) => bookmark.url)
+            .slice(0, 3);
+    }
+
+    function ensureSourceBookmarkBlocks(blocks = [], { preset = null, toolEvents = [] } = {}) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return blocks;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        if (stats.typeCounts.bookmark > 0) {
+            return blocks;
+        }
+
+        const bookmarks = extractSourceBookmarksFromToolEvents(toolEvents);
+        if (!bookmarks.length) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        const bookmarkBlocks = bookmarks.map((bookmark) => ({
+            type: 'bookmark',
+            content: {
+                url: bookmark.url,
+                title: bookmark.title || bookmark.url,
+                description: bookmark.description || '',
+                favicon: '',
+                image: '',
+            },
+        }));
+
+        const sourceHeadingIndex = nextBlocks.findIndex((block) => {
+            const type = canonicalizeBlockType(block?.type || '');
+            return /^heading_/.test(type) && looksLikeSourceHeadingText(extractBlockDefinitionText(block));
+        });
+
+        if (sourceHeadingIndex >= 0) {
+            let insertionHeadingIndex = sourceHeadingIndex;
+            if (sourceHeadingIndex > 0 && canonicalizeBlockType(nextBlocks[sourceHeadingIndex - 1]?.type || '') !== 'divider' && nextBlocks.length >= 7) {
+                nextBlocks.splice(sourceHeadingIndex, 0, { type: 'divider', content: '' });
+                insertionHeadingIndex += 1;
+            }
+            nextBlocks.splice(insertionHeadingIndex + 1, 0, ...bookmarkBlocks);
+            return nextBlocks;
+        }
+
+        if (nextBlocks.length >= 7 && canonicalizeBlockType(nextBlocks[nextBlocks.length - 1]?.type || '') !== 'divider') {
+            nextBlocks.push({ type: 'divider', content: '' });
+        }
+
+        nextBlocks.push({
+            type: 'heading_2',
+            content: preset?.sourceHeading || 'Sources',
+        });
+        nextBlocks.push(...bookmarkBlocks);
+        return nextBlocks;
+    }
+
+    function shouldApplyStructuredDesignUpgrade(blocks = [], { question = '', template = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return false;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        const structuralRequest = /\b(create|make|build|draft|write|turn|convert|organize|restructure|brief|report|guide|proposal|page|notes?)\b/i.test(String(question || ''));
+        const substantial = stats.blockCount >= 6
+            || stats.textChars >= 420
+            || (stats.typeCounts.heading_2 || 0) >= 2
+            || structuralRequest;
+
+        if (!substantial) {
+            return false;
+        }
+
+        switch (template?.id) {
+            case 'research':
+                return stats.typeCounts.callout === 0
+                    || stats.typeCounts.bookmark === 0
+                    || stats.layoutSupportCount < 3
+                    || stats.longTextCount > 1;
+            case 'project':
+            case 'dashboard':
+                return stats.typeCounts.callout === 0
+                    || stats.typeCounts.database === 0
+                    || stats.typeCounts.todo === 0;
+            case 'documentation':
+                return stats.typeCounts.callout === 0
+                    || ((stats.typeCounts.numbered_list || 0) === 0 && (stats.typeCounts.code || 0) === 0 && (stats.typeCounts.toggle || 0) === 0);
+            case 'meeting':
+                return stats.typeCounts.todo === 0 || stats.typeCounts.callout === 0;
+            default:
+                return stats.typeCounts.callout === 0
+                    || stats.layoutSupportCount < 2
+                    || stats.longTextCount > 1;
+        }
+    }
+
+    function enhanceStructuredPageActions(actions = [], question = '', context = null, toolEvents = []) {
+        if (!Array.isArray(actions) || actions.length === 0) {
+            return [];
+        }
+
+        return actions.map((action) => {
+            if (!action || typeof action !== 'object') {
+                return action;
+            }
+
+            const op = String(action.op || '').trim().toLowerCase();
+            if (!['rebuild_page', 'replace_page'].includes(op) || !Array.isArray(action.blocks) || action.blocks.length === 0) {
+                return action;
+            }
+
+            const generatedContext = buildPageContextFromGeneratedBlocks(action.blocks, context);
+            const template = selectNotesPageTemplates(question, generatedContext, { limit: 1 })[0] || null;
+            if (!shouldApplyStructuredDesignUpgrade(action.blocks, { question, template })) {
+                return action;
+            }
+
+            const preset = getTemplateDesignPreset(template?.id);
+            let nextBlocks = action.blocks.map((block) => cloneStructuredValue(block));
+            nextBlocks = ensureTemplateCalloutBlock(nextBlocks, { template, preset, action, context, question });
+            nextBlocks = maybeConvertSupportNoteToToggle(nextBlocks, { template });
+            nextBlocks = ensureSupportSectionDivider(nextBlocks, { template });
+            nextBlocks = ensureSourceBookmarkBlocks(nextBlocks, { preset, toolEvents });
+
+            const enhancedAction = {
+                ...action,
+                blocks: nextBlocks,
+            };
+
+            if (!enhancedAction.icon && preset?.pageIcon) {
+                enhancedAction.icon = preset.pageIcon;
+            }
+
+            if (!enhancedAction.title) {
+                const currentTitle = String(context?.title || '').trim();
+                if (!currentTitle || /^untitled$/i.test(currentTitle)) {
+                    const nextTitle = inferStructuredPageTitle({
+                        blocks: nextBlocks,
+                        action: enhancedAction,
+                        context,
+                        question,
+                    });
+                    if (nextTitle) {
+                        enhancedAction.title = nextTitle;
+                    }
+                }
+            }
+
+            return enhancedAction;
+        });
+    }
+
     function getSelectionSnapshot(pageContext) {
         const selectedBlockId = window.Selection?.getSelectedBlockId?.() || null;
         const selectedText = truncateText(window.Selection?.getSelectedText?.() || '', 300);
@@ -821,6 +1424,7 @@ const Agent = (function() {
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
         const blockPlaybook = buildBlockCapabilityPlaybook();
         const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
+        const designManual = buildNotesPageDesignManual();
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -858,6 +1462,9 @@ ${templateGuidance}
 
 BLOCK CAPABILITY PLAYBOOK:
 ${blockPlaybook}
+
+PAGE DESIGN MANUAL:
+${designManual}
 
 BLOCK OPPORTUNITIES FOR THIS REQUEST:
 ${blockOpportunities}
@@ -1551,23 +2158,25 @@ GUIDELINES:
         }
 
         if (isExplicitAIImage || /(?:^|\.)unsplash\.com$/i.test(hostname)) {
+            const isUnsplashPhotoPage = /(?:^|\.)unsplash\.com$/i.test(hostname) && /\/photos\/[^/?#]+/i.test(url);
             return {
                 type: 'ai_image',
                 content: {
                     prompt: caption || (isExplicitAIImage ? 'AI image' : 'Unsplash image'),
                     caption: normalizedTitle || caption || '',
-                    imageUrl: url,
+                    imageUrl: isUnsplashPhotoPage ? null : url,
                     model: null,
                     size: isExplicitAIImage ? '1024x1024' : '1536x1024',
                     quality: 'standard',
                     style: isExplicitAIImage ? 'vivid' : 'natural',
                     source: isExplicitAIImage ? 'ai' : 'unsplash',
-                    status: 'done',
+                    status: isUnsplashPhotoPage ? 'pending' : 'done',
                     unsplashResults: null,
                     selectedUnsplashId: null,
                     unsplashPhotographer: null,
                     unsplashPhotographerUrl: null,
-                    imageAssetId: null
+                    imageAssetId: null,
+                    downloadUrl: isUnsplashPhotoPage ? url : null,
                 }
             };
         }
@@ -2083,12 +2692,12 @@ GUIDELINES:
         return paragraphBlocks.length > 1 ? paragraphBlocks : preferredBlocks;
     }
 
-    function normalizeStructuredPageActions(actions = [], question = '', context = null) {
+    function normalizeStructuredPageActions(actions = [], question = '', context = null, toolEvents = []) {
         if (!Array.isArray(actions) || actions.length === 0) {
             return [];
         }
 
-        return actions.map((action) => {
+        const expandedActions = actions.map((action) => {
             if (!action || typeof action !== 'object') {
                 return action;
             }
@@ -2153,6 +2762,8 @@ GUIDELINES:
                 blocks: expandedBlocks,
             };
         });
+
+        return enhanceStructuredPageActions(expandedActions, question, context, toolEvents);
     }
 
     async function repairNotesPageEditResponse({
@@ -3758,10 +4369,11 @@ Build the page in a structured, polished way instead of one-shotting the whole d
     function prepareAssistantResponse(responseText, options = {}) {
         const {
             question = '',
-            context = null
+            context = null,
+            toolEvents = [],
         } = options;
         const parsed = extractNotesActionPlan(responseText);
-        const normalizedActions = normalizeStructuredPageActions(parsed.actions, question, context);
+        const normalizedActions = normalizeStructuredPageActions(parsed.actions, question, context, toolEvents);
         const applied = applyNotesActions(normalizedActions);
         const actionCount = Array.isArray(normalizedActions) ? normalizedActions.length : 0;
 
@@ -5549,8 +6161,13 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const apiClient = getAPIClient();
         syncAPIClientSession(apiClient, context);
         const explicitPageEditIntent = isExplicitPageEditIntent(question);
-        const requestedArtifactFormat = null;
-        const requestOptions = {};
+        let requestedArtifactFormat = inferRequestedArtifactFormat(question);
+        if (shouldSuppressRequestedArtifactFormat(question, context, requestedArtifactFormat)) {
+            requestedArtifactFormat = null;
+        }
+        const requestOptions = requestedArtifactFormat
+            ? { outputFormat: requestedArtifactFormat }
+            : {};
         
         // Build messages array with enhanced system prompt
         const systemPrompt = buildSystemPrompt(context || {
@@ -5704,7 +6321,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                     try {
                         preparedResponse = prepareAssistantResponse(responseText, {
                             question,
-                            context
+                            context,
+                            toolEvents: generatedToolEvents,
                         });
                     } catch (parseError) {
                         console.warn('Failed to parse structured response, using raw text:', parseError);
@@ -5736,7 +6354,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
                                     responseText = repairedResponseText;
                                     preparedResponse = prepareAssistantResponse(repairedResponseText, {
                                         question,
-                                        context
+                                        context,
+                                        toolEvents: generatedToolEvents,
                                     });
                                 }
 
@@ -5887,7 +6506,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             // Add assistant message
             const preparedResponse = prepareAssistantResponse(responseText, {
                 question,
-                context
+                context,
+                toolEvents: generatedToolEvents,
             });
             const visibleResponse = resolveVisibleAssistantText(preparedResponse.displayText, responseText);
 

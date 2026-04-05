@@ -325,6 +325,48 @@ describe('/api/chat route', () => {
         }));
     });
 
+    test('allows direct PDF artifact generation for explicit notes exports', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Export this page as a PDF file I can download.',
+        });
+        shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
+        generateOutputArtifactFromPrompt.mockResolvedValue({
+            responseId: 'resp-notes-export-1',
+            artifact: { id: 'pdf-artifact-1', filename: 'page-export.pdf' },
+            artifacts: [{ id: 'pdf-artifact-1', filename: 'page-export.pdf' }],
+            assistantMessage: 'Created the PDF artifact (page-export.pdf).',
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Export this page as a PDF file I can download.',
+                stream: false,
+                outputFormat: 'pdf',
+                metadata: { taskType: 'notes', clientSurface: 'notes' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(generateOutputArtifactFromPrompt).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            mode: 'notes',
+            outputFormat: 'pdf',
+        }));
+        expect(executeConversationRuntime).not.toHaveBeenCalled();
+        expect(response.body.message).toBe('Created the PDF artifact (page-export.pdf).');
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({ id: 'pdf-artifact-1', filename: 'page-export.pdf' }),
+        ]);
+    });
+
     test('pre-generates image artifacts before direct PDF creation for mixed requests', async () => {
         ensureRuntimeToolManager.mockResolvedValue({
             getTool: jest.fn(() => ({ id: 'image-generate' })),

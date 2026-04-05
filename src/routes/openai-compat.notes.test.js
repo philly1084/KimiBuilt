@@ -150,9 +150,9 @@ describe('/v1/chat/completions notes routing', () => {
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
     });
 
-    test('does not take the direct artifact branch for notes sessions even when html is inferred', async () => {
+    test('keeps inferred html requests in the normal runtime for notes page edits', async () => {
         inferRequestedOutputFormat.mockReturnValue('html');
-        shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
+        shouldSuppressNotesSurfaceArtifact.mockReturnValue(true);
         executeConversationRuntime.mockResolvedValue({
             handledPersistence: true,
             response: {
@@ -192,22 +192,20 @@ describe('/v1/chat/completions notes routing', () => {
         }));
     });
 
-    test('does not take the direct artifact branch for notes sessions even when html output is explicitly requested', async () => {
+    test('takes the direct artifact branch for notes sessions when html output is explicitly requested', async () => {
         inferRequestedOutputFormat.mockReturnValue(null);
         shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
-        executeConversationRuntime.mockResolvedValue({
-            handledPersistence: true,
-            response: {
-                id: 'resp-notes-compat-2',
-                output_text: 'Returned through normal runtime',
-                output: [{
-                    type: 'message',
-                    content: [{ type: 'output_text', text: 'Returned through normal runtime' }],
-                }],
-                metadata: {
-                    toolEvents: [],
-                },
+        generateOutputArtifactFromPrompt.mockResolvedValue({
+            responseId: 'resp-notes-compat-2',
+            artifact: {
+                id: 'artifact-html-1',
+                filename: 'penguins.html',
             },
+            artifacts: [{
+                id: 'artifact-html-1',
+                filename: 'penguins.html',
+            }],
+            assistantMessage: 'Created the HTML document artifact (penguins.html).',
         });
 
         const app = express();
@@ -227,8 +225,16 @@ describe('/v1/chat/completions notes routing', () => {
             });
 
         expect(response.status).toBe(200);
-        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
-        expect(executeConversationRuntime).toHaveBeenCalled();
+        expect(generateOutputArtifactFromPrompt).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'page-session-1',
+            mode: 'notes',
+            outputFormat: 'html',
+        }));
+        expect(executeConversationRuntime).not.toHaveBeenCalled();
+        expect(response.body.choices[0].message.content).toBe('Created the HTML document artifact (penguins.html).');
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({ id: 'artifact-html-1', filename: 'penguins.html' }),
+        ]);
         expect(shouldSuppressNotesSurfaceArtifact).toHaveBeenCalledWith(expect.objectContaining({
             taskType: 'notes',
             outputFormat: 'html',

@@ -651,9 +651,6 @@ router.post('/chat/completions', async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
-        if (isNotesSurfaceValue(taskType) || isNotesSurfaceValue(clientSurface)) {
-            effectiveOutputFormat = null;
-        }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat
             ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
             : [];
@@ -1273,9 +1270,6 @@ router.post('/responses', async (req, res, next) => {
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
-            effectiveOutputFormat = null;
-        }
-        if (isNotesSurfaceValue(taskType) || isNotesSurfaceValue(clientSurface)) {
             effectiveOutputFormat = null;
         }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat

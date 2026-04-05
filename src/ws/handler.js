@@ -296,9 +296,6 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     })) {
         effectiveOutputFormat = null;
     }
-    if (isNotesSurfaceValue(taskType) || isNotesSurfaceValue(clientSurface)) {
-        effectiveOutputFormat = null;
-    }
     const recentMessagesForWorkloadPreflight = effectiveOutputFormat
         ? await sessionStore.getRecentMessages(session.id, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
         : [];

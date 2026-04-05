@@ -132,6 +132,27 @@ describe('notes agent parsing', () => {
         ]));
     });
 
+    test('turns Unsplash photo-page links into pending ai_image blocks instead of broken image embeds', () => {
+        const agent = loadAgent();
+        const responseText = JSON.stringify({
+            assistant_reply: 'Added a penguin visual.',
+            content: '# Penguins\n\n![Penguins during daytime](https://unsplash.com/photos/penguins-during-daytime-_FRAYdYmQCM)',
+        });
+
+        const parsed = agent._extractNotesActionPlan(responseText);
+        const imageBlock = parsed.actions[0].blocks.find((block) => block.type === 'ai_image');
+
+        expect(imageBlock).toEqual(expect.objectContaining({
+            type: 'ai_image',
+            content: expect.objectContaining({
+                imageUrl: null,
+                status: 'pending',
+                source: 'unsplash',
+                downloadUrl: 'https://unsplash.com/photos/penguins-during-daytime-_FRAYdYmQCM',
+            }),
+        }));
+    });
+
     test('unwraps nested assistant content arrays and stringified output_text payloads', () => {
         const agent = loadAgent();
         const responseText = JSON.stringify({
@@ -274,9 +295,11 @@ Approved page plan:
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('BLOCK CAPABILITY PLAYBOOK:');
+        expect(prompt).toContain('PAGE DESIGN MANUAL:');
         expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
+        expect(prompt).toContain('Think in page roles, not just paragraphs');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
         expect(prompt).toContain('callout: Key takeaways');
@@ -321,6 +344,71 @@ Approved page plan:
             expect.objectContaining({ type: 'bulleted_list', content: 'Antarctica' }),
         ]));
         expect(normalizedActions[0].blocks.length).toBeGreaterThan(1);
+    });
+
+    test('upgrades plain research rebuilds with richer support blocks and source bookmarks', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [
+                    { type: 'heading_1', content: 'Penguins: Built for Water, Pressed by Change' },
+                    { type: 'quote', content: 'Shoutout to emperor penguins for surviving brutal Antarctic cold with patience, teamwork, and elite-level parenting.' },
+                    { type: 'heading_2', content: 'Why Penguins Stand Out' },
+                    { type: 'text', content: 'Penguins are flightless seabirds engineered for life in the ocean. On land they can look awkward and almost comic, but in the water they become fast, controlled, and highly efficient swimmers.' },
+                    { type: 'heading_2', content: 'Source Note' },
+                    { type: 'text', content: 'This page is based on verified research already established in the session, including Nat Geo Kids and ScienceDaily notes about penguin habitats across the Southern Hemisphere.' },
+                ],
+            },
+        ], 'Create a researched page about penguins with verified sources and a polished layout.', {
+            title: 'Untitled',
+            blockCount: 0,
+            outline: [],
+            blocks: [],
+        }, [
+            {
+                toolCall: { function: { name: 'web-search', arguments: '{}' } },
+                result: {
+                    success: true,
+                    toolId: 'web-search',
+                    data: {
+                        results: [
+                            {
+                                title: 'National Geographic Kids: Penguins',
+                                url: 'https://kids.nationalgeographic.com/animals/birds/facts/penguin',
+                                snippet: 'Penguins are flightless birds that live across the Southern Hemisphere.',
+                            },
+                            {
+                                title: 'ScienceDaily: Penguins',
+                                url: 'https://www.sciencedaily.com/releases/2024/01/240101123456.htm',
+                                snippet: 'Research overview on penguin habitats and climate pressure.',
+                            },
+                        ],
+                    },
+                },
+            },
+        ]);
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].icon).toBe('🔎');
+        expect(normalizedActions[0].title).toBe('Penguins: Built for Water, Pressed by Change');
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'callout',
+                content: expect.objectContaining({
+                    icon: '🧭',
+                }),
+                color: 'blue',
+            }),
+            expect.objectContaining({ type: 'divider' }),
+            expect.objectContaining({ type: 'toggle', color: 'gray' }),
+            expect.objectContaining({
+                type: 'bookmark',
+                content: expect.objectContaining({
+                    url: 'https://kids.nationalgeographic.com/animals/birds/facts/penguin',
+                }),
+            }),
+        ]));
     });
 
     test('suppresses inferred html artifacts for notes page build requests unless file delivery is explicit', () => {
