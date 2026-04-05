@@ -460,6 +460,9 @@ GUIDELINES:
 - assistant_reply should be brief and user-friendly (not mention the JSON actions)
 - The editor will automatically apply your actions and show the assistant_reply to the user
 - Your default job in this interface is to edit the current notes page itself through block updates.
+- When notes mode is active, the only supporting tools you may rely on are web-search, web-fetch, and web-scrape.
+- Do not rely on document creation, artifact generation, filesystem writes, image tools, Git, deployment tools, or remote/server commands from this surface.
+- Use any gathered web information only to update the current page blocks or to answer the user in chat while planning.
 - When the user asks for page changes, put the final content into page blocks instead of replying with standalone HTML, artifact info, download links, or chat-only prose.
 - Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.
 - Only switch to standalone HTML/file/artifact output when the user explicitly asks for an export, download, link, attachment, or standalone file.

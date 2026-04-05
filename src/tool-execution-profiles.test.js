@@ -1,6 +1,7 @@
 const {
     DEFAULT_EXECUTION_PROFILE,
     NOTES_EXECUTION_PROFILE,
+    NOTES_ALLOWED_TOOL_IDS,
     REMOTE_BUILD_EXECUTION_PROFILE,
     HIDDEN_FRONTEND_TOOL_IDS,
     getAllowedToolIdsForProfile,
@@ -22,18 +23,13 @@ describe('tool execution profiles', () => {
         ]));
     });
 
-    test('notes profile keeps remote-command and promoted local tools', () => {
+    test('notes profile is restricted to web research tools only', () => {
         const toolIds = getAllowedToolIdsForProfile(NOTES_EXECUTION_PROFILE);
 
-        expect(toolIds).toEqual(expect.arrayContaining([
-            'remote-command',
-            'k3s-deploy',
-            'architecture-design',
-            'schema-generate',
-        ]));
-        expect(toolIds).not.toContain('file-write');
-        expect(toolIds).not.toContain('file-mkdir');
+        expect(toolIds).toEqual([...NOTES_ALLOWED_TOOL_IDS]);
+        expect(toolIds).not.toContain('remote-command');
         expect(toolIds).not.toContain('document-workflow');
+        expect(toolIds).not.toContain('file-write');
         expect(toolIds).not.toContain('ssh-execute');
     });
 

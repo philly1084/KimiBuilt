@@ -1796,6 +1796,12 @@ class ChatApp {
             this.renderOrReplaceMessage(surveyMessage);
         }
 
+        this.markLocalCheckpointAnswered(
+            sessionId,
+            surveyId,
+            responseContent.replace(/^Survey response \([^)]+\):\s*/i, ''),
+        );
+
         card.dataset.submitted = 'true';
         if (button) {
             button.disabled = true;
@@ -2474,6 +2480,273 @@ class ChatApp {
         }
     }
 
+    getSessionRecord(sessionId) {
+        if (!sessionId) {
+            return null;
+        }
+
+        return sessionManager.sessions.find((session) => session.id === sessionId) || null;
+    }
+
+    buildSyntheticSurveyMessageId(checkpointId = '') {
+        const normalizedId = String(checkpointId || '').trim().replace(/[^a-z0-9_-]/gi, '-');
+        return `synthetic-user-checkpoint-${normalizedId || 'pending'}`;
+    }
+
+    assistantMentionsPendingSurvey(content = '') {
+        return /\b(inline survey|survey card|questionnaire|popup question|multiple[- ]choice)\b/i.test(
+            String(content || ''),
+        );
+    }
+
+    extractCheckpointFromToolEvents(toolEvents = []) {
+        const checkpointEvent = [...(Array.isArray(toolEvents) ? toolEvents : [])]
+            .reverse()
+            .find((event) => (
+                (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'user-checkpoint'
+                && event?.result?.success !== false
+            ));
+
+        if (!checkpointEvent) {
+            return null;
+        }
+
+        const data = checkpointEvent?.result?.data || {};
+        const checkpoint = data.checkpoint && typeof data.checkpoint === 'object'
+            ? data.checkpoint
+            : (data && typeof data === 'object' ? data : null);
+
+        return uiHelpers.normalizeSurveyDefinition(checkpoint);
+    }
+
+    updateLocalCheckpointControlState(sessionId, updater) {
+        const session = this.getSessionRecord(sessionId);
+        if (!session || typeof updater !== 'function') {
+            return null;
+        }
+
+        const nextControlState = updater(session.controlState && typeof session.controlState === 'object'
+            ? session.controlState
+            : {});
+
+        if (!nextControlState || typeof nextControlState !== 'object') {
+            return null;
+        }
+
+        session.controlState = nextControlState;
+        sessionManager.saveToStorage();
+        return session;
+    }
+
+    syncLocalPendingCheckpointFromToolEvents(sessionId, toolEvents = []) {
+        const checkpoint = this.extractCheckpointFromToolEvents(toolEvents);
+        if (!sessionId || !checkpoint) {
+            return;
+        }
+
+        this.updateLocalCheckpointControlState(sessionId, (currentControlState = {}) => {
+            const currentUserCheckpoint = currentControlState?.userCheckpoint
+                && typeof currentControlState.userCheckpoint === 'object'
+                ? currentControlState.userCheckpoint
+                : {};
+
+            return {
+                ...currentControlState,
+                userCheckpoint: {
+                    ...currentUserCheckpoint,
+                    pending: checkpoint,
+                },
+            };
+        });
+    }
+
+    markLocalCheckpointAnswered(sessionId, checkpointId = '', summary = '') {
+        const normalizedCheckpointId = String(checkpointId || '').trim();
+        if (!sessionId || !normalizedCheckpointId) {
+            return;
+        }
+
+        this.updateLocalCheckpointControlState(sessionId, (currentControlState = {}) => {
+            const currentUserCheckpoint = currentControlState?.userCheckpoint
+                && typeof currentControlState.userCheckpoint === 'object'
+                ? currentControlState.userCheckpoint
+                : {};
+            const pendingCheckpointId = String(currentUserCheckpoint?.pending?.id || '').trim();
+
+            if (pendingCheckpointId && pendingCheckpointId !== normalizedCheckpointId) {
+                return currentControlState;
+            }
+
+            return {
+                ...currentControlState,
+                userCheckpoint: {
+                    ...currentUserCheckpoint,
+                    pending: null,
+                    lastResponse: {
+                        checkpointId: normalizedCheckpointId,
+                        summary: String(summary || '').trim(),
+                        answeredAt: new Date().toISOString(),
+                    },
+                },
+            };
+        });
+    }
+
+    attachPendingCheckpointDisplayContent(message = null, sessionId = '') {
+        if (!message || message.role !== 'assistant') {
+            return message;
+        }
+
+        const existingContent = String(message.displayContent ?? message.content ?? '');
+        if (this.extractSurveyDefinition(existingContent)) {
+            return message;
+        }
+
+        if (!this.assistantMentionsPendingSurvey(message.content || '')) {
+            return message;
+        }
+
+        const pendingCheckpoint = uiHelpers.normalizeSurveyDefinition(
+            this.getSessionRecord(sessionId)?.controlState?.userCheckpoint?.pending || null,
+        );
+        if (!pendingCheckpoint) {
+            return message;
+        }
+
+        return {
+            ...message,
+            displayContent: this.buildSurveyFenceContent(pendingCheckpoint),
+        };
+    }
+
+    reconcilePendingCheckpointMessages(sessionId) {
+        const messages = sessionManager.getMessages(sessionId);
+        const session = this.getSessionRecord(sessionId);
+        const pendingCheckpoint = uiHelpers.normalizeSurveyDefinition(
+            session?.controlState?.userCheckpoint?.pending || null,
+        );
+
+        let nextMessages = Array.isArray(messages) ? [...messages] : [];
+        let changed = false;
+
+        const isSyntheticCheckpointMessage = (message) => (
+            message?.clientOnly === true
+            && message?.syntheticUserCheckpoint === true
+        );
+
+        const collectSurveyMatch = (message) => {
+            if (message?.role !== 'assistant') {
+                return null;
+            }
+
+            const survey = this.extractSurveyDefinition(message.displayContent ?? message.content ?? '');
+            return survey?.id
+                ? { survey, synthetic: isSyntheticCheckpointMessage(message) }
+                : null;
+        };
+
+        const surveyEntries = nextMessages
+            .map((message, index) => ({ message, index, match: collectSurveyMatch(message) }))
+            .filter((entry) => entry.match?.survey?.id);
+        const realSurveyIds = new Set(
+            surveyEntries
+                .filter((entry) => entry.match.synthetic !== true)
+                .map((entry) => entry.match.survey.id),
+        );
+
+        if (realSurveyIds.size > 0) {
+            const filteredMessages = nextMessages.filter((message, index) => {
+                const entry = surveyEntries.find((candidate) => candidate.index === index);
+                if (!entry || entry.match.synthetic !== true) {
+                    return true;
+                }
+
+                return !realSurveyIds.has(entry.match.survey.id);
+            });
+
+            if (filteredMessages.length !== nextMessages.length) {
+                nextMessages = filteredMessages;
+                changed = true;
+            }
+        }
+
+        if (!pendingCheckpoint) {
+            const filteredMessages = nextMessages.filter((message) => (
+                !isSyntheticCheckpointMessage(message)
+                || message?.surveyState?.status === 'answered'
+            ));
+
+            if (filteredMessages.length !== nextMessages.length) {
+                nextMessages = filteredMessages;
+                changed = true;
+            }
+        } else {
+            const checkpointId = pendingCheckpoint.id;
+            const syntheticMessageId = this.buildSyntheticSurveyMessageId(checkpointId);
+            const matchingEntries = nextMessages
+                .map((message, index) => ({ message, index, match: collectSurveyMatch(message) }))
+                .filter((entry) => entry.match?.survey?.id === checkpointId);
+            const realMatch = matchingEntries.find((entry) => entry.match.synthetic !== true) || null;
+            const syntheticMatches = matchingEntries.filter((entry) => entry.match.synthetic === true);
+
+            if (realMatch) {
+                const filteredMessages = nextMessages.filter((message, index) => (
+                    !syntheticMatches.some((entry) => entry.index === index)
+                ));
+
+                if (filteredMessages.length !== nextMessages.length) {
+                    nextMessages = filteredMessages;
+                    changed = true;
+                }
+            } else if (syntheticMatches.length === 0) {
+                const lastTimestamp = nextMessages[nextMessages.length - 1]?.timestamp || '';
+                const baseTime = Number.isNaN(new Date(lastTimestamp).getTime())
+                    ? Date.now()
+                    : new Date(lastTimestamp).getTime();
+
+                nextMessages.push({
+                    id: syntheticMessageId,
+                    role: 'assistant',
+                    content: pendingCheckpoint.preamble || 'Choose an option below and I will continue from there.',
+                    displayContent: this.buildSurveyFenceContent(pendingCheckpoint),
+                    clientOnly: true,
+                    syntheticUserCheckpoint: true,
+                    excludeFromTranscript: true,
+                    timestamp: new Date(baseTime + 1).toISOString(),
+                });
+                changed = true;
+            } else {
+                const [primarySynthetic, ...duplicateSynthetics] = syntheticMatches;
+                const expectedDisplayContent = this.buildSurveyFenceContent(pendingCheckpoint);
+                const currentSynthetic = primarySynthetic.message || {};
+                const needsUpdate = String(currentSynthetic.displayContent || '').trim() !== expectedDisplayContent;
+
+                if (needsUpdate) {
+                    nextMessages[primarySynthetic.index] = {
+                        ...currentSynthetic,
+                        content: currentSynthetic.content || pendingCheckpoint.preamble || 'Choose an option below and I will continue from there.',
+                        displayContent: expectedDisplayContent,
+                        syntheticUserCheckpoint: true,
+                    };
+                    changed = true;
+                }
+
+                if (duplicateSynthetics.length > 0) {
+                    const duplicateIndexes = new Set(duplicateSynthetics.map((entry) => entry.index));
+                    nextMessages = nextMessages.filter((_message, index) => !duplicateIndexes.has(index));
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) {
+            sessionManager.sessionMessages.set(sessionId, nextMessages);
+            sessionManager.saveToStorage();
+        }
+
+        return nextMessages;
+    }
+
     extractSurveyDisplayContentFromToolEvents(toolEvents = []) {
         const checkpointEvent = [...(Array.isArray(toolEvents) ? toolEvents : [])]
             .reverse()
@@ -2566,7 +2839,7 @@ class ChatApp {
     }
 
     syncAnnotatedSurveyStates(sessionId) {
-        const messages = sessionManager.getMessages(sessionId);
+        const messages = this.reconcilePendingCheckpointMessages(sessionId);
         const annotatedMessages = this.annotateSurveyStates(messages);
         sessionManager.sessionMessages.set(sessionId, annotatedMessages);
         sessionManager.saveToStorage();
@@ -3083,11 +3356,23 @@ class ChatApp {
         // Hide typing indicator
         uiHelpers.hideTypingIndicator();
 
-        const currentMessage = this.getSessionMessage(sessionId, parentMessageId);
+        let currentMessage = this.getSessionMessage(sessionId, parentMessageId);
         if (currentMessage && Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
             const updatedMessage = this.attachSurveyDisplayContent(currentMessage, chunk.toolEvents);
             if (updatedMessage !== currentMessage) {
                 this.upsertSessionMessage(sessionId, updatedMessage);
+                currentMessage = updatedMessage;
+            }
+        }
+
+        if (Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
+            this.syncLocalPendingCheckpointFromToolEvents(sessionId, chunk.toolEvents);
+        }
+
+        if (currentMessage) {
+            const resurfacedMessage = this.attachPendingCheckpointDisplayContent(currentMessage, sessionId);
+            if (resurfacedMessage !== currentMessage) {
+                this.upsertSessionMessage(sessionId, resurfacedMessage);
             }
         }
 
@@ -3799,12 +4084,12 @@ class ChatApp {
             return;
         }
 
-        const refreshedMessages = await sessionManager.loadSessionMessagesFromBackend(currentSessionId);
-        const refreshedCount = refreshedMessages.length;
-        const refreshedLastTimestamp = refreshedMessages[refreshedMessages.length - 1]?.timestamp || '';
+        await sessionManager.loadSessionMessagesFromBackend(currentSessionId);
+        const messages = this.syncAnnotatedSurveyStates(currentSessionId);
+        const refreshedCount = messages.length;
+        const refreshedLastTimestamp = messages[messages.length - 1]?.timestamp || '';
 
         if (refreshedCount !== previousMessageCount || refreshedLastTimestamp !== previousLastTimestamp) {
-            const messages = this.syncAnnotatedSurveyStates(currentSessionId);
             this.renderMessages(messages);
             this.playCueForNewAssistantMessages(previousMessages, messages);
             this.updateSessionInfo();

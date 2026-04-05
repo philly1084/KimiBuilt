@@ -3402,7 +3402,7 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('Do not use `file-write` or `file-mkdir`');
     });
 
-    test('notes tool policy does not surface local file writes for page-edit requests', () => {
+    test('notes tool policy is restricted to web research tools for page-edit requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
                 createResponse: jest.fn(),
@@ -3410,7 +3410,7 @@ describe('ConversationOrchestrator', () => {
             },
             toolManager: {
                 getTool: jest.fn((toolId) => (
-                    ['file-read', 'file-search', 'file-write', 'file-mkdir', 'web-search'].includes(toolId)
+                    ['web-search', 'web-fetch', 'web-scrape', 'file-read', 'file-search', 'file-write', 'file-mkdir', 'remote-command', 'document-workflow'].includes(toolId)
                         ? { id: toolId, description: toolId }
                         : null
                 )),
@@ -3423,12 +3423,8 @@ describe('ConversationOrchestrator', () => {
             toolManager: orchestrator.toolManager,
         });
 
-        expect(toolPolicy.allowedToolIds).not.toContain('file-write');
-        expect(toolPolicy.allowedToolIds).not.toContain('file-mkdir');
-        expect(toolPolicy.allowedToolIds).not.toContain('document-workflow');
-        expect(toolPolicy.candidateToolIds).not.toContain('file-write');
-        expect(toolPolicy.candidateToolIds).not.toContain('file-mkdir');
-        expect(toolPolicy.candidateToolIds).not.toContain('document-workflow');
+        expect(toolPolicy.allowedToolIds).toEqual(['web-search', 'web-fetch', 'web-scrape']);
+        expect(toolPolicy.candidateToolIds).toEqual([]);
     });
 
     test('falls back to web-search planning when planner output is not valid json', async () => {

@@ -9,6 +9,9 @@ const {
 } = require('./workloads/natural-language');
 const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const {
+    DEFAULT_EXECUTION_PROFILE,
+    NOTES_EXECUTION_PROFILE,
+    REMOTE_BUILD_EXECUTION_PROFILE,
     PROMOTED_LOCAL_TOOL_IDS,
     getAllowedToolIdsForProfile,
 } = require('./tool-execution-profiles');
@@ -641,6 +644,10 @@ function hasUsableSshDefaults() {
 function normalizeExecutionProfile(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
 
+    if (!normalized) {
+        return DEFAULT_EXECUTION_PROFILE;
+    }
+
     if ([
         'remote-build',
         'remote_builder',
@@ -649,10 +656,20 @@ function normalizeExecutionProfile(value = '') {
         'server-builder',
         'software-builder',
     ].includes(normalized)) {
-        return 'remote-build';
+        return REMOTE_BUILD_EXECUTION_PROFILE;
     }
 
-    return 'default';
+    if ([
+        'notes',
+        'notes-app',
+        'notes_app',
+        'notes-editor',
+        'notes_editor',
+    ].includes(normalized)) {
+        return NOTES_EXECUTION_PROFILE;
+    }
+
+    return DEFAULT_EXECUTION_PROFILE;
 }
 
 function promptHasExplicitSshIntent(prompt = '') {

@@ -1356,7 +1356,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(automaticTools.some((tool) => tool.id === 'ssh-execute')).toBe(false);
     });
 
-    test('does not expose local file write tools to notes sessions', () => {
+    test('restricts notes sessions to web research tools only', () => {
         const toolManager = createToolManager();
         const automaticTools = __testUtils.buildAutomaticToolDefinitions(
             toolManager,
@@ -1364,8 +1364,11 @@ describe('openai-client automatic tool orchestration helpers', () => {
             { executionProfile: 'notes' },
         );
 
-        expect(automaticTools.some((tool) => tool.id === 'file-write')).toBe(false);
-        expect(automaticTools.some((tool) => tool.id === 'file-mkdir')).toBe(false);
+        expect(automaticTools.map((tool) => tool.id).sort()).toEqual([
+            'web-fetch',
+            'web-scrape',
+            'web-search',
+        ]);
     });
 
     test('does not create a deterministic remote-command preflight for generic cluster deployment wording', () => {

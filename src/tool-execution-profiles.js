@@ -1,6 +1,11 @@
 const DEFAULT_EXECUTION_PROFILE = 'default';
 const NOTES_EXECUTION_PROFILE = 'notes';
 const REMOTE_BUILD_EXECUTION_PROFILE = 'remote-build';
+const NOTES_ALLOWED_TOOL_IDS = Object.freeze([
+    'web-search',
+    'web-fetch',
+    'web-scrape',
+]);
 
 const PROMOTED_LOCAL_TOOL_IDS = Object.freeze([
     'security-scan',
@@ -30,25 +35,12 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     ...PROMOTED_LOCAL_TOOL_IDS,
 ]);
 
-const NOTES_EXCLUDED_TOOL_IDS = new Set([
-    'file-write',
-    'file-mkdir',
-    'document-workflow',
-]);
-
-const NOTES_SHARED_TOOL_IDS = Object.freeze(
-    BASE_SHARED_TOOL_IDS.filter((toolId) => !NOTES_EXCLUDED_TOOL_IDS.has(toolId)),
-);
-
 const PROFILE_TOOL_ALLOWLISTS = Object.freeze({
     [DEFAULT_EXECUTION_PROFILE]: Object.freeze([
         ...BASE_SHARED_TOOL_IDS,
     ]),
     [NOTES_EXECUTION_PROFILE]: Object.freeze([
-        'remote-command',
-        'k3s-deploy',
-        'docker-exec',
-        ...NOTES_SHARED_TOOL_IDS,
+        ...NOTES_ALLOWED_TOOL_IDS,
     ]),
     [REMOTE_BUILD_EXECUTION_PROFILE]: Object.freeze([
         'remote-command',
@@ -71,6 +63,7 @@ module.exports = {
     DEFAULT_EXECUTION_PROFILE,
     NOTES_EXECUTION_PROFILE,
     REMOTE_BUILD_EXECUTION_PROFILE,
+    NOTES_ALLOWED_TOOL_IDS,
     PROMOTED_LOCAL_TOOL_IDS,
     PROFILE_TOOL_ALLOWLISTS,
     HIDDEN_FRONTEND_TOOL_IDS,

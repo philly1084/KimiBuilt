@@ -125,6 +125,12 @@ class SessionManager extends EventTarget {
                         title: stored?.title || 'New Chat',
                         createdAt: session.createdAt,
                         updatedAt: session.updatedAt,
+                        metadata: session.metadata || stored?.metadata || {},
+                        controlState: session.controlState
+                            || stored?.controlState
+                            || session.metadata?.controlState
+                            || stored?.metadata?.controlState
+                            || {},
                         workloadSummary: session.workloadSummary || stored?.workloadSummary || {
                             queued: 0,
                             running: 0,
@@ -377,6 +383,7 @@ class SessionManager extends EventTarget {
         let createdAt = new Date().toISOString();
         let updatedAt = createdAt;
         let isLocal = true;
+        let backendSession = null;
 
         try {
             const response = await fetch(`${this.apiBaseUrl}/sessions`, {
@@ -396,7 +403,7 @@ class SessionManager extends EventTarget {
             });
 
             if (response.ok) {
-                const backendSession = await response.json();
+                backendSession = await response.json();
                 sessionId = backendSession.id;
                 createdAt = backendSession.createdAt || createdAt;
                 updatedAt = backendSession.updatedAt || updatedAt;
@@ -413,6 +420,14 @@ class SessionManager extends EventTarget {
             title: 'New Chat',
             createdAt,
             updatedAt,
+            metadata: backendSession?.metadata || {
+                mode,
+                taskType: SESSION_MANAGER_TASK_TYPE,
+                clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
+            },
+            controlState: backendSession?.controlState
+                || backendSession?.metadata?.controlState
+                || {},
             workloadSummary: {
                 queued: 0,
                 running: 0,
