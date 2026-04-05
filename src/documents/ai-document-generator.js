@@ -61,7 +61,7 @@ class AIDocumentGenerator {
   async requestJson({ messages, model, reasoningEffort = null }) {
     const response = await this.requestResponse({ messages, model, reasoningEffort, stream: false });
     const text = this.extractText(response);
-    return JSON.parse(text);
+    return this.parseJsonResponseText(text);
   }
 
   async requestText({ messages, model, reasoningEffort = null }) {
@@ -94,6 +94,11 @@ class AIDocumentGenerator {
       return this.normalizeDocumentStructure(content);
     } catch (error) {
       console.error('[AIDocumentGenerator] Generation failed:', error);
+      if (error?.responseText) {
+        return this.normalizeDocumentStructure(
+          this.buildFallbackDocumentFromText(error.responseText, prompt, options),
+        );
+      }
       throw new Error(`AI generation failed: ${error.message}`);
     }
   }
@@ -386,6 +391,131 @@ Return JSON:
     ];
 
     return lines.filter(Boolean).join('\n');
+  }
+
+  parseJsonResponseText(text = '') {
+    const rawText = String(text || '').trim();
+    const candidates = [
+      rawText,
+      this.unwrapCodeFence(rawText),
+      this.extractFirstJsonBlock(rawText),
+    ].filter((candidate, index, list) => candidate && list.indexOf(candidate) === index);
+
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate);
+      } catch (_error) {
+        // Try the next candidate.
+      }
+    }
+
+    const error = new SyntaxError(
+      `Unexpected token in AI response: ${rawText.slice(0, 80) || '[empty response]'}`,
+    );
+    error.responseText = rawText;
+    throw error;
+  }
+
+  unwrapCodeFence(text = '') {
+    const trimmed = String(text || '').trim();
+    const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    return match ? match[1].trim() : trimmed;
+  }
+
+  extractFirstJsonBlock(text = '') {
+    const source = this.unwrapCodeFence(text);
+    const objectStart = source.indexOf('{');
+    const arrayStart = source.indexOf('[');
+    const hasObject = objectStart !== -1;
+    const hasArray = arrayStart !== -1;
+
+    if (!hasObject && !hasArray) {
+      return '';
+    }
+
+    const start = hasObject && hasArray
+      ? Math.min(objectStart, arrayStart)
+      : (hasObject ? objectStart : arrayStart);
+    const openChar = source[start];
+    const closeChar = openChar === '{' ? '}' : ']';
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < source.length; index += 1) {
+      const char = source[index];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (inString) {
+        continue;
+      }
+
+      if (char === openChar) {
+        depth += 1;
+      } else if (char === closeChar) {
+        depth -= 1;
+        if (depth === 0) {
+          return source.slice(start, index + 1);
+        }
+      }
+    }
+
+    return '';
+  }
+
+  buildFallbackDocumentFromText(text = '', prompt = '', options = {}) {
+    const rawText = String(text || '').trim();
+    const theme = options.designPlan?.themeSuggestion || options.theme || options.style || 'editorial';
+    const title = options.designPlan?.titleSuggestion
+      || this.deriveTitleFromPrompt(prompt)
+      || 'Generated Document';
+    const heading = options.designPlan?.outline?.[0]?.heading || 'Overview';
+
+    return {
+      title,
+      subtitle: '',
+      theme,
+      sections: [
+        {
+          heading,
+          content: rawText,
+          level: 1,
+        },
+      ],
+      metadata: {
+        parseRecovery: 'plain-text-fallback',
+      },
+    };
+  }
+
+  deriveTitleFromPrompt(prompt = '') {
+    const normalized = String(prompt || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return '';
+    }
+
+    return normalized
+      .replace(/^(create|make|generate|build|produce|draft|prepare)\s+/i, '')
+      .replace(/[.?!].*$/, '')
+      .trim()
+      .slice(0, 80);
   }
 
   /**

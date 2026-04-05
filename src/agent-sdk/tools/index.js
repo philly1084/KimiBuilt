@@ -9,6 +9,8 @@ const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
+const { artifactService } = require('../../artifacts/artifact-service');
+const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const {
   hasSchedulingCue,
   summarizeTrigger,
@@ -487,6 +489,33 @@ function buildDocumentWorkflowResult(document = null, { includeContent = false }
   };
 }
 
+function buildArtifactWorkflowResult(result = null, { includeContent = false } = {}) {
+  const artifact = result?.artifact || null;
+  if (!artifact) {
+    return null;
+  }
+
+  const textualContent = isTextualDocumentMimeType(artifact.mimeType, artifact.filename)
+    ? String(result?.outputText || artifact.preview?.content || '')
+    : '';
+
+  return {
+    id: artifact.id,
+    filename: artifact.filename,
+    mimeType: artifact.mimeType,
+    size: artifact.sizeBytes || 0,
+    metadata: artifact.metadata || {},
+    preview: artifact.preview || null,
+    downloadUrl: artifact.downloadUrl || null,
+    ...(textualContent
+      ? {
+        contentPreview: textualContent.slice(0, 4000),
+        ...(includeContent ? { content: textualContent } : {}),
+      }
+      : {}),
+  };
+}
+
 class ToolManager {
   constructor() {
     this.registry = getUnifiedRegistry();
@@ -948,6 +977,35 @@ class ToolManager {
               });
               if (!groundedPrompt) {
                 throw new Error('document-workflow generate requires a prompt or grounded source material.');
+              }
+
+              if (resolvedFormat === 'html'
+                && isDashboardRequest(groundedPrompt)
+                && context?.sessionId) {
+                try {
+                  const generatedArtifact = await artifactService.generateArtifact({
+                    session: context.session || null,
+                    sessionId: context.sessionId,
+                    mode: context.clientSurface || 'chat',
+                    prompt: groundedPrompt,
+                    format: 'html',
+                    artifactIds: [],
+                    existingContent: '',
+                    model: params.model || context.model || undefined,
+                    reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+                  });
+
+                  return {
+                    action,
+                    recommendation,
+                    sourceCount: sources.length,
+                    document: buildArtifactWorkflowResult(generatedArtifact, {
+                      includeContent: params.includeContent === true,
+                    }),
+                  };
+                } catch (error) {
+                  console.warn(`[document-workflow] Dashboard HTML artifact generation failed, falling back to document service: ${error.message}`);
+                }
               }
 
               const document = await documentService.aiGenerate(groundedPrompt, {

@@ -1,4 +1,11 @@
+jest.mock('../../artifacts/artifact-service', () => ({
+  artifactService: {
+    generateArtifact: jest.fn(),
+  },
+}));
+
 const { ToolManager } = require('./index');
+const { artifactService } = require('../../artifacts/artifact-service');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -8,6 +15,7 @@ describe('ToolManager image tools', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    artifactService.generateArtifact.mockReset();
   });
 
   afterEach(() => {
@@ -197,6 +205,70 @@ describe('ToolManager image tools', () => {
       filename: 'vacation-pricing.html',
       downloadUrl: '/api/documents/doc-1/download',
       content: expect.stringContaining('<h1>Vacation Pricing</h1>'),
+    }));
+  });
+
+  test('routes dashboard html generation through the artifact pipeline inside document-workflow', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'document',
+        recommendedFormat: 'html',
+        blueprint: { label: 'Executive Brief' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+    };
+
+    artifactService.generateArtifact.mockResolvedValue({
+      artifact: {
+        id: 'artifact-1',
+        filename: 'support-ops-dashboard.html',
+        mimeType: 'text/html',
+        sizeBytes: 2048,
+        downloadUrl: '/api/artifacts/artifact-1/download',
+        preview: {
+          type: 'html',
+          content: '<!DOCTYPE html><html><body data-dashboard-template="admin-control-room"></body></html>',
+        },
+        metadata: {
+          dashboardTemplateSuggestedPrimaryId: 'admin-control-room',
+        },
+      },
+      outputText: '<!DOCTYPE html><html><body data-dashboard-template="admin-control-room"></body></html>',
+    });
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate',
+      prompt: 'Create a dashboard-style HTML for support operations.',
+      format: 'html',
+      includeContent: true,
+      sources: [
+        {
+          title: 'Weekly technology brief',
+          content: 'Ticket volume is up 18%. SLA misses concentrated in the overnight queue.',
+        },
+      ],
+    }, {
+      sessionId: 'session-1',
+      documentService,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(artifactService.generateArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      format: 'html',
+      prompt: expect.stringContaining('Ticket volume is up 18%'),
+    }));
+    expect(documentService.aiGenerate).not.toHaveBeenCalled();
+    expect(result.data.document).toEqual(expect.objectContaining({
+      filename: 'support-ops-dashboard.html',
+      downloadUrl: '/api/artifacts/artifact-1/download',
+      content: expect.stringContaining('data-dashboard-template'),
     }));
   });
 
