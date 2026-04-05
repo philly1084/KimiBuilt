@@ -619,6 +619,16 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('prefer `image-search-unsplash` and `image-from-url` over `image-generate`');
     });
 
+    test('checkpoint guidance forbids request_user_input when user-checkpoint is attached', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'user-checkpoint' },
+        ]);
+
+        expect(guidance).toContain('Use `user-checkpoint` for a high-impact decision before major work');
+        expect(guidance).toContain('do not call or mention `request_user_input`');
+        expect(guidance).toContain('Do not tell the user that a questionnaire tool failed');
+    });
+
     test('extracts explicit web research queries for deterministic preflight', () => {
         expect(
             __testUtils.extractExplicitWebResearchQuery('Still not working, can you web research tigers and cats differences.'),

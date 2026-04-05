@@ -1609,7 +1609,7 @@ class ToolManager {
         id: USER_CHECKPOINT_TOOL_ID,
         name: 'User Checkpoint',
         category: 'system',
-        description: 'Pause once or twice for a high-impact user decision before major work by creating a structured multiple-choice checkpoint.',
+        description: 'Pause once or twice for a high-impact user decision before major work by creating a structured multiple-choice checkpoint for web chat. Use this instead of `request_user_input`.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const policy = context?.userCheckpointPolicy || {};

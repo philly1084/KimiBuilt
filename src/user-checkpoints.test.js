@@ -70,6 +70,7 @@ describe('user checkpoint helpers', () => {
         expect(instructions).toContain('do not ask a blocking multiple-choice question as plain assistant text');
         expect(instructions).toContain('use the tool so the UI can render inline options');
         expect(instructions).toContain('keep the free-text field available');
+        expect(instructions).toContain('Do not call or mention `request_user_input`');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {
