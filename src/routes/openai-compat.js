@@ -444,6 +444,14 @@ function resolveConversationTaskType(payload = {}, session = null) {
         payload?.task_type,
         payload?.clientSurface,
         payload?.client_surface,
+        payload?.metadata?.taskType,
+        payload?.metadata?.task_type,
+        payload?.metadata?.clientSurface,
+        payload?.metadata?.client_surface,
+        session?.metadata?.taskType,
+        session?.metadata?.task_type,
+        session?.metadata?.clientSurface,
+        session?.metadata?.client_surface,
     ];
 
     return candidates.some((value) => isNotesSurfaceValue(value)) ? 'notes' : 'chat';
@@ -641,6 +649,9 @@ router.post('/chat/completions', async (req, res, next) => {
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (isNotesSurfaceValue(taskType) || isNotesSurfaceValue(clientSurface)) {
             effectiveOutputFormat = null;
         }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat
@@ -1262,6 +1273,9 @@ router.post('/responses', async (req, res, next) => {
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
         })) {
+            effectiveOutputFormat = null;
+        }
+        if (isNotesSurfaceValue(taskType) || isNotesSurfaceValue(clientSurface)) {
             effectiveOutputFormat = null;
         }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat

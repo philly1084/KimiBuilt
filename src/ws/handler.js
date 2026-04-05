@@ -47,6 +47,17 @@ const EventEmitter = require('events');
 const adminEvents = new EventEmitter();
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
 
+function isNotesSurfaceValue(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return [
+        'notes',
+        'notes-app',
+        'notes_app',
+        'notes-editor',
+        'notes_editor',
+    ].includes(normalized);
+}
+
 function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
     return {
         ...(ownerId ? { ownerId } : {}),
@@ -283,6 +294,9 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         outputFormat: effectiveOutputFormat,
         outputFormatProvided: Boolean(outputFormat),
     })) {
+        effectiveOutputFormat = null;
+    }
+    if (isNotesSurfaceValue(taskType) || isNotesSurfaceValue(clientSurface)) {
         effectiveOutputFormat = null;
     }
     const recentMessagesForWorkloadPreflight = effectiveOutputFormat

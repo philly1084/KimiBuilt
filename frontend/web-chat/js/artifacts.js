@@ -852,10 +852,10 @@
 
     function patchApp() {
         if (!window.chatApp) return;
-        
+
         const originalHandleDone = window.chatApp.handleDone?.bind(window.chatApp);
-        window.chatApp.handleDone = function() {
-            if (originalHandleDone) originalHandleDone();
+        window.chatApp.handleDone = function(...args) {
+            if (originalHandleDone) originalHandleDone(...args);
             if (state.lastDone?.artifacts?.length) {
                 if (window.sessionManager?.currentSessionId) {
                     const sessionId = window.sessionManager.currentSessionId;
@@ -863,7 +863,11 @@
                     const lastMessage = messages[messages.length - 1];
                     if (lastMessage && lastMessage.role === 'assistant') {
                         const artifactSummary = buildArtifactSummary(state.lastDone.artifacts);
-                        if (artifactSummary) {
+                        const existingDisplayContent = String(lastMessage.displayContent || lastMessage.content || '');
+                        const hasSurveyDisplay = typeof window.chatApp?.extractSurveyDefinition === 'function'
+                            && Boolean(window.chatApp.extractSurveyDefinition(existingDisplayContent));
+
+                        if (artifactSummary && !hasSurveyDisplay) {
                             lastMessage.displayContent = artifactSummary;
                         }
                         window.sessionManager.saveToStorage?.();

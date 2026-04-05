@@ -4880,15 +4880,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const apiClient = getAPIClient();
         syncAPIClientSession(apiClient, context);
         const explicitPageEditIntent = isExplicitPageEditIntent(question);
-        const inferredArtifactFormat = isArtifactGenerationIntent(question)
-            ? inferRequestedArtifactFormat(question)
-            : null;
-        const requestedArtifactFormat = shouldSuppressRequestedArtifactFormat(question, context, inferredArtifactFormat)
-            ? null
-            : inferredArtifactFormat;
-        const requestOptions = requestedArtifactFormat
-            ? { outputFormat: requestedArtifactFormat }
-            : {};
+        const requestedArtifactFormat = null;
+        const requestOptions = {};
         
         // Build messages array with enhanced system prompt
         const systemPrompt = buildSystemPrompt(context || {

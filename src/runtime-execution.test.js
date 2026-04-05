@@ -177,11 +177,19 @@ describe('runtime-execution', () => {
         expect(inferExecutionProfile({ executionProfile: 'remote-builder' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Use kubectl to inspect the cluster and restart the deployment.' })).toBe('remote-build');
         expect(inferExecutionProfile({ input: 'Run a remote command on root@77.42.44.98 to check its health.' })).toBe('remote-build');
+        expect(inferExecutionProfile({ input: 'Answer directly.' })).toBe('default');
+    });
+
+    test('keeps notes-surface requests on the notes execution profile even when the prompt mentions remote operations', () => {
         expect(inferExecutionProfile({
             taskType: 'notes',
             input: 'Can you reach the remote build now?',
-        })).toBe('remote-build');
-        expect(inferExecutionProfile({ input: 'Answer directly.' })).toBe('default');
+        })).toBe('notes');
+        expect(inferExecutionProfile({
+            taskType: 'notes',
+            executionProfile: 'remote-build',
+            input: 'Use kubectl to inspect the cluster.',
+        })).toBe('notes');
     });
 
     test('uses the latest user turn instead of stale remote transcript content when inferring execution profile', () => {

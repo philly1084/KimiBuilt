@@ -135,6 +135,7 @@ function inferExecutionProfile(payload = {}) {
         || payload?.metadata?.client_surface
         || '',
     ).trim().toLowerCase();
+    const notesSurfaceRequested = ['notes', 'notes-app', 'notes_app', 'notes-editor', 'notes_editor'].includes(taskType);
     const configuredProfile = normalizeExecutionProfile(
         payload?.executionProfile
         || payload?.execution_profile
@@ -146,7 +147,11 @@ function inferExecutionProfile(payload = {}) {
         || payload?.metadata?.agent_profile,
     );
     const requestedNotesProfile = configuredProfile === NOTES_EXECUTION_PROFILE
-        || ['notes', 'notes-app', 'notes_app', 'notes-editor', 'notes_editor'].includes(taskType);
+        || notesSurfaceRequested;
+
+    if (notesSurfaceRequested) {
+        return NOTES_EXECUTION_PROFILE;
+    }
 
     if (configuredProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
         return REMOTE_BUILD_EXECUTION_PROFILE;
@@ -202,14 +207,8 @@ function inferExecutionProfile(payload = {}) {
     ].some((pattern) => pattern.test(normalized));
     const stickyRemoteApprovalIntent = stickyRemoteContext && isRemotePermissionGrantText(normalized);
 
-    if (requestedNotesProfile) {
-        if (pageEditIntent) {
-            return NOTES_EXECUTION_PROFILE;
-        }
-
-        return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent || stickyRemoteApprovalIntent)
-            ? REMOTE_BUILD_EXECUTION_PROFILE
-            : NOTES_EXECUTION_PROFILE;
+    if (requestedNotesProfile || pageEditIntent) {
+        return NOTES_EXECUTION_PROFILE;
     }
 
     return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent || stickyRemoteApprovalIntent)

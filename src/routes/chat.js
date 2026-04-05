@@ -217,6 +217,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
+        if (String(taskType || '').trim().toLowerCase().startsWith('notes')
+            || String(clientSurface || '').trim().toLowerCase().startsWith('notes')) {
+            effectiveOutputFormat = null;
+        }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat
             ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
             : [];

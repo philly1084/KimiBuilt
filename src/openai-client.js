@@ -2062,6 +2062,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `user-checkpoint` for a high-impact decision before major work instead of asking a plain-text multiple-choice question.');
         guidance.push('- In this runtime, do not call or mention `request_user_input`. `user-checkpoint` is the correct questionnaire tool for web chat.');
         guidance.push('- Do not tell the user that a questionnaire tool failed or expose internal mode/tool errors. If `user-checkpoint` is attached, use it directly.');
+        guidance.push('- Do not claim that the inline survey card rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.');
         guidance.push('- Keep the checkpoint to one question with 2 to 4 strong options, and leave the built-in free-text path available so the user can type their own answer.');
     }
 

@@ -627,6 +627,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('Use `user-checkpoint` for a high-impact decision before major work');
         expect(guidance).toContain('do not call or mention `request_user_input`');
         expect(guidance).toContain('Do not tell the user that a questionnaire tool failed');
+        expect(guidance).toContain('Do not claim that the inline survey card rendered');
     });
 
     test('extracts explicit web research queries for deterministic preflight', () => {
