@@ -531,6 +531,122 @@ class UIHelpers {
         };
     }
 
+    cleanPlainSurveyText(value = '') {
+        return String(value || '')
+            .replace(/^#+\s*/, '')
+            .replace(/^>\s*/, '')
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/__(.*?)__/g, '$1')
+            .replace(/`([^`]+)`/g, '$1')
+            .trim();
+    }
+
+    normalizePlainSurveyOption(line = '', index = 0) {
+        const match = String(line || '').match(/^(?:[-*•]\s+|(?:option\s+)?(?:\d+|[A-Ea-e])[.):]\s+)(.+)$/);
+        if (!match?.[1]) {
+            return null;
+        }
+
+        const raw = this.cleanPlainSurveyText(match[1]);
+        if (!raw) {
+            return null;
+        }
+
+        const splitMatch = raw.match(/^(.+?)(?:\s*:\s+|\s+[—-]\s+)(.+)$/);
+        const label = this.cleanPlainSurveyText(splitMatch?.[1] || raw);
+        const description = this.cleanPlainSurveyText(splitMatch?.[2] || '');
+
+        return this.normalizeSurveyOption({
+            id: `option-${index + 1}`,
+            label,
+            ...(description ? { description } : {}),
+        }, index);
+    }
+
+    extractPlainSurveyDefinition(content = '', fallbackId = '') {
+        const source = String(content || '').replace(/\r\n/g, '\n').trim();
+        if (!source || /```(?:survey|kb-survey)/i.test(source)) {
+            return null;
+        }
+
+        const rawLines = source.split('\n');
+        let bestRun = [];
+        let currentRun = [];
+
+        rawLines.forEach((line, index) => {
+            const option = this.normalizePlainSurveyOption(line.trim(), currentRun.length);
+            if (option) {
+                currentRun.push({ index, option });
+                return;
+            }
+
+            if (currentRun.length >= 2 && bestRun.length === 0) {
+                bestRun = [...currentRun];
+            }
+            currentRun = [];
+        });
+
+        if (bestRun.length === 0 && currentRun.length >= 2) {
+            bestRun = [...currentRun];
+        }
+
+        if (bestRun.length < 2 || bestRun.length > 5) {
+            return null;
+        }
+
+        const preLines = rawLines
+            .slice(0, bestRun[0].index)
+            .map((line) => this.cleanPlainSurveyText(line))
+            .filter(Boolean);
+        if (preLines.length === 0) {
+            return null;
+        }
+
+        const question = this.cleanPlainSurveyText(preLines[preLines.length - 1].replace(/[:\s]+$/, ''));
+        const promptContext = preLines.join(' ');
+        if (!question) {
+            return null;
+        }
+
+        const looksLikeChoicePrompt = /\?$/.test(question)
+            || /\b(choose|select|pick|prefer|decision|direction|option|path|approach|should i|which|what should i do)\b/i.test(promptContext);
+        if (!looksLikeChoicePrompt) {
+            return null;
+        }
+
+        const titleCandidate = preLines.length > 1
+            ? this.cleanPlainSurveyText(preLines[0].replace(/[:\s]+$/, ''))
+            : '';
+        const title = titleCandidate && titleCandidate !== question && titleCandidate.length <= 72
+            ? titleCandidate
+            : 'Choose a direction';
+        const contextLines = title === titleCandidate
+            ? preLines.slice(1, -1)
+            : preLines.slice(0, -1);
+
+        return this.normalizeSurveyDefinition({
+            id: String(fallbackId || `survey-${Date.now().toString(36)}`).trim(),
+            title,
+            question,
+            whyThisMatters: contextLines.join(' ').trim(),
+            options: bestRun.map((entry) => entry.option),
+        });
+    }
+
+    extractSurveyDefinitionFromContent(content = '', fallbackId = '') {
+        const source = String(content || '');
+        const fencedMatch = source.match(/```(?:survey|kb-survey)\s*([\s\S]*?)```/i);
+        if (fencedMatch?.[1]) {
+            const parsed = this.parseJsonSafely(fencedMatch[1]);
+            const normalized = this.normalizeSurveyDefinition(parsed);
+            if (normalized) {
+                return normalized;
+            }
+        }
+
+        return this.extractPlainSurveyDefinition(source, fallbackId);
+    }
+
     buildSurveyAnsweredSummary(surveyState = {}) {
         const selectedLabels = Array.isArray(surveyState.selectedLabels)
             ? surveyState.selectedLabels.filter(Boolean)
@@ -643,12 +759,16 @@ class UIHelpers {
     renderSurveyMarkdownBlocks(content = '', message = {}) {
         const source = String(content || '');
         if (!/```(?:survey|kb-survey)/i.test(source)) {
+            const inferredSurvey = this.extractPlainSurveyDefinition(source, message?.id || '');
+            if (inferredSurvey) {
+                return this.renderSurveyBlock(inferredSurvey, message);
+            }
+
             return source;
         }
 
         return source.replace(/```(?:survey|kb-survey)\s*([\s\S]*?)```/gi, (_match, rawJson) => {
-            const parsed = this.parseJsonSafely(rawJson);
-            const survey = this.normalizeSurveyDefinition(parsed);
+            const survey = this.extractSurveyDefinitionFromContent(_match, message?.id || '');
             if (!survey) {
                 return _match;
             }

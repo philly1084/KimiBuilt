@@ -2403,16 +2403,7 @@ class ChatApp {
     }
 
     extractSurveyDefinition(messageContent = '') {
-        const match = String(messageContent || '').match(/```(?:survey|kb-survey)\s*([\s\S]*?)```/i);
-        if (!match?.[1]) {
-            return null;
-        }
-
-        try {
-            return uiHelpers.normalizeSurveyDefinition(JSON.parse(match[1]));
-        } catch (_error) {
-            return null;
-        }
+        return uiHelpers.extractSurveyDefinitionFromContent(messageContent);
     }
 
     parseSurveyResponseContent(messageContent = '') {

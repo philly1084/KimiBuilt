@@ -21,6 +21,7 @@ const {
     getSessionControlState,
     mergeControlState,
 } = require('./runtime-control-state');
+const { USER_CHECKPOINT_TOOL_ID } = require('./user-checkpoints');
 const { stripNullCharacters } = require('./utils/text');
 const {
     DEFAULT_EXECUTION_PROFILE,
@@ -153,6 +154,84 @@ function hasDocumentWorkflowIntentText(text = '') {
         /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/.test(normalized)
         && /\b(research|look up|search|browse|scrape|extract|pricing|comparison|current|latest)\b/.test(normalized)
     );
+}
+
+function hasExplicitCheckpointRequestText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(ask me first|check with me|run it by me|before you start|before doing|before making|before major work|before major changes?|before implementation|which direction|which approach|choose a direction|help me choose|decision|trade-?off|options?)\b/.test(normalized);
+}
+
+function hasSubstantialWorkIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(plan|planning|refactor|implement|implementation|build|create|generate|draft|design|deploy|migration|migrate|rewrite|organize|set up|setup|fix|debug|investigate|audit|review)\b/.test(normalized);
+}
+
+function normalizeUserCheckpointPlanParams(step = {}) {
+    const rawParams = step?.params && typeof step.params === 'object'
+        ? { ...step.params }
+        : {};
+    const question = typeof rawParams.question === 'string'
+        ? rawParams.question.trim()
+        : (typeof rawParams.prompt === 'string' ? rawParams.prompt.trim() : '');
+    const rawOptions = Array.isArray(rawParams.options)
+        ? rawParams.options
+        : (Array.isArray(rawParams.choices) ? rawParams.choices : []);
+    const options = rawOptions
+        .map((option, index) => {
+            if (typeof option === 'string') {
+                const label = option.trim();
+                return label ? { label } : null;
+            }
+
+            if (!option || typeof option !== 'object') {
+                return null;
+            }
+
+            const label = typeof option.label === 'string'
+                ? option.label.trim()
+                : (typeof option.title === 'string'
+                    ? option.title.trim()
+                    : (typeof option.text === 'string' ? option.text.trim() : ''));
+            if (!label) {
+                return null;
+            }
+
+            const description = typeof option.description === 'string'
+                ? option.description.trim()
+                : (typeof option.details === 'string' ? option.details.trim() : '');
+            const id = typeof option.id === 'string' ? option.id.trim() : '';
+
+            return {
+                ...(id ? { id } : {}),
+                label,
+                ...(description ? { description } : {}),
+            };
+        })
+        .filter(Boolean)
+        .slice(0, 5);
+
+    return {
+        ...rawParams,
+        ...(question ? { question } : {}),
+        ...(options.length > 0 ? { options } : {}),
+        ...(typeof rawParams.title === 'string' && rawParams.title.trim()
+            ? { title: rawParams.title.trim() }
+            : {}),
+        ...(typeof rawParams.preamble === 'string' && rawParams.preamble.trim()
+            ? { preamble: rawParams.preamble.trim() }
+            : {}),
+        ...(typeof rawParams.whyThisMatters === 'string' && rawParams.whyThisMatters.trim()
+            ? { whyThisMatters: rawParams.whyThisMatters.trim() }
+            : {}),
+    };
 }
 
 function inferRecallProfileFromText(text = '') {
@@ -3681,6 +3760,13 @@ class ConversationOrchestrator extends EventEmitter {
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
         const candidates = new Set();
         const remoteToolId = getPreferredRemoteToolId({ allowedToolIds });
+        const userCheckpointPolicy = toolContext?.userCheckpointPolicy && typeof toolContext.userCheckpointPolicy === 'object'
+            ? toolContext.userCheckpointPolicy
+            : {};
+        const canUseUserCheckpoint = allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
+            && userCheckpointPolicy.enabled === true
+            && Number(userCheckpointPolicy.remaining || 0) > 0
+            && !userCheckpointPolicy.pending;
         const hasUrl = /https?:\/\//i.test(prompt);
         const hasExplicitWebResearchIntent = hasExplicitWebResearchIntentText(prompt);
         const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/.test(prompt);
@@ -3870,6 +3956,10 @@ class ConversationOrchestrator extends EventEmitter {
             }
         }
 
+        if (canUseUserCheckpoint && (candidates.size > 0 || hasExplicitCheckpointRequestText(prompt) || hasSubstantialWorkIntentText(prompt))) {
+            candidates.add(USER_CHECKPOINT_TOOL_ID);
+        }
+
         return {
             executionProfile,
             allowedToolIds,
@@ -3877,6 +3967,11 @@ class ConversationOrchestrator extends EventEmitter {
             hasSshDefaults,
             hasReachableSshTarget,
             sshRuntimeTarget: formatSshRuntimeTarget(sshContext.target),
+            userCheckpointPolicy: {
+                enabled: userCheckpointPolicy.enabled === true,
+                remaining: Math.max(0, Number(userCheckpointPolicy.remaining) || 0),
+                pending: userCheckpointPolicy.pending || null,
+            },
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
@@ -4042,6 +4137,11 @@ class ConversationOrchestrator extends EventEmitter {
                 objective,
                 recentMessages,
             });
+            return normalizedStep;
+        }
+
+        if (normalizedStep.tool === USER_CHECKPOINT_TOOL_ID) {
+            normalizedStep.params = normalizeUserCheckpointPlanParams(step);
             return normalizedStep;
         }
 
@@ -4279,10 +4379,22 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
             'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
+            'Every `user-checkpoint` step must include a non-empty `params.question` string and 2 to 4 concise `params.options` entries.',
+            'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
+            'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
+            'Keep `user-checkpoint` to one question with mutually exclusive, actionable options. Do not bundle multiple decisions into one checkpoint.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
+            ...(toolPolicy?.userCheckpointPolicy?.enabled
+                ? [
+                    `Checkpoint questions remaining in this session: ${Math.max(0, Number(toolPolicy.userCheckpointPolicy.remaining) || 0)}.`,
+                    toolPolicy.userCheckpointPolicy.pending
+                        ? 'A `user-checkpoint` is already pending. Do not plan another checkpoint until the user answers it.'
+                        : 'If a checkpoint would unblock a major decision, you may use `user-checkpoint` instead of stopping with a prose question.',
+                ]
+                : []),
             'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',
             'Use `remote-command` for host cron only when the user explicitly asks to inspect or modify the server\'s own crontab.',
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
@@ -4738,6 +4850,11 @@ class ConversationOrchestrator extends EventEmitter {
 
     buildRuntimeInstructions({ baseInstructions = '', executionProfile = DEFAULT_EXECUTION_PROFILE, allowedToolIds = [], toolEvents = [], toolPolicy = {} }) {
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+        const userCheckpointPolicy = toolPolicy?.userCheckpointPolicy || {};
+        const canUseUserCheckpoint = allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
+            && userCheckpointPolicy.enabled === true
+            && Number(userCheckpointPolicy.remaining || 0) > 0
+            && !userCheckpointPolicy.pending;
         const parts = [
             String(baseInstructions || '').trim(),
             `Execution profile: ${executionProfile}.`,
@@ -4750,6 +4867,14 @@ class ConversationOrchestrator extends EventEmitter {
         if (allowedToolIds.length > 0) {
             parts.push(`Runtime-available tools for this request: ${allowedToolIds.join(', ')}.`);
             parts.push('Do not claim tools are unavailable if they are listed as runtime-available tools.');
+        }
+
+        if (canUseUserCheckpoint) {
+            parts.push('Use `user-checkpoint` when one high-impact decision would materially change the plan before major implementation, refactoring, or other long multi-step work.');
+            parts.push('On web-chat, `user-checkpoint` renders as an inline popup-style survey card with clickable choices, so prefer it over a plain-text multiple-choice question.');
+            parts.push('Keep checkpoint surveys concise: one question, 2 to 4 strong options, short descriptions, and optional free-text only when it materially helps.');
+        } else if (userCheckpointPolicy.enabled === true && userCheckpointPolicy.pending) {
+            parts.push('A `user-checkpoint` is already pending for this session. Do not ask another survey question until the user answers it.');
         }
 
         if (allowedToolIds.includes('architecture-design')) {

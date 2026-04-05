@@ -3047,6 +3047,96 @@ describe('ConversationOrchestrator', () => {
         expect(scrapePolicy.candidateToolIds).toContain('web-scrape');
     });
 
+    test('surfaces user-checkpoint to planners for web-chat decision gates', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['user-checkpoint', 'architecture-design'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Plan the system architecture and ask me which direction to take before you start major implementation.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 2,
+                    pending: null,
+                },
+            },
+        });
+
+        await orchestrator.planToolUse({
+            objective,
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        const plannerPrompt = llmClient.complete.mock.calls[0]?.[0] || '';
+        const runtimeInstructions = orchestrator.buildRuntimeInstructions({
+            executionProfile: 'default',
+            allowedToolIds: toolPolicy.allowedToolIds,
+            toolPolicy,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('user-checkpoint');
+        expect(toolPolicy.userCheckpointPolicy).toEqual(expect.objectContaining({
+            enabled: true,
+            remaining: 2,
+        }));
+        expect(plannerPrompt).toContain('Every `user-checkpoint` step must include a non-empty `params.question` string');
+        expect(plannerPrompt).toContain('inline survey card with clickable options');
+        expect(runtimeInstructions).toContain('inline popup-style survey card with clickable choices');
+    });
+
+    test('suppresses user-checkpoint when a survey is already pending', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'user-checkpoint'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Plan the refactor and ask me first before doing major work.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 1,
+                    pending: {
+                        id: 'checkpoint-1',
+                        question: 'Choose a direction',
+                    },
+                },
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).not.toContain('user-checkpoint');
+        expect(toolPolicy.userCheckpointPolicy.pending).toEqual(expect.objectContaining({
+            id: 'checkpoint-1',
+        }));
+    });
+
     test('forces a direct Perplexity-backed web-search action for explicit research requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
@@ -3488,6 +3578,69 @@ describe('ConversationOrchestrator', () => {
                         createdFromScenario: true,
                         scenarioRequest: 'can you run a cron later to check the time on the remote host in 5 minutes',
                     }),
+                }),
+            }),
+        ]);
+    });
+
+    test('repairs simple planner params for user-checkpoint steps', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'user-checkpoint',
+                        reason: 'Need one decision before major work.',
+                        params: {
+                            prompt: 'Which direction should I take?',
+                            options: [
+                                'Refactor auth flow first',
+                                'Prototype the UI first',
+                            ],
+                        },
+                    },
+                ],
+            })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'user-checkpoint'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Plan the next implementation steps and ask me first before major work.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 2,
+                    pending: null,
+                },
+            },
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'Plan the next implementation steps and ask me first before major work.',
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'user-checkpoint',
+                params: expect.objectContaining({
+                    question: 'Which direction should I take?',
+                    options: [
+                        { label: 'Refactor auth flow first' },
+                        { label: 'Prototype the UI first' },
+                    ],
                 }),
             }),
         ]);
