@@ -33,6 +33,7 @@ describe('tool execution profiles', () => {
         ]));
         expect(toolIds).not.toContain('file-write');
         expect(toolIds).not.toContain('file-mkdir');
+        expect(toolIds).not.toContain('document-workflow');
         expect(toolIds).not.toContain('ssh-execute');
     });
 

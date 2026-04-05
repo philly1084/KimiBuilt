@@ -3425,8 +3425,10 @@ describe('ConversationOrchestrator', () => {
 
         expect(toolPolicy.allowedToolIds).not.toContain('file-write');
         expect(toolPolicy.allowedToolIds).not.toContain('file-mkdir');
+        expect(toolPolicy.allowedToolIds).not.toContain('document-workflow');
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
         expect(toolPolicy.candidateToolIds).not.toContain('file-mkdir');
+        expect(toolPolicy.candidateToolIds).not.toContain('document-workflow');
     });
 
     test('falls back to web-search planning when planner output is not valid json', async () => {

@@ -11,6 +11,7 @@ class UIHelpers {
         this.searchResults = [];
         this.currentSearchIndex = -1;
         this.setupMarked();
+        this.ensureAssistantModelControls();
         this.setupEventListeners();
         
         // Image generation state
@@ -114,6 +115,29 @@ class UIHelpers {
         } catch (_error) {
             return false;
         }
+    }
+
+    ensureAssistantModelControls() {
+        if (document.getElementById('assistant-model-select')) {
+            return;
+        }
+
+        const settings = document.querySelector('.model-selector-settings');
+        if (!settings) {
+            return;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'model-selector-setting';
+        wrapper.innerHTML = `
+            <label for="assistant-model-select" class="model-selector-setting__label">AI model</label>
+            <select id="assistant-model-select" class="reasoning-select reasoning-select--panel assistant-model-select" title="AI model" aria-label="AI model">
+                <option value="gpt-4o">GPT-4o</option>
+            </select>
+            <p class="model-selector-setting__hint">Choose the model for the next messages in this chat.</p>
+        `;
+
+        settings.insertBefore(wrapper, settings.firstElementChild || null);
     }
 
     storageGet(key) {

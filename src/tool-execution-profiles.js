@@ -33,6 +33,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
 const NOTES_EXCLUDED_TOOL_IDS = new Set([
     'file-write',
     'file-mkdir',
+    'document-workflow',
 ]);
 
 const NOTES_SHARED_TOOL_IDS = Object.freeze(

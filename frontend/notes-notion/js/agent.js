@@ -4406,11 +4406,15 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         const normalized = String(question || '').toLowerCase();
         if (!normalized) return null;
 
-        if (/\bstandalone html\b|\bhtml\b/.test(normalized)) return 'html';
-        if (/\bpdf\b/.test(normalized)) return 'pdf';
-        if (/\bdocx\b|\bword document\b/.test(normalized)) return 'docx';
-        if (/\bxml\b/.test(normalized)) return 'xml';
-        if (/\bxlsx\b|\bexcel\b|\bspreadsheet\b/.test(normalized)) return 'xlsx';
+        const explicitDeliveryIntent = hasExplicitArtifactDeliveryIntent(normalized);
+        const explicitArtifactVerb = /\b(export|generate|create|make|save|download|convert|render|produce|link|share|attach)\b/.test(normalized);
+        const explicitStandaloneHtmlIntent = /\b(standalone html|html file|downloadable html|shareable html|html artifact|html export)\b/.test(normalized);
+
+        if (explicitStandaloneHtmlIntent || (/\bhtml\b/.test(normalized) && explicitDeliveryIntent)) return 'html';
+        if (/\bpdf\b/.test(normalized) && explicitArtifactVerb) return 'pdf';
+        if (/\bdocx\b|\bword document\b/.test(normalized) && explicitArtifactVerb) return 'docx';
+        if (/\bxml\b/.test(normalized) && explicitArtifactVerb) return 'xml';
+        if (/\bxlsx\b|\bexcel\b|\bspreadsheet\b/.test(normalized) && explicitArtifactVerb) return 'xlsx';
         if (/\b(mermaid|\.mmd\b)\b/.test(normalized)
             && /\b(export|download|save|artifact|file|mmd|link|share)\b/.test(normalized)) return 'mermaid';
         return null;
