@@ -195,6 +195,15 @@ function hasExplicitArtifactDeliveryIntent(text = '') {
     return /\b(export|download|save|artifact|file|link|share|attachment)\b/i.test(normalized);
 }
 
+function hasExplicitStandaloneHtmlIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\b(standalone html|html file|downloadable html|shareable html|html artifact|html export)\b/i.test(normalized);
+}
+
 function hasPlanningConversationIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -246,6 +255,7 @@ function shouldSuppressNotesSurfaceArtifact({
     outputFormatProvided = false,
 } = {}) {
     const normalizedFormat = normalizeFormat(outputFormat);
+    const explicitDeliveryIntent = hasExplicitArtifactDeliveryIntent(text);
     if (!normalizedFormat || !isNotesSurfaceTaskType(taskType)) {
         return false;
     }
@@ -255,11 +265,14 @@ function shouldSuppressNotesSurfaceArtifact({
     }
 
     if (normalizedFormat === 'power-query') {
-        return !hasExplicitArtifactDeliveryIntent(text);
+        return !explicitDeliveryIntent;
     }
 
-    return (hasPlanningConversationIntent(text) || hasExplicitNotesPageEditIntent(text) || hasImplicitNotesPageBuildIntent(text))
-        && !hasExplicitArtifactDeliveryIntent(text);
+    if (normalizedFormat === 'html' && hasExplicitStandaloneHtmlIntent(text)) {
+        return false;
+    }
+
+    return !explicitDeliveryIntent;
 }
 
 function shouldSuppressImplicitMermaidArtifact({
@@ -1001,6 +1014,7 @@ module.exports = {
     shouldDeferArtifactGenerationToWorkload,
     hasExplicitMermaidArtifactIntent,
     hasExplicitMermaidFileIntent,
+    hasExplicitStandaloneHtmlIntent,
     hasPlanningConversationIntent,
     hasExplicitNotesPageEditIntent,
     hasImplicitNotesPageBuildIntent,

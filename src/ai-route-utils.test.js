@@ -26,6 +26,7 @@ const {
     hasExplicitArtifactDeliveryIntent,
     hasExplicitImageGenerationIntent,
     hasExplicitMermaidFileIntent,
+    hasExplicitStandaloneHtmlIntent,
     hasPlanningConversationIntent,
     hasImplicitNotesPageBuildIntent,
     hasExplicitNotesPageEditIntent,
@@ -224,6 +225,7 @@ describe('ai-route-utils', () => {
         expect(hasImplicitNotesPageBuildIntent('Can you make me an HTML page about tropical fish with sections for habitat and care?')).toBe(true);
         expect(hasPlanningConversationIntent('Help me plan the structure for an HTML page about tropical fish before you write it.')).toBe(true);
         expect(hasPlanningConversationIntent('Put this implementation plan on the page as a structured brief.')).toBe(false);
+        expect(hasExplicitStandaloneHtmlIntent('Create a standalone HTML page I can use outside notes.')).toBe(true);
         expect(hasExplicitArtifactDeliveryIntent('Export a PDF file and add the download link to the page.')).toBe(true);
         expect(hasExplicitArtifactDeliveryIntent('Put this on the page as a polished hypercar brochure.')).toBe(false);
     });
@@ -308,6 +310,20 @@ describe('ai-route-utils', () => {
             outputFormat: 'html',
             outputFormatProvided: false,
         })).toBe(true);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Can you make this about pigeons?',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(true);
+
+        expect(shouldSuppressNotesSurfaceArtifact({
+            taskType: 'notes',
+            text: 'Create a standalone HTML page for me to download.',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(false);
     });
 
     test('shouldSuppressNotesSurfaceArtifact keeps Power Query inline on notes unless file delivery was explicit', () => {
