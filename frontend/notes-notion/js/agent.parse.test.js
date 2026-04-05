@@ -266,12 +266,33 @@ Approved page plan:
                 { id: 'block_4', type: 'text', content: 'They swim efficiently and live in large colonies.', depth: 0 },
                 { id: 'block_5', type: 'text', content: 'Their diet includes fish, squid, and krill.', depth: 0 },
             ],
+        }, {
+            question: 'Create a research brief about penguins with sources and key findings.',
         });
 
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
+        expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
+        expect(prompt).toContain('Executive Brief [brief]');
+        expect(prompt).toContain('Research Page [research]');
+    });
+
+    test('selects a project-oriented template for project planning requests', () => {
+        const agent = loadAgent();
+        const templates = agent._selectNotesPageTemplates(
+            'Create a project plan for launching the new notes agent with milestones, owners, and a timeline.',
+            {
+                title: 'Launch Planning',
+                blockCount: 0,
+                blocks: [],
+                outline: [],
+            }
+        );
+
+        expect(Array.isArray(templates)).toBe(true);
+        expect(templates[0].id).toBe('project');
     });
 
     test('expands oversized single-block rebuild actions into multiple page blocks', () => {

@@ -915,6 +915,25 @@ function hasExplicitQuestionnaireToolTestIntent(prompt = '') {
     return mentionsQuestionnaire && (mentionsTesting || asksToBeAsked || mentionsTool);
 }
 
+function hasExplicitUserCheckpointInteractionIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    const mentionsQuestionnaire = /\b(questionnaire|questionaire|survey|multiple[- ]choice|multiple choice|user[- ]checkpoint|checkpoint)\b/i.test(text);
+    const asksToBeAsked = /\bask me\b/i.test(text)
+        || /\bask that as\b/i.test(text)
+        || /\bcan you ask\b/i.test(text)
+        || /\bask (?:this|that|those)\b[\s\S]{0,20}\bas\b/i.test(text);
+    const mentionsInlineUi = /\b(inline|popup|card|clickable|choice|choices|option|options)\b/i.test(text)
+        && /\b(survey|questionnaire|questionaire|checkpoint)\b/i.test(text);
+    const mentionsToolOrSurface = /\b(tool|ui|web[- ]chat)\b/i.test(text) && mentionsQuestionnaire;
+    const asksForCheckpointCard = /\b(turn|make|convert|open|use|show|render)\b[\s\S]{0,40}\b(user[- ]checkpoint|checkpoint card|survey card|inline survey|inline questionnaire)\b/i.test(text);
+
+    return mentionsQuestionnaire && (asksToBeAsked || mentionsInlineUi || mentionsToolOrSurface || asksForCheckpointCard);
+}
+
 function extractExplicitWebResearchQuery(prompt = '') {
     const text = String(prompt || '').trim();
     if (!text) {
@@ -1940,7 +1959,10 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         && checkpointPolicy.enabled === true
         && Number(checkpointPolicy.remaining || 0) > 0
         && !checkpointPolicy.pending
-        && hasExplicitQuestionnaireToolTestIntent(prompt)) {
+        && (
+            hasExplicitQuestionnaireToolTestIntent(prompt)
+            || hasExplicitUserCheckpointInteractionIntent(prompt)
+        )) {
         return USER_CHECKPOINT_TOOL_ID;
     }
 
@@ -2089,6 +2111,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Do not tell the user that a questionnaire tool failed or expose internal mode/tool errors. If `user-checkpoint` is attached, use it directly.');
         guidance.push('- Do not claim that the inline survey card rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.');
         guidance.push('- Prefer `user-checkpoint` over a prose "which option do you want?" message when one short choice would unblock progress or keep the user involved.');
+        guidance.push('- If the user asks you to ask them a survey, questionnaire, inline survey card, or checkpoint card, call `user-checkpoint` directly instead of replying with sample survey text, markdown checkboxes, or an offer to turn it into a card later.');
         guidance.push('- Keep the checkpoint to one card and one question with 2 to 4 strong options, and leave the built-in free-text path available so the user can type their own answer.');
         guidance.push('- Do not turn `user-checkpoint` into long forms, pages of questions, or back-to-back questionnaires.');
         guidance.push('- If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not write a multi-question quiz or personality test as assistant text.');
@@ -3417,6 +3440,7 @@ module.exports = {
         shouldAutoUseTool,
         shouldUseResponsesAPI,
         promptHasExplicitSshIntent,
+        hasExplicitUserCheckpointInteractionIntent,
         hasUsableSshDefaults,
         isTerminalFinishReason,
         parseLenientJson,

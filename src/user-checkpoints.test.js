@@ -73,6 +73,7 @@ describe('user checkpoint helpers', () => {
         expect(instructions).toContain('Do not call or mention `request_user_input`');
         expect(instructions).toContain('Do not claim that the questionnaire rendered');
         expect(instructions).toContain('Do not turn that into a multi-question quiz');
+        expect(instructions).toContain('sample survey text, markdown checkboxes');
         expect(instructions).toContain('primary quick way to involve the user');
         expect(instructions).toContain('Prefer `user-checkpoint` over a prose "which option do you want?" message');
         expect(instructions).toContain('one card, one question');

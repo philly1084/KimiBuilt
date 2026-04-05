@@ -9,6 +9,144 @@ const Agent = (function() {
     const LEGACY_MESSAGES_STORAGE_KEY = 'notes_agent_messages';
     const PAGE_MESSAGES_STORAGE_PREFIX = 'notes_agent_messages:';
     const NOTES_COLOR_OPTIONS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
+    const NOTES_PAGE_TEMPLATES = Object.freeze([
+        Object.freeze({
+            id: 'brief',
+            name: 'Executive Brief',
+            useWhen: 'Short, high-signal pages that need a fast read with a clear takeaway.',
+            matchers: [/\bbrief\b/, /\bsummary\b/, /\boverview\b/, /\bdecision\b/, /\bkey takeaways?\b/, /\bnext steps?\b/],
+            structure: [
+                'heading_1 for the topic or decision',
+                'callout with the bottom line or headline takeaway',
+                'heading_2 for context or background',
+                'bulleted_list for the main points',
+                'heading_2 for risks, watchouts, or tradeoffs',
+                'todo or numbered_list for next steps',
+            ],
+            designRules: [
+                'Lead with the answer, not with history.',
+                'Use one callout and one list before adding dense prose.',
+                'Keep sections compact and scannable.',
+            ],
+        }),
+        Object.freeze({
+            id: 'research',
+            name: 'Research Page',
+            useWhen: 'Topic pages, research notes, explainers, and source-backed investigations.',
+            matchers: [/\bresearch\b/, /\bfindings?\b/, /\btopic\b/, /\bcompare\b/, /\bevidence\b/, /\bsources?\b/, /\blearn about\b/],
+            structure: [
+                'heading_1 for the topic',
+                'callout describing what the page covers',
+                'heading_2 for overview',
+                'heading_2 for findings or themes',
+                'bulleted_list or numbered_list for evidence, examples, or facts',
+                'heading_2 for sources or open questions',
+            ],
+            designRules: [
+                'Organize by themes, not by one uninterrupted essay.',
+                'Use lists for findings and bookmarks for key links when relevant.',
+                'Reserve prose blocks for synthesis between evidence sections.',
+            ],
+        }),
+        Object.freeze({
+            id: 'project',
+            name: 'Project Plan',
+            useWhen: 'Project pages, rollouts, roadmaps, launches, and execution planning.',
+            matchers: [/\bproject\b/, /\bplan\b/, /\broadmap\b/, /\btimeline\b/, /\bmilestones?\b/, /\bowners?\b/, /\blaunch\b/],
+            structure: [
+                'heading_1 for the project name',
+                'callout with project snapshot, goal, or status',
+                'database or list for milestones, owners, or status tracking',
+                'heading_2 for goals and scope',
+                'heading_2 for timeline or phases',
+                'heading_2 for risks and dependencies',
+                'todo list for immediate actions',
+            ],
+            designRules: [
+                'Make ownership and next actions visible.',
+                'Use structured blocks instead of hiding status in paragraphs.',
+                'Treat the page like a working surface, not a static memo.',
+            ],
+        }),
+        Object.freeze({
+            id: 'meeting',
+            name: 'Meeting Notes',
+            useWhen: 'Meetings, workshops, interviews, retros, and collaborative sessions.',
+            matchers: [/\bmeeting\b/, /\bnotes\b/, /\bagenda\b/, /\battendees?\b/, /\bdecisions?\b/, /\bretro\b/, /\binterview\b/],
+            structure: [
+                'heading_1 for the meeting title',
+                'text block for date, owner, or context',
+                'heading_2 for attendees',
+                'heading_2 for agenda',
+                'heading_2 for notes or discussion',
+                'heading_2 for decisions',
+                'todo list for action items',
+            ],
+            designRules: [
+                'Separate decisions from raw discussion notes.',
+                'Keep action items explicit and checkable.',
+                'Use dividers sparingly to separate pre-meeting and post-meeting sections.',
+            ],
+        }),
+        Object.freeze({
+            id: 'documentation',
+            name: 'Documentation',
+            useWhen: 'Guides, SOPs, onboarding docs, references, and product documentation.',
+            matchers: [/\bdocumentation\b/, /\bdoc\b/, /\bguide\b/, /\bhow to\b/, /\bonboarding\b/, /\bsetup\b/, /\breference\b/],
+            structure: [
+                'heading_1 for the doc title',
+                'callout with audience, scope, or prerequisite note',
+                'heading_2 for overview',
+                'heading_2 for getting started or setup',
+                'numbered_list for steps or process',
+                'code blocks, quotes, or callouts for examples and warnings',
+                'heading_2 for troubleshooting or FAQ',
+            ],
+            designRules: [
+                'Optimize for scanning and task completion.',
+                'Use numbered steps for sequences and code blocks for examples.',
+                'Pull warnings or constraints into callouts instead of burying them.',
+            ],
+        }),
+        Object.freeze({
+            id: 'dashboard',
+            name: 'Status Dashboard',
+            useWhen: 'Status overviews, operating dashboards, trackers, and live working summaries.',
+            matchers: [/\bdashboard\b/, /\bstatus\b/, /\btracker\b/, /\bmetrics?\b/, /\bkpis?\b/, /\bscorecard\b/, /\bhealth\b/],
+            structure: [
+                'heading_1 for the dashboard title',
+                'callout with overall status or summary',
+                'database for metrics, owners, risks, or workstreams',
+                'heading_2 for highlights',
+                'heading_2 for blockers or risks',
+                'heading_2 for next moves or decisions',
+            ],
+            designRules: [
+                'Use structured blocks first and summary prose second.',
+                'Give the page obvious status surfaces near the top.',
+                'Keep sections compact so the page feels operational.',
+            ],
+        }),
+        Object.freeze({
+            id: 'journal',
+            name: 'Journal / Reflection',
+            useWhen: 'Daily notes, reflections, check-ins, and personal working pages.',
+            matchers: [/\bjournal\b/, /\bdaily\b/, /\breflection\b/, /\bcheck-in\b/, /\blog\b/, /\bdiary\b/],
+            structure: [
+                'heading_1 for the date or entry title',
+                'callout for the mood, theme, or daily focus',
+                'heading_2 for highlights',
+                'heading_2 for reflections',
+                'heading_2 for priorities or goals',
+                'todo list for follow-up actions',
+            ],
+            designRules: [
+                'Make the page feel lightweight and easy to revisit.',
+                'Use short paragraphs and headings for emotional or thematic separation.',
+                'Keep the page personal but still structured.',
+            ],
+        }),
+    ]);
     let initPromise = null;
 
     // ============================================
@@ -397,6 +535,107 @@ const Agent = (function() {
         return criteria.join('\n');
     }
 
+    function buildTemplateSignalText(question = '', pageContext = null) {
+        const parts = [
+            String(question || ''),
+            String(pageContext?.title || ''),
+            ...(Array.isArray(pageContext?.outline)
+                ? pageContext.outline.map((item) => item?.content || '')
+                : []),
+            ...(Array.isArray(pageContext?.blocks)
+                ? pageContext.blocks.slice(0, 20).map((block) => `${block?.type || ''} ${block?.content || ''}`)
+                : []),
+        ];
+
+        return parts.join('\n').toLowerCase();
+    }
+
+    function scoreNotesPageTemplate(template, question = '', pageContext = null) {
+        const signalText = buildTemplateSignalText(question, pageContext);
+        let score = 0;
+
+        template.matchers.forEach((matcher, index) => {
+            if (matcher.test(signalText)) {
+                score += index === 0 ? 7 : 4;
+            }
+        });
+
+        const blockCount = Number(pageContext?.blockCount || 0);
+        const blockTypes = new Set((pageContext?.blocks || []).map((block) => String(block?.type || '').trim().toLowerCase()));
+        const outlineText = Array.isArray(pageContext?.outline)
+            ? pageContext.outline.map((heading) => String(heading?.content || '').toLowerCase()).join('\n')
+            : '';
+
+        if (!blockCount) {
+            if (template.id === 'brief' || template.id === 'documentation') {
+                score += 1;
+            }
+        }
+
+        if (template.id === 'project' && (blockTypes.has('todo') || /\b(goals?|timeline|milestones?|owners?|resources?)\b/.test(outlineText))) {
+            score += 3;
+        }
+
+        if (template.id === 'meeting' && /\b(attendees?|agenda|decisions?|action items?)\b/.test(outlineText)) {
+            score += 4;
+        }
+
+        if (template.id === 'dashboard' && (blockTypes.has('database') || /\b(status|metrics?|kpis?|blockers?)\b/.test(outlineText))) {
+            score += 4;
+        }
+
+        if (template.id === 'documentation' && blockTypes.has('code')) {
+            score += 3;
+        }
+
+        if (template.id === 'research' && /\b(sources?|findings?|evidence|comparison)\b/.test(outlineText)) {
+            score += 3;
+        }
+
+        return score;
+    }
+
+    function selectNotesPageTemplates(question = '', pageContext = null, options = {}) {
+        const { limit = 3 } = options;
+        const ranked = NOTES_PAGE_TEMPLATES
+            .map((template) => ({
+                ...template,
+                score: scoreNotesPageTemplate(template, question, pageContext),
+            }))
+            .sort((left, right) => right.score - left.score);
+
+        const matches = ranked.filter((template) => template.score > 0).slice(0, limit);
+        if (matches.length > 0) {
+            return matches;
+        }
+
+        return NOTES_PAGE_TEMPLATES
+            .filter((template) => ['brief', 'documentation', 'project'].includes(template.id))
+            .slice(0, limit)
+            .map((template, index) => ({
+                ...template,
+                score: limit - index,
+            }));
+    }
+
+    function buildTemplateGuidance(question = '', pageContext = null, templateMatches = []) {
+        const matches = Array.isArray(templateMatches) && templateMatches.length > 0
+            ? templateMatches
+            : selectNotesPageTemplates(question, pageContext, { limit: 2 });
+
+        if (!matches.length) {
+            return 'No specific template match. Fall back to a clean heading-first document layout.';
+        }
+
+        return matches.map((template, index) => [
+            `${index + 1}. ${template.name} [${template.id}]`,
+            `   Use when: ${template.useWhen}`,
+            '   Suggested block flow:',
+            ...template.structure.map((step) => `   - ${step}`),
+            `   Design moves: ${template.designRules.join(' ')}`,
+        ].join('\n')).join('\n\n');
+    }
+
     function getSelectionSnapshot(pageContext) {
         const selectedBlockId = window.Selection?.getSelectedBlockId?.() || null;
         const selectedText = truncateText(window.Selection?.getSelectedText?.() || '', 300);
@@ -456,12 +695,18 @@ const Agent = (function() {
     }
 
     // Build system prompt with page context
-    function buildSystemPrompt(pageContext) {
+    function buildSystemPrompt(pageContext, requestContext = {}) {
+        const question = String(requestContext?.question || '').trim();
+        const templateMatches = selectNotesPageTemplates(question, pageContext, { limit: 2 });
         const pageSetup = buildPageSetupSummary(pageContext);
         const blockMap = buildPageContentSnapshot(pageContext);
         const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
-        const designCriteria = buildPageDesignCriteria(pageContext);
+        const designCriteria = [
+            buildPageDesignCriteria(pageContext),
+            ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
+        ].filter(Boolean).join('\n');
+        const templateGuidance = buildTemplateGuidance(question, pageContext, templateMatches);
         const outline = pageContext?.outline?.length
             ? pageContext.outline.map((heading) => `- [${heading.id}] ${heading.content}`).join('\n')
             : '- No headings yet';
@@ -488,6 +733,9 @@ ${pageContent || '(page is empty)'}
 
 PAGE STATS:
 ${pageSetup}
+
+BEST-FIT PAGE TEMPLATES:
+${templateGuidance}
 
 PAGE DESIGN CRITERIA:
 ${designCriteria}
@@ -557,6 +805,7 @@ GUIDELINES:
 - Use any gathered web information only to update the current page blocks or to answer the user in chat while planning.
 - When the user asks for page changes, put the final content into page blocks instead of replying with standalone HTML, artifact info, download links, or chat-only prose.
 - Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.
+- When the user is brainstorming or asking for layout help, offer 2-3 template directions by name, explain the block structure briefly, and then adapt the chosen direction on the page.
 - Only switch to standalone HTML/file/artifact output when the user explicitly asks for an export, download, link, attachment, or standalone file.
 - You are free to change block types, replace weak sections, move blocks, delete redundant content, and rebuild the page structure when that produces a better result.
 - In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
@@ -569,6 +818,7 @@ GUIDELINES:
 - If SSH access or a prior SSH target is already established in the session, do not ask for host/user details again unless a tool failure shows the target is missing or incorrect.
 - Ask the user only when blocked by missing secrets or credentials, a genuinely ambiguous product decision, or a destructive action that needs approval.
 - For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
+- Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
@@ -1872,6 +2122,7 @@ Do not return notes-actions in this pass.
 Do not plan filesystem writes, repo paths, or local file creation.
 Return JSON only in this shape:
 {
+  "templateId": "brief",
   "title": "Page title",
   "sections": [
     {
@@ -1903,8 +2154,10 @@ Hidden section-expansion pass for a substantial notes-writing request.
 Do not return notes-actions in this pass.
 Do not plan filesystem writes, repo paths, or local file creation.
 You will receive the original request plus the approved page plan.
+Keep the chosen template consistent while expanding sections.
 Return JSON only in this shape:
 {
+  "templateId": "brief",
   "title": "Page title",
   "sections": [
     {
@@ -1956,6 +2209,7 @@ ${normalizedPlan}
 Use these expanded section briefs:
 ${normalizedExpansion}
 
+Preserve the chosen template's layout rhythm and block variety.
 Build the page in a structured, polished way instead of one-shotting the whole document.`
             }
         ];
@@ -5175,6 +5429,8 @@ Build the page in a structured, polished way instead of one-shotting the whole d
             blockCount: 0,
             wordCount: 0,
             outline: []
+        }, {
+            question
         });
 
         const attemptedModels = [];
@@ -6035,6 +6291,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         _generateStubResponse: generateStubResponse,
         _simulateStreaming: simulateStreaming,
         _buildSystemPrompt: buildSystemPrompt,
+        _selectNotesPageTemplates: selectNotesPageTemplates,
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,
         _normalizeStructuredPageActions: normalizeStructuredPageActions,

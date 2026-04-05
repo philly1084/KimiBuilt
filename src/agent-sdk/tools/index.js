@@ -1669,7 +1669,7 @@ class ToolManager {
           additionalProperties: false,
         },
         skill: {
-          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question', 'questionnaire tool', 'survey tool', 'test the questionnaire tool', 'quick user choice', 'quick checkpoint', 'involve the user quickly'],
+          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question', 'questionnaire tool', 'questionaire', 'survey tool', 'test the questionnaire tool', 'quick user choice', 'quick checkpoint', 'involve the user quickly', 'ask me a survey', 'inline survey', 'survey card', 'checkpoint card'],
           requiresConfirmation: false,
         },
         frontend: {

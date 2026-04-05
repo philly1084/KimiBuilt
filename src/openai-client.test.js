@@ -874,6 +874,63 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('forces user-checkpoint for inline survey card prompts and common questionnaire misspellings', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Can you ask me these questions as a questionaire in the inline survey card?';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        const toolChoice = __testUtils.buildAutomaticToolChoice(
+            selectedTools,
+            'responses',
+            {
+                prompt,
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 2,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        expect(__testUtils.hasExplicitUserCheckpointInteractionIntent(prompt)).toBe(true);
+        expect(selectedTools.map((tool) => tool.id)).toContain('user-checkpoint');
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'user-checkpoint',
+        });
+    });
+
     test('offers document-workflow for research-backed deck generation when document service is available', () => {
         const toolManager = createToolManager();
         const prompt = 'Research vacation pricing in Halifax and build a slide deck I can review.';
