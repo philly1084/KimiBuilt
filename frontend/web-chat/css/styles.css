@@ -1220,6 +1220,17 @@ body.mobile-chat-menu-open {
     background: rgba(255, 255, 255, 0.015);
 }
 
+.model-selector-list-header__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text-secondary);
+}
+
+.model-selector-list-header__title i {
+    color: var(--accent);
+}
+
 .assistant-preview-btn {
     border: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.03);
