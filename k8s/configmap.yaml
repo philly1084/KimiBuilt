@@ -31,5 +31,6 @@ data:
   KIMIBUILT_DEPLOY_DEPLOYMENT: "backend"
   KIMIBUILT_DEPLOY_CONTAINER: "backend"
   KIMIBUILT_DEPLOY_BRANCH: "master"
+  KIMIBUILT_STATE_DIR: "/home/kimibuilt/.kimibuilt"
   PORT: "3000"
   NODE_ENV: "production"

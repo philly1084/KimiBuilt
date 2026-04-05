@@ -10,6 +10,11 @@ const { buildSessionInstructions } = require('../session-instructions');
 const { postgres } = require('../postgres');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const {
+    isDashboardRequest,
+    selectDashboardTemplates,
+    buildDashboardTemplatePromptContext,
+} = require('../dashboard-template-catalog');
+const {
     buildDocumentCreativityPacket,
     inferDocumentTypeFromPrompt,
     renderCreativityPromptContext,
@@ -579,6 +584,26 @@ function buildDocumentImageInstructions() {
     ].join('\n');
 }
 
+function buildDashboardHtmlInstructions(requestPrompt = '', existingContent = '') {
+    const dashboardContext = buildDashboardTemplatePromptContext({
+        prompt: requestPrompt,
+        existingContent,
+        limit: 3,
+    });
+
+    if (!dashboardContext) {
+        return '';
+    }
+
+    return [
+        dashboardContext,
+        'Implement the chosen primary dashboard option fully instead of producing a generic landing page with random charts.',
+        'Set <body data-dashboard-template="template-id"> using the chosen option id.',
+        'Add stable data-dashboard-zone attributes on major regions such as hero, filters, kpi-rail, chart-grid, table-panel, alerts, or activity-feed.',
+        'Use realistic dashboard modules, filters, tables, and chart placeholders that fit the chosen domain.',
+    ].join('\n');
+}
+
 function looksLikeStandaloneHtml(text = '') {
     return /<!doctype html>|<html\b|<body\b|<main\b|<article\b|<section\b|<header\b|<figure\b|<img\b|<h1\b/i.test(String(text || ''));
 }
@@ -882,7 +907,8 @@ function isFrontendDemoArtifactRequest(prompt = '') {
         return false;
     }
 
-    return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup)\b/.test(normalized);
+    return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup)\b/.test(normalized)
+        || isDashboardRequest(normalized);
 }
 
 class ArtifactService {
@@ -1171,6 +1197,9 @@ class ArtifactService {
     getGenerationInstructions(format, existingContent = '', promptContext = '', creativityPacket = null, requestPrompt = '') {
         const normalizedFormat = normalizeFormat(format);
         const creativityContext = renderCreativityPromptContext(creativityPacket);
+        const dashboardInstructions = normalizedFormat === 'html'
+            ? buildDashboardHtmlInstructions(requestPrompt, existingContent)
+            : '';
         const base = [
             'You are the LillyBuilt Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
@@ -1186,6 +1215,7 @@ class ArtifactService {
             return [
                 base,
                 buildDocumentImageInstructions(),
+                dashboardInstructions,
                 'Return standalone HTML only.',
                 'Start at the first character with <!DOCTYPE html> and include no preface, explanation, or trailing notes.',
                 'Build a polished frontend demo instead of a plain document.',
@@ -1603,6 +1633,13 @@ class ArtifactService {
         });
         const imageReferenceContext = this.formatImageReferenceContext(imageReferences);
         const combinedExistingContent = [template, existingContent].filter(Boolean).join('\n\n');
+        const dashboardTemplates = normalizedFormat === 'html'
+            ? selectDashboardTemplates({
+                prompt,
+                existingContent: combinedExistingContent,
+                limit: 3,
+            })
+            : [];
         const creativityPacket = buildDocumentCreativityPacket({
             prompt,
             documentType: inferDocumentTypeFromPrompt(prompt),
@@ -1690,6 +1727,17 @@ class ArtifactService {
                 themeSuggestion: generated.metadata?.themeSuggestion || creativityPacket.themeSuggestion || null,
             }
             : {};
+        const dashboardMetadata = dashboardTemplates.length > 0
+            ? {
+                dashboardTemplateSuggestedPrimaryId: dashboardTemplates[0].id,
+                dashboardTemplateSuggestedPrimaryLabel: dashboardTemplates[0].label,
+                dashboardTemplateOptions: dashboardTemplates.map((templateOption) => ({
+                    id: templateOption.id,
+                    label: templateOption.label,
+                    summary: templateOption.summary,
+                })),
+            }
+            : {};
 
         const artifact = await this.createStoredArtifact({
             sessionId,
@@ -1709,6 +1757,7 @@ class ArtifactService {
                 sourcePrompt: prompt,
                 artifactIds,
                 ...creativeMetadata,
+                ...dashboardMetadata,
                 ...(generated.metadata || {}),
             },
             vectorize: Boolean(rendered.extractedText),

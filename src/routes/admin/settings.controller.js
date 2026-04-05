@@ -11,6 +11,7 @@ const {
   resetSoulFile,
   writeSoulFile,
 } = require('../../agent-soul');
+const { resolvePreferredWritableFile } = require('../../runtime-state-paths');
 
 class SettingsController {
   constructor() {
@@ -207,10 +208,8 @@ class SettingsController {
    */
   async saveSettings() {
     try {
-      const configDir = path.join(__dirname, '../../../config');
-      await fs.mkdir(configDir, { recursive: true });
-      
-      const settingsPath = path.join(configDir, 'dashboard-settings.json');
+      const settingsPath = this.getSettingsPath();
+      await fs.mkdir(path.dirname(settingsPath), { recursive: true });
       await fs.writeFile(settingsPath, JSON.stringify(this.settings, null, 2));
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -222,7 +221,7 @@ class SettingsController {
    */
   async loadSettings() {
     try {
-      const settingsPath = path.join(__dirname, '../../../config/dashboard-settings.json');
+      const settingsPath = this.getSettingsPath();
       const data = await fs.readFile(settingsPath, 'utf8');
       this.settings = this.deepMerge(this.getDefaultSettings(), JSON.parse(data));
     } catch (error) {
@@ -340,6 +339,18 @@ class SettingsController {
     }
 
     return publicSettings;
+  }
+
+  getSettingsPath() {
+    const configured = String(process.env.KIMIBUILT_SETTINGS_PATH || '').trim();
+    if (configured) {
+      return path.resolve(path.join(__dirname, '../../..'), configured);
+    }
+
+    return resolvePreferredWritableFile(
+      path.join(__dirname, '../../../config/dashboard-settings.json'),
+      ['dashboard-settings.json'],
+    );
   }
 
   getEffectivePersonalityConfig() {

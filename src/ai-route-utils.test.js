@@ -209,6 +209,7 @@ describe('ai-route-utils', () => {
     test('inferRequestedOutputFormat treats landing-page and frontend-demo requests as html artifacts', () => {
         expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBe('html');
         expect(inferRequestedOutputFormat('Create a frontend demo microsite for our product launch')).toBe('html');
+        expect(inferRequestedOutputFormat('Create an admin dashboard HTML for customer support ops')).toBe('html');
     });
 
     test('hasExplicitMermaidFileIntent only returns true for file-like Mermaid requests', () => {

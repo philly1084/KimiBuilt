@@ -2,6 +2,7 @@ const OpenAI = require('openai');
 const { config } = require('./config');
 const settingsController = require('./routes/admin/settings.controller');
 const { normalizeReasoningEffort } = require('./ai-route-utils');
+const { isDashboardRequest } = require('./dashboard-template-catalog');
 const {
     hasWorkloadIntent,
     summarizeTrigger,
@@ -1006,6 +1007,7 @@ function inferRequestedOutputFormatForPreflight(text = '') {
     }
 
     const hasArtifactIntent = hasExplicitArtifactGenerationIntentForPreflight(normalized);
+    const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(normalized);
 
     if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
         || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
@@ -1031,6 +1033,14 @@ function inferRequestedOutputFormatForPreflight(text = '') {
 
     if (hasExplicitMermaidArtifactIntentForPreflight(normalized)) {
         return 'mermaid';
+    }
+
+    if ((hasArtifactIntent || hasBuildIntent)
+        && (
+            /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
+            || isDashboardRequest(normalized)
+        )) {
+        return 'html';
     }
 
     if (/\bhtml\b/.test(normalized) && hasArtifactIntent) {

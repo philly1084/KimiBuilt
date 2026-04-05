@@ -1,8 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+const {
+    PROJECT_ROOT,
+    resolvePreferredWritableFile,
+} = require('./runtime-state-paths');
 
-const PROJECT_ROOT = path.resolve(__dirname, '..');
-const DEFAULT_SOUL_FILE = path.join(PROJECT_ROOT, 'soul.md');
+const REPO_SOUL_FILE = path.join(PROJECT_ROOT, 'soul.md');
 const DEFAULT_SOUL_MARKDOWN = `# Soul
 
 You are the KimiBuilt assistant: calm, observant, practical, and quietly confident.
@@ -28,9 +31,11 @@ let cachedSoul = null;
 
 function getSoulFilePath() {
     const configured = String(process.env.KIMIBUILT_SOUL_PATH || '').trim();
-    return configured
-        ? path.resolve(PROJECT_ROOT, configured)
-        : DEFAULT_SOUL_FILE;
+    if (configured) {
+        return path.resolve(PROJECT_ROOT, configured);
+    }
+
+    return resolvePreferredWritableFile(REPO_SOUL_FILE, ['soul.md']);
 }
 
 function toDisplayPath(filePath = '') {

@@ -1,5 +1,6 @@
 'use strict';
 
+const { isDashboardRequest } = require('../dashboard-template-catalog');
 const { extractStructuredExecution } = require('./execution-extractor');
 const {
     deriveWorkloadTitle,
@@ -240,7 +241,9 @@ function hasExplicitArtifactGenerationIntent(text = '') {
 
 function inferDeferredArtifactOutputFormat(prompt = '') {
     const normalized = sanitizeText(prompt).toLowerCase();
-    if (!normalized || !hasExplicitArtifactGenerationIntent(normalized)) {
+    const hasArtifactIntent = hasExplicitArtifactGenerationIntent(normalized);
+    const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(normalized);
+    if (!normalized || (!hasArtifactIntent && !hasBuildIntent)) {
         return null;
     }
 
@@ -252,7 +255,11 @@ function inferDeferredArtifactOutputFormat(prompt = '') {
         return 'docx';
     }
 
-    if (/\bhtml\b/.test(normalized)) {
+    if (/\bhtml\b/.test(normalized)
+        || (
+            /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
+            || isDashboardRequest(normalized)
+        )) {
         return 'html';
     }
 

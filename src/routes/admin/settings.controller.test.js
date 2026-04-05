@@ -1,4 +1,9 @@
 jest.mock('fs', () => ({
+  constants: {
+    F_OK: 0,
+    W_OK: 2,
+  },
+  accessSync: jest.fn(() => undefined),
   promises: {
     mkdir: jest.fn().mockResolvedValue(),
     writeFile: jest.fn().mockResolvedValue(),

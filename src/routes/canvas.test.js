@@ -45,6 +45,18 @@ describe('/api/canvas helpers', () => {
         expect(instructions).toContain('Existing demo');
     });
 
+    test('buildCanvasInstructions injects dashboard template guidance for dashboard prompts', () => {
+        const instructions = buildCanvasInstructions(
+            'frontend',
+            '',
+            'Build an admin dashboard HTML for support operations',
+        );
+
+        expect(instructions).toContain('[Dashboard template catalog]');
+        expect(instructions).toContain('metadata.dashboardTemplate');
+        expect(instructions).toContain('data-dashboard-template');
+    });
+
     test('parseCanvasResponse normalizes frontend metadata from structured JSON', () => {
         const parsed = parseCanvasResponse(JSON.stringify({
             content: '<!DOCTYPE html><html><head><title>Nova Demo</title></head><body><section id="hero"></section></body></html>',

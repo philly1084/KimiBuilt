@@ -4,6 +4,7 @@ const { buildSessionInstructions } = require('./session-instructions');
 const { config } = require('./config');
 const { getSessionControlState } = require('./runtime-control-state');
 const { resolveDeferredWorkloadPreflight } = require('./workloads/preflight');
+const { isDashboardRequest } = require('./dashboard-template-catalog');
 const settingsController = require('./routes/admin/settings.controller');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -267,6 +268,7 @@ function inferRequestedOutputFormat(text = '') {
     }
 
     const hasArtifactIntent = hasExplicitArtifactGenerationIntent(normalized);
+    const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(normalized);
 
     if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
         || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
@@ -294,8 +296,11 @@ function inferRequestedOutputFormat(text = '') {
         return 'mermaid';
     }
 
-    if (hasArtifactIntent
-        && /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)) {
+    if ((hasArtifactIntent || hasBuildIntent)
+        && (
+            /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
+            || isDashboardRequest(normalized)
+        )) {
         return 'html';
     }
 

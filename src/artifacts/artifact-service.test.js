@@ -285,6 +285,44 @@ describe('ArtifactService', () => {
         expect(result.responseId).toBe('resp-frontend-1');
     });
 
+    test('injects dashboard template guidance for dashboard html artifacts', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-dashboard-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: '<!DOCTYPE html><html><body data-dashboard-template="admin-control-room"><main data-dashboard-zone="hero"><h1>Support Ops</h1></main></body></html>',
+                }],
+            }],
+        });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-1', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create an admin dashboard HTML for support operations with ticket queues and SLA timers.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse).toHaveBeenCalledTimes(1);
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('[Dashboard template catalog]');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('data-dashboard-template');
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                dashboardTemplateSuggestedPrimaryId: expect.any(String),
+                dashboardTemplateOptions: expect.arrayContaining([
+                    expect.objectContaining({
+                        id: expect.any(String),
+                        label: expect.any(String),
+                    }),
+                ]),
+            }),
+        }));
+    });
+
     test('injects verified session image references into multi-pass document instructions', async () => {
         createResponse
             .mockResolvedValueOnce({

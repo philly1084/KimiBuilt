@@ -6,6 +6,7 @@ const { executeConversationRuntime, resolveConversationExecutorFlag } = require(
 const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReasoningEffort } = require('../ai-route-utils');
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const { buildDashboardTemplatePromptContext, isDashboardRequest } = require('../dashboard-template-catalog');
 
 const router = Router();
 
@@ -243,7 +244,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         });
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            buildCanvasInstructions(canvasType, existingContent),
+            buildCanvasInstructions(canvasType, existingContent, message),
             artifactIds,
         );
 
@@ -330,7 +331,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
     }
 });
 
-function buildCanvasInstructions(canvasType, existingContent) {
+function buildCanvasInstructions(canvasType, existingContent, requestPrompt = '') {
     const base = `You are an AI assistant working in canvas mode. You generate structured content that can be displayed in an editable canvas interface.
 
 Always respond with valid JSON in this format:
@@ -339,15 +340,26 @@ Always respond with valid JSON in this format:
   "metadata": { "language": "...", "title": "..." },
   "suggestions": ["suggestion 1", "suggestion 2"]
 }`;
+    const dashboardPromptContext = canvasType === 'frontend' && isDashboardRequest(requestPrompt, existingContent)
+        ? buildDashboardTemplatePromptContext({
+            prompt: requestPrompt,
+            existingContent,
+            limit: 3,
+        })
+        : '';
 
     const typeInstructions = {
         code: '\n\nYou are generating CODE. Include the programming language in metadata.language. Provide working, well-commented code. Suggestions should be improvements or alternative approaches.',
         document: '\n\nYou are generating a DOCUMENT. Use markdown formatting. Include a title in metadata.title. Suggestions should be ways to expand or improve the document.',
         diagram: '\n\nYou are generating a DIAGRAM using Mermaid syntax. Include the diagram type in metadata.type (flowchart, sequence, etc). Suggestions should be ways to enhance the diagram.',
-        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML. Favor polished marketing sites, product pages, landing pages, editorial promos, dashboards, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. Suggestions should be concrete next frontend iterations.',
+        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML. Favor polished marketing sites, product pages, landing pages, editorial promos, dashboards, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. When the request is dashboard-oriented, choose one dashboard template from the provided catalog, include metadata.dashboardTemplate as {"id":"...","label":"...","rationale":"..."}, include metadata.dashboardTemplateOptions as [{"id":"...","label":"..."}], set <body data-dashboard-template="template-id">, and add data-dashboard-zone attributes on major layout regions. Suggestions should be concrete next frontend iterations.',
     };
 
     let instructions = base + (typeInstructions[canvasType] || typeInstructions.document);
+
+    if (dashboardPromptContext) {
+        instructions += `\n\n${dashboardPromptContext}`;
+    }
 
     if (existingContent) {
         instructions += `\n\nThe user has existing content that they want to modify or build upon:\n\`\`\`\n${existingContent}\n\`\`\``;
