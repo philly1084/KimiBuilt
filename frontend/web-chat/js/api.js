@@ -13,8 +13,8 @@ const API_BASE_URL = LOCAL_HOSTNAMES.has(CURRENT_HOSTNAME)
     : `${CURRENT_ORIGIN}/v1`;
 const API_KEY = 'any-key'; // Required by SDK but not validated by LillyBuilt
 const BASE_URL_WITHOUT_API = API_BASE_URL.replace('/v1', '');
-const WEB_CHAT_TASK_TYPE = 'chat';
-const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
+const WEB_CHAT_API_TASK_TYPE = 'chat';
+const WEB_CHAT_API_CLIENT_SURFACE = 'web-chat';
 const USER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 
@@ -380,10 +380,10 @@ class OpenAIAPIClient extends EventTarget {
             messages,
             stream: true,
             enableConversationExecutor: true,
-            taskType: WEB_CHAT_TASK_TYPE,
-            clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            taskType: WEB_CHAT_API_TASK_TYPE,
+            clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
             metadata: {
-                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
             },
@@ -682,10 +682,10 @@ class OpenAIAPIClient extends EventTarget {
             messages,
             stream: false,
             enableConversationExecutor: true,
-            taskType: WEB_CHAT_TASK_TYPE,
-            clientSurface: WEB_CHAT_CLIENT_SURFACE,
+            taskType: WEB_CHAT_API_TASK_TYPE,
+            clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
             metadata: {
-                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
             },
@@ -1119,8 +1119,8 @@ class OpenAIAPIClient extends EventTarget {
         if (category) {
             params.set('category', category);
         }
-        params.set('taskType', WEB_CHAT_TASK_TYPE);
-        params.set('clientSurface', WEB_CHAT_CLIENT_SURFACE);
+        params.set('taskType', WEB_CHAT_API_TASK_TYPE);
+        params.set('clientSurface', WEB_CHAT_API_CLIENT_SURFACE);
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
             params.set('sessionId', this.currentSessionId);
         }
@@ -1164,10 +1164,10 @@ class OpenAIAPIClient extends EventTarget {
                 tool: toolId,
                 params,
                 sessionId: this.currentSessionId,
-                taskType: WEB_CHAT_TASK_TYPE,
-                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                taskType: WEB_CHAT_API_TASK_TYPE,
+                clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 metadata: {
-                    clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                    clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                     ...buildClientClockMetadata(),
                 },
             }),
