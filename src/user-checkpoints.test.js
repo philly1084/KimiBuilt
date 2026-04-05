@@ -5,6 +5,7 @@ const {
     buildUserCheckpointPolicy,
     buildUserCheckpointResponseMessage,
     extractPendingUserCheckpoint,
+    normalizeCheckpointRequest,
     parseUserCheckpointResponseMessage,
 } = require('./user-checkpoints');
 
@@ -69,14 +70,15 @@ describe('user checkpoint helpers', () => {
 
         expect(instructions).toContain('do not ask a blocking multiple-choice question as plain assistant text');
         expect(instructions).toContain('use the tool so the UI can render inline options');
-        expect(instructions).toContain('keep the free-text field available');
+        expect(instructions).toContain('keep the optional free-text path available');
         expect(instructions).toContain('Do not call or mention `request_user_input`');
         expect(instructions).toContain('Do not claim that the questionnaire rendered');
         expect(instructions).toContain('Do not turn that into a multi-question quiz');
         expect(instructions).toContain('sample survey text, markdown checkboxes');
         expect(instructions).toContain('primary quick way to involve the user');
         expect(instructions).toContain('Prefer `user-checkpoint` over a prose "which option do you want?" message');
-        expect(instructions).toContain('one card, one question');
+        expect(instructions).toContain('one card with one visible step at a time');
+        expect(instructions).toContain('Supported step types are single-choice, multi-choice, text, date, time, and datetime');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {
@@ -141,5 +143,54 @@ describe('user checkpoint helpers', () => {
             checkpointId: 'checkpoint-3',
             summary: 'chose "Fast patch" [fast]. Notes: Keep the backend changes narrow.',
         });
+    });
+
+    test('normalizes short multi-step questionnaires with text and time inputs', () => {
+        const checkpoint = normalizeCheckpointRequest({
+            title: 'Quick intake',
+            whyThisMatters: 'A few answers will shape the work.',
+            steps: [
+                {
+                    title: 'Direction',
+                    prompt: 'Which direction should I take first?',
+                    options: [
+                        'Refactor the backend',
+                        'Polish the web chat',
+                    ],
+                },
+                {
+                    question: 'What should the page be called?',
+                    inputType: 'text',
+                    placeholder: 'Type a short title',
+                },
+                {
+                    question: 'When should I schedule the follow-up?',
+                    type: 'time',
+                },
+            ],
+        });
+
+        expect(checkpoint).toEqual(expect.objectContaining({
+            title: 'Quick intake',
+            steps: [
+                expect.objectContaining({
+                    question: 'Which direction should I take first?',
+                    inputType: 'choice',
+                    options: [
+                        { id: 'refactor-the-backend', label: 'Refactor the backend' },
+                        { id: 'polish-the-web-chat', label: 'Polish the web chat' },
+                    ],
+                }),
+                expect.objectContaining({
+                    question: 'What should the page be called?',
+                    inputType: 'text',
+                    placeholder: 'Type a short title',
+                }),
+                expect.objectContaining({
+                    question: 'When should I schedule the follow-up?',
+                    inputType: 'time',
+                }),
+            ],
+        }));
     });
 });

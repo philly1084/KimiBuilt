@@ -18,6 +18,7 @@ const {
 const {
     USER_CHECKPOINT_TOOL_ID,
     buildUserCheckpointMessage,
+    normalizeCheckpointRequest,
 } = require('./user-checkpoints');
 const { parseLenientJson } = require('./utils/lenient-json');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
@@ -2112,8 +2113,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Do not claim that the inline survey card rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.');
         guidance.push('- Prefer `user-checkpoint` over a prose "which option do you want?" message when one short choice would unblock progress or keep the user involved.');
         guidance.push('- If the user asks you to ask them a survey, questionnaire, inline survey card, or checkpoint card, call `user-checkpoint` directly instead of replying with sample survey text, markdown checkboxes, or an offer to turn it into a card later.');
-        guidance.push('- Keep the checkpoint to one card and one question with 2 to 4 strong options, and leave the built-in free-text path available so the user can type their own answer.');
-        guidance.push('- Do not turn `user-checkpoint` into long forms, pages of questions, or back-to-back questionnaires.');
+        guidance.push('- Keep `user-checkpoint` to one card with one visible step at a time. Prefer a single question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake or back-and-forth.');
+        guidance.push('- Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and keep the built-in free-text path available when helpful.');
+        guidance.push('- Do not turn `user-checkpoint` into long forms, sprawling questionnaires, or more than 6 steps.');
         guidance.push('- If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not write a multi-question quiz or personality test as assistant text.');
     }
 
@@ -2313,6 +2315,177 @@ function parseToolArguments(rawArguments = '{}') {
             raw: rawArguments,
         };
     }
+}
+
+function normalizeQuestionnaireLine(value = '') {
+    return String(value || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractQuestionnaireQuestion(line = '') {
+    const normalized = normalizeQuestionnaireLine(line);
+    if (!normalized || /^reply like:/i.test(normalized)) {
+        return null;
+    }
+
+    const numberedMatch = normalized.match(/^\d+[.)]\s+(.+?\?)$/);
+    if (numberedMatch?.[1]) {
+        return numberedMatch[1].trim();
+    }
+
+    const explicitMatch = normalized.match(/^(?:sample\s+survey\s+question:\s*)?(.+?\?)$/i);
+    if (explicitMatch?.[1]) {
+        return explicitMatch[1].trim();
+    }
+
+    return null;
+}
+
+function extractQuestionnaireOption(line = '') {
+    const normalized = normalizeQuestionnaireLine(line);
+    if (!normalized) {
+        return null;
+    }
+
+    const checkboxMatch = normalized.match(/^(?:[-*]\s*)?\[\s?\]\s*(.+)$/);
+    if (checkboxMatch?.[1]) {
+        return {
+            label: checkboxMatch[1].trim(),
+        };
+    }
+
+    const letteredMatch = normalized.match(/^(?:[-*]\s*)?([A-Z])(?:[.)]|:)\s+(.+)$/);
+    if (letteredMatch?.[2]) {
+        return {
+            id: letteredMatch[1].toLowerCase(),
+            label: letteredMatch[2].trim(),
+        };
+    }
+
+    const bulletedMatch = normalized.match(/^[-*]\s+(.+)$/);
+    if (bulletedMatch?.[1] && !extractQuestionnaireQuestion(bulletedMatch[1])) {
+        return {
+            label: bulletedMatch[1].trim(),
+        };
+    }
+
+    return null;
+}
+
+function extractQuestionnaireCheckpointFromText(text = '') {
+    const source = String(text || '').replace(/\r/g, '').trim();
+    if (!source) {
+        return null;
+    }
+
+    const lines = source
+        .split('\n')
+        .map((line) => normalizeQuestionnaireLine(line))
+        .filter(Boolean);
+
+    if (lines.length === 0) {
+        return null;
+    }
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const question = extractQuestionnaireQuestion(lines[index]);
+        if (!question) {
+            continue;
+        }
+
+        const options = [];
+        for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+            const line = lines[cursor];
+
+            if (/^reply like:/i.test(line) || /^if you[’']d like/i.test(line) || /^---+$/.test(line)) {
+                break;
+            }
+
+            if (extractQuestionnaireQuestion(line) && options.length > 0) {
+                break;
+            }
+
+            const option = extractQuestionnaireOption(line);
+            if (option) {
+                options.push(option);
+                continue;
+            }
+
+            if (options.length > 0) {
+                break;
+            }
+        }
+
+        if (options.length >= 2) {
+            const hasLaterQuestion = lines.slice(index + 1).some((line) => Boolean(extractQuestionnaireQuestion(line)));
+            return normalizeCheckpointRequest({
+                title: 'Decision checkpoint',
+                preamble: hasLaterQuestion
+                    ? 'Web chat supports one inline checkpoint card at a time, so starting with the first decision.'
+                    : 'Choose an option below.',
+                question,
+                options: options.slice(0, 5),
+                allowFreeText: true,
+            });
+        }
+    }
+
+    return null;
+}
+
+function maybeRecoverUserCheckpointResponse({
+    response = null,
+    selectedTools = [],
+    toolEvents = [],
+    toolContext = {},
+    model = null,
+} = {}) {
+    if (!selectedTools.some((entry) => entry.id === USER_CHECKPOINT_TOOL_ID)) {
+        return null;
+    }
+
+    if ((Array.isArray(toolEvents) ? toolEvents : []).some((event) => (
+        (event?.toolCall?.function?.name || event?.result?.toolId || '') === USER_CHECKPOINT_TOOL_ID
+    ))) {
+        return null;
+    }
+
+    const checkpointPolicy = toolContext?.userCheckpointPolicy || {};
+    if (checkpointPolicy.enabled !== true
+        || Number(checkpointPolicy.remaining || 0) <= 0
+        || checkpointPolicy.pending) {
+        return null;
+    }
+
+    const checkpoint = extractQuestionnaireCheckpointFromText(getModelResponseText(response));
+    if (!checkpoint) {
+        return null;
+    }
+
+    const toolCall = {
+        id: 'recovered_user_checkpoint_1',
+        type: 'function',
+        function: {
+            name: USER_CHECKPOINT_TOOL_ID,
+            arguments: JSON.stringify(checkpoint),
+        },
+    };
+    const toolEvent = {
+        toolCall: normalizeToolCall(toolCall),
+        reason: 'Recovered a single inline checkpoint from plain-text questionnaire output.',
+        result: {
+            success: true,
+            toolId: USER_CHECKPOINT_TOOL_ID,
+            data: {
+                checkpoint,
+                message: buildUserCheckpointMessage(checkpoint),
+                recovered: true,
+            },
+        },
+    };
+
+    return buildDirectToolResponse(toolEvent, model, [...(Array.isArray(toolEvents) ? toolEvents : []), toolEvent]);
 }
 
 async function executeAutomaticToolCall(toolManager, toolCall, context = {}) {
@@ -2755,6 +2928,17 @@ async function runAutomaticToolLoopWithResponses(openai, {
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
         });
 
+        const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+            response: finalResponse,
+            selectedTools,
+            toolEvents,
+            toolContext,
+            model,
+        });
+        if (recoveredCheckpointResponse) {
+            return recoveredCheckpointResponse;
+        }
+
         if (toolEvents.length > 0) {
             finalResponse._kimibuilt = {
                 toolEvents,
@@ -2784,6 +2968,17 @@ async function runAutomaticToolLoopWithResponses(openai, {
         const toolCalls = getResponseFunctionCalls(finalResponse);
 
         if (toolCalls.length === 0) {
+            const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+                response: finalResponse,
+                selectedTools,
+                toolEvents,
+                toolContext,
+                model,
+            });
+            if (recoveredCheckpointResponse) {
+                return recoveredCheckpointResponse;
+            }
+
             if (toolEvents.length > 0) {
                 finalResponse._kimibuilt = {
                     toolEvents,
@@ -2798,6 +2993,17 @@ async function runAutomaticToolLoopWithResponses(openai, {
         })));
         if (seenToolCalls.has(signature)) {
             console.warn('[OpenAI] Endless tool loop detected (duplicate calls), breaking early.');
+            const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+                response: finalResponse,
+                selectedTools,
+                toolEvents,
+                toolContext,
+                model,
+            });
+            if (recoveredCheckpointResponse) {
+                return recoveredCheckpointResponse;
+            }
+
             if (toolEvents.length > 0) {
                 finalResponse._kimibuilt = { toolEvents };
             }
@@ -2846,6 +3052,17 @@ async function runAutomaticToolLoopWithResponses(openai, {
         tool_choice: 'none',
         ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
     });
+
+    const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+        response: finalResponse,
+        selectedTools,
+        toolEvents,
+        toolContext,
+        model,
+    });
+    if (recoveredCheckpointResponse) {
+        return recoveredCheckpointResponse;
+    }
 
     if (toolEvents.length > 0) {
         finalResponse._kimibuilt = {
@@ -2910,6 +3127,17 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             ...chatReasoningParams,
         });
 
+        const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+            response: finalResponse,
+            selectedTools,
+            toolEvents,
+            toolContext,
+            model,
+        });
+        if (recoveredCheckpointResponse) {
+            return recoveredCheckpointResponse;
+        }
+
         if (toolEvents.length > 0) {
             finalResponse._kimibuilt = {
                 toolEvents,
@@ -2937,6 +3165,17 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
 
         if (toolCalls.length === 0) {
+            const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+                response: finalResponse,
+                selectedTools,
+                toolEvents,
+                toolContext,
+                model,
+            });
+            if (recoveredCheckpointResponse) {
+                return recoveredCheckpointResponse;
+            }
+
             if (toolEvents.length > 0) {
                 finalResponse._kimibuilt = {
                     toolEvents,
@@ -2948,6 +3187,17 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         const signature = JSON.stringify(toolCalls.map((tc) => ({ name: tc.function?.name, args: tc.function?.arguments })));
         if (seenToolCalls.has(signature)) {
             console.warn('[OpenAI] Endless tool loop detected (duplicate calls), breaking early.');
+            const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+                response: finalResponse,
+                selectedTools,
+                toolEvents,
+                toolContext,
+                model,
+            });
+            if (recoveredCheckpointResponse) {
+                return recoveredCheckpointResponse;
+            }
+
             if (toolEvents.length > 0) {
                 finalResponse._kimibuilt = { toolEvents };
             }
@@ -2986,6 +3236,17 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         stream: false,
         ...chatReasoningParams,
     });
+
+    const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
+        response: finalResponse,
+        selectedTools,
+        toolEvents,
+        toolContext,
+        model,
+    });
+    if (recoveredCheckpointResponse) {
+        return recoveredCheckpointResponse;
+    }
 
     if (toolEvents.length > 0) {
         finalResponse._kimibuilt = {
@@ -3441,6 +3702,8 @@ module.exports = {
         shouldUseResponsesAPI,
         promptHasExplicitSshIntent,
         hasExplicitUserCheckpointInteractionIntent,
+        extractQuestionnaireCheckpointFromText,
+        maybeRecoverUserCheckpointResponse,
         hasUsableSshDefaults,
         isTerminalFinishReason,
         parseLenientJson,

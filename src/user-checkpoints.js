@@ -1,6 +1,7 @@
 const { getSessionControlState } = require('./runtime-control-state');
 
 const DEFAULT_MAX_USER_CHECKPOINTS = 2;
+const MAX_USER_CHECKPOINT_STEPS = 6;
 const USER_CHECKPOINT_TOOL_ID = 'user-checkpoint';
 const USER_CHECKPOINT_SURFACE = 'web-chat';
 const USER_CHECKPOINT_FENCE_LANGUAGE = 'survey';
@@ -48,11 +49,59 @@ function resolveAllowFreeText(value = {}) {
     return true;
 }
 
+function normalizeCheckpointInputType(value = '', { hasOptions = false, allowMultiple = false } = {}) {
+    const normalized = trimText(value)
+        .toLowerCase()
+        .replace(/[_\s]+/g, '-');
+
+    if (['multi-choice', 'multiple-choice', 'multi', 'checkbox', 'checkboxes'].includes(normalized)) {
+        return 'multi-choice';
+    }
+
+    if (['choice', 'single-choice', 'select', 'radio', 'options'].includes(normalized)) {
+        return 'choice';
+    }
+
+    if (['text', 'textarea', 'open-ended', 'open', 'free-text'].includes(normalized)) {
+        return 'text';
+    }
+
+    if (['date', 'day'].includes(normalized)) {
+        return 'date';
+    }
+
+    if (['time', 'clock'].includes(normalized)) {
+        return 'time';
+    }
+
+    if (['datetime', 'date-time', 'datetime-local', 'timestamp', 'schedule'].includes(normalized)) {
+        return 'datetime';
+    }
+
+    if (hasOptions) {
+        return allowMultiple ? 'multi-choice' : 'choice';
+    }
+
+    return 'text';
+}
+
 function isUserCheckpointSurface(clientSurface = '') {
     return normalizeSurface(clientSurface) === USER_CHECKPOINT_SURFACE;
 }
 
 function normalizeCheckpointOption(option = {}, index = 0) {
+    if (typeof option === 'string') {
+        const label = trimText(option);
+        if (!label) {
+            return null;
+        }
+
+        return {
+            id: slugifyOptionId(label, `option-${index + 1}`),
+            label,
+        };
+    }
+
     if (!option || typeof option !== 'object') {
         return null;
     }
@@ -89,40 +138,116 @@ function normalizeCheckpointOptions(options = []) {
         .slice(0, 5);
 }
 
+function normalizeCheckpointStep(step = {}, index = 0) {
+    if (!step || typeof step !== 'object') {
+        return null;
+    }
+
+    const question = trimText(step.question || step.prompt || step.ask || '');
+    if (!question) {
+        return null;
+    }
+
+    const options = normalizeCheckpointOptions(step.options || step.choices || []);
+    const allowMultiple = step.allowMultiple === true || step.multiple === true;
+    const inputType = normalizeCheckpointInputType(step.inputType || step.type || step.kind || '', {
+        hasOptions: options.length > 0,
+        allowMultiple,
+    });
+    const isChoiceInput = inputType === 'choice' || inputType === 'multi-choice';
+
+    if (isChoiceInput && options.length < 2) {
+        return null;
+    }
+
+    const title = trimText(step.title || '');
+    const placeholder = trimText(step.placeholder || step.inputPlaceholder || step.freeTextPlaceholder || '');
+    const allowFreeText = isChoiceInput ? resolveAllowFreeText(step) : false;
+    const freeTextLabel = allowFreeText
+        ? trimText(step.freeTextLabel || step.freeTextPrompt || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL) || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL
+        : '';
+
+    return {
+        id: trimText(step.id || `step-${index + 1}`),
+        ...(title ? { title } : {}),
+        question,
+        inputType,
+        required: step.required !== false,
+        ...(placeholder ? { placeholder } : {}),
+        ...(isChoiceInput
+            ? {
+                options,
+                allowMultiple: inputType === 'multi-choice',
+                maxSelections: inputType === 'multi-choice'
+                    ? clampInteger(step.maxSelections, 1, options.length, Math.min(2, options.length))
+                    : 1,
+                allowFreeText,
+                ...(allowFreeText ? { freeTextLabel } : {}),
+            }
+            : {}),
+    };
+}
+
+function normalizeCheckpointSteps(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const rawSteps = Array.isArray(source.steps) ? source.steps : [];
+    const legacyStep = rawSteps.length === 0
+        ? normalizeCheckpointStep({
+            ...source,
+            inputType: source.inputType || source.type || source.kind || '',
+        }, 0)
+        : null;
+
+    const steps = rawSteps.length > 0
+        ? rawSteps
+            .map((step, index) => normalizeCheckpointStep(step, index))
+            .filter(Boolean)
+            .slice(0, MAX_USER_CHECKPOINT_STEPS)
+        : (legacyStep ? [legacyStep] : []);
+
+    return steps;
+}
+
+function buildCheckpointLegacyFields(steps = []) {
+    const firstStep = Array.isArray(steps) ? steps[0] : null;
+    if (!firstStep) {
+        return {};
+    }
+
+    return {
+        question: firstStep.question,
+        options: Array.isArray(firstStep.options) ? firstStep.options : [],
+        allowMultiple: firstStep.allowMultiple === true,
+        maxSelections: Number(firstStep.maxSelections || 1) > 0 ? Number(firstStep.maxSelections || 1) : 1,
+        allowFreeText: firstStep.allowFreeText === true,
+        ...(firstStep.allowFreeText
+            ? { freeTextLabel: firstStep.freeTextLabel || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL }
+            : {}),
+        inputType: firstStep.inputType || 'choice',
+        ...(firstStep.placeholder ? { placeholder: firstStep.placeholder } : {}),
+    };
+}
+
 function normalizePendingCheckpoint(value = null) {
     if (!value || typeof value !== 'object') {
         return null;
     }
 
-    const question = trimText(value.question || value.prompt || '');
-    const options = normalizeCheckpointOptions(value.options || value.choices || []);
-    if (!question || options.length < 2) {
+    const steps = normalizeCheckpointSteps(value);
+    if (steps.length === 0) {
         return null;
     }
-
-    const allowMultiple = value.allowMultiple === true;
-    const maxSelections = allowMultiple
-        ? clampInteger(value.maxSelections, 1, options.length, Math.min(2, options.length))
-        : 1;
     const title = trimText(value.title || 'Choose a direction');
     const whyThisMatters = trimText(value.whyThisMatters || value.context || value.rationale || '');
     const preamble = trimText(value.preamble || value.message || '');
-    const allowFreeText = resolveAllowFreeText(value);
-    const freeTextLabel = allowFreeText
-        ? trimText(value.freeTextLabel || value.freeTextPrompt || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL)
-        : '';
 
     return {
         id: trimText(value.id || `checkpoint-${Date.now().toString(36)}`),
         title,
-        question,
         ...(whyThisMatters ? { whyThisMatters } : {}),
         ...(preamble ? { preamble } : {}),
-        allowMultiple,
-        maxSelections,
-        allowFreeText,
-        ...(allowFreeText ? { freeTextLabel } : {}),
-        options,
+        steps,
+        ...buildCheckpointLegacyFields(steps),
     };
 }
 
@@ -171,45 +296,22 @@ function buildUserCheckpointPolicy({ session = null, clientSurface = '' } = {}) 
 }
 
 function normalizeCheckpointRequest(params = {}) {
-    const question = trimText(
-        params.question
-        || params.prompt
-        || params.request
-        || params.ask
-        || '',
-    );
-    if (!question) {
-        throw new Error('user-checkpoint requires a non-empty `question`.');
+    const steps = normalizeCheckpointSteps(params);
+    if (steps.length === 0) {
+        throw new Error('user-checkpoint requires either a valid `question` with answer options or a non-empty `steps` questionnaire.');
     }
-
-    const options = normalizeCheckpointOptions(params.options || params.choices || []);
-    if (options.length < 2) {
-        throw new Error('user-checkpoint requires 2 to 5 answer options.');
-    }
-
-    const allowMultiple = params.allowMultiple === true;
-    const maxSelections = allowMultiple
-        ? clampInteger(params.maxSelections, 1, options.length, Math.min(2, options.length))
-        : 1;
-    const allowFreeText = resolveAllowFreeText(params);
 
     return {
         id: trimText(params.id || `checkpoint-${Date.now().toString(36)}`),
         title: trimText(params.title || 'Choose a direction'),
-        question,
         ...(trimText(params.whyThisMatters || params.context || params.rationale || '')
             ? { whyThisMatters: trimText(params.whyThisMatters || params.context || params.rationale || '') }
             : {}),
         ...(trimText(params.preamble || params.message || 'I need one decision before I continue with the main work.')
             ? { preamble: trimText(params.preamble || params.message || 'I need one decision before I continue with the main work.') }
             : {}),
-        allowMultiple,
-        maxSelections,
-        allowFreeText,
-        ...(allowFreeText
-            ? { freeTextLabel: trimText(params.freeTextLabel || params.freeTextPrompt || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL) || DEFAULT_USER_CHECKPOINT_FREE_TEXT_LABEL }
-            : {}),
-        options,
+        steps,
+        ...buildCheckpointLegacyFields(steps),
     };
 }
 
@@ -223,11 +325,19 @@ function buildUserCheckpointMessage(checkpoint = null) {
         return 'I need one decision before I continue.';
     }
 
+    const stepCount = Array.isArray(normalized.steps) ? normalized.steps.length : 0;
+    const firstStep = stepCount > 0 ? normalized.steps[0] : null;
+    const closingLine = stepCount > 1
+        ? 'Complete the questionnaire below and I will continue from there.'
+        : (['text', 'date', 'time', 'datetime'].includes(firstStep?.inputType)
+            ? 'Answer below and I will continue from there.'
+            : 'Choose an option below and I will continue from there.');
+
     return [
         normalized.preamble || 'I need one decision before I continue with the main work.',
         normalized.whyThisMatters || '',
         buildUserCheckpointFence(normalized),
-        'Choose an option below and I will continue from there.',
+        closingLine,
     ].filter(Boolean).join('\n\n');
 }
 
@@ -351,8 +461,9 @@ function buildUserCheckpointInstructions(policy = {}) {
         'Prefer `user-checkpoint` over a prose "which option do you want?" message when one short decision would unblock progress or keep the user involved.',
         'Use a checkpoint only when the answer would materially change the plan, architecture, implementation scope, or final output.',
         'Do not use a checkpoint for small clarifications or details you can infer reasonably.',
-        'Keep the checkpoint concise: one card, one question, 2 to 4 strong options, short descriptions, and keep the free-text field available so the user can add their own input when needed.',
-        'Do not turn checkpoints into long forms, pages of questions, or back-to-back survey cards unless the user explicitly asks for that and the tool supports it.',
+        'Keep the checkpoint concise: one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake or back-and-forth.',
+        'Supported step types are single-choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and keep the optional free-text path available when helpful.',
+        `Do not turn checkpoints into long forms or sprawling questionnaires. Keep them to at most ${MAX_USER_CHECKPOINT_STEPS} steps unless the product adds a richer form surface.`,
         'If there are no checkpoint questions remaining, proceed with the best reasonable assumption and state that assumption briefly.',
         'When the user sends a message starting with `Survey response (` treat it as the answer to the checkpoint and continue the work.',
     ];
@@ -362,6 +473,7 @@ function buildUserCheckpointInstructions(policy = {}) {
 
 module.exports = {
     DEFAULT_MAX_USER_CHECKPOINTS,
+    MAX_USER_CHECKPOINT_STEPS,
     USER_CHECKPOINT_FENCE_LANGUAGE,
     USER_CHECKPOINT_RESPONSE_PREFIX,
     USER_CHECKPOINT_SURFACE,

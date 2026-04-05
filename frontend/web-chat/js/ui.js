@@ -677,39 +677,152 @@ class UIHelpers {
         return true;
     }
 
+    normalizeSurveyInputType(value = '', { hasOptions = false, allowMultiple = false } = {}) {
+        const normalized = String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[_\s]+/g, '-');
+
+        if (['multi-choice', 'multiple-choice', 'multi', 'checkbox', 'checkboxes'].includes(normalized)) {
+            return 'multi-choice';
+        }
+
+        if (['choice', 'single-choice', 'select', 'radio', 'options'].includes(normalized)) {
+            return 'choice';
+        }
+
+        if (['text', 'textarea', 'open-ended', 'open', 'free-text'].includes(normalized)) {
+            return 'text';
+        }
+
+        if (['date', 'day'].includes(normalized)) {
+            return 'date';
+        }
+
+        if (['time', 'clock'].includes(normalized)) {
+            return 'time';
+        }
+
+        if (['datetime', 'date-time', 'datetime-local', 'timestamp', 'schedule'].includes(normalized)) {
+            return 'datetime';
+        }
+
+        if (hasOptions) {
+            return allowMultiple ? 'multi-choice' : 'choice';
+        }
+
+        return 'text';
+    }
+
+    normalizeSurveyStep(step = {}, index = 0) {
+        if (!step || typeof step !== 'object') {
+            return null;
+        }
+
+        const question = String(step.question || step.prompt || step.ask || '').trim();
+        if (!question) {
+            return null;
+        }
+
+        const options = (Array.isArray(step.options) ? step.options : [])
+            .map((option, optionIndex) => this.normalizeSurveyOption(option, optionIndex))
+            .filter(Boolean)
+            .slice(0, 5);
+        const allowMultiple = step.allowMultiple === true || step.multiple === true;
+        const inputType = this.normalizeSurveyInputType(step.inputType || step.type || step.kind || '', {
+            hasOptions: options.length > 0,
+            allowMultiple,
+        });
+        const isChoiceInput = inputType === 'choice' || inputType === 'multi-choice';
+
+        if (isChoiceInput && options.length < 2) {
+            return null;
+        }
+
+        const title = String(step.title || '').trim();
+        const placeholder = String(step.placeholder || step.inputPlaceholder || step.freeTextPlaceholder || '').trim();
+        const allowFreeText = isChoiceInput ? this.resolveSurveyAllowFreeText(step) : false;
+
+        return {
+            id: String(step.id || `step-${index + 1}`).trim(),
+            ...(title ? { title } : {}),
+            question,
+            inputType,
+            required: step.required !== false,
+            ...(placeholder ? { placeholder } : {}),
+            ...(isChoiceInput
+                ? {
+                    options,
+                    allowMultiple: inputType === 'multi-choice',
+                    maxSelections: inputType === 'multi-choice'
+                        ? Math.min(options.length, Math.max(1, Number(step.maxSelections) || Math.min(2, options.length)))
+                        : 1,
+                    allowFreeText,
+                    ...(allowFreeText
+                        ? {
+                            freeTextLabel: String(step.freeTextLabel || step.freeTextPrompt || 'Add your own input (optional)').trim() || 'Add your own input (optional)',
+                        }
+                        : {}),
+                }
+                : {}),
+        };
+    }
+
+    normalizeSurveySteps(value = null) {
+        if (!value || typeof value !== 'object') {
+            return [];
+        }
+
+        const rawSteps = Array.isArray(value.steps) ? value.steps : [];
+        const legacyStep = rawSteps.length === 0
+            ? this.normalizeSurveyStep({
+                ...value,
+                options: value.options,
+            }, 0)
+            : null;
+
+        return rawSteps.length > 0
+            ? rawSteps
+                .map((step, index) => this.normalizeSurveyStep(step, index))
+                .filter(Boolean)
+                .slice(0, 6)
+            : (legacyStep ? [legacyStep] : []);
+    }
+
+    buildLegacySurveyFields(steps = []) {
+        const firstStep = Array.isArray(steps) ? steps[0] : null;
+        if (!firstStep) {
+            return {};
+        }
+
+        return {
+            question: firstStep.question,
+            options: Array.isArray(firstStep.options) ? firstStep.options : [],
+            allowMultiple: firstStep.allowMultiple === true,
+            maxSelections: Number(firstStep.maxSelections || 1) > 0 ? Number(firstStep.maxSelections || 1) : 1,
+            allowFreeText: firstStep.allowFreeText === true,
+            ...(firstStep.allowFreeText ? { freeTextLabel: firstStep.freeTextLabel || 'Add your own input (optional)' } : {}),
+            inputType: firstStep.inputType || 'choice',
+            ...(firstStep.placeholder ? { placeholder: firstStep.placeholder } : {}),
+        };
+    }
+
     normalizeSurveyDefinition(value = null) {
         if (!value || typeof value !== 'object') {
             return null;
         }
 
-        const options = (Array.isArray(value.options) ? value.options : [])
-            .map((option, index) => this.normalizeSurveyOption(option, index))
-            .filter(Boolean)
-            .slice(0, 5);
-
-        const question = String(value.question || value.prompt || '').trim();
-        if (!question || options.length < 2) {
+        const steps = this.normalizeSurveySteps(value);
+        if (steps.length === 0) {
             return null;
         }
-
-        const allowMultiple = value.allowMultiple === true;
-        const maxSelections = allowMultiple
-            ? Math.min(options.length, Math.max(1, Number(value.maxSelections) || Math.min(2, options.length)))
-            : 1;
-        const allowFreeText = this.resolveSurveyAllowFreeText(value);
 
         return {
             id: String(value.id || `survey-${Date.now().toString(36)}`).trim(),
             title: String(value.title || 'Choose a direction').trim() || 'Choose a direction',
-            question,
             whyThisMatters: String(value.whyThisMatters || value.context || value.rationale || '').trim(),
-            allowMultiple,
-            maxSelections,
-            allowFreeText,
-            freeTextLabel: allowFreeText
-                ? (String(value.freeTextLabel || value.freeTextPrompt || 'Add your own input (optional)').trim() || 'Add your own input (optional)')
-                : '',
-            options,
+            steps,
+            ...this.buildLegacySurveyFields(steps),
         };
     }
 
@@ -829,7 +942,22 @@ class UIHelpers {
         return this.extractPlainSurveyDefinition(source, fallbackId);
     }
 
-    buildSurveyAnsweredSummary(surveyState = {}) {
+    buildSurveyAnsweredSummary(surveyState = {}, survey = null) {
+        const explicitSummary = String(surveyState.summary || '').trim();
+        if (explicitSummary) {
+            return explicitSummary;
+        }
+
+        const stepResponses = surveyState?.stepResponses && typeof surveyState.stepResponses === 'object'
+            ? surveyState.stepResponses
+            : {};
+        const stepSummaries = (Array.isArray(survey?.steps) ? survey.steps : [])
+            .map((step) => this.buildSurveyStepAnswerSummary(step, stepResponses?.[step.id] || null))
+            .filter(Boolean);
+        if (stepSummaries.length > 0) {
+            return stepSummaries.join(' | ');
+        }
+
         const selectedLabels = Array.isArray(surveyState.selectedLabels)
             ? surveyState.selectedLabels.filter(Boolean)
             : [];
@@ -855,11 +983,11 @@ class UIHelpers {
         };
     }
 
-    buildRenderedSurveyOptions(survey = {}) {
-        const options = Array.isArray(survey.options)
-            ? survey.options.map((option) => ({ ...option }))
+    buildRenderedSurveyOptions(step = {}) {
+        const options = Array.isArray(step.options)
+            ? step.options.map((option) => ({ ...option }))
             : [];
-        if (!survey.allowFreeText) {
+        if (!step.allowFreeText) {
             return options;
         }
 
@@ -876,24 +1004,176 @@ class UIHelpers {
         return options;
     }
 
+    getSurveyStepAnswer(surveyState = {}, stepId = '') {
+        if (!stepId) {
+            return null;
+        }
+
+        return surveyState?.stepResponses && typeof surveyState.stepResponses === 'object'
+            ? (surveyState.stepResponses[stepId] || null)
+            : null;
+    }
+
+    getSurveyCurrentStepIndex(survey = {}, surveyState = {}) {
+        const steps = Array.isArray(survey?.steps) ? survey.steps : [];
+        if (steps.length === 0) {
+            return 0;
+        }
+
+        const requestedIndex = Number(surveyState?.currentStepIndex || 0);
+        if (!Number.isFinite(requestedIndex)) {
+            return 0;
+        }
+
+        return Math.max(0, Math.min(steps.length - 1, Math.round(requestedIndex)));
+    }
+
+    buildSurveyStepAnswerSummary(step = {}, response = null) {
+        if (!step || !response || typeof response !== 'object') {
+            return '';
+        }
+
+        const selectedLabels = Array.isArray(response.selectedLabels)
+            ? response.selectedLabels.filter(Boolean)
+            : [];
+        const text = String(response.text || response.value || '').trim();
+        const answer = selectedLabels.length > 0
+            ? [selectedLabels.join(', '), text].filter(Boolean).join(' | ')
+            : text;
+
+        if (!answer) {
+            return '';
+        }
+
+        return `${String(step.question || 'Answer').trim()}: ${answer}`;
+    }
+
+    isSurveyStepComplete(step = {}, answer = null) {
+        if (!step || typeof step !== 'object') {
+            return false;
+        }
+
+        const inputType = String(step.inputType || 'choice').trim();
+        const required = step.required !== false;
+        const response = answer && typeof answer === 'object' ? answer : {};
+
+        if (inputType === 'choice' || inputType === 'multi-choice') {
+            const selectedOptionIds = Array.isArray(response.selectedOptionIds)
+                ? response.selectedOptionIds.filter(Boolean)
+                : [];
+            const selectedLabels = Array.isArray(response.selectedLabels)
+                ? response.selectedLabels.filter(Boolean)
+                : [];
+            const notes = String(response.text || '').trim();
+            const selectedCount = Math.max(selectedOptionIds.length, selectedLabels.length);
+            const customSelected = selectedOptionIds.includes(this.getSurveyCustomOption().id)
+                || selectedLabels.includes(this.getSurveyCustomOption().label);
+
+            if (!required && selectedCount === 0 && !notes) {
+                return true;
+            }
+
+            if (selectedCount === 0) {
+                return false;
+            }
+
+            return !(customSelected && selectedCount === 1 && !notes);
+        }
+
+        const value = String(response.value || response.text || '').trim();
+        return required ? Boolean(value) : true;
+    }
+
     updateSurveySubmitState(card) {
         if (!card) {
             return;
         }
 
-        const allOptions = Array.from(card.querySelectorAll('.agent-survey-option'));
-        const selectedOptions = allOptions.filter((entry) => entry.classList.contains('is-selected'));
         const submitButton = card.querySelector('.agent-survey-card__submit');
-        const notes = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
-        const customOptionId = this.getSurveyCustomOption().id;
-        const customSelected = selectedOptions.some((entry) => String(entry.dataset.optionId || '').trim() === customOptionId);
-        const hasSelection = selectedOptions.length > 0;
-        const customNeedsNotes = customSelected && selectedOptions.length === 1 && !notes;
-        const canSubmit = hasSelection && !customNeedsNotes;
+        const inputType = String(card.dataset.stepInputType || 'choice').trim();
+        const required = card.dataset.stepRequired !== 'false';
+        let canSubmit = false;
+
+        if (inputType === 'choice' || inputType === 'multi-choice') {
+            const allOptions = Array.from(card.querySelectorAll('.agent-survey-option'));
+            const selectedOptions = allOptions.filter((entry) => entry.classList.contains('is-selected'));
+            const notes = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
+            const customOptionId = this.getSurveyCustomOption().id;
+            const customSelected = selectedOptions.some((entry) => String(entry.dataset.optionId || '').trim() === customOptionId);
+            const hasSelection = selectedOptions.length > 0;
+            const customNeedsNotes = customSelected && selectedOptions.length === 1 && !notes;
+            canSubmit = required ? (hasSelection && !customNeedsNotes) : (!customNeedsNotes);
+        } else {
+            const value = String(card.querySelector('.agent-survey-card__input')?.value || '').trim();
+            canSubmit = required ? Boolean(value) : true;
+        }
 
         if (submitButton) {
             submitButton.disabled = !canSubmit;
         }
+    }
+
+    renderSurveyStepInput(step = {}, stepAnswer = {}, isAnswered = false) {
+        const inputType = String(step.inputType || 'choice').trim();
+
+        if (inputType === 'choice' || inputType === 'multi-choice') {
+            const selectedOptionIds = new Set(Array.isArray(stepAnswer?.selectedOptionIds) ? stepAnswer.selectedOptionIds : []);
+            const renderedOptions = this.buildRenderedSurveyOptions(step);
+            const optionsHtml = renderedOptions.map((option) => {
+                const selected = selectedOptionIds.has(option.id);
+                return [
+                    `<button type="button" class="agent-survey-option ${selected ? 'is-selected' : ''}"`,
+                    ` data-option-id="${this.escapeHtmlAttr(option.id)}"`,
+                    ` data-option-label="${this.escapeHtmlAttr(option.label)}"`,
+                    ' onclick="uiHelpers.toggleSurveyOption(this)"',
+                    isAnswered ? ' disabled' : '',
+                    ` aria-checked="${selected ? 'true' : 'false'}">`,
+                    `<span class="agent-survey-option__title">${this.escapeHtml(option.label)}</span>`,
+                    option.description ? `<span class="agent-survey-option__description">${this.escapeHtml(option.description)}</span>` : '',
+                    '</button>',
+                ].join('');
+            }).join('');
+
+            return [
+                `<div class="agent-survey-card__options">${optionsHtml}</div>`,
+                step.allowFreeText
+                    ? [
+                        '<label class="agent-survey-card__notes-label">',
+                        `<span>${this.escapeHtml(step.freeTextLabel || 'Add your own input (optional)')}</span>`,
+                        `<textarea class="agent-survey-card__notes" rows="3" maxlength="500" placeholder="Type your own answer or extra context for the agent" oninput="uiHelpers.syncSurveyFreeText(this)" ${isAnswered ? 'disabled' : ''}>${this.escapeHtml(stepAnswer?.text || '')}</textarea>`,
+                        '</label>',
+                    ].join('')
+                    : '',
+            ].filter(Boolean).join('');
+        }
+
+        const inputTypeMap = {
+            text: 'text',
+            date: 'date',
+            time: 'time',
+            datetime: 'datetime-local',
+        };
+        const htmlInputType = inputTypeMap[inputType] || 'text';
+        const value = String(stepAnswer?.value || stepAnswer?.text || '').trim();
+        const placeholder = String(step.placeholder || (inputType === 'text'
+            ? 'Type your answer for the agent'
+            : '')).trim();
+
+        if (inputType === 'text') {
+            return [
+                '<label class="agent-survey-card__input-label">',
+                `<span>${this.escapeHtml(placeholder || 'Your answer')}</span>`,
+                `<textarea class="agent-survey-card__input agent-survey-card__input--text" rows="4" maxlength="800" placeholder="${this.escapeHtmlAttr(placeholder || 'Type your answer for the agent')}" oninput="uiHelpers.syncSurveyInputValue(this)" ${isAnswered ? 'disabled' : ''}>${this.escapeHtml(value)}</textarea>`,
+                '</label>',
+            ].join('');
+        }
+
+        return [
+            '<label class="agent-survey-card__input-label">',
+            `<span>${this.escapeHtml(placeholder || 'Your answer')}</span>`,
+            `<input class="agent-survey-card__input" type="${this.escapeHtmlAttr(htmlInputType)}" value="${this.escapeHtmlAttr(value)}" oninput="uiHelpers.syncSurveyInputValue(this)" ${isAnswered ? 'disabled' : ''}>`,
+            '</label>',
+        ].join('');
     }
 
     renderSurveyBlock(survey = null, message = {}) {
@@ -906,58 +1186,68 @@ class UIHelpers {
             ? message.surveyState
             : null;
         const isAnswered = surveyState?.status === 'answered';
-        const selectedOptionIds = new Set(
-            Array.isArray(surveyState?.selectedOptionIds) && surveyState.selectedOptionIds.length > 0
-                ? surveyState.selectedOptionIds
-                : survey.options
-                    .filter((option) => Array.isArray(surveyState?.selectedLabels) && surveyState.selectedLabels.includes(option.label))
-                    .map((option) => option.id),
-        );
         const answeredSummary = isAnswered
-            ? this.buildSurveyAnsweredSummary(surveyState)
+            ? this.buildSurveyAnsweredSummary(surveyState, survey)
             : '';
-        const selectionHint = survey.allowMultiple
-            ? `Choose up to ${survey.maxSelections}`
-            : 'Choose one option';
-        const renderedOptions = this.buildRenderedSurveyOptions(survey);
-        const optionsHtml = renderedOptions.map((option) => {
-            const selected = selectedOptionIds.has(option.id);
-            return [
-                `<button type="button" class="agent-survey-option ${selected ? 'is-selected' : ''}"`,
-                ` data-option-id="${this.escapeHtmlAttr(option.id)}"`,
-                ` data-option-label="${this.escapeHtmlAttr(option.label)}"`,
-                ' onclick="uiHelpers.toggleSurveyOption(this)"',
-                isAnswered ? ' disabled' : '',
-                ` aria-checked="${selected ? 'true' : 'false'}">`,
-                `<span class="agent-survey-option__title">${this.escapeHtml(option.label)}</span>`,
-                option.description ? `<span class="agent-survey-option__description">${this.escapeHtml(option.description)}</span>` : '',
-                '</button>',
-            ].join('');
-        }).join('');
+        const steps = Array.isArray(survey.steps) ? survey.steps : [];
+        const currentStepIndex = isAnswered ? 0 : this.getSurveyCurrentStepIndex(survey, surveyState);
+        const currentStep = steps[currentStepIndex] || steps[0] || null;
+        const stepAnswer = currentStep
+            ? this.getSurveyStepAnswer(surveyState, currentStep.id)
+            : null;
+        const isLastStep = currentStepIndex >= Math.max(0, steps.length - 1);
+        const selectionHint = !currentStep
+            ? ''
+            : (currentStep.inputType === 'multi-choice'
+                ? `Choose up to ${currentStep.maxSelections}`
+                : (currentStep.inputType === 'choice'
+                    ? 'Choose one option'
+                    : (currentStep.inputType === 'text'
+                        ? 'Type your answer'
+                        : `Pick a ${currentStep.inputType === 'datetime' ? 'date and time' : currentStep.inputType}`)));
+        const progressLabel = isAnswered
+            ? (steps.length > 1 ? `Completed ${steps.length} steps` : 'Answered')
+            : (steps.length > 1
+                ? `Step ${currentStepIndex + 1} of ${steps.length}`
+                : selectionHint);
+        const stepInputHtml = (!isAnswered && currentStep)
+            ? this.renderSurveyStepInput(currentStep, stepAnswer, false)
+            : '';
+        const canSubmitCurrentStep = currentStep
+            ? this.isSurveyStepComplete(currentStep, stepAnswer)
+            : false;
+        const submitLabel = isLastStep
+            ? 'Continue with these answers'
+            : 'Next question';
 
         return [
             `<div class="agent-survey-card ${isAnswered ? 'is-answered' : ''}"`,
             ` data-message-id="${this.escapeHtmlAttr(messageId)}"`,
             ` data-survey-id="${this.escapeHtmlAttr(survey.id)}"`,
-            ` data-allow-multiple="${survey.allowMultiple ? 'true' : 'false'}"`,
-            ` data-max-selections="${String(survey.maxSelections)}"`,
+            ` data-current-step-index="${String(currentStepIndex)}"`,
+            ` data-step-id="${this.escapeHtmlAttr(currentStep?.id || '')}"`,
+            ` data-step-input-type="${this.escapeHtmlAttr(currentStep?.inputType || 'choice')}"`,
+            ` data-step-required="${currentStep?.required === false ? 'false' : 'true'}"`,
+            ` data-step-allow-multiple="${currentStep?.allowMultiple === true ? 'true' : 'false'}"`,
+            ` data-step-max-selections="${String(currentStep?.maxSelections || 1)}"`,
             ` data-submitted="${isAnswered ? 'true' : 'false'}">`,
             '<div class="agent-survey-card__eyebrow">Decision checkpoint</div>',
             '<div class="agent-survey-card__title-row">',
             `<h4 class="agent-survey-card__title">${this.escapeHtml(survey.title)}</h4>`,
-            `<span class="agent-survey-card__meta">${this.escapeHtml(selectionHint)}</span>`,
+            `<span class="agent-survey-card__meta">${this.escapeHtml(progressLabel)}</span>`,
             '</div>',
-            `<p class="agent-survey-card__question">${this.escapeHtml(survey.question)}</p>`,
-            survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : '',
-            `<div class="agent-survey-card__options">${optionsHtml}</div>`,
-            survey.allowFreeText
+            steps.length > 1
                 ? [
-                    '<label class="agent-survey-card__notes-label">',
-                    `<span>${this.escapeHtml(survey.freeTextLabel || 'Add your own input (optional)')}</span>`,
-                    `<textarea class="agent-survey-card__notes" rows="3" maxlength="500" placeholder="Type your own answer or extra context for the agent" oninput="uiHelpers.syncSurveyFreeText(this)" ${isAnswered ? 'disabled' : ''}>${this.escapeHtml(surveyState?.notes || '')}</textarea>`,
-                    '</label>',
+                    '<div class="agent-survey-card__progress">',
+                    `<span class="agent-survey-card__progress-text">${this.escapeHtml(progressLabel)}</span>`,
+                    `<div class="agent-survey-card__progress-bar"><span style="width:${isAnswered ? 100 : Math.max(8, ((currentStepIndex + 1) / steps.length) * 100)}%"></span></div>`,
+                    '</div>',
                 ].join('')
                 : '',
+            (!isAnswered && currentStep?.title) ? `<p class="agent-survey-card__step-title">${this.escapeHtml(currentStep.title)}</p>` : '',
+            !isAnswered ? `<p class="agent-survey-card__question">${this.escapeHtml(currentStep?.question || survey.question)}</p>` : '',
+            survey.whyThisMatters ? `<p class="agent-survey-card__context">${this.escapeHtml(survey.whyThisMatters)}</p>` : '',
+            stepInputHtml,
             '<div class="agent-survey-card__footer">',
             isAnswered
                 ? [
@@ -968,15 +1258,26 @@ class UIHelpers {
                 ].join('')
                 : [
                     '<div class="agent-survey-card__actions">',
-                    '<button type="button" class="agent-survey-card__submit" onclick="window.chatApp.submitAgentSurvey(this)" disabled>',
-                    'Continue with this choice',
-                    '</button>',
+                    currentStepIndex > 0
+                        ? '<button type="button" class="agent-survey-card__secondary" onclick="window.chatApp.goToPreviousSurveyStep(this)">Back</button>'
+                        : '',
+                    `<button type="button" class="agent-survey-card__submit" onclick="window.chatApp.submitAgentSurvey(this)" ${canSubmitCurrentStep ? '' : 'disabled'}>${this.escapeHtml(submitLabel)}</button>`,
                     '<span class="agent-survey-card__hint">The agent will continue once you answer.</span>',
                     '</div>',
                 ].join(''),
             '</div>',
             '</div>',
         ].filter(Boolean).join('');
+    }
+
+    syncSurveyInputValue(input) {
+        const surveyInput = input?.closest?.('.agent-survey-card__input') || input;
+        const card = surveyInput?.closest?.('.agent-survey-card');
+        if (!card) {
+            return;
+        }
+
+        this.updateSurveySubmitState(card);
     }
 
     buildSurveyRenderPlan(content = '', message = {}) {
@@ -1162,8 +1463,9 @@ class UIHelpers {
                 'aria-label', 'aria-hidden', 'aria-checked',
                 'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide',
                 'data-message-id', 'data-survey-id', 'data-allow-multiple', 'data-max-selections',
-                'data-option-id', 'data-option-label', 'data-submitted',
-                'placeholder', 'rows', 'maxlength', 'role'
+                'data-step-id', 'data-step-input-type', 'data-step-required', 'data-step-allow-multiple', 'data-step-max-selections',
+                'data-current-step-index', 'data-option-id', 'data-option-label', 'data-submitted',
+                'placeholder', 'rows', 'maxlength', 'role', 'value', 'style'
             ],
             ALLOW_DATA_ATTR: false
         });
@@ -1186,8 +1488,8 @@ class UIHelpers {
         }
 
         const allOptions = Array.from(card.querySelectorAll('.agent-survey-option'));
-        const allowMultiple = card.dataset.allowMultiple === 'true';
-        const maxSelections = Math.max(1, Number(card.dataset.maxSelections) || 1);
+        const allowMultiple = card.dataset.stepAllowMultiple === 'true';
+        const maxSelections = Math.max(1, Number(card.dataset.stepMaxSelections) || 1);
         const isSelected = optionButton.classList.contains('is-selected');
 
         if (!allowMultiple) {

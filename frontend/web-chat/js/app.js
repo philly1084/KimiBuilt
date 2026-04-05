@@ -1755,43 +1755,73 @@ class ChatApp {
 
         const messageId = String(card.dataset.messageId || '').trim();
         const surveyId = String(card.dataset.surveyId || '').trim();
-        const selectedOptions = Array.from(card.querySelectorAll('.agent-survey-option.is-selected'))
-            .map((option) => ({
-                id: String(option.dataset.optionId || '').trim(),
-                label: String(option.dataset.optionLabel || '').trim(),
-            }))
-            .filter((option) => option.label);
-
-        if (selectedOptions.length === 0) {
-            uiHelpers.showToast('Choose an option first', 'info');
+        const sessionId = sessionManager.currentSessionId;
+        const surveyMessage = this.getSessionMessage(sessionId, messageId);
+        const survey = this.extractSurveyDefinition(surveyMessage?.displayContent ?? surveyMessage?.content ?? '');
+        if (!survey || survey.id !== surveyId) {
+            uiHelpers.showToast('Unable to load that questionnaire right now.', 'error');
             return;
         }
 
-        const notes = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
-        const requiresNotes = selectedOptions.length === 1 && selectedOptions.some((option) => option.id === 'custom-input');
-        if (requiresNotes && !notes) {
-            uiHelpers.showToast('Type your answer for the Other option', 'info');
-            card.querySelector('.agent-survey-card__notes')?.focus();
+        const currentStepIndex = uiHelpers.getSurveyCurrentStepIndex(survey, {
+            currentStepIndex: Number(card.dataset.currentStepIndex || 0),
+        });
+        const currentStep = survey.steps[currentStepIndex];
+        if (!currentStep) {
+            uiHelpers.showToast('Unable to determine the current question.', 'error');
+            return;
+        }
+
+        const currentStepResponse = this.collectSurveyStepResponseFromCard(card, currentStep);
+        if (!uiHelpers.isSurveyStepComplete(currentStep, currentStepResponse)) {
+            const prompt = ['choice', 'multi-choice'].includes(currentStep.inputType)
+                ? 'Complete this choice first'
+                : 'Fill in this answer first';
+            uiHelpers.showToast(prompt, 'info');
+            return;
+        }
+
+        const existingSurveyState = surveyMessage?.surveyState?.checkpointId === surveyId
+            ? surveyMessage.surveyState
+            : null;
+        const stepResponses = {
+            ...((existingSurveyState?.stepResponses && typeof existingSurveyState.stepResponses === 'object')
+                ? existingSurveyState.stepResponses
+                : {}),
+            [currentStep.id]: currentStepResponse,
+        };
+        const isLastStep = currentStepIndex >= (survey.steps.length - 1);
+
+        if (!isLastStep) {
+            if (surveyMessage) {
+                surveyMessage.surveyState = this.buildSurveyStatePayload({
+                    survey,
+                    checkpointId: surveyId,
+                    status: 'draft',
+                    currentStepIndex: currentStepIndex + 1,
+                    stepResponses,
+                });
+                this.upsertSessionMessage(sessionId, surveyMessage);
+                this.renderOrReplaceMessage(surveyMessage);
+            }
             return;
         }
 
         const responseContent = this.buildSurveyResponseContent({
             checkpointId: surveyId,
-            selectedOptions,
-            notes,
+            survey,
+            stepResponses,
         });
-        const sessionId = sessionManager.currentSessionId;
-        const surveyMessage = this.getSessionMessage(sessionId, messageId);
 
         if (surveyMessage) {
-            surveyMessage.surveyState = {
-                status: 'answered',
+            surveyMessage.surveyState = this.buildSurveyStatePayload({
+                survey,
                 checkpointId: surveyId,
+                status: 'answered',
+                currentStepIndex,
+                stepResponses,
                 summary: responseContent.replace(/^Survey response \([^)]+\):\s*/i, ''),
-                selectedOptionIds: selectedOptions.map((option) => option.id),
-                selectedLabels: selectedOptions.map((option) => option.label),
-                notes,
-            };
+            });
             this.upsertSessionMessage(sessionId, surveyMessage);
             this.renderOrReplaceMessage(surveyMessage);
         }
@@ -1808,6 +1838,60 @@ class ChatApp {
         }
 
         await this.sendPreparedMessage(responseContent);
+    }
+
+    goToPreviousSurveyStep(trigger) {
+        const button = trigger?.closest?.('.agent-survey-card__secondary') || trigger;
+        const card = button?.closest?.('.agent-survey-card');
+        if (!card || this.isProcessing) {
+            return;
+        }
+
+        const messageId = String(card.dataset.messageId || '').trim();
+        const surveyId = String(card.dataset.surveyId || '').trim();
+        const sessionId = sessionManager.currentSessionId;
+        const surveyMessage = this.getSessionMessage(sessionId, messageId);
+        const survey = this.extractSurveyDefinition(surveyMessage?.displayContent ?? surveyMessage?.content ?? '');
+        if (!survey || survey.id !== surveyId) {
+            return;
+        }
+
+        const currentStepIndex = uiHelpers.getSurveyCurrentStepIndex(survey, {
+            currentStepIndex: Number(card.dataset.currentStepIndex || 0),
+        });
+        if (currentStepIndex <= 0) {
+            return;
+        }
+
+        const currentStep = survey.steps[currentStepIndex];
+        const existingSurveyState = surveyMessage?.surveyState?.checkpointId === surveyId
+            ? surveyMessage.surveyState
+            : null;
+        const stepResponses = {
+            ...((existingSurveyState?.stepResponses && typeof existingSurveyState.stepResponses === 'object')
+                ? existingSurveyState.stepResponses
+                : {}),
+        };
+        if (currentStep) {
+            const currentStepResponse = this.collectSurveyStepResponseFromCard(card, currentStep);
+            if (this.hasSurveyStepResponseData(currentStepResponse)) {
+                stepResponses[currentStep.id] = currentStepResponse;
+            } else {
+                delete stepResponses[currentStep.id];
+            }
+        }
+
+        if (surveyMessage) {
+            surveyMessage.surveyState = this.buildSurveyStatePayload({
+                survey,
+                checkpointId: surveyId,
+                status: 'draft',
+                currentStepIndex: currentStepIndex - 1,
+                stepResponses,
+            });
+            this.upsertSessionMessage(sessionId, surveyMessage);
+            this.renderOrReplaceMessage(surveyMessage);
+        }
     }
 
     async tryHandleToolCommand(content) {
@@ -2468,6 +2552,81 @@ class ChatApp {
         return match?.[1] ? String(match[1]).trim() : '';
     }
 
+    collectSurveyStepResponseFromCard(card, step = {}) {
+        if (!card || !step || typeof step !== 'object') {
+            return {};
+        }
+
+        const inputType = String(step.inputType || card.dataset.stepInputType || 'choice').trim();
+        if (inputType === 'choice' || inputType === 'multi-choice') {
+            const selectedOptions = Array.from(card.querySelectorAll('.agent-survey-option.is-selected'))
+                .map((option) => ({
+                    id: String(option.dataset.optionId || '').trim(),
+                    label: String(option.dataset.optionLabel || '').trim(),
+                }))
+                .filter((option) => option.label);
+            const text = String(card.querySelector('.agent-survey-card__notes')?.value || '').trim();
+
+            return {
+                selectedOptionIds: selectedOptions.map((option) => option.id),
+                selectedLabels: selectedOptions.map((option) => option.label),
+                text,
+            };
+        }
+
+        const value = String(card.querySelector('.agent-survey-card__input')?.value || '').trim();
+        return {
+            value,
+            text: value,
+        };
+    }
+
+    hasSurveyStepResponseData(response = null) {
+        if (!response || typeof response !== 'object') {
+            return false;
+        }
+
+        const selectedOptionIds = Array.isArray(response.selectedOptionIds)
+            ? response.selectedOptionIds.filter(Boolean)
+            : [];
+        const selectedLabels = Array.isArray(response.selectedLabels)
+            ? response.selectedLabels.filter(Boolean)
+            : [];
+        const text = String(response.text || '').trim();
+        const value = String(response.value || '').trim();
+
+        return selectedOptionIds.length > 0
+            || selectedLabels.length > 0
+            || Boolean(text)
+            || Boolean(value);
+    }
+
+    buildSurveyStatePayload({ survey = null, checkpointId = '', status = 'draft', currentStepIndex = 0, stepResponses = {}, summary = '' } = {}) {
+        const steps = Array.isArray(survey?.steps) ? survey.steps : [];
+        const safeStepResponses = stepResponses && typeof stepResponses === 'object'
+            ? stepResponses
+            : {};
+        const firstStep = steps[0] || null;
+        const firstStepResponse = firstStep
+            ? (safeStepResponses[firstStep.id] || null)
+            : null;
+
+        return {
+            status,
+            checkpointId,
+            currentStepIndex: Math.max(0, Number(currentStepIndex) || 0),
+            stepResponses: safeStepResponses,
+            ...(summary ? { summary } : {}),
+            selectedOptionIds: Array.isArray(firstStepResponse?.selectedOptionIds)
+                ? firstStepResponse.selectedOptionIds
+                : [],
+            selectedLabels: Array.isArray(firstStepResponse?.selectedLabels)
+                ? firstStepResponse.selectedLabels
+                : [],
+            notes: String(firstStepResponse?.text || '').trim(),
+        };
+    }
+
     buildSurveyFenceContent(checkpoint = null) {
         if (!checkpoint || typeof checkpoint !== 'object') {
             return '';
@@ -2827,12 +2986,20 @@ class ChatApp {
             return {
                 ...message,
                 surveyState: {
+                    ...(message.surveyState && typeof message.surveyState === 'object'
+                        ? message.surveyState
+                        : {}),
                     status: 'answered',
                     checkpointId: survey.id,
                     summary: response.summary,
-                    selectedOptionIds: this.extractSurveySelectedOptionIds(response.summary, survey.options),
-                    selectedLabels: this.extractSurveySelectedLabels(response.summary),
-                    notes: this.extractSurveyNotes(response.summary),
+                    selectedOptionIds: Array.isArray(message.surveyState?.selectedOptionIds)
+                        ? message.surveyState.selectedOptionIds
+                        : this.extractSurveySelectedOptionIds(response.summary, survey.options),
+                    selectedLabels: Array.isArray(message.surveyState?.selectedLabels)
+                        ? message.surveyState.selectedLabels
+                        : this.extractSurveySelectedLabels(response.summary),
+                    notes: String(message.surveyState?.notes || '').trim()
+                        || this.extractSurveyNotes(response.summary),
                 },
             };
         });
@@ -2882,7 +3049,18 @@ class ChatApp {
         }
     }
 
-    buildSurveyResponseContent({ checkpointId = '', selectedOptions = [], notes = '' } = {}) {
+    buildSurveyResponseContent({ checkpointId = '', survey = null, stepResponses = {}, selectedOptions = [], notes = '' } = {}) {
+        const surveySteps = Array.isArray(survey?.steps) ? survey.steps : [];
+        const responseMap = stepResponses && typeof stepResponses === 'object'
+            ? stepResponses
+            : {};
+        const stepSummaries = surveySteps
+            .map((step) => uiHelpers.buildSurveyStepAnswerSummary(step, responseMap[step.id] || null))
+            .filter(Boolean);
+        if (stepSummaries.length > 0) {
+            return `Survey response (${String(checkpointId || '').trim()}): ${stepSummaries.join(' | ')}`;
+        }
+
         const chosen = (Array.isArray(selectedOptions) ? selectedOptions : [])
             .map((option) => {
                 const label = String(option?.label || option?.id || '').trim();

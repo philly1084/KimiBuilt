@@ -641,7 +641,8 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('Do not write a multi-question quiz or personality test as assistant text');
         expect(guidance).toContain('primary quick way to involve the user');
         expect(guidance).toContain('Prefer `user-checkpoint` over a prose "which option do you want?" message');
-        expect(guidance).toContain('one card and one question');
+        expect(guidance).toContain('one card with one visible step at a time');
+        expect(guidance).toContain('Supported step types are choice, multi-choice, text, date, time, and datetime');
     });
 
     test('extracts explicit web research queries for deterministic preflight', () => {
@@ -929,6 +930,64 @@ describe('openai-client automatic tool orchestration helpers', () => {
             type: 'function',
             name: 'user-checkpoint',
         });
+    });
+
+    test('extracts a single checkpoint from a numbered prose questionnaire fallback', () => {
+        const checkpoint = __testUtils.extractQuestionnaireCheckpointFromText([
+            'Use these 5 and reply with the option letter for each.',
+            '1. What should this server be mainly?',
+            'A. Personal app host',
+            'B. Staging/dev box',
+            'C. Production platform',
+            'D. Homelab / experiments',
+            '2. What should I prioritize first?',
+            'A. Fix broken workloads',
+            'B. Clean up and simplify the cluster',
+        ].join('\n'));
+
+        expect(checkpoint).toEqual(expect.objectContaining({
+            question: 'What should this server be mainly?',
+            preamble: expect.stringContaining('one inline checkpoint card at a time'),
+            options: [
+                expect.objectContaining({ id: 'a', label: 'Personal app host' }),
+                expect.objectContaining({ id: 'b', label: 'Staging/dev box' }),
+                expect.objectContaining({ id: 'c', label: 'Production platform' }),
+                expect.objectContaining({ id: 'd', label: 'Homelab / experiments' }),
+            ],
+        }));
+    });
+
+    test('recovers a real user-checkpoint response from prose questionnaire output', () => {
+        const recovered = __testUtils.maybeRecoverUserCheckpointResponse({
+            response: {
+                choices: [{
+                    message: {
+                        content: [
+                            'Use these 5 and reply with the option letter for each.',
+                            '1. What should this server be mainly?',
+                            'A. Personal app host',
+                            'B. Staging/dev box',
+                            'C. Production platform',
+                            'D. Homelab / experiments',
+                        ].join('\n'),
+                    },
+                }],
+            },
+            selectedTools: [{ id: 'user-checkpoint' }],
+            toolEvents: [],
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 2,
+                    pending: null,
+                },
+            },
+            model: 'gpt-test',
+        });
+
+        expect(recovered?.output?.[0]?.content?.[0]?.text || '').toContain('```survey');
+        expect(recovered?._kimibuilt?.toolEvents?.[0]?.result?.toolId).toBe('user-checkpoint');
+        expect(recovered?._kimibuilt?.toolEvents?.[0]?.result?.data?.recovered).toBe(true);
     });
 
     test('offers document-workflow for research-backed deck generation when document service is available', () => {

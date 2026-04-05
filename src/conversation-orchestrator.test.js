@@ -3095,13 +3095,13 @@ describe('ConversationOrchestrator', () => {
             enabled: true,
             remaining: 2,
         }));
-        expect(plannerPrompt).toContain('Every `user-checkpoint` step must include a non-empty `params.question` string');
+        expect(plannerPrompt).toContain('Every `user-checkpoint` step must include either a non-empty `params.question` with concise choice `params.options`, or a short `params.steps` questionnaire.');
         expect(plannerPrompt).toContain('inline survey card with clickable options');
         expect(plannerPrompt).toContain('primary quick way to involve the user');
-        expect(plannerPrompt).toContain('Do not turn `user-checkpoint` into a long questionnaire');
+        expect(plannerPrompt).toContain('Supported step types are choice, multi-choice, text, date, time, and datetime.');
         expect(runtimeInstructions).toContain('inline popup-style survey card with clickable choices');
         expect(runtimeInstructions).toContain('primary quick way to involve the user');
-        expect(runtimeInstructions).toContain('Do not turn checkpoints into long questionnaires');
+        expect(runtimeInstructions).toContain('Do not turn checkpoints into long questionnaires, pages of questions, or more than 6 steps.');
     });
 
     test('suppresses user-checkpoint when a survey is already pending', () => {
@@ -3643,10 +3643,99 @@ describe('ConversationOrchestrator', () => {
             expect.objectContaining({
                 tool: 'user-checkpoint',
                 params: expect.objectContaining({
+                    inputType: 'choice',
                     question: 'Which direction should I take?',
                     options: [
-                        { label: 'Refactor auth flow first' },
-                        { label: 'Prototype the UI first' },
+                        { id: 'refactor-auth-flow-first', label: 'Refactor auth flow first' },
+                        { id: 'prototype-the-ui-first', label: 'Prototype the UI first' },
+                    ],
+                    steps: [
+                        expect.objectContaining({
+                            question: 'Which direction should I take?',
+                            inputType: 'choice',
+                        }),
+                    ],
+                }),
+            }),
+        ]);
+    });
+
+    test('repairs short multi-step planner params for user-checkpoint steps', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'user-checkpoint',
+                        reason: 'Need a short intake before major work.',
+                        params: {
+                            title: 'Quick intake',
+                            steps: [
+                                {
+                                    prompt: 'Which track should I take first?',
+                                    choices: [
+                                        'Refactor the backend',
+                                        'Polish the web chat',
+                                    ],
+                                },
+                                {
+                                    question: 'What should the rollout date be?',
+                                    type: 'date',
+                                },
+                            ],
+                        },
+                    },
+                ],
+            })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'user-checkpoint'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Plan the next implementation steps and ask me first before major work.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 2,
+                    pending: null,
+                },
+            },
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective: 'Plan the next implementation steps and ask me first before major work.',
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'user-checkpoint',
+                params: expect.objectContaining({
+                    title: 'Quick intake',
+                    steps: [
+                        expect.objectContaining({
+                            question: 'Which track should I take first?',
+                            inputType: 'choice',
+                            options: [
+                                { id: 'refactor-the-backend', label: 'Refactor the backend' },
+                                { id: 'polish-the-web-chat', label: 'Polish the web chat' },
+                            ],
+                        }),
+                        expect.objectContaining({
+                            question: 'What should the rollout date be?',
+                            inputType: 'date',
+                        }),
                     ],
                 }),
             }),

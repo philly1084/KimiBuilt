@@ -26,7 +26,10 @@ const {
     resolveClientSurface,
     resolveSessionScope,
 } = require('./session-scope');
-const { USER_CHECKPOINT_TOOL_ID } = require('./user-checkpoints');
+const {
+    USER_CHECKPOINT_TOOL_ID,
+    normalizeCheckpointRequest,
+} = require('./user-checkpoints');
 const { parseLenientJson } = require('./utils/lenient-json');
 const { stripNullCharacters } = require('./utils/text');
 const {
@@ -180,54 +183,104 @@ function hasSubstantialWorkIntentText(text = '') {
     return /\b(plan|planning|refactor|implement|implementation|build|create|generate|draft|design|deploy|migration|migrate|rewrite|organize|set up|setup|fix|debug|investigate|audit|review)\b/.test(normalized);
 }
 
+function normalizeUserCheckpointPlanOption(option = {}) {
+    if (typeof option === 'string') {
+        const label = option.trim();
+        return label ? { label } : null;
+    }
+
+    if (!option || typeof option !== 'object') {
+        return null;
+    }
+
+    const label = typeof option.label === 'string'
+        ? option.label.trim()
+        : (typeof option.title === 'string'
+            ? option.title.trim()
+            : (typeof option.text === 'string' ? option.text.trim() : ''));
+    if (!label) {
+        return null;
+    }
+
+    const description = typeof option.description === 'string'
+        ? option.description.trim()
+        : (typeof option.details === 'string' ? option.details.trim() : '');
+    const id = typeof option.id === 'string' ? option.id.trim() : '';
+
+    return {
+        ...(id ? { id } : {}),
+        label,
+        ...(description ? { description } : {}),
+    };
+}
+
+function normalizeUserCheckpointPlanStep(step = {}) {
+    if (!step || typeof step !== 'object') {
+        return null;
+    }
+
+    const question = typeof step.question === 'string'
+        ? step.question.trim()
+        : (typeof step.prompt === 'string'
+            ? step.prompt.trim()
+            : (typeof step.ask === 'string' ? step.ask.trim() : ''));
+    if (!question) {
+        return null;
+    }
+
+    const rawOptions = Array.isArray(step.options)
+        ? step.options
+        : (Array.isArray(step.choices) ? step.choices : []);
+    const options = rawOptions
+        .map((option) => normalizeUserCheckpointPlanOption(option))
+        .filter(Boolean)
+        .slice(0, 5);
+    const inputType = typeof step.inputType === 'string'
+        ? step.inputType.trim()
+        : (typeof step.type === 'string'
+            ? step.type.trim()
+            : (typeof step.kind === 'string' ? step.kind.trim() : ''));
+    const title = typeof step.title === 'string' ? step.title.trim() : '';
+    const placeholder = typeof step.placeholder === 'string'
+        ? step.placeholder.trim()
+        : (typeof step.inputPlaceholder === 'string'
+            ? step.inputPlaceholder.trim()
+            : '');
+    const freeTextLabel = typeof step.freeTextLabel === 'string'
+        ? step.freeTextLabel.trim()
+        : (typeof step.freeTextPrompt === 'string'
+            ? step.freeTextPrompt.trim()
+            : '');
+    const id = typeof step.id === 'string' ? step.id.trim() : '';
+
+    return {
+        ...(id ? { id } : {}),
+        ...(title ? { title } : {}),
+        question,
+        ...(inputType ? { inputType } : {}),
+        ...(placeholder ? { placeholder } : {}),
+        ...(typeof step.required === 'boolean' ? { required: step.required } : {}),
+        ...(typeof step.allowMultiple === 'boolean' ? { allowMultiple: step.allowMultiple } : {}),
+        ...(typeof step.multiple === 'boolean' ? { allowMultiple: step.multiple } : {}),
+        ...(Number.isFinite(Number(step.maxSelections)) ? { maxSelections: Number(step.maxSelections) } : {}),
+        ...(typeof step.allowFreeText === 'boolean' ? { allowFreeText: step.allowFreeText } : {}),
+        ...(typeof step.allowText === 'boolean' ? { allowFreeText: step.allowText } : {}),
+        ...(freeTextLabel ? { freeTextLabel } : {}),
+        ...(options.length > 0 ? { options } : {}),
+    };
+}
+
 function normalizeUserCheckpointPlanParams(step = {}) {
     const rawParams = step?.params && typeof step.params === 'object'
         ? { ...step.params }
         : {};
-    const question = typeof rawParams.question === 'string'
-        ? rawParams.question.trim()
-        : (typeof rawParams.prompt === 'string' ? rawParams.prompt.trim() : '');
-    const rawOptions = Array.isArray(rawParams.options)
-        ? rawParams.options
-        : (Array.isArray(rawParams.choices) ? rawParams.choices : []);
-    const options = rawOptions
-        .map((option, index) => {
-            if (typeof option === 'string') {
-                const label = option.trim();
-                return label ? { label } : null;
-            }
-
-            if (!option || typeof option !== 'object') {
-                return null;
-            }
-
-            const label = typeof option.label === 'string'
-                ? option.label.trim()
-                : (typeof option.title === 'string'
-                    ? option.title.trim()
-                    : (typeof option.text === 'string' ? option.text.trim() : ''));
-            if (!label) {
-                return null;
-            }
-
-            const description = typeof option.description === 'string'
-                ? option.description.trim()
-                : (typeof option.details === 'string' ? option.details.trim() : '');
-            const id = typeof option.id === 'string' ? option.id.trim() : '';
-
-            return {
-                ...(id ? { id } : {}),
-                label,
-                ...(description ? { description } : {}),
-            };
-        })
+    const normalizedSteps = (Array.isArray(rawParams.steps) ? rawParams.steps : [])
+        .map((entry) => normalizeUserCheckpointPlanStep(entry))
         .filter(Boolean)
-        .slice(0, 5);
-
-    return {
+        .slice(0, 6);
+    const legacyStep = normalizeUserCheckpointPlanStep(rawParams);
+    const baseParams = {
         ...rawParams,
-        ...(question ? { question } : {}),
-        ...(options.length > 0 ? { options } : {}),
         ...(typeof rawParams.title === 'string' && rawParams.title.trim()
             ? { title: rawParams.title.trim() }
             : {}),
@@ -237,7 +290,18 @@ function normalizeUserCheckpointPlanParams(step = {}) {
         ...(typeof rawParams.whyThisMatters === 'string' && rawParams.whyThisMatters.trim()
             ? { whyThisMatters: rawParams.whyThisMatters.trim() }
             : {}),
+        ...(normalizedSteps.length > 0
+            ? { steps: normalizedSteps }
+            : (legacyStep || {})),
     };
+
+    try {
+        const normalized = normalizeCheckpointRequest(baseParams);
+        const { id: _unusedId, ...normalizedParams } = normalized;
+        return normalizedParams;
+    } catch (_error) {
+        return baseParams;
+    }
 }
 
 function inferRecallProfileFromText(text = '') {
@@ -4388,12 +4452,13 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
             'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
-            'Every `user-checkpoint` step must include a non-empty `params.question` string and 2 to 4 concise `params.options` entries.',
+            'Every `user-checkpoint` step must include either a non-empty `params.question` with concise choice `params.options`, or a short `params.steps` questionnaire.',
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
             'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision or direction check would help.',
             'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
-            'Keep `user-checkpoint` to one card and one question with mutually exclusive, actionable options. Leave the free-text field enabled so the user can supply a custom answer when needed. Do not bundle multiple decisions into one checkpoint.',
-            'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or a chain of back-to-back surveys.',
+            'Keep `user-checkpoint` to one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake.',
+            'Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use mutually exclusive, actionable options and leave the free-text field enabled when helpful.',
+            'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or more than 6 steps.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
@@ -4884,8 +4949,9 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `user-checkpoint` when one high-impact decision would materially change the plan before major implementation, refactoring, or other long multi-step work.');
             parts.push('On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would help.');
             parts.push('On web-chat, `user-checkpoint` renders as an inline popup-style survey card with clickable choices, so prefer it over a plain-text multiple-choice question.');
-            parts.push('Keep checkpoint surveys concise: one card, one question, 2 to 4 strong options, short descriptions, and leave the free-text field available so the user can supply their own input when needed.');
-            parts.push('Do not turn checkpoints into long questionnaires, pages of questions, or back-to-back survey cards.');
+            parts.push('Keep checkpoint surveys concise: one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake.');
+            parts.push('Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and leave the free-text field available when helpful.');
+            parts.push('Do not turn checkpoints into long questionnaires, pages of questions, or more than 6 steps.');
         } else if (userCheckpointPolicy.enabled === true && userCheckpointPolicy.pending) {
             parts.push('A `user-checkpoint` is already pending for this session. Do not ask another survey question until the user answers it.');
         }
