@@ -4,8 +4,8 @@
  * Now works client-side only with OpenAI SDK backend
  */
 
-const WEB_CHAT_TASK_TYPE = 'chat';
-const WEB_CHAT_CLIENT_SURFACE = 'web-chat';
+const SESSION_MANAGER_TASK_TYPE = 'chat';
+const SESSION_MANAGER_CLIENT_SURFACE = 'web-chat';
 
 class SessionManager extends EventTarget {
     constructor() {
@@ -98,8 +98,8 @@ class SessionManager extends EventTarget {
     async loadSessions() {
         try {
             const params = new URLSearchParams({
-                taskType: WEB_CHAT_TASK_TYPE,
-                clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                taskType: SESSION_MANAGER_TASK_TYPE,
+                clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
             });
             const response = await fetch(`${this.apiBaseUrl}/sessions?${params.toString()}`);
             if (response.ok) {
@@ -200,8 +200,8 @@ class SessionManager extends EventTarget {
                 },
                 body: JSON.stringify({
                     activeSessionId: normalizedSessionId || null,
-                    taskType: WEB_CHAT_TASK_TYPE,
-                    clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                    taskType: SESSION_MANAGER_TASK_TYPE,
+                    clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
                 }),
             });
         } catch (error) {
@@ -385,12 +385,12 @@ class SessionManager extends EventTarget {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    taskType: WEB_CHAT_TASK_TYPE,
-                    clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                    taskType: SESSION_MANAGER_TASK_TYPE,
+                    clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
                     metadata: {
                         mode,
-                        taskType: WEB_CHAT_TASK_TYPE,
-                        clientSurface: WEB_CHAT_CLIENT_SURFACE,
+                        taskType: SESSION_MANAGER_TASK_TYPE,
+                        clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
                     },
                 }),
             });

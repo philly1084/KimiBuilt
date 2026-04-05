@@ -1212,6 +1212,14 @@ body.mobile-chat-menu-open {
     gap: 0.45rem;
 }
 
+.model-selector-list-header {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.9rem 1.1rem 0.15rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.015);
+}
+
 .assistant-preview-btn {
     border: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.03);
