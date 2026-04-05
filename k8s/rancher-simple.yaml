@@ -44,10 +44,17 @@ metadata:
   name: backend
   namespace: kimibuilt
 spec:
+  strategy:
+    type: Recreate
   template:
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
       imagePullSecrets:
         - name: ghcr-secret
       containers:
@@ -80,3 +87,25 @@ spec:
               value: backend
             - name: KIMIBUILT_DEPLOY_BRANCH
               value: master
+            - name: KIMIBUILT_STATE_DIR
+              value: /home/kimibuilt/.kimibuilt
+          volumeMounts:
+            - name: backend-state
+              mountPath: /home/kimibuilt/.kimibuilt
+      volumes:
+        - name: backend-state
+          persistentVolumeClaim:
+            claimName: backend-state
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backend-state
+  namespace: kimibuilt
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

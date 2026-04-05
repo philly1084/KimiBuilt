@@ -7,6 +7,8 @@ metadata:
     app: backend
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: backend
@@ -17,6 +19,11 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: backend
           image: ghcr.io/philly1084/kimibuilt:latest
@@ -29,6 +36,9 @@ spec:
                 name: kimibuilt-config
             - secretRef:
                 name: kimibuilt-secrets
+          volumeMounts:
+            - name: backend-state
+              mountPath: /home/kimibuilt/.kimibuilt
           readinessProbe:
             httpGet:
               path: /health
@@ -48,6 +58,10 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+      volumes:
+        - name: backend-state
+          persistentVolumeClaim:
+            claimName: backend-state
 ---
 apiVersion: v1
 kind: Service

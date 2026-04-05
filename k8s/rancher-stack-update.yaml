@@ -51,6 +51,7 @@ data:
   KIMIBUILT_DEPLOY_DEPLOYMENT: "backend"
   KIMIBUILT_DEPLOY_CONTAINER: "backend"
   KIMIBUILT_DEPLOY_BRANCH: "master"
+  KIMIBUILT_STATE_DIR: "/home/kimibuilt/.kimibuilt"
   PORT: "3000"
   NODE_ENV: "production"
 
@@ -132,6 +133,19 @@ spec:
   resources:
     requests:
       storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backend-state
+  namespace: kimibuilt
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 
 ---
 apiVersion: apps/v1
@@ -403,10 +417,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
   selector:
     matchLabels:
       app: backend
@@ -417,6 +428,11 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: backend
           image: ghcr.io/philly1084/kimibuilt:latest
@@ -429,6 +445,9 @@ spec:
                 name: kimibuilt-config
             - secretRef:
                 name: kimibuilt-secrets
+          volumeMounts:
+            - name: backend-state
+              mountPath: /home/kimibuilt/.kimibuilt
           readinessProbe:
             httpGet:
               path: /health
@@ -448,6 +467,10 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "1000m"
+      volumes:
+        - name: backend-state
+          persistentVolumeClaim:
+            claimName: backend-state
 
 ---
 apiVersion: v1
