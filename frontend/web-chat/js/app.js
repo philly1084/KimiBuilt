@@ -2417,11 +2417,11 @@ class ChatApp {
             return {};
         }
 
-        try {
-            return JSON.parse(rawArgs);
-        } catch (_error) {
-            return {};
+        if (typeof uiHelpers?.parseJsonSafely === 'function') {
+            return uiHelpers.parseJsonSafely(rawArgs) || {};
         }
+
+        return {};
     }
 
     extractSurveyDefinition(messageContent = '') {

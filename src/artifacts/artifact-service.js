@@ -19,6 +19,7 @@ const {
     inferDocumentTypeFromPrompt,
     renderCreativityPromptContext,
 } = require('../documents/document-creativity');
+const { parseLenientJson } = require('../utils/lenient-json');
 const { resolveDocumentTheme } = require('../documents/document-design-engine');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
 const DEFAULT_DOCUMENT_IMAGE_TARGET = 20;
@@ -322,7 +323,10 @@ function unwrapCodeFence(text = '') {
 
 function tryParseJson(text, fallbackTitle = 'Workbook') {
     try {
-        const parsed = JSON.parse(unwrapCodeFence(text));
+        const parsed = parseLenientJson(unwrapCodeFence(text));
+        if (!parsed || typeof parsed !== 'object') {
+            throw new Error('Invalid workbook JSON');
+        }
         return {
             title: parsed.title || fallbackTitle,
             sheets: Array.isArray(parsed.sheets) ? parsed.sheets : [],
@@ -344,11 +348,7 @@ function tryParseJson(text, fallbackTitle = 'Workbook') {
 }
 
 function safeJsonParse(text = '') {
-    try {
-        return JSON.parse(unwrapCodeFence(text));
-    } catch (_error) {
-        return null;
-    }
+    return parseLenientJson(unwrapCodeFence(text));
 }
 
 function inferDocumentTitle(prompt = '', fallback = 'Document') {

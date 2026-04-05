@@ -1609,7 +1609,7 @@ class ToolManager {
         id: USER_CHECKPOINT_TOOL_ID,
         name: 'User Checkpoint',
         category: 'system',
-        description: 'Pause once or twice for a high-impact user decision before major work by creating a structured multiple-choice checkpoint for web chat. Use this instead of `request_user_input`.',
+        description: 'Primary quick user-involvement path for web chat: pause once or twice for a single high-impact decision before major work by creating one structured checkpoint card. Use this instead of `request_user_input`, and do not use it for long or multi-page questionnaires.',
         backend: {
           handler: async (params = {}, context = {}) => {
             const policy = context?.userCheckpointPolicy || {};
@@ -1669,7 +1669,7 @@ class ToolManager {
           additionalProperties: false,
         },
         skill: {
-          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question', 'questionnaire tool', 'survey tool', 'test the questionnaire tool'],
+          triggerPatterns: ['clarify before major work', 'ask a checkpoint question', 'multiple choice question', 'questionnaire tool', 'survey tool', 'test the questionnaire tool', 'quick user choice', 'quick checkpoint', 'involve the user quickly'],
           requiresConfirmation: false,
         },
         frontend: {

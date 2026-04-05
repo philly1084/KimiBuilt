@@ -1,3 +1,290 @@
+const SOUND_CUES = {
+    ack: {
+        id: 'ack',
+        group: 'assistant',
+        cooldown: 120,
+        previewGain: 1.08,
+        notes: [
+            {
+                frequency: 604,
+                slideTo: 676,
+                duration: 0.074,
+                volume: 0.068,
+                pan: -0.15,
+                type: 'triangle',
+                attack: 0.012,
+                decay: 0.04,
+                sustain: 0.56,
+                cutoff: 1800,
+                cutoffTo: 1260,
+                vibratoRate: 5.1,
+                vibratoDepth: 7,
+                detuneJitter: 3,
+            },
+            {
+                delay: 0.034,
+                frequency: 912,
+                slideTo: 1018,
+                duration: 0.056,
+                volume: 0.03,
+                pan: 0.12,
+                type: 'sine',
+                attack: 0.01,
+                decay: 0.03,
+                sustain: 0.48,
+                cutoff: 2500,
+                cutoffTo: 1760,
+                shimmer: true,
+                detuneJitter: 5,
+            },
+            {
+                delay: 0.008,
+                frequency: 302,
+                slideTo: 288,
+                duration: 0.08,
+                volume: 0.017,
+                pan: 0.02,
+                type: 'sine',
+                attack: 0.012,
+                decay: 0.04,
+                sustain: 0.52,
+                cutoff: 920,
+                cutoffTo: 700,
+            },
+        ],
+    },
+    response: {
+        id: 'response',
+        group: 'assistant',
+        cooldown: 900,
+        previewGain: 1.05,
+        notes: [
+            {
+                frequency: 492,
+                slideTo: 548,
+                duration: 0.095,
+                volume: 0.066,
+                pan: -0.14,
+                type: 'triangle',
+                attack: 0.016,
+                decay: 0.05,
+                sustain: 0.68,
+                cutoff: 1580,
+                cutoffTo: 1100,
+                vibratoRate: 4.8,
+                vibratoDepth: 5,
+                detuneJitter: 2,
+            },
+            {
+                delay: 0.078,
+                frequency: 738,
+                slideTo: 842,
+                duration: 0.124,
+                volume: 0.078,
+                pan: 0.12,
+                type: 'triangle',
+                attack: 0.016,
+                decay: 0.058,
+                sustain: 0.72,
+                cutoff: 2080,
+                cutoffTo: 1440,
+                shimmer: true,
+                detuneJitter: 4,
+            },
+            {
+                delay: 0.142,
+                frequency: 1108,
+                slideTo: 1180,
+                duration: 0.11,
+                volume: 0.022,
+                pan: 0.18,
+                type: 'sine',
+                attack: 0.012,
+                decay: 0.04,
+                sustain: 0.48,
+                cutoff: 2860,
+                cutoffTo: 1900,
+            },
+        ],
+    },
+    survey: {
+        id: 'survey',
+        group: 'assistant',
+        cooldown: 1200,
+        previewGain: 1.04,
+        notes: [
+            {
+                frequency: 452,
+                slideTo: 486,
+                duration: 0.09,
+                volume: 0.052,
+                pan: -0.2,
+                type: 'triangle',
+                attack: 0.013,
+                decay: 0.044,
+                sustain: 0.58,
+                cutoff: 1450,
+                cutoffTo: 1080,
+            },
+            {
+                delay: 0.092,
+                frequency: 624,
+                slideTo: 704,
+                duration: 0.102,
+                volume: 0.06,
+                pan: 0.02,
+                type: 'triangle',
+                attack: 0.014,
+                decay: 0.046,
+                sustain: 0.62,
+                cutoff: 1820,
+                cutoffTo: 1320,
+                detuneJitter: 3,
+            },
+            {
+                delay: 0.184,
+                frequency: 828,
+                slideTo: 948,
+                duration: 0.136,
+                volume: 0.08,
+                pan: 0.18,
+                type: 'triangle',
+                attack: 0.016,
+                decay: 0.058,
+                sustain: 0.74,
+                cutoff: 2200,
+                cutoffTo: 1520,
+                shimmer: true,
+                vibratoRate: 5.6,
+                vibratoDepth: 6,
+                detuneJitter: 4,
+            },
+            {
+                delay: 0.228,
+                frequency: 414,
+                slideTo: 394,
+                duration: 0.142,
+                volume: 0.014,
+                pan: -0.04,
+                type: 'sine',
+                attack: 0.01,
+                decay: 0.05,
+                sustain: 0.44,
+                cutoff: 760,
+                cutoffTo: 620,
+            },
+        ],
+    },
+    'menu-open': {
+        id: 'menu-open',
+        group: 'menu',
+        cooldown: 120,
+        previewGain: 1.1,
+        notes: [
+            {
+                frequency: 398,
+                slideTo: 516,
+                duration: 0.06,
+                volume: 0.036,
+                pan: -0.1,
+                type: 'triangle',
+                attack: 0.01,
+                decay: 0.032,
+                sustain: 0.46,
+                cutoff: 1620,
+                cutoffTo: 1180,
+            },
+            {
+                delay: 0.034,
+                frequency: 604,
+                slideTo: 724,
+                duration: 0.048,
+                volume: 0.028,
+                pan: 0.08,
+                type: 'sine',
+                attack: 0.009,
+                decay: 0.026,
+                sustain: 0.42,
+                cutoff: 2140,
+                cutoffTo: 1580,
+                shimmer: true,
+            },
+        ],
+    },
+    'menu-close': {
+        id: 'menu-close',
+        group: 'menu',
+        cooldown: 120,
+        previewGain: 1.1,
+        notes: [
+            {
+                frequency: 618,
+                slideTo: 520,
+                duration: 0.056,
+                volume: 0.034,
+                pan: 0.1,
+                type: 'triangle',
+                attack: 0.009,
+                decay: 0.03,
+                sustain: 0.42,
+                cutoff: 1680,
+                cutoffTo: 1240,
+            },
+            {
+                delay: 0.026,
+                frequency: 506,
+                slideTo: 412,
+                duration: 0.05,
+                volume: 0.024,
+                pan: -0.08,
+                type: 'sine',
+                attack: 0.009,
+                decay: 0.024,
+                sustain: 0.38,
+                cutoff: 1500,
+                cutoffTo: 980,
+            },
+        ],
+    },
+    'menu-select': {
+        id: 'menu-select',
+        group: 'menu',
+        cooldown: 72,
+        previewGain: 1.12,
+        notes: [
+            {
+                frequency: 568,
+                slideTo: 644,
+                duration: 0.046,
+                volume: 0.028,
+                pan: 0.04,
+                type: 'triangle',
+                attack: 0.008,
+                decay: 0.022,
+                sustain: 0.36,
+                cutoff: 1880,
+                cutoffTo: 1440,
+                shimmer: true,
+                detuneJitter: 2,
+            },
+            {
+                delay: 0.01,
+                frequency: 286,
+                slideTo: 278,
+                duration: 0.048,
+                volume: 0.012,
+                pan: -0.02,
+                type: 'sine',
+                attack: 0.008,
+                decay: 0.024,
+                sustain: 0.34,
+                cutoff: 820,
+                cutoffTo: 660,
+            },
+        ],
+    },
+};
+
 class WebChatSoundManager {
     constructor() {
         this.storageKeys = {
@@ -5,16 +292,19 @@ class WebChatSoundManager {
             menuEnabled: 'kimibuilt_menu_sounds_enabled',
         };
         this.audioContext = null;
+        this.masterInput = null;
         this.masterGain = null;
         this.lastPlayedAt = new Map();
+        this.activeVoices = new Map();
         this.unlockListenersInstalled = false;
+        this.idleSuspendTimer = null;
         this.boundUnlock = () => {
             void this.unlock();
         };
         this.enabled = this.parseBoolean(this.storageGet(this.storageKeys.enabled), false);
         this.menuEnabled = this.parseBoolean(this.storageGet(this.storageKeys.menuEnabled), false);
 
-        this.installUnlockListeners();
+        this.syncUnlockListeners();
     }
 
     parseBoolean(value, fallback = false) {
@@ -59,6 +349,23 @@ class WebChatSoundManager {
         }
     }
 
+    clamp(value, min, max) {
+        return Math.min(max, Math.max(min, Number(value || 0)));
+    }
+
+    hasActivePreferences() {
+        return this.enabled === true || this.menuEnabled === true;
+    }
+
+    syncUnlockListeners() {
+        if (this.hasActivePreferences()) {
+            this.installUnlockListeners();
+            return;
+        }
+
+        this.removeUnlockListeners();
+    }
+
     installUnlockListeners() {
         if (this.unlockListenersInstalled) {
             return;
@@ -93,16 +400,76 @@ class WebChatSoundManager {
 
         try {
             const context = new AudioContextCtor();
+            const masterInput = context.createGain();
+            const toneFilter = context.createBiquadFilter();
+            const compressor = context.createDynamicsCompressor();
             const masterGain = context.createGain();
-            masterGain.gain.value = 0.17;
+
+            masterInput.gain.value = 1;
+
+            toneFilter.type = 'highshelf';
+            toneFilter.frequency.value = 2400;
+            toneFilter.gain.value = -4;
+
+            compressor.threshold.value = -28;
+            compressor.knee.value = 18;
+            compressor.ratio.value = 3;
+            compressor.attack.value = 0.004;
+            compressor.release.value = 0.16;
+
+            masterGain.gain.value = 0.2;
+
+            masterInput.connect(toneFilter);
+            toneFilter.connect(compressor);
+            compressor.connect(masterGain);
             masterGain.connect(context.destination);
 
             this.audioContext = context;
+            this.masterInput = masterInput;
             this.masterGain = masterGain;
             return context;
         } catch (_error) {
             return null;
         }
+    }
+
+    cancelIdleSuspend() {
+        if (!this.idleSuspendTimer) {
+            return;
+        }
+
+        clearTimeout(this.idleSuspendTimer);
+        this.idleSuspendTimer = null;
+    }
+
+    countActiveVoices() {
+        let count = 0;
+        this.activeVoices.forEach((voices) => {
+            count += voices.size;
+        });
+        return count;
+    }
+
+    queueIdleSuspend(delayMs = 280) {
+        if (!this.audioContext || this.hasActivePreferences()) {
+            return;
+        }
+
+        this.cancelIdleSuspend();
+        this.idleSuspendTimer = window.setTimeout(() => {
+            if (!this.audioContext || this.hasActivePreferences()) {
+                return;
+            }
+
+            if (this.countActiveVoices() > 0) {
+                this.queueIdleSuspend(delayMs);
+                return;
+            }
+
+            if (this.audioContext.state === 'running') {
+                void this.audioContext.suspend().catch(() => null);
+            }
+        }, delayMs);
     }
 
     async unlock() {
@@ -111,10 +478,15 @@ class WebChatSoundManager {
             return null;
         }
 
+        this.cancelIdleSuspend();
+
         if (context.state === 'suspended') {
             try {
                 await context.resume();
             } catch (_error) {
+                if (this.hasActivePreferences()) {
+                    this.installUnlockListeners();
+                }
                 return null;
             }
         }
@@ -122,6 +494,10 @@ class WebChatSoundManager {
         if (context.state === 'running') {
             this.removeUnlockListeners();
             return context;
+        }
+
+        if (this.hasActivePreferences()) {
+            this.installUnlockListeners();
         }
 
         return null;
@@ -138,136 +514,197 @@ class WebChatSoundManager {
     setEnabled(value) {
         this.enabled = value === true;
         this.storageSet(this.storageKeys.enabled, this.enabled ? 'true' : 'false');
+        this.syncUnlockListeners();
+
+        if (this.enabled) {
+            void this.unlock();
+            return;
+        }
+
+        this.queueIdleSuspend();
     }
 
     setMenuEnabled(value) {
         this.menuEnabled = value === true;
         this.storageSet(this.storageKeys.menuEnabled, this.menuEnabled ? 'true' : 'false');
-    }
+        this.syncUnlockListeners();
 
-    getCooldown(kind = '') {
-        const key = String(kind || '').trim().toLowerCase();
-        switch (key) {
-            case 'ack':
-                return 120;
-            case 'response':
-                return 900;
-            case 'survey':
-                return 1200;
-            case 'menu-open':
-            case 'menu-close':
-                return 110;
-            case 'menu-select':
-                return 80;
-            default:
-                return 180;
+        if (this.menuEnabled) {
+            void this.unlock();
+            return;
         }
+
+        this.queueIdleSuspend();
     }
 
-    isCueAllowed(kind = '', preview = false) {
+    getCueConfig(kind = '') {
         const key = String(kind || '').trim().toLowerCase();
+        return SOUND_CUES[key] || SOUND_CUES['menu-select'];
+    }
+
+    isCueAllowed(cue, preview = false) {
+        if (!cue) {
+            return false;
+        }
 
         if (!preview) {
-            if (!this.isEnabled()) {
-                return false;
-            }
-
-            if (key.startsWith('menu') && !this.isMenuEnabled()) {
+            if (cue.group === 'menu') {
+                if (!this.isMenuEnabled()) {
+                    return false;
+                }
+            } else if (!this.isEnabled()) {
                 return false;
             }
         }
 
         const now = Date.now();
-        const lastPlayedAt = this.lastPlayedAt.get(key) || 0;
-        const cooldown = preview ? 0 : this.getCooldown(key);
+        const lastPlayedAt = this.lastPlayedAt.get(cue.id) || 0;
+        const cooldown = preview ? 0 : Number(cue.cooldown || 180);
         if (!preview && now - lastPlayedAt < cooldown) {
             return false;
         }
 
-        this.lastPlayedAt.set(key, now);
+        this.lastPlayedAt.set(cue.id, now);
         return true;
     }
 
-    getPattern(kind = '') {
-        const key = String(kind || '').trim().toLowerCase();
-
-        switch (key) {
-            case 'ack':
-                return [
-                    { frequency: 612, slideTo: 684, duration: 0.065, volume: 0.085, pan: -0.08 },
-                    { delay: 0.045, frequency: 918, slideTo: 964, duration: 0.05, volume: 0.045, pan: 0.1, shimmer: true },
-                ];
-            case 'response':
-                return [
-                    { frequency: 524, slideTo: 608, duration: 0.09, volume: 0.09, pan: -0.12 },
-                    { delay: 0.085, frequency: 698, slideTo: 820, duration: 0.11, volume: 0.082, pan: 0.14, shimmer: true },
-                ];
-            case 'survey':
-                return [
-                    { frequency: 466, slideTo: 520, duration: 0.085, volume: 0.085, pan: -0.18 },
-                    { delay: 0.095, frequency: 698, slideTo: 740, duration: 0.1, volume: 0.09, pan: 0.06, shimmer: true },
-                    { delay: 0.205, frequency: 932, slideTo: 1048, duration: 0.13, volume: 0.1, pan: 0.18, shimmer: true },
-                ];
-            case 'menu-open':
-                return [
-                    { frequency: 420, slideTo: 520, duration: 0.055, volume: 0.05, pan: -0.1 },
-                    { delay: 0.045, frequency: 612, slideTo: 700, duration: 0.05, volume: 0.04, pan: 0.08, shimmer: true },
-                ];
-            case 'menu-close':
-                return [
-                    { frequency: 620, slideTo: 520, duration: 0.055, volume: 0.05, pan: 0.1 },
-                    { delay: 0.042, frequency: 508, slideTo: 420, duration: 0.05, volume: 0.038, pan: -0.08 },
-                ];
-            case 'menu-select':
-            default:
-                return [
-                    { frequency: 560, slideTo: 640, duration: 0.05, volume: 0.046, pan: 0.02, shimmer: true },
-                ];
+    registerVoice(group, voiceRef) {
+        if (!group || !voiceRef?.oscillator) {
+            return;
         }
+
+        const voices = this.activeVoices.get(group) || new Set();
+        voices.add(voiceRef);
+        this.activeVoices.set(group, voices);
+
+        voiceRef.oscillator.onended = () => {
+            voices.delete(voiceRef);
+            if (!voices.size) {
+                this.activeVoices.delete(group);
+            }
+
+            if (!this.hasActivePreferences()) {
+                this.queueIdleSuspend();
+            }
+        };
+    }
+
+    fadeOutGroup(context, group, atTime, fadeDuration = 0.04) {
+        const voices = this.activeVoices.get(group);
+        if (!voices?.size) {
+            return;
+        }
+
+        voices.forEach((voiceRef) => {
+            if (!voiceRef || voiceRef.isStopping) {
+                return;
+            }
+
+            voiceRef.isStopping = true;
+            const fadeStart = Math.max(context.currentTime, atTime);
+            const fadeEnd = fadeStart + fadeDuration;
+            const stopAt = Math.max(fadeEnd + 0.02, Number(voiceRef.startAt || fadeStart) + 0.02);
+
+            if (voiceRef.gainNode?.gain) {
+                if (typeof voiceRef.gainNode.gain.cancelAndHoldAtTime === 'function') {
+                    voiceRef.gainNode.gain.cancelAndHoldAtTime(fadeStart);
+                } else {
+                    voiceRef.gainNode.gain.cancelScheduledValues(fadeStart);
+                    voiceRef.gainNode.gain.setValueAtTime(
+                        Math.max(0.0001, Number(voiceRef.peakVolume || 0.02) * 0.42),
+                        fadeStart,
+                    );
+                }
+                voiceRef.gainNode.gain.exponentialRampToValueAtTime(0.0001, fadeEnd);
+            }
+
+            try {
+                voiceRef.oscillator.stop(stopAt);
+            } catch (_error) {
+                // Ignore repeated stop calls.
+            }
+
+            (voiceRef.modulators || []).forEach((oscillator) => {
+                try {
+                    oscillator.stop(stopAt);
+                } catch (_error) {
+                    // Ignore repeated stop calls.
+                }
+            });
+        });
     }
 
     async play(kind = '', options = {}) {
+        const cue = this.getCueConfig(kind);
         const preview = options?.preview === true;
-        if (!this.isCueAllowed(kind, preview)) {
+        if (!this.isCueAllowed(cue, preview)) {
             return false;
         }
 
         const context = await this.unlock();
-        if (!context || !this.masterGain) {
+        if (!context || !this.masterInput) {
             return false;
         }
 
-        const baseTime = context.currentTime + 0.01;
-        const pattern = this.getPattern(kind);
-        pattern.forEach((note) => {
-            this.scheduleNote(context, baseTime, note);
+        const baseTime = context.currentTime + 0.012;
+        this.fadeOutGroup(context, cue.group, baseTime);
+
+        const gainScale = preview
+            ? Number(cue.previewGain || 1.05)
+            : 1;
+
+        cue.notes.forEach((note) => {
+            this.scheduleNote(context, baseTime, note, {
+                gainScale,
+                group: cue.group,
+            });
         });
 
         return true;
     }
 
-    scheduleNote(context, baseTime, note = {}) {
+    scheduleNote(context, baseTime, note = {}, options = {}) {
         const startAt = baseTime + Number(note.delay || 0);
         const duration = Math.max(0.035, Number(note.duration || 0.06));
         const endAt = startAt + duration;
+        const detuneJitter = Number(note.detuneJitter || 0);
+        const detune = Number(note.detune || 0) + (
+            detuneJitter
+                ? (Math.random() * 2 - 1) * detuneJitter
+                : 0
+        );
 
         this.scheduleVoice(context, startAt, endAt, {
             type: note.type || 'triangle',
             frequency: Number(note.frequency || 440),
             slideTo: Number(note.slideTo || note.frequency || 440),
-            volume: Number(note.volume || 0.05),
+            volume: Number(note.volume || 0.05) * Number(options.gainScale || 1),
             pan: Number(note.pan || 0),
             cutoff: Number(note.cutoff || 1700),
+            cutoffTo: Number(note.cutoffTo || note.cutoff || 1400),
+            attack: Number(note.attack || 0.014),
+            decay: Number(note.decay || 0.04),
+            sustain: Number(note.sustain || 0.56),
+            vibratoRate: Number(note.vibratoRate || 0),
+            vibratoDepth: Number(note.vibratoDepth || 0),
+            detune,
+            group: options.group,
         });
 
         if (note.shimmer) {
-            this.scheduleVoice(context, startAt + 0.005, endAt, {
+            this.scheduleVoice(context, startAt + 0.004, endAt, {
                 type: 'sine',
                 frequency: Number(note.frequency || 440) * 2,
-                slideTo: Number(note.slideTo || note.frequency || 440) * 2.02,
-                volume: Number(note.volume || 0.05) * 0.32,
-                pan: Number(note.pan || 0) * -0.55,
-                cutoff: Number(note.cutoff || 1700) + 900,
+                slideTo: Number(note.slideTo || note.frequency || 440) * 2.01,
+                volume: Number(note.volume || 0.05) * Number(options.gainScale || 1) * 0.26,
+                pan: Number(note.pan || 0) * -0.5,
+                cutoff: Number(note.cutoff || 1700) + 920,
+                cutoffTo: Number(note.cutoffTo || note.cutoff || 1400) + 620,
+                attack: Number(note.attack || 0.014) * 0.78,
+                decay: Number(note.decay || 0.04) * 0.78,
+                sustain: this.clamp(Number(note.sustain || 0.56) * 0.72, 0.2, 0.9),
+                detune: detune + 8,
+                group: options.group,
             });
         }
     }
@@ -280,36 +717,79 @@ class WebChatSoundManager {
             ? context.createStereoPanner()
             : null;
         const safeStart = Math.max(context.currentTime, startAt);
-        const safeEnd = Math.max(safeStart + 0.02, endAt);
+        const safeEnd = Math.max(safeStart + 0.024, endAt);
+        const duration = safeEnd - safeStart;
         const peakVolume = Math.max(0.0001, Number(voice.volume || 0.04));
         const targetFrequency = Math.max(40, Number(voice.frequency || 440));
         const slideTarget = Math.max(40, Number(voice.slideTo || targetFrequency));
+        const attackEnd = Math.min(safeEnd - 0.012, safeStart + Math.min(duration * 0.34, Number(voice.attack || 0.014)));
+        const decayEnd = Math.min(
+            safeEnd - 0.01,
+            attackEnd + Math.min(duration * 0.38, Number(voice.decay || 0.04)),
+        );
+        const sustainLevel = peakVolume * this.clamp(Number(voice.sustain || 0.56), 0.22, 0.95);
+        const modulators = [];
 
         oscillator.type = voice.type || 'triangle';
         oscillator.frequency.setValueAtTime(targetFrequency, safeStart);
         oscillator.frequency.exponentialRampToValueAtTime(slideTarget, safeEnd);
+        oscillator.detune.setValueAtTime(Number(voice.detune || 0), safeStart);
+
+        if (Number(voice.vibratoDepth || 0) > 0 && Number(voice.vibratoRate || 0) > 0) {
+            const vibratoOscillator = context.createOscillator();
+            const vibratoGain = context.createGain();
+
+            vibratoOscillator.type = 'sine';
+            vibratoOscillator.frequency.setValueAtTime(Number(voice.vibratoRate || 5), safeStart);
+            vibratoGain.gain.setValueAtTime(Number(voice.vibratoDepth || 0), safeStart);
+
+            vibratoOscillator.connect(vibratoGain);
+            vibratoGain.connect(oscillator.detune);
+            vibratoOscillator.start(safeStart);
+            vibratoOscillator.stop(safeEnd + 0.04);
+            modulators.push(vibratoOscillator);
+        }
 
         filter.type = 'lowpass';
-        filter.Q.value = 0.8;
-        filter.frequency.setValueAtTime(Math.max(500, Number(voice.cutoff || 1800)), safeStart);
+        filter.Q.value = 0.86;
+        filter.frequency.setValueAtTime(Math.max(480, Number(voice.cutoff || 1800)), safeStart);
+        filter.frequency.exponentialRampToValueAtTime(
+            Math.max(420, Number(voice.cutoffTo || voice.cutoff || 1400)),
+            safeEnd,
+        );
 
         gain.gain.setValueAtTime(0.0001, safeStart);
-        gain.gain.exponentialRampToValueAtTime(peakVolume, safeStart + 0.016);
+        gain.gain.exponentialRampToValueAtTime(peakVolume, Math.max(safeStart + 0.008, attackEnd));
+
+        if (decayEnd > attackEnd + 0.004) {
+            gain.gain.exponentialRampToValueAtTime(sustainLevel, decayEnd);
+        }
+
         gain.gain.exponentialRampToValueAtTime(0.0001, safeEnd);
 
         oscillator.connect(filter);
         filter.connect(gain);
 
         if (panNode) {
-            panNode.pan.setValueAtTime(Math.max(-0.85, Math.min(0.85, Number(voice.pan || 0))), safeStart);
+            panNode.pan.setValueAtTime(this.clamp(Number(voice.pan || 0), -0.85, 0.85), safeStart);
             gain.connect(panNode);
-            panNode.connect(this.masterGain);
+            panNode.connect(this.masterInput);
         } else {
-            gain.connect(this.masterGain);
+            gain.connect(this.masterInput);
         }
 
+        const voiceRef = {
+            oscillator,
+            gainNode: gain,
+            peakVolume,
+            startAt: safeStart,
+            modulators,
+        };
+
+        this.registerVoice(String(voice.group || ''), voiceRef);
+
         oscillator.start(safeStart);
-        oscillator.stop(safeEnd + 0.02);
+        oscillator.stop(safeEnd + 0.03);
     }
 }
 

@@ -19,6 +19,7 @@ const {
     USER_CHECKPOINT_TOOL_ID,
     buildUserCheckpointMessage,
 } = require('./user-checkpoints');
+const { parseLenientJson } = require('./utils/lenient-json');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 
 let chatClient = null;
@@ -2084,9 +2085,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === USER_CHECKPOINT_TOOL_ID)) {
         guidance.push('- Use `user-checkpoint` for a high-impact decision before major work instead of asking a plain-text multiple-choice question.');
         guidance.push('- In this runtime, do not call or mention `request_user_input`. `user-checkpoint` is the correct questionnaire tool for web chat.');
+        guidance.push('- On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision would materially help.');
         guidance.push('- Do not tell the user that a questionnaire tool failed or expose internal mode/tool errors. If `user-checkpoint` is attached, use it directly.');
         guidance.push('- Do not claim that the inline survey card rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.');
-        guidance.push('- Keep the checkpoint to one question with 2 to 4 strong options, and leave the built-in free-text path available so the user can type their own answer.');
+        guidance.push('- Prefer `user-checkpoint` over a prose "which option do you want?" message when one short choice would unblock progress or keep the user involved.');
+        guidance.push('- Keep the checkpoint to one card and one question with 2 to 4 strong options, and leave the built-in free-text path available so the user can type their own answer.');
+        guidance.push('- Do not turn `user-checkpoint` into long forms, pages of questions, or back-to-back questionnaires.');
         guidance.push('- If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not write a multi-question quiz or personality test as assistant text.');
     }
 
@@ -2275,11 +2279,14 @@ function parseToolArguments(rawArguments = '{}') {
         };
     }
 
-    try {
-        return JSON.parse(rawArguments);
-    } catch (error) {
+    const parsed = parseLenientJson(rawArguments);
+    if (parsed !== null) {
+        return parsed;
+    }
+
+    {
         return {
-            __parseError: `Invalid tool arguments: ${error.message}`,
+            __parseError: 'Invalid tool arguments: unable to parse as JSON-like structured data.',
             raw: rawArguments,
         };
     }
@@ -3412,6 +3419,7 @@ module.exports = {
         promptHasExplicitSshIntent,
         hasUsableSshDefaults,
         isTerminalFinishReason,
+        parseLenientJson,
         ToolOrchestrationError,
     },
 };

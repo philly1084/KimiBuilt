@@ -343,12 +343,15 @@ function buildUserCheckpointInstructions(policy = {}) {
             ? `A checkpoint is already pending (${policy.pending.id}). Do not ask another one until the user answers it.`
             : 'If you truly need that decision, call the `user-checkpoint` tool instead of asking in free-form prose.',
         'Do not call or mention `request_user_input` in this runtime. Use `user-checkpoint` for web-chat questionnaires.',
+        'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would materially help.',
         'On the web-chat surface, do not ask a blocking multiple-choice question as plain assistant text when `user-checkpoint` is available; use the tool so the UI can render inline options.',
         'Do not claim that the questionnaire rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.',
         'If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not turn that into a multi-question quiz, personality test, or numbered prose form.',
+        'Prefer `user-checkpoint` over a prose "which option do you want?" message when one short decision would unblock progress or keep the user involved.',
         'Use a checkpoint only when the answer would materially change the plan, architecture, implementation scope, or final output.',
         'Do not use a checkpoint for small clarifications or details you can infer reasonably.',
-        'Keep the checkpoint concise: one question, 2 to 4 strong options, short descriptions, and keep the free-text field available so the user can add their own input when needed.',
+        'Keep the checkpoint concise: one card, one question, 2 to 4 strong options, short descriptions, and keep the free-text field available so the user can add their own input when needed.',
+        'Do not turn checkpoints into long forms, pages of questions, or back-to-back survey cards unless the user explicitly asks for that and the tool supports it.',
         'If there are no checkpoint questions remaining, proceed with the best reasonable assumption and state that assumption briefly.',
         'When the user sends a message starting with `Survey response (` treat it as the answer to the checkpoint and continue the work.',
     ];

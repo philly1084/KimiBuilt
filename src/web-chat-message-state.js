@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { stripNullCharacters } = require('./utils/text');
+const { parseLenientJson } = require('./utils/lenient-json');
 
 const COLLAPSIBLE_ARTIFACT_FORMATS = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'power-query']);
 const COLLAPSIBLE_ARTIFACT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.pq', '.m'];
@@ -23,11 +24,7 @@ function parseToolArguments(rawArgs) {
         return {};
     }
 
-    try {
-        return JSON.parse(rawArgs);
-    } catch (_error) {
-        return {};
-    }
+    return parseLenientJson(rawArgs) || {};
 }
 
 function buildSurveyFenceContent(checkpoint = null) {

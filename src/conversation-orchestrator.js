@@ -27,6 +27,7 @@ const {
     resolveSessionScope,
 } = require('./session-scope');
 const { USER_CHECKPOINT_TOOL_ID } = require('./user-checkpoints');
+const { parseLenientJson } = require('./utils/lenient-json');
 const { stripNullCharacters } = require('./utils/text');
 const {
     DEFAULT_EXECUTION_PROFILE,
@@ -347,25 +348,7 @@ function unwrapCodeFence(text = '') {
 }
 
 function safeJsonParse(text = '') {
-    const source = unwrapCodeFence(text);
-    if (!source) {
-        return null;
-    }
-
-    try {
-        return JSON.parse(source);
-    } catch (_error) {
-        const start = source.indexOf('{');
-        const end = source.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            try {
-                return JSON.parse(source.slice(start, end + 1));
-            } catch (_innerError) {
-                return null;
-            }
-        }
-        return null;
-    }
+    return parseLenientJson(unwrapCodeFence(text));
 }
 
 function truncateText(value = '', limit = MAX_TOOL_RESULT_CHARS) {
@@ -1420,11 +1403,7 @@ function parseToolCallArguments(rawArguments = '{}') {
         return {};
     }
 
-    try {
-        return JSON.parse(rawArguments);
-    } catch (_error) {
-        return {};
-    }
+    return parseLenientJson(rawArguments) || {};
 }
 
 function extractRemoteWebsiteConfigMapName(toolEvents = []) {
@@ -1655,12 +1634,7 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
         return [];
     }
 
-    let lastArgs = {};
-    try {
-        lastArgs = JSON.parse(lastRemoteEvent?.toolCall?.function?.arguments || '{}');
-    } catch (_error) {
-        lastArgs = {};
-    }
+    const lastArgs = parseToolCallArguments(lastRemoteEvent?.toolCall?.function?.arguments || '{}');
 
     const combinedOutput = [
         objective,
@@ -1978,13 +1952,7 @@ function normalizeStepSignature(step = {}) {
 
 function extractExecutedStepSignature(toolEvent = {}) {
     const toolName = toolEvent?.toolCall?.function?.name || toolEvent?.result?.toolId || '';
-    let params = {};
-
-    try {
-        params = JSON.parse(toolEvent?.toolCall?.function?.arguments || '{}');
-    } catch (_error) {
-        params = {};
-    }
+    const params = parseToolCallArguments(toolEvent?.toolCall?.function?.arguments || '{}');
 
     return normalizeStepSignature({
         tool: toolName,
@@ -4415,8 +4383,10 @@ class ConversationOrchestrator extends EventEmitter {
             'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
             'Every `user-checkpoint` step must include a non-empty `params.question` string and 2 to 4 concise `params.options` entries.',
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
+            'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision or direction check would help.',
             'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
-            'Keep `user-checkpoint` to one question with mutually exclusive, actionable options. Leave the free-text field enabled so the user can supply a custom answer when needed. Do not bundle multiple decisions into one checkpoint.',
+            'Keep `user-checkpoint` to one card and one question with mutually exclusive, actionable options. Leave the free-text field enabled so the user can supply a custom answer when needed. Do not bundle multiple decisions into one checkpoint.',
+            'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or a chain of back-to-back surveys.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
@@ -4905,8 +4875,10 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (canUseUserCheckpoint) {
             parts.push('Use `user-checkpoint` when one high-impact decision would materially change the plan before major implementation, refactoring, or other long multi-step work.');
+            parts.push('On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would help.');
             parts.push('On web-chat, `user-checkpoint` renders as an inline popup-style survey card with clickable choices, so prefer it over a plain-text multiple-choice question.');
-            parts.push('Keep checkpoint surveys concise: one question, 2 to 4 strong options, short descriptions, and leave the free-text field available so the user can supply their own input when needed.');
+            parts.push('Keep checkpoint surveys concise: one card, one question, 2 to 4 strong options, short descriptions, and leave the free-text field available so the user can supply their own input when needed.');
+            parts.push('Do not turn checkpoints into long questionnaires, pages of questions, or back-to-back survey cards.');
         } else if (userCheckpointPolicy.enabled === true && userCheckpointPolicy.pending) {
             parts.push('A `user-checkpoint` is already pending for this session. Do not ask another survey question until the user answers it.');
         }

@@ -498,6 +498,16 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('repairs JSON-like tool arguments before parsing', () => {
+        expect(__testUtils.parseToolArguments("command:'hostname', host:'77.42.44.98', options:['-f',], dryRun:False"))
+            .toEqual({
+                command: 'hostname',
+                host: '77.42.44.98',
+                options: ['-f'],
+                dryRun: false,
+            });
+    });
+
     test('sanitizes union schema types into a single tool-compatible type', () => {
         expect(__testUtils.sanitizeToolSchema({
             type: 'object',
@@ -629,6 +639,9 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('Do not tell the user that a questionnaire tool failed');
         expect(guidance).toContain('Do not claim that the inline survey card rendered');
         expect(guidance).toContain('Do not write a multi-question quiz or personality test as assistant text');
+        expect(guidance).toContain('primary quick way to involve the user');
+        expect(guidance).toContain('Prefer `user-checkpoint` over a prose "which option do you want?" message');
+        expect(guidance).toContain('one card and one question');
     });
 
     test('extracts explicit web research queries for deterministic preflight', () => {

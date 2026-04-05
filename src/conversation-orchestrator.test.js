@@ -3097,7 +3097,11 @@ describe('ConversationOrchestrator', () => {
         }));
         expect(plannerPrompt).toContain('Every `user-checkpoint` step must include a non-empty `params.question` string');
         expect(plannerPrompt).toContain('inline survey card with clickable options');
+        expect(plannerPrompt).toContain('primary quick way to involve the user');
+        expect(plannerPrompt).toContain('Do not turn `user-checkpoint` into a long questionnaire');
         expect(runtimeInstructions).toContain('inline popup-style survey card with clickable choices');
+        expect(runtimeInstructions).toContain('primary quick way to involve the user');
+        expect(runtimeInstructions).toContain('Do not turn checkpoints into long questionnaires');
     });
 
     test('suppresses user-checkpoint when a survey is already pending', () => {

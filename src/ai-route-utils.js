@@ -6,6 +6,7 @@ const { getSessionControlState } = require('./runtime-control-state');
 const { resolveDeferredWorkloadPreflight } = require('./workloads/preflight');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
 const settingsController = require('./routes/admin/settings.controller');
+const { parseLenientJson } = require('./utils/lenient-json');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
@@ -796,12 +797,7 @@ function extractSshSessionMetadataFromToolEvents(toolEvents = []) {
             continue;
         }
 
-        let args = {};
-        try {
-            args = JSON.parse(event?.toolCall?.function?.arguments || '{}');
-        } catch (_error) {
-            args = {};
-        }
+        const args = parseLenientJson(event?.toolCall?.function?.arguments || '{}') || {};
         const hostField = String(event?.result?.data?.host || '').trim();
         const hostMatch = hostField.match(/^(?<host>[^:]+)(?::(?<port>\d+))?$/);
         const hostFromResult = hostMatch?.groups?.host && !isSuspiciousSshTargetHost(hostMatch.groups.host)

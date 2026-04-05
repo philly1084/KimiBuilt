@@ -496,12 +496,145 @@ class UIHelpers {
     // Message Rendering
     // ============================================
 
-    parseJsonSafely(value = '') {
-        try {
-            return JSON.parse(value);
-        } catch (_error) {
-            return null;
+    normalizeJsonLikeText(value = '') {
+        return String(value || '')
+            .replace(/^\uFEFF/, '')
+            .replace(/[\u201C\u201D]/g, '"')
+            .replace(/[\u2018\u2019]/g, '\'')
+            .replace(/\u00A0/g, ' ')
+            .trim();
+    }
+
+    unwrapJsonLikeCodeFence(value = '') {
+        const normalized = this.normalizeJsonLikeText(value);
+        const match = normalized.match(/^```(?:json|survey|kb-survey)?\s*([\s\S]*?)\s*```$/i);
+        return match ? match[1].trim() : normalized;
+    }
+
+    extractJsonLikeSegment(value = '') {
+        const source = this.unwrapJsonLikeCodeFence(value);
+        const objectStart = source.indexOf('{');
+        const arrayStart = source.indexOf('[');
+        const starts = [objectStart, arrayStart].filter((index) => index >= 0);
+
+        if (starts.length === 0) {
+            return source;
         }
+
+        const start = Math.min(...starts);
+        if (objectStart < 0 && arrayStart >= 0) {
+            const prefix = source.slice(0, arrayStart).trim();
+            if (/[A-Za-z_][A-Za-z0-9_-]*\s*:/.test(prefix)) {
+                return source;
+            }
+        }
+
+        const stack = [];
+        let quote = null;
+        let escaped = false;
+
+        for (let index = start; index < source.length; index += 1) {
+            const char = source[index];
+
+            if (quote) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+
+                if (char === '\\') {
+                    escaped = true;
+                    continue;
+                }
+
+                if (char === quote) {
+                    quote = null;
+                }
+
+                continue;
+            }
+
+            if (char === '"' || char === '\'') {
+                quote = char;
+                continue;
+            }
+
+            if (char === '{' || char === '[') {
+                stack.push(char);
+                continue;
+            }
+
+            if (char === '}' || char === ']') {
+                const expectedOpening = char === '}' ? '{' : '[';
+                if (stack[stack.length - 1] === expectedOpening) {
+                    stack.pop();
+                }
+
+                if (stack.length === 0) {
+                    return source.slice(start, index + 1).trim();
+                }
+            }
+        }
+
+        return source.slice(start).trim();
+    }
+
+    repairJsonLikeString(value = '') {
+        const wrapped = this.wrapBareJsonLikeObject(String(value || '')
+            .split('\n')
+            .map((line) => line.replace(/^\s*\/\/.*$/g, ''))
+            .join('\n'));
+
+        return wrapped
+            .replace(/(^|[{,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'(\s*:)/gm, '$1"$2"$3')
+            .replace(/(^|[{,]\s*)([A-Za-z_][A-Za-z0-9_-]*)(\s*:)/gm, '$1"$2"$3')
+            .replace(/([:\[,]\s*)'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, prefix, entry) => `${prefix}"${String(entry || '').replace(/\\'/g, '\'').replace(/"/g, '\\"')}"`)
+            .replace(/\bNone\b/g, 'null')
+            .replace(/\bTrue\b/g, 'true')
+            .replace(/\bFalse\b/g, 'false')
+            .replace(/\bundefined\b/g, 'null')
+            .replace(/,\s*([}\]])/g, '$1')
+            .replace(/;\s*$/g, '')
+            .trim();
+    }
+
+    wrapBareJsonLikeObject(value = '') {
+        const trimmed = String(value || '').trim();
+        if (!trimmed || /^[{\[]/.test(trimmed)) {
+            return trimmed;
+        }
+
+        return /^[A-Za-z_][A-Za-z0-9_-]*\s*:/.test(trimmed)
+            ? `{${trimmed}}`
+            : trimmed;
+    }
+
+    parseJsonSafely(value = '') {
+        const tryParse = (candidate) => {
+            if (!candidate) {
+                return null;
+            }
+
+            try {
+                return JSON.parse(candidate);
+            } catch (_error) {
+                return null;
+            }
+        };
+
+        const direct = tryParse(this.unwrapJsonLikeCodeFence(value));
+        if (direct !== null) {
+            return direct;
+        }
+
+        const extracted = this.extractJsonLikeSegment(value);
+        const extractedParsed = tryParse(extracted);
+        if (extractedParsed !== null) {
+            return extractedParsed;
+        }
+
+        const repaired = this.repairJsonLikeString(extracted);
+        return tryParse(repaired) || tryParse(this.wrapBareJsonLikeObject(repaired));
     }
 
     normalizeSurveyOption(option = {}, index = 0) {
@@ -2561,10 +2694,6 @@ class UIHelpers {
     }
 
     setMenuSoundsEnabled(value) {
-        if (value === true && !this.isSoundCuesEnabled()) {
-            this.soundManager?.setEnabled?.(true);
-            this.updateSoundCuesUI();
-        }
         this.soundManager?.setMenuEnabled?.(value === true);
         this.updateMenuSoundsUI();
     }

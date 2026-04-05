@@ -8,6 +8,7 @@ const logsController = require('./logs.controller');
 const tracesController = require('./traces.controller');
 const { vectorStore } = require('../../memory/vector-store');
 const { getUnifiedRegistry } = require('../../agent-sdk/registry/UnifiedRegistry');
+const { parseLenientJson } = require('../../utils/lenient-json');
 
 class DashboardController {
   constructor(agentOrchestrator) {
@@ -47,12 +48,7 @@ class DashboardController {
   }
 
   normalizeToolEvent(event = {}) {
-    let rawArgs = {};
-    try {
-      rawArgs = JSON.parse(event?.toolCall?.function?.arguments || '{}');
-    } catch (_error) {
-      rawArgs = {};
-    }
+    const rawArgs = parseLenientJson(event?.toolCall?.function?.arguments || '{}') || {};
 
     const toolId = event?.toolCall?.function?.name
       || event?.result?.toolId
