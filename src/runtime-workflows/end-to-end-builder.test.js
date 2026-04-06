@@ -220,6 +220,107 @@ describe('end-to-end builder workflow', () => {
         })).toEqual([]);
     });
 
+    test('uses remote-command to build and deploy a remote workspace after OpenCode implementation', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Fix the app in the remote repo, deploy it to k3s on the same server, and verify the rollout.',
+            workspacePath: '/var/www/test.demoserver2.buzz',
+            repositoryPath: '/workspace/local-clone',
+            opencodeTarget: 'remote-default',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+        const toolPolicy = {
+            candidateToolIds: ['opencode-run', 'remote-command'],
+            preferredRemoteToolId: 'remote-command',
+        };
+
+        expect(workflow).toEqual(expect.objectContaining({
+            lane: 'repo-then-deploy',
+            deliveryMode: 'remote-workspace',
+            completionCriteria: expect.arrayContaining([
+                'Remote workspace built and deployed',
+            ]),
+        }));
+
+        const implementationPlan = buildEndToEndWorkflowPlan({
+            workflow,
+            toolPolicy,
+            remoteToolId: 'remote-command',
+        });
+        expect(implementationPlan).toEqual([
+            expect.objectContaining({
+                tool: 'opencode-run',
+                params: expect.objectContaining({
+                    target: 'remote-default',
+                    workspacePath: '/var/www/test.demoserver2.buzz',
+                }),
+            }),
+        ]);
+
+        const afterImplementation = advanceEndToEndBuilderWorkflow({
+            workflow,
+            toolEvents: [
+                buildToolEvent('opencode-run', {}, {
+                    data: {
+                        workspacePath: '/var/www/test.demoserver2.buzz',
+                        summary: 'Remote repo updated.',
+                    },
+                }),
+            ],
+        });
+        expect(afterImplementation).toEqual(expect.objectContaining({
+            stage: 'saving',
+            progress: expect.objectContaining({
+                implemented: true,
+            }),
+        }));
+
+        const deployPlan = buildEndToEndWorkflowPlan({
+            workflow: afterImplementation,
+            toolPolicy,
+            remoteToolId: 'remote-command',
+        });
+        expect(deployPlan).toEqual([
+            expect.objectContaining({
+                tool: 'remote-command',
+                reason: expect.stringContaining('Build the remote workspace'),
+                params: expect.objectContaining({
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    workingDirectory: '/var/www/test.demoserver2.buzz',
+                    workflowAction: 'build-and-deploy-remote-workspace',
+                    command: expect.stringContaining('kubectl apply -f'),
+                }),
+            }),
+        ]);
+        expect(deployPlan[0].params.command).toContain('app/package.json');
+
+        const completedWorkflow = advanceEndToEndBuilderWorkflow({
+            workflow: afterImplementation,
+            toolEvents: [
+                buildToolEvent('remote-command', {
+                    workflowAction: 'build-and-deploy-remote-workspace',
+                }, {
+                    data: {
+                        stdout: 'deployment "backend" successfully rolled out',
+                    },
+                }),
+            ],
+        });
+        expect(completedWorkflow).toEqual(expect.objectContaining({
+            stage: 'completed',
+            status: 'completed',
+            progress: expect.objectContaining({
+                deployed: true,
+                verified: true,
+            }),
+        }));
+    });
+
     test('reuses an active stored workflow on continuation prompts', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'continue',
@@ -299,6 +400,45 @@ describe('end-to-end builder workflow', () => {
             stage: 'blocked',
             status: 'blocked',
             lastError: expect.stringContaining('`opencode-run` is not ready'),
+        }));
+    });
+
+    test('does not require git-safe or k3s-deploy for a remote workspace deploy flow', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Fix the app in the remote repo, deploy it to k3s on the same server, and verify the rollout.',
+            workspacePath: '/var/www/test.demoserver2.buzz',
+            repositoryPath: '/workspace/local-clone',
+            opencodeTarget: 'remote-default',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        const afterImplementation = advanceEndToEndBuilderWorkflow({
+            workflow,
+            toolEvents: [
+                buildToolEvent('opencode-run', {}, {
+                    data: {
+                        workspacePath: '/var/www/test.demoserver2.buzz',
+                    },
+                }),
+            ],
+        });
+
+        const evaluated = evaluateEndToEndBuilderWorkflow({
+            workflow: afterImplementation,
+            toolPolicy: {
+                candidateToolIds: ['remote-command'],
+                preferredRemoteToolId: 'remote-command',
+            },
+        });
+
+        expect(evaluated).toEqual(expect.objectContaining({
+            stage: 'saving',
+            status: 'active',
+            lastError: null,
         }));
     });
 });

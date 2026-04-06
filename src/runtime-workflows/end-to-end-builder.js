@@ -11,6 +11,10 @@ const VALID_LANES = new Set([
     'repo-then-deploy',
     'inspect-only',
 ]);
+const VALID_DELIVERY_MODES = new Set([
+    'gitops',
+    'remote-workspace',
+]);
 const VALID_STAGES = new Set([
     'planned',
     'implementing',
@@ -184,13 +188,33 @@ function buildInitialStage(lane = '') {
     return 'planned';
 }
 
-function buildCompletionCriteria(lane = '') {
+function inferDeliveryMode({ lane = '', opencodeTarget = 'local' } = {}) {
+    if (lane === 'repo-then-deploy' && normalizeText(opencodeTarget) === 'remote-default') {
+        return 'remote-workspace';
+    }
+
+    return 'gitops';
+}
+
+function isRemoteWorkspaceDeployWorkflow(workflow = null) {
+    return Boolean(workflow)
+        && workflow.lane === 'repo-then-deploy'
+        && inferDeliveryMode({
+            lane: workflow.lane,
+            opencodeTarget: workflow.opencodeTarget,
+        }) === 'remote-workspace';
+}
+
+function buildCompletionCriteria({ lane = '', deliveryMode = 'gitops' } = {}) {
     switch (lane) {
     case 'repo-only':
         return ['Repository implementation completed'];
     case 'deploy-only':
         return ['Deployment applied', 'Deployment verified'];
     case 'repo-then-deploy':
+        if (deliveryMode === 'remote-workspace') {
+            return ['Repository implementation completed', 'Remote workspace built and deployed', 'Deployment verified'];
+        }
         return ['Repository implementation completed', 'Changes pushed', 'Deployment applied', 'Deployment verified'];
     case 'inspect-only':
         return ['Inspection completed'];
@@ -199,13 +223,17 @@ function buildCompletionCriteria(lane = '') {
     }
 }
 
-function buildVerificationCriteria(lane = '') {
+function buildVerificationCriteria({ lane = '', deliveryMode = 'gitops' } = {}) {
     if (lane === 'repo-only') {
         return [];
     }
 
     if (lane === 'inspect-only') {
         return ['Captured a verified remote inspection result'];
+    }
+
+    if (lane === 'repo-then-deploy' && deliveryMode === 'remote-workspace') {
+        return ['Remote workspace build completed', 'Kubernetes apply completed', 'Post-deploy remote verification captured'];
     }
 
     return ['Rollout status confirmed', 'Post-deploy remote verification captured'];
@@ -235,6 +263,12 @@ function normalizeWorkflowState(workflow = null) {
         : ACTIVE_WORKFLOW_STATUS;
     const deploy = buildDeployState(workflow.deploy || {});
     const progress = normalizeProgress(workflow.progress);
+    const deliveryMode = VALID_DELIVERY_MODES.has(String(workflow.deliveryMode || '').trim())
+        ? String(workflow.deliveryMode).trim()
+        : inferDeliveryMode({
+            lane: workflow.lane,
+            opencodeTarget: workflow.opencodeTarget,
+        });
 
     return {
         kind: END_TO_END_WORKFLOW_KIND,
@@ -246,6 +280,7 @@ function normalizeWorkflowState(workflow = null) {
         workspacePath: normalizeText(workflow.workspacePath) || null,
         repositoryPath: normalizeText(workflow.repositoryPath) || null,
         opencodeTarget: normalizeText(workflow.opencodeTarget) || 'local',
+        deliveryMode,
         remoteTarget: workflow.remoteTarget && typeof workflow.remoteTarget === 'object'
             ? {
                 ...(normalizeText(workflow.remoteTarget.host) ? { host: normalizeText(workflow.remoteTarget.host) } : {}),
@@ -258,10 +293,16 @@ function normalizeWorkflowState(workflow = null) {
         requiresVerification: workflow.requiresVerification !== false,
         completionCriteria: Array.isArray(workflow.completionCriteria)
             ? workflow.completionCriteria.map((entry) => normalizeText(entry)).filter(Boolean)
-            : buildCompletionCriteria(workflow.lane),
+            : buildCompletionCriteria({
+                lane: workflow.lane,
+                deliveryMode,
+            }),
         verificationCriteria: Array.isArray(workflow.verificationCriteria)
             ? workflow.verificationCriteria.map((entry) => normalizeText(entry)).filter(Boolean)
-            : buildVerificationCriteria(workflow.lane),
+            : buildVerificationCriteria({
+                lane: workflow.lane,
+                deliveryMode,
+            }),
         lastMeaningfulProgressAt: normalizeText(workflow.lastMeaningfulProgressAt) || null,
         lastError: normalizeText(workflow.lastError) || null,
         source: normalizeText(workflow.source) || null,
@@ -308,8 +349,14 @@ function inferEndToEndBuilderWorkflow({
         deploy: buildDeployState(),
         progress: normalizeProgress(),
         requiresVerification: lane !== 'repo-only' || hasVerificationIntent(objective),
-        completionCriteria: buildCompletionCriteria(lane),
-        verificationCriteria: buildVerificationCriteria(lane),
+        completionCriteria: buildCompletionCriteria({
+            lane,
+            deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
+        }),
+        verificationCriteria: buildVerificationCriteria({
+            lane,
+            deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
+        }),
         lastMeaningfulProgressAt: null,
         lastError: null,
         source: 'objective',
@@ -333,12 +380,19 @@ function getToolEventAction(event = {}) {
     return normalizeText(event?.result?.data?.action || args.action).toLowerCase();
 }
 
+function getToolEventWorkflowAction(event = {}) {
+    const args = parseToolArguments(event?.toolCall?.function?.arguments || '{}');
+    return normalizeText(args.workflowAction || args.workflow_action).toLowerCase();
+}
+
 function buildImplementationPrompt(workflow = null) {
     const objective = normalizeText(workflow?.objective);
     return [
         'Implement the requested repository changes in the workspace.',
         workflow?.lane === 'repo-then-deploy'
-            ? 'Keep the changes ready for a later git-safe save/push and k3s deploy step. Do not perform git pushes or remote deployment from inside OpenCode.'
+            ? (isRemoteWorkspaceDeployWorkflow(workflow)
+                ? 'Keep the changes ready for a later remote build and k3s deployment step on the same server. Do not perform kubectl or deployment actions from inside OpenCode.'
+                : 'Keep the changes ready for a later git-safe save/push and k3s deploy step. Do not perform git pushes or remote deployment from inside OpenCode.')
             : 'Focus on the code or content changes and summarize any relevant build or test results.',
         '',
         'User objective:',
@@ -377,6 +431,72 @@ function buildInspectCommand(workflow = null) {
     ].join('\n');
 }
 
+function quoteShellArg(value = '') {
+    return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
+}
+
+function resolveRemoteWorkspaceManifestsPath(workflow = null) {
+    const workspacePath = normalizeText(workflow?.workspacePath);
+    const manifestsPath = normalizeText(workflow?.deploy?.manifestsPath || config.deploy.defaultManifestsPath);
+    if (!manifestsPath) {
+        return workspacePath || null;
+    }
+
+    if (manifestsPath.startsWith('/')) {
+        return manifestsPath;
+    }
+
+    if (!workspacePath) {
+        return manifestsPath;
+    }
+
+    return `${workspacePath.replace(/\/+$/, '')}/${manifestsPath.replace(/^\/+/, '')}`;
+}
+
+function buildRemoteWorkspaceDeployCommand(workflow = null) {
+    const workspacePath = normalizeText(workflow?.workspacePath);
+    const manifestsPath = resolveRemoteWorkspaceManifestsPath(workflow);
+    const namespace = normalizeText(workflow?.deploy?.namespace) || 'kimibuilt';
+    const deployment = normalizeText(workflow?.deploy?.deployment) || 'backend';
+    const manifestTarget = manifestsPath || workspacePath;
+
+    return [
+        'set -e',
+        'workspace_dir="$(pwd)"',
+        'app_dir="$workspace_dir"',
+        'if [ ! -f "$app_dir/package.json" ] && [ -f "$workspace_dir/app/package.json" ]; then',
+        '  app_dir="$workspace_dir/app"',
+        'fi',
+        'if [ -f "$app_dir/package.json" ]; then',
+        '  cd -- "$app_dir"',
+        '  if ! command -v node >/dev/null 2>&1; then echo "node is required to build the remote workspace" >&2; exit 1; fi',
+        '  if [ -f pnpm-lock.yaml ]; then',
+        '    if ! command -v pnpm >/dev/null 2>&1; then echo "pnpm is required to build this workspace" >&2; exit 1; fi',
+        '    pnpm install --frozen-lockfile || pnpm install',
+        '    if node -e "const p=require(\'./package.json\'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then pnpm run build; fi',
+        '  elif [ -f yarn.lock ]; then',
+        '    if ! command -v yarn >/dev/null 2>&1; then echo "yarn is required to build this workspace" >&2; exit 1; fi',
+        '    yarn install --frozen-lockfile || yarn install',
+        '    if node -e "const p=require(\'./package.json\'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then yarn build; fi',
+        '  else',
+        '    if ! command -v npm >/dev/null 2>&1; then echo "npm is required to build this workspace" >&2; exit 1; fi',
+        '    if [ -f package-lock.json ]; then npm ci || npm install; else npm install; fi',
+        '    if node -e "const p=require(\'./package.json\'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then npm run build; fi',
+        '  fi',
+        '  cd -- "$workspace_dir"',
+        'fi',
+        'if ! command -v kubectl >/dev/null 2>&1; then echo "kubectl is required on the remote host" >&2; exit 1; fi',
+        `if [ ! -e ${quoteShellArg(manifestTarget)} ]; then echo "manifests path not found: ${manifestTarget}" >&2; exit 1; fi`,
+        `kubectl apply -f ${quoteShellArg(manifestTarget)}`,
+        deployment
+            ? `kubectl rollout status deployment/${deployment} -n ${quoteShellArg(namespace)} --timeout=180s`
+            : `kubectl get all -n ${quoteShellArg(namespace)}`,
+        deployment
+            ? `kubectl get deployment/${deployment} -n ${quoteShellArg(namespace)} -o wide`
+            : '',
+    ].filter(Boolean).join('\n');
+}
+
 function buildBlockedWorkflowState(workflow = null, error = '') {
     return normalizeWorkflowState({
         ...workflow,
@@ -398,6 +518,7 @@ function evaluateEndToEndBuilderWorkflow({
 
     const candidateToolIds = new Set(Array.isArray(toolPolicy?.candidateToolIds) ? toolPolicy.candidateToolIds : []);
     const remoteTool = normalizeText(remoteToolId || toolPolicy?.preferredRemoteToolId || 'remote-command') || 'remote-command';
+    const usesRemoteWorkspaceDeploy = isRemoteWorkspaceDeployWorkflow(currentWorkflow);
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
@@ -409,6 +530,18 @@ function evaluateEndToEndBuilderWorkflow({
     }
 
     if (currentWorkflow.lane === 'repo-then-deploy'
+        && usesRemoteWorkspaceDeploy
+        && currentWorkflow.progress.implemented
+        && !currentWorkflow.progress.deployed
+        && !candidateToolIds.has(remoteTool)) {
+        return buildBlockedWorkflowState(
+            currentWorkflow,
+            `The workflow needs \`${remoteTool}\` to build and deploy the remote workspace on the target server.`,
+        );
+    }
+
+    if (currentWorkflow.lane === 'repo-then-deploy'
+        && !usesRemoteWorkspaceDeploy
         && currentWorkflow.progress.implemented
         && (!currentWorkflow.progress.repoStatusChecked || !currentWorkflow.progress.saved)
         && !candidateToolIds.has('git-safe')) {
@@ -418,7 +551,7 @@ function evaluateEndToEndBuilderWorkflow({
         );
     }
 
-    if ((currentWorkflow.lane === 'deploy-only' || currentWorkflow.lane === 'repo-then-deploy')
+    if ((currentWorkflow.lane === 'deploy-only' || (currentWorkflow.lane === 'repo-then-deploy' && !usesRemoteWorkspaceDeploy))
         && !currentWorkflow.progress.deployed
         && !candidateToolIds.has('k3s-deploy')) {
         return buildBlockedWorkflowState(
@@ -453,6 +586,7 @@ function buildEndToEndWorkflowPlan({
     const candidateToolIds = new Set(Array.isArray(toolPolicy?.candidateToolIds) ? toolPolicy.candidateToolIds : []);
     const remoteTool = normalizeText(remoteToolId || toolPolicy?.preferredRemoteToolId || 'remote-command') || 'remote-command';
     const repositoryPath = currentWorkflow.repositoryPath || config.deploy.defaultRepositoryPath || '';
+    const usesRemoteWorkspaceDeploy = isRemoteWorkspaceDeployWorkflow(currentWorkflow);
 
     if ((currentWorkflow.lane === 'repo-only' || currentWorkflow.lane === 'repo-then-deploy')
         && !currentWorkflow.progress.implemented
@@ -475,6 +609,25 @@ function buildEndToEndWorkflowPlan({
     }
 
     if (currentWorkflow.lane === 'repo-then-deploy'
+        && usesRemoteWorkspaceDeploy
+        && !currentWorkflow.progress.deployed
+        && candidateToolIds.has(remoteTool)) {
+        return [{
+            tool: remoteTool,
+            reason: 'Build the remote workspace on the target server, apply the k3s manifests, and verify the rollout.',
+            params: {
+                ...(currentWorkflow.remoteTarget?.host ? { host: currentWorkflow.remoteTarget.host } : {}),
+                ...(currentWorkflow.remoteTarget?.username ? { username: currentWorkflow.remoteTarget.username } : {}),
+                ...(currentWorkflow.remoteTarget?.port ? { port: currentWorkflow.remoteTarget.port } : {}),
+                ...(currentWorkflow.workspacePath ? { workingDirectory: currentWorkflow.workspacePath } : {}),
+                workflowAction: 'build-and-deploy-remote-workspace',
+                command: buildRemoteWorkspaceDeployCommand(currentWorkflow),
+            },
+        }];
+    }
+
+    if (currentWorkflow.lane === 'repo-then-deploy'
+        && !usesRemoteWorkspaceDeploy
         && !currentWorkflow.progress.repoStatusChecked
         && candidateToolIds.has('git-safe')) {
         return [{
@@ -488,6 +641,7 @@ function buildEndToEndWorkflowPlan({
     }
 
     if (currentWorkflow.lane === 'repo-then-deploy'
+        && !usesRemoteWorkspaceDeploy
         && !currentWorkflow.progress.saved
         && candidateToolIds.has('git-safe')) {
         return [{
@@ -501,7 +655,7 @@ function buildEndToEndWorkflowPlan({
         }];
     }
 
-    if ((currentWorkflow.lane === 'deploy-only' || currentWorkflow.lane === 'repo-then-deploy')
+    if ((currentWorkflow.lane === 'deploy-only' || (currentWorkflow.lane === 'repo-then-deploy' && !usesRemoteWorkspaceDeploy))
         && !currentWorkflow.progress.deployed
         && candidateToolIds.has('k3s-deploy')) {
         return [{
@@ -577,6 +731,7 @@ function advanceEndToEndBuilderWorkflow({
         const toolId = getToolEventToolId(event);
         const success = event?.result?.success !== false;
         const action = getToolEventAction(event);
+        const workflowAction = getToolEventWorkflowAction(event);
 
         if (!success) {
             currentWorkflow = normalizeWorkflowState({
@@ -649,6 +804,20 @@ function advanceEndToEndBuilderWorkflow({
         }
 
         if (toolId === 'remote-command' || toolId === 'ssh-execute') {
+            if (workflowAction === 'build-and-deploy-remote-workspace') {
+                currentWorkflow = markMeaningfulProgress({
+                    ...currentWorkflow,
+                    progress: {
+                        ...currentWorkflow.progress,
+                        deployed: true,
+                        verified: true,
+                    },
+                    stage: 'completed',
+                    status: COMPLETED_WORKFLOW_STATUS,
+                });
+                continue;
+            }
+
             currentWorkflow = markMeaningfulProgress({
                 ...currentWorkflow,
                 progress: {
