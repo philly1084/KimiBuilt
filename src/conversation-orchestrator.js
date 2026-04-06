@@ -178,7 +178,22 @@ function hasExplicitCheckpointRequestText(text = '') {
         return false;
     }
 
-    return /\b(ask me first|check with me|run it by me|before you start|before doing|before making|before major work|before major changes?|before implementation|which direction|which approach|choose a direction|help me choose|decision|trade-?off|options?)\b/.test(normalized);
+    return /\b(ask me first|check with me|run it by me|before you start|before doing|before making|before major work|before major changes?|before implementation|which direction|which approach|choose a direction|help me choose|decision|trade-?off|options?|questionnaire|questionnaires|ask me (?:some|a few|a couple of)? questions?|start with (?:questions?|a questionnaire|questionnaires))\b/.test(normalized);
+}
+
+function hasDiscoveryPlanningIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(questionnaire|questionnaires|survey|surveys|intake|discovery questions?|discovery session)\b/,
+        /\b(ask me (?:a few|some|a couple of)? questions?|provide (?:some|a couple of)? questions?|start with (?:questions?|a questionnaire|questionnaires))\b/,
+        /\b(figure out|work out|narrow down|brainstorm|explore|talk through|discuss|decide|choose|direction|options?)\b[\s\S]{0,40}\b(what to work on|what we should work on|what to build|what we should build|what to make|scope|approach)\b/,
+        /\b(before|first)\b[\s\S]{0,30}\b(questionnaire|questions?|research|planning|brainstorm|options?)\b/,
+        /\blet'?s start with\b/,
+    ].some((pattern) => pattern.test(normalized));
 }
 
 function hasSubstantialWorkIntentText(text = '') {
@@ -1968,7 +1983,7 @@ function hasExplicitLocalSandboxIntent(text = '') {
 
 function hasOpencodeRepoWorkIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized) {
+    if (!normalized || hasDiscoveryPlanningIntentText(normalized)) {
         return false;
     }
 

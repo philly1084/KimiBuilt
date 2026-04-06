@@ -71,6 +71,7 @@ describe('buildWebChatSessionMessages', () => {
             assistantMetadata: {
                 agentExecutor: true,
                 taskType: 'chat',
+                displayContent: '```survey\n{"id":"checkpoint-1","question":"Pick one.","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}\n```',
                 trace: { steps: 4 },
             },
             timestamp: '2026-04-05T12:30:00.000Z',
@@ -79,6 +80,7 @@ describe('buildWebChatSessionMessages', () => {
         expect(messages[1].metadata).toEqual(expect.objectContaining({
             agentExecutor: true,
             taskType: 'chat',
+            displayContent: expect.stringContaining('```survey'),
         }));
         expect(messages[1].metadata.trace).toBeUndefined();
     });

@@ -3998,6 +3998,73 @@ describe('ConversationOrchestrator', () => {
         expect(directAction.params.prompt).toContain(objective);
     });
 
+    test('keeps discovery-first server build prompts out of the repo implementation lane', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'web-search', 'tool-doc-read', 'user-checkpoint']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'I want to build on the server, lets start with a couple questionnaires to figure out what we should work on. Some kind of web app we can run on our VPS server on the net with our demoserver2.buzz DNS. Can you do some research on the server and then provide those questions.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 3,
+                    pending: null,
+                },
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {},
+        });
+
+        expect(toolPolicy.workflow).toBeNull();
+        expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
+            'remote-command',
+            'web-search',
+            'user-checkpoint',
+        ]));
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
+        expect(directAction).toBeNull();
+    });
+
     test('surfaces the repo-then-deploy lane for mixed end-to-end build requests', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

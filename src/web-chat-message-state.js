@@ -99,6 +99,15 @@ function buildFrontendAssistantMetadata(metadata = null) {
         nextMetadata.taskType = metadata.taskType.trim();
     }
 
+    const displayContent = typeof metadata.displayContent === 'string' && metadata.displayContent.trim()
+        ? metadata.displayContent.trim()
+        : (typeof metadata.display_content === 'string' && metadata.display_content.trim()
+            ? metadata.display_content.trim()
+            : '');
+    if (displayContent) {
+        nextMetadata.displayContent = displayContent;
+    }
+
     return nextMetadata;
 }
 

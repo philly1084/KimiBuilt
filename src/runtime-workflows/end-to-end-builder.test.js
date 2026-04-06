@@ -257,6 +257,22 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
+    test('does not classify discovery-first server planning prompts as implementation workflows', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'I want to build on the server, let\'s start with a couple questionnaires to figure out what we should work on. Some kind of web app we can run on our VPS server with demoserver2.buzz DNS. Can you do some research on the server and then provide those questions.',
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+            opencodeTarget: 'remote-default',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        expect(workflow).toBeNull();
+    });
+
     test('blocks a repo-then-deploy workflow when repository implementation is required but opencode is unavailable', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the auth service in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',

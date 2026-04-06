@@ -54,9 +54,24 @@ function hasContinuationIntent(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
-function hasRepoImplementationIntent(text = '') {
+function hasDiscoveryPlanningIntent(text = '') {
     const normalized = normalizeText(text).toLowerCase();
     if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(questionnaire|questionnaires|survey|surveys|intake|discovery questions?|discovery session)\b/,
+        /\b(ask me (?:a few|some|a couple of)? questions?|provide (?:some|a couple of)? questions?|start with (?:questions?|a questionnaire|questionnaires))\b/,
+        /\b(figure out|work out|narrow down|brainstorm|explore|talk through|discuss|decide|choose|direction|options?)\b[\s\S]{0,40}\b(what to work on|what we should work on|what to build|what we should build|what to make|scope|approach)\b/,
+        /\b(before|first)\b[\s\S]{0,30}\b(questionnaire|questions?|research|planning|brainstorm|options?)\b/,
+        /\blet'?s start with\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasRepoImplementationIntent(text = '') {
+    const normalized = normalizeText(text).toLowerCase();
+    if (!normalized || hasDiscoveryPlanningIntent(normalized)) {
         return false;
     }
 
@@ -118,6 +133,10 @@ function hasInspectOnlyIntent(text = '') {
 function inferWorkflowLane(objective = '') {
     const normalized = normalizeText(objective);
     if (!normalized) {
+        return null;
+    }
+
+    if (hasDiscoveryPlanningIntent(normalized)) {
         return null;
     }
 

@@ -155,6 +155,15 @@ function normalizeAssistantMetadata(value) {
         nextMetadata.taskType = value.taskType.trim();
     }
 
+    const displayContent = typeof value.displayContent === 'string' && value.displayContent.trim()
+        ? value.displayContent.trim()
+        : (typeof value.display_content === 'string' && value.display_content.trim()
+            ? value.display_content.trim()
+            : '');
+    if (displayContent) {
+        nextMetadata.displayContent = displayContent;
+    }
+
     return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
 }
 
