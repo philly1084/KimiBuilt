@@ -300,6 +300,8 @@ Approved page plan:
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Think in page roles, not just paragraphs');
+        expect(prompt).toContain('Treat style as part of the page system');
+        expect(prompt).toContain('visual hierarchy as required work');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
         expect(prompt).toContain('callout: Key takeaways');
@@ -407,6 +409,25 @@ Approved page plan:
                 content: expect.objectContaining({
                     url: 'https://kids.nationalgeographic.com/animals/birds/facts/penguin',
                 }),
+            }),
+        ]));
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'ai_image',
+                content: expect.objectContaining({
+                    source: 'unsplash',
+                    prompt: expect.stringMatching(/penguins/i),
+                }),
+            }),
+            expect.objectContaining({
+                type: 'heading_2',
+                content: 'Why Penguins Stand Out',
+                textColor: 'blue',
+            }),
+            expect.objectContaining({
+                type: 'heading_2',
+                content: 'Source Note',
+                textColor: 'gray',
             }),
         ]));
     });

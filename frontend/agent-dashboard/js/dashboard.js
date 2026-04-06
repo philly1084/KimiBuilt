@@ -23,6 +23,7 @@ class Dashboard {
             runs: [],
             selectedRun: null,
             settings: {},
+            opencodeRuntime: null,
             tokenAnalysis: null,
             stats: {
                 totalTasks: 0,
@@ -260,6 +261,10 @@ class Dashboard {
         
         document.getElementById('testConnectionBtn')?.addEventListener('click', () => {
             this.testConnection();
+        });
+
+        document.getElementById('refreshOpenCodeRuntimeBtn')?.addEventListener('click', () => {
+            this.loadOpenCodeRuntime();
         });
         
         // API key visibility toggles
@@ -651,14 +656,44 @@ class Dashboard {
      */
     async loadSettings() {
         try {
-            const response = await apiClient.get('/api/admin/settings');
-            const settings = this.unwrapApiPayload(response, null);
-            if (settings) {
-                this.state.settings = settings;
-                this.applySettings(settings);
+            const [settingsResponse, opencodeResponse] = await Promise.allSettled([
+                apiClient.get('/api/admin/settings'),
+                apiClient.getOpenCodeRuntime(),
+            ]);
+
+            if (settingsResponse.status === 'fulfilled') {
+                const settings = this.unwrapApiPayload(settingsResponse.value, null);
+                if (settings) {
+                    this.state.settings = settings;
+                    this.applySettings(settings);
+                }
+            } else {
+                throw settingsResponse.reason;
+            }
+
+            if (opencodeResponse.status === 'fulfilled') {
+                this.state.opencodeRuntime = this.unwrapApiPayload(opencodeResponse.value, null);
+                this.renderOpenCodeRuntime(this.state.opencodeRuntime);
+            } else {
+                console.error('Error loading OpenCode runtime:', opencodeResponse.reason);
+                this.renderOpenCodeRuntime(null, opencodeResponse.reason);
             }
         } catch (error) {
             console.error('Error loading settings:', error);
+        }
+    }
+
+    async loadOpenCodeRuntime() {
+        try {
+            const response = await apiClient.getOpenCodeRuntime();
+            const runtime = this.unwrapApiPayload(response, null);
+            this.state.opencodeRuntime = runtime;
+            this.renderOpenCodeRuntime(runtime);
+            return runtime;
+        } catch (error) {
+            console.error('Error loading OpenCode runtime:', error);
+            this.renderOpenCodeRuntime(null, error);
+            throw error;
         }
     }
     
@@ -3102,6 +3137,7 @@ class Dashboard {
 
             const response = await apiClient.put('/api/admin/settings', settings);
             this.applySettings(this.unwrapApiPayload(response, settings));
+            await this.loadOpenCodeRuntime().catch(() => null);
             this.showToast('API settings saved', 'success');
         } catch (error) {
             console.error('Error saving API settings:', error);
@@ -3341,6 +3377,150 @@ class Dashboard {
                 : 'No complete SSH credential set is configured yet.';
             sshSummary.textContent = summary;
         }
+    }
+
+    renderOpenCodeRuntime(runtime = null, error = null) {
+        const enabledBadge = document.getElementById('opencodeEnabledBadge');
+        const authBadge = document.getElementById('opencodeGatewayAuthBadge');
+        const remoteBadge = document.getElementById('opencodeRemoteReachabilityBadge');
+        const activeInstancesBadge = document.getElementById('opencodeActiveInstancesBadge');
+        const runtimeSummary = document.getElementById('opencodeRuntimeSummary');
+        const authSummary = document.getElementById('opencodeGatewayAuthSummary');
+        const remoteSummary = document.getElementById('opencodeRemoteReachabilitySummary');
+        const activeInstancesSummary = document.getElementById('opencodeActiveInstancesSummary');
+        const gatewayUrl = document.getElementById('opencodeGatewayUrl');
+        const localGatewayUrl = document.getElementById('opencodeLocalGatewayUrl');
+        const defaultAgent = document.getElementById('opencodeDefaultAgent');
+        const defaultModel = document.getElementById('opencodeDefaultModel');
+        const workspacePolicy = document.getElementById('opencodeWorkspacePolicy');
+        const modelCatalog = document.getElementById('opencodeModelCatalog');
+
+        if (!enabledBadge || !runtimeSummary || !modelCatalog) {
+            return;
+        }
+
+        if (error || !runtime) {
+            this.setStatusBadge(enabledBadge, 'error', 'unavailable');
+            this.setStatusBadge(authBadge, 'neutral', 'unknown');
+            this.setStatusBadge(remoteBadge, 'neutral', 'unknown');
+            this.setStatusBadge(activeInstancesBadge, 'neutral', '0');
+            runtimeSummary.textContent = error?.message || 'OpenCode runtime details are unavailable.';
+            authSummary.textContent = 'Gateway auth status is unavailable.';
+            remoteSummary.textContent = 'Remote reachability has not been verified.';
+            activeInstancesSummary.textContent = 'No live instance data is available.';
+            if (gatewayUrl) gatewayUrl.textContent = '--';
+            if (localGatewayUrl) localGatewayUrl.textContent = '--';
+            if (defaultAgent) defaultAgent.textContent = '--';
+            if (defaultModel) defaultModel.textContent = '--';
+            if (workspacePolicy) {
+                workspacePolicy.innerHTML = '<p class="empty-state">Workspace policy unavailable.</p>';
+            }
+            modelCatalog.innerHTML = `<p class="empty-state">${this.escapeHtml(error?.message || 'OpenCode runtime details are unavailable.')}</p>`;
+            return;
+        }
+
+        const runtimeMeta = runtime.runtime || {};
+        const gateway = runtime.gateway || {};
+        const defaults = runtime.defaults || {};
+        const models = Array.isArray(runtime.models) ? runtime.models : [];
+        const counts = runtime.counts || {};
+        const allowedRoots = Array.isArray(runtimeMeta.allowedWorkspaceRoots) ? runtimeMeta.allowedWorkspaceRoots : [];
+        const authMode = this.formatOpenCodeAuthMode(gateway.authMode);
+        const activeInstances = Number(counts.activeInstances || runtimeMeta.activeInstances || 0);
+
+        this.setStatusBadge(
+            enabledBadge,
+            runtimeMeta.enabled === false ? 'warning' : 'healthy',
+            runtimeMeta.enabled === false ? 'disabled' : 'enabled',
+        );
+        this.setStatusBadge(
+            authBadge,
+            gateway.authEnabled ? 'healthy' : 'warning',
+            gateway.authEnabled ? authMode : 'disabled',
+        );
+        this.setStatusBadge(
+            remoteBadge,
+            gateway.remoteReachable ? 'healthy' : 'warning',
+            gateway.remoteReachable ? 'ready' : 'blocked',
+        );
+        this.setStatusBadge(
+            activeInstancesBadge,
+            activeInstances > 0 ? 'info' : 'neutral',
+            String(activeInstances),
+        );
+
+        runtimeSummary.textContent = runtimeMeta.enabled === false
+            ? 'Managed OpenCode runs are disabled in settings.'
+            : `${models.length} gateway model${models.length === 1 ? '' : 's'} available with ${activeInstances} active instance${activeInstances === 1 ? '' : 's'}.`;
+        authSummary.textContent = gateway.authEnabled
+            ? `OpenCode authenticates to KimiBuilt /v1 with a ${authMode} gateway bearer token.`
+            : 'No gateway bearer token could be resolved for OpenCode.';
+        remoteSummary.textContent = gateway.remoteReachable
+            ? 'Remote hosts can use the configured KimiBuilt base URL for OpenCode /v1 traffic.'
+            : (gateway.remoteReachabilityError || 'Remote hosts cannot reach the configured KimiBuilt base URL.');
+        activeInstancesSummary.textContent = activeInstances > 0
+            ? `${activeInstances} managed OpenCode instance${activeInstances === 1 ? '' : 's'} currently cached.`
+            : 'No OpenCode instances are active right now.';
+
+        if (gatewayUrl) gatewayUrl.textContent = gateway.baseURL || '--';
+        if (localGatewayUrl) localGatewayUrl.textContent = gateway.localBaseURL || '--';
+        if (defaultAgent) defaultAgent.textContent = defaults.agent || runtimeMeta.defaultAgent || '--';
+        if (defaultModel) defaultModel.textContent = defaults.model || runtimeMeta.defaultModel || '--';
+
+        if (workspacePolicy) {
+            const items = [
+                runtimeMeta.remoteDefaultWorkspace
+                    ? `<div class="opencode-runtime-list-item"><strong>Remote default workspace:</strong> <code>${this.escapeHtml(runtimeMeta.remoteDefaultWorkspace)}</code></div>`
+                    : '',
+                ...allowedRoots.map((root) => (
+                    `<div class="opencode-runtime-list-item"><strong>Allowed local root:</strong> <code>${this.escapeHtml(root)}</code></div>`
+                )),
+            ].filter(Boolean);
+            workspacePolicy.innerHTML = items.length > 0
+                ? items.join('')
+                : '<p class="empty-state">No workspace restrictions are configured.</p>';
+        }
+
+        modelCatalog.innerHTML = models.length > 0
+            ? models.map((model) => `
+                <div class="opencode-model-item">
+                    <div class="opencode-model-header">
+                        <div class="opencode-model-title">
+                            <strong>${this.escapeHtml(model.id || model.name || 'unknown')}</strong>
+                            <span class="opencode-model-provider">${this.escapeHtml(model.provider || 'unknown provider')}</span>
+                        </div>
+                        <div class="opencode-model-badges">
+                            ${model.isDefault ? '<span class="status-badge info">default</span>' : ''}
+                            ${model.isSmallModel ? '<span class="status-badge neutral">small</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="opencode-model-meta">
+                        <span>Context: <code>${this.escapeHtml(model.contextWindow ? model.contextWindow.toLocaleString() : 'n/a')}</code></span>
+                        <span>Output: <code>${this.escapeHtml(model.outputLimit ? model.outputLimit.toLocaleString() : 'n/a')}</code></span>
+                    </div>
+                </div>
+            `).join('')
+            : '<p class="empty-state">No chat-capable models were discovered from the KimiBuilt gateway.</p>';
+    }
+
+    setStatusBadge(element, tone = 'neutral', label = '') {
+        if (!element) {
+            return;
+        }
+
+        element.className = `status-badge ${tone}`;
+        element.textContent = label;
+    }
+
+    formatOpenCodeAuthMode(mode = '') {
+        const normalized = String(mode || '').trim().toLowerCase();
+        if (normalized === 'explicit') {
+            return 'explicit';
+        }
+        if (normalized === 'derived') {
+            return 'derived';
+        }
+        return 'disabled';
     }
 
     setInputValue(id, value) {

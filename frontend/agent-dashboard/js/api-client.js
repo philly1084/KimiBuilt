@@ -508,6 +508,13 @@ class ApiClient {
     async getAdminRun(id) {
         return this.get(`/api/admin/runs/${id}`);
     }
+
+    /**
+     * Get managed OpenCode runtime status and gateway catalog details
+     */
+    async getOpenCodeRuntime() {
+        return this.get('/api/admin/opencode/runtime');
+    }
     
     /**
      * Get settings

@@ -2506,6 +2506,110 @@ select.form-control,
     color: var(--text-muted);
 }
 
+.opencode-runtime-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.opencode-runtime-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding: var(--space-md);
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+}
+
+.opencode-runtime-label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.opencode-runtime-code {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--accent-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.opencode-runtime-badges {
+    margin-bottom: var(--space-lg);
+}
+
+.opencode-runtime-list,
+.opencode-model-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.opencode-runtime-list-item,
+.opencode-model-item {
+    padding: var(--space-md);
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+}
+
+.opencode-runtime-list-item strong,
+.opencode-model-item strong {
+    color: var(--text-primary);
+}
+
+.opencode-runtime-list-item code,
+.opencode-model-item code {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--accent-secondary);
+}
+
+.opencode-model-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+
+.opencode-model-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.opencode-model-title strong {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+}
+
+.opencode-model-provider {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.opencode-model-badges {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+}
+
+.opencode-model-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+}
+
 /* Danger Zone */
 .danger-zone {
     border: 1px solid var(--danger);

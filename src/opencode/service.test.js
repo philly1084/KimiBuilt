@@ -117,4 +117,59 @@ describe('OpenCode service helpers', () => {
         });
         expect(localConfig.model).toBe('kimibuilt/gpt-4o');
     });
+
+    test('builds admin runtime details with gateway auth and model catalog metadata', async () => {
+        settingsController.settings.api.baseURL = 'https://kimibuilt.example.com';
+        config.opencode.gatewayApiKey = 'gateway-secret';
+        listModels.mockResolvedValue([
+            {
+                id: 'gpt-4o',
+                owned_by: 'openai',
+                context_length: 128000,
+                max_output_tokens: 16384,
+            },
+            {
+                id: 'gpt-4o-mini',
+                owned_by: 'openai',
+                context_length: 128000,
+                max_output_tokens: 8192,
+            },
+        ]);
+
+        const service = new OpenCodeService({
+            store: {
+                isAvailable: () => true,
+            },
+        });
+
+        const details = await service.getAdminRuntimeDetails();
+
+        expect(details.gateway).toEqual(expect.objectContaining({
+            baseURL: 'https://kimibuilt.example.com/v1',
+            localBaseURL: `http://127.0.0.1:${config.port}/v1`,
+            authEnabled: true,
+            authMode: 'explicit',
+            remoteReachable: true,
+            remoteReachabilityError: null,
+        }));
+        expect(details.defaults).toEqual({
+            agent: 'build',
+            model: 'gpt-4o',
+            smallModel: 'gpt-4o-mini',
+        });
+        expect(details.models).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'gpt-4o',
+                provider: 'openai',
+                contextWindow: 128000,
+                outputLimit: 16384,
+                isDefault: true,
+                isSmallModel: false,
+            }),
+            expect.objectContaining({
+                id: 'gpt-4o-mini',
+                isSmallModel: true,
+            }),
+        ]));
+    });
 });

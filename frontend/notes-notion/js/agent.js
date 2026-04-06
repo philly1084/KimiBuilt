@@ -204,52 +204,85 @@ const Agent = (function() {
             pageIcon: '📌',
             calloutIcon: '⚡',
             calloutColor: 'yellow',
+            sectionTextColor: 'blue',
+            supportingTextColor: 'gray',
             sourceHeading: 'Supporting Notes',
+            heroPromptSuffix: 'editorial desk scene',
+            heroCaptionPrefix: 'Brief visual',
         }),
         research: Object.freeze({
             pageIcon: '🔎',
             calloutIcon: '🧭',
             calloutColor: 'blue',
+            sectionTextColor: 'blue',
+            supportingTextColor: 'gray',
             sourceHeading: 'Verified Sources',
+            heroPromptSuffix: 'editorial wildlife or reference photo',
+            heroCaptionPrefix: 'Reference visual',
         }),
         project: Object.freeze({
             pageIcon: '🚀',
             calloutIcon: '📍',
             calloutColor: 'green',
+            sectionTextColor: 'green',
+            supportingTextColor: 'gray',
             sourceHeading: 'Working References',
+            heroPromptSuffix: 'team workspace or planning board',
+            heroCaptionPrefix: 'Project visual',
         }),
         meeting: Object.freeze({
             pageIcon: '🗒️',
             calloutIcon: '👥',
             calloutColor: 'gray',
+            sectionTextColor: 'brown',
+            supportingTextColor: 'gray',
             sourceHeading: 'Follow-up Links',
+            heroPromptSuffix: 'meeting desk or collaboration scene',
+            heroCaptionPrefix: 'Meeting visual',
         }),
         documentation: Object.freeze({
             pageIcon: '🧩',
             calloutIcon: 'ℹ️',
             calloutColor: 'blue',
+            sectionTextColor: 'blue',
+            supportingTextColor: 'gray',
             sourceHeading: 'References',
+            heroPromptSuffix: 'clean interface or system diagram reference',
+            heroCaptionPrefix: 'Reference visual',
         }),
         dashboard: Object.freeze({
             pageIcon: '📊',
             calloutIcon: '📈',
             calloutColor: 'green',
+            sectionTextColor: 'green',
+            supportingTextColor: 'gray',
             sourceHeading: 'Reference Links',
+            heroPromptSuffix: 'operations dashboard or team workspace',
+            heroCaptionPrefix: 'Dashboard visual',
         }),
         journal: Object.freeze({
             pageIcon: '📔',
             calloutIcon: '🌤️',
             calloutColor: 'purple',
+            sectionTextColor: 'purple',
+            supportingTextColor: 'gray',
             sourceHeading: 'Context',
+            heroPromptSuffix: 'calm editorial photo',
+            heroCaptionPrefix: 'Mood visual',
         }),
     });
     const NOTES_PAGE_DESIGN_MANUAL = Object.freeze([
+        'Design quality is part of correctness in notes mode. If the result feels like raw Markdown pasted into a page, it is not finished.',
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive details, sources, and next steps.',
+        'Aim for a true Notion feel: one obvious focal block near the top, clear section rhythm, muted supporting notes, and at least one visual or source cluster when the page is substantial.',
+        'Treat style as part of the page system, not decoration after the fact: use page icon, colored section labels, muted secondary copy, and accent callouts to create hierarchy.',
         'Avoid a long ladder of heading followed by paragraph repeated all the way down the page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
         'Research pages should usually feel like a small knowledge hub: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of hiding them in prose.',
+        'When the topic is visual, real-world, product-like, place-based, or research-driven, include a hero image or ai_image near the top instead of leaving the page text-only.',
         'Operational pages should feel usable, not literary: use databases for repeated fields, todos for actions, and visible status or decision callouts near the top.',
         'Use toggles for optional depth, appendices, research notes, or background material so the main page stays scannable but still interactive.',
         'When a page is meant to look polished, upgrade page metadata too: title, icon, and section rhythm should feel intentional, not accidental.',
+        'Use styling on purpose: accent callouts, muted gray support copy, section label colors where helpful, and image/bookmark blocks that make the page feel designed instead of dumped.',
     ]);
     let initPromise = null;
 
@@ -596,6 +629,8 @@ const Agent = (function() {
         const listBlocks = blocks.filter((block) => ['bulleted_list', 'numbered_list', 'todo'].includes(block?.type));
         const callouts = blocks.filter((block) => block?.type === 'callout');
         const dividers = blocks.filter((block) => block?.type === 'divider');
+        const visualBlocks = blocks.filter((block) => ['image', 'ai_image', 'bookmark'].includes(block?.type));
+        const styledBlocks = blocks.filter((block) => block?.color || block?.textColor);
         const longTextBlocks = textBlocks.filter((block) => String(block?.content || '').trim().length >= 280);
 
         const criteria = [
@@ -604,7 +639,8 @@ const Agent = (function() {
             '- Use headings to define sections before adding supporting text.',
             '- Keep paragraphs short. Split dense writing into multiple text blocks.',
             '- Use lists for grouped facts, steps, examples, or comparisons instead of burying them in prose.',
-            '- Use callouts, quotes, dividers, and visual rhythm intentionally when they improve clarity.',
+            '- Use callouts, quotes, dividers, visuals, and visual rhythm intentionally when they improve clarity.',
+            '- For polished notes, use block styling intentionally: accent the focal callout, use colored section labels, and mute secondary/supporting copy.',
             '- Do not return a single giant text block for a substantial page unless the user explicitly asks for one paragraph.',
         ];
 
@@ -630,6 +666,14 @@ const Agent = (function() {
 
         if (callouts.length === 0) {
             criteria.push('- Consider at least one callout for the key takeaway, status, warning, or decision when the content warrants it.');
+        }
+
+        if (visualBlocks.length === 0 && blocks.length >= 5) {
+            criteria.push('- The page has no visual or source media blocks yet. Add an image, ai_image, or bookmark cluster if the topic supports it.');
+        }
+
+        if (styledBlocks.length === 0 && blocks.length >= 4) {
+            criteria.push('- Nothing on the page is styled yet. Use textColor and background color intentionally so the hierarchy feels designed.');
         }
 
         if (dividers.length === 0 && blocks.length >= 6) {
@@ -898,6 +942,8 @@ const Agent = (function() {
         const typeCounts = {};
         let textChars = 0;
         let longTextCount = 0;
+        let visualSupportCount = 0;
+        let styledBlockCount = 0;
 
         blocks.forEach((block) => {
             const type = canonicalizeBlockType(block?.type || 'text');
@@ -908,6 +954,14 @@ const Agent = (function() {
             if (['text', 'quote', 'callout', 'toggle'].includes(type) && text.length >= 220) {
                 longTextCount += 1;
             }
+
+            if (['image', 'ai_image', 'bookmark'].includes(type)) {
+                visualSupportCount += 1;
+            }
+
+            if (block?.color || block?.textColor) {
+                styledBlockCount += 1;
+            }
         });
 
         const layoutSupportTypes = ['callout', 'bookmark', 'database', 'image', 'ai_image', 'mermaid', 'toggle', 'divider', 'todo'];
@@ -917,6 +971,8 @@ const Agent = (function() {
             blockCount: blocks.length,
             textChars,
             longTextCount,
+            visualSupportCount,
+            styledBlockCount,
             typeCounts,
             layoutSupportCount,
         };
@@ -1128,6 +1184,113 @@ const Agent = (function() {
         return blocks;
     }
 
+    function shouldPreferHeroVisual({ template = null, question = '', blocks = [] } = {}) {
+        const signalText = [
+            String(question || ''),
+            ...blocks.slice(0, 12).map((block) => extractBlockDefinitionText(block)),
+        ].join('\n').toLowerCase();
+
+        if (['research', 'brief', 'journal'].includes(template?.id)) {
+            return true;
+        }
+
+        return /\b(animal|wildlife|bird|species|nature|ocean|sea|mountain|city|travel|product|brand|design|visual|photo|look|appearance|gallery|place|landscape)\b/.test(signalText);
+    }
+
+    function buildTemplateHeroImageBlock({ template = null, preset = null, action = null, context = null, question = '' } = {}) {
+        const subject = inferStructuredPageSubject({ blocks: action?.blocks || [], action, context, question }) || 'page topic';
+        const promptBase = `${subject}, ${preset?.heroPromptSuffix || 'editorial reference photo'}`;
+        const captionPrefix = preset?.heroCaptionPrefix || 'Reference visual';
+
+        return {
+            type: 'ai_image',
+            content: {
+                prompt: promptBase,
+                caption: `${captionPrefix}: ${subject}`,
+                imageUrl: null,
+                model: null,
+                size: '1536x1024',
+                quality: 'standard',
+                style: 'natural',
+                source: 'unsplash',
+                status: 'pending',
+                unsplashResults: null,
+                selectedUnsplashId: null,
+                unsplashPhotographer: null,
+                unsplashPhotographerUrl: null,
+                imageAssetId: null,
+                downloadUrl: null,
+            },
+        };
+    }
+
+    function ensureHeroVisualBlock(blocks = [], { template = null, preset = null, action = null, context = null, question = '' } = {}) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return blocks;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        if (stats.visualSupportCount > 0 || !shouldPreferHeroVisual({ template, question, blocks })) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        const heroBlock = buildTemplateHeroImageBlock({ template, preset, action, context, question });
+        const calloutIndex = nextBlocks.findIndex((block) => canonicalizeBlockType(block?.type || '') === 'callout');
+        if (calloutIndex >= 0) {
+            nextBlocks.splice(calloutIndex + 1, 0, heroBlock);
+            return nextBlocks;
+        }
+
+        const headingIndex = nextBlocks.findIndex((block) => canonicalizeBlockType(block?.type || '') === 'heading_1');
+        if (headingIndex >= 0) {
+            nextBlocks.splice(headingIndex + 1, 0, heroBlock);
+            return nextBlocks;
+        }
+
+        return [heroBlock, ...nextBlocks];
+    }
+
+    function looksLikeSupportingSection(text = '') {
+        return /\b(source note|research note|background|appendix|deep dive|extra context|verification note|references?|sources?|follow[- ]?up|next steps?|faq)\b/i.test(String(text || ''));
+    }
+
+    function applyTemplateDesignDecorations(blocks = [], { preset = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return blocks;
+        }
+
+        return blocks.map((block) => {
+            if (!block || typeof block !== 'object') {
+                return block;
+            }
+
+            const nextBlock = cloneStructuredValue(block);
+            const type = canonicalizeBlockType(nextBlock.type || 'text');
+            const text = extractBlockDefinitionText(nextBlock).trim();
+
+            if (type === 'callout' && !nextBlock.color && preset?.calloutColor) {
+                nextBlock.color = preset.calloutColor;
+            }
+
+            if ((type === 'heading_2' || type === 'heading_3') && !nextBlock.textColor) {
+                nextBlock.textColor = looksLikeSupportingSection(text)
+                    ? (preset?.supportingTextColor || 'gray')
+                    : (preset?.sectionTextColor || null);
+            }
+
+            if ((type === 'text' || type === 'quote' || type === 'toggle') && !nextBlock.textColor && looksLikeSupportingSection(text)) {
+                nextBlock.textColor = preset?.supportingTextColor || 'gray';
+            }
+
+            if (type === 'toggle' && !nextBlock.color && looksLikeSupportingSection(text)) {
+                nextBlock.color = 'gray';
+            }
+
+            return nextBlock;
+        });
+    }
+
     function extractSourceBookmarksFromToolEvents(toolEvents = []) {
         if (!Array.isArray(toolEvents) || toolEvents.length === 0) {
             return [];
@@ -1281,20 +1444,27 @@ const Agent = (function() {
             case 'research':
                 return stats.typeCounts.callout === 0
                     || stats.typeCounts.bookmark === 0
+                    || stats.visualSupportCount === 0
+                    || stats.styledBlockCount === 0
                     || stats.layoutSupportCount < 3
                     || stats.longTextCount > 1;
             case 'project':
             case 'dashboard':
                 return stats.typeCounts.callout === 0
+                    || stats.styledBlockCount === 0
                     || stats.typeCounts.database === 0
                     || stats.typeCounts.todo === 0;
             case 'documentation':
                 return stats.typeCounts.callout === 0
+                    || stats.visualSupportCount === 0
+                    || stats.styledBlockCount === 0
                     || ((stats.typeCounts.numbered_list || 0) === 0 && (stats.typeCounts.code || 0) === 0 && (stats.typeCounts.toggle || 0) === 0);
             case 'meeting':
-                return stats.typeCounts.todo === 0 || stats.typeCounts.callout === 0;
+                return stats.typeCounts.todo === 0 || stats.typeCounts.callout === 0 || stats.styledBlockCount === 0;
             default:
                 return stats.typeCounts.callout === 0
+                    || stats.visualSupportCount === 0
+                    || stats.styledBlockCount === 0
                     || stats.layoutSupportCount < 2
                     || stats.longTextCount > 1;
         }
@@ -1324,9 +1494,11 @@ const Agent = (function() {
             const preset = getTemplateDesignPreset(template?.id);
             let nextBlocks = action.blocks.map((block) => cloneStructuredValue(block));
             nextBlocks = ensureTemplateCalloutBlock(nextBlocks, { template, preset, action, context, question });
+            nextBlocks = ensureHeroVisualBlock(nextBlocks, { template, preset, action, context, question });
             nextBlocks = maybeConvertSupportNoteToToggle(nextBlocks, { template });
             nextBlocks = ensureSupportSectionDivider(nextBlocks, { template });
             nextBlocks = ensureSourceBookmarkBlocks(nextBlocks, { preset, toolEvents });
+            nextBlocks = applyTemplateDesignDecorations(nextBlocks, { preset });
 
             const enhancedAction = {
                 ...action,
@@ -1528,6 +1700,7 @@ BLOCK DESIGN HEURISTICS:
 - Use database blocks for comparison tables, trackers, or structured matrices.
 - If headings, text, and bullets are the only blocks in a substantial page draft, you almost certainly have not used the full page palette yet.
 - Before finalizing notes-actions, do a palette audit and check whether callout, database, bookmark, image/ai_image, mermaid, toggle, quote, todo, divider, code, or math would improve the page.
+- For a polished Notion-like page, treat visual hierarchy as required work, not optional polish: use a focal block near the top, style section labels with textColor where helpful, and give secondary notes a quieter tone.
 
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
@@ -1558,6 +1731,7 @@ GUIDELINES:
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
 - Do not ship a substantial page as only \`heading_*\` + \`text\` + list blocks unless the user explicitly asked for a minimal/plain layout.
 - Research pages should usually use at least one richer support block such as \`callout\`, \`bookmark\`, \`image\`, \`ai_image\`, \`toggle\`, or \`database\` when the content supports it.
+- When the user wants the page to feel polished, designed, or Notion-like, make the design visible in the returned blocks: page icon, a focal callout, a hero image/ai_image when the topic supports it, colored section labels, muted supporting notes, and a clear source or appendix cluster.
 - Prefer structural edits over append-only edits when the page needs organization: use update_block to convert block types, replace_block to rebuild a section, move_block to reorder sections, and rebuild_page when the current layout should be replaced wholesale.
 - It is acceptable to replace a single block with multiple blocks, or to rebuild the full page, if that is the clearest way to satisfy the request.
 - In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.

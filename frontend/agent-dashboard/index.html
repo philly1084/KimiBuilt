@@ -1176,6 +1176,81 @@
                                         <p class="text-muted" id="sshConfigSummary">No SSH credentials configured.</p>
                                     </div>
                                 </div>
+
+                                <div class="card">
+                                    <div class="card-header">
+                                        <div>
+                                            <h3>OpenCode Gateway</h3>
+                                            <p class="text-muted">Managed OpenCode provider wiring, gateway auth status, and discovered model catalog.</p>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-ghost" id="refreshOpenCodeRuntimeBtn">Refresh</button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="opencode-runtime-grid">
+                                            <div class="opencode-runtime-item">
+                                                <span class="opencode-runtime-label">Remote Gateway</span>
+                                                <code class="opencode-runtime-code" id="opencodeGatewayUrl">--</code>
+                                            </div>
+                                            <div class="opencode-runtime-item">
+                                                <span class="opencode-runtime-label">Local Gateway</span>
+                                                <code class="opencode-runtime-code" id="opencodeLocalGatewayUrl">--</code>
+                                            </div>
+                                            <div class="opencode-runtime-item">
+                                                <span class="opencode-runtime-label">Default Agent</span>
+                                                <code class="opencode-runtime-code" id="opencodeDefaultAgent">--</code>
+                                            </div>
+                                            <div class="opencode-runtime-item">
+                                                <span class="opencode-runtime-label">Default Model</span>
+                                                <code class="opencode-runtime-code" id="opencodeDefaultModel">--</code>
+                                            </div>
+                                        </div>
+
+                                        <div class="opencode-runtime-badges">
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">OpenCode Runtime</span>
+                                                    <span class="feature-desc" id="opencodeRuntimeSummary">Waiting for runtime details.</span>
+                                                </div>
+                                                <span class="status-badge neutral" id="opencodeEnabledBadge">unknown</span>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Gateway Auth</span>
+                                                    <span class="feature-desc" id="opencodeGatewayAuthSummary">OpenCode uses a dedicated bearer token for `/v1` requests.</span>
+                                                </div>
+                                                <span class="status-badge neutral" id="opencodeGatewayAuthBadge">unknown</span>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Remote Reachability</span>
+                                                    <span class="feature-desc" id="opencodeRemoteReachabilitySummary">Remote hosts must be able to reach the configured KimiBuilt base URL.</span>
+                                                </div>
+                                                <span class="status-badge neutral" id="opencodeRemoteReachabilityBadge">unknown</span>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Instance Capacity</span>
+                                                    <span class="feature-desc" id="opencodeActiveInstancesSummary">No instance data loaded yet.</span>
+                                                </div>
+                                                <span class="status-badge neutral" id="opencodeActiveInstancesBadge">0</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Workspace Policy</label>
+                                            <div class="opencode-runtime-list" id="opencodeWorkspacePolicy">
+                                                <p class="empty-state">Load runtime details to inspect workspace policy.</p>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label>Discovered Gateway Models</label>
+                                            <div class="opencode-model-list" id="opencodeModelCatalog">
+                                                <p class="empty-state">Load runtime details to inspect the model catalog.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Notifications Settings -->

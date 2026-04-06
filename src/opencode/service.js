@@ -68,6 +68,62 @@ class OpenCodeService {
         };
     }
 
+    async getAdminRuntimeDetails() {
+        const runtime = this.getRuntimeSummary();
+        const models = await this.getGatewayModels();
+        const providerModels = buildOpenCodeGatewayModels(models, runtime.defaultModel || config.openai.model);
+        const defaultModelId = resolveDefaultOpenCodeModelId(providerModels, runtime.defaultModel || config.openai.model);
+        const smallModelId = resolvePreferredSmallModelId(providerModels, defaultModelId);
+        const explicitGatewayApiKey = String(config.opencode.gatewayApiKey || process.env.OPENCODE_GATEWAY_API_KEY || '').trim();
+        const effectiveGatewayApiKey = resolveOpenCodeGatewayApiKey();
+
+        let remoteReachable = true;
+        let remoteReachabilityError = null;
+        try {
+            assertRemoteGatewayBaseURLReachable();
+        } catch (error) {
+            remoteReachable = false;
+            remoteReachabilityError = error.message;
+        }
+
+        return {
+            runtime,
+            gateway: {
+                baseURL: runtime.gatewayBaseURL || resolveOpenCodeGatewayBaseURL({ target: 'remote-default' }),
+                localBaseURL: runtime.localGatewayBaseURL || resolveOpenCodeGatewayBaseURL({ target: 'local' }),
+                authEnabled: Boolean(effectiveGatewayApiKey),
+                authMode: explicitGatewayApiKey
+                    ? 'explicit'
+                    : (effectiveGatewayApiKey ? 'derived' : 'disabled'),
+                remoteReachable,
+                remoteReachabilityError,
+            },
+            defaults: {
+                agent: runtime.defaultAgent || 'build',
+                model: defaultModelId || runtime.defaultModel || null,
+                smallModel: smallModelId || null,
+            },
+            counts: {
+                activeInstances: Number(runtime.activeInstances || 0),
+                modelCount: Array.isArray(models) ? models.length : 0,
+            },
+            models: (Array.isArray(models) ? models : [])
+                .map((model) => normalizeAdminModelCatalogEntry(model, {
+                    defaultModelId,
+                    smallModelId,
+                }))
+                .sort((left, right) => {
+                    if (left.isDefault !== right.isDefault) {
+                        return left.isDefault ? -1 : 1;
+                    }
+                    if (left.isSmallModel !== right.isSmallModel) {
+                        return left.isSmallModel ? -1 : 1;
+                    }
+                    return left.name.localeCompare(right.name);
+                }),
+        };
+    }
+
     async ensureAvailable() {
         if (!this.isAvailable()) {
             const error = new Error('OpenCode runs require Postgres persistence');
@@ -1165,6 +1221,21 @@ function serializeError(error) {
         name: String(error?.name || 'Error'),
         ...(error?.statusCode ? { statusCode: error.statusCode } : {}),
         ...(error?.exitCode != null ? { exitCode: error.exitCode } : {}),
+    };
+}
+
+function normalizeAdminModelCatalogEntry(model = {}, { defaultModelId = null, smallModelId = null } = {}) {
+    const id = String(model?.id || '').trim();
+    const limit = buildModelLimit(model);
+
+    return {
+        id,
+        name: String(model?.name || id || 'unknown').trim() || 'unknown',
+        provider: String(model?.owned_by || model?.provider || 'unknown').trim() || 'unknown',
+        contextWindow: Number(limit?.context || 0) || null,
+        outputLimit: Number(limit?.output || 0) || null,
+        isDefault: Boolean(defaultModelId && id === defaultModelId),
+        isSmallModel: Boolean(smallModelId && id === smallModelId),
     };
 }
 

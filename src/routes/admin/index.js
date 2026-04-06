@@ -185,4 +185,18 @@ router.get('/runs/:id', async (req, res, next) => {
   }
 });
 
+router.get('/opencode/runtime', async (req, res, next) => {
+  try {
+    const service = req.app.locals.opencodeService;
+    if (!service?.getAdminRuntimeDetails) {
+      return res.status(503).json({ success: false, error: 'OpenCode runtime is not initialized' });
+    }
+
+    const runtime = await service.getAdminRuntimeDetails();
+    res.json({ success: true, data: runtime });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
