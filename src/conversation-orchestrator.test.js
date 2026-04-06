@@ -3990,9 +3990,501 @@ describe('ConversationOrchestrator', () => {
         expect(directAction).toEqual(expect.objectContaining({
             tool: 'opencode-run',
             params: expect.objectContaining({
-                prompt: objective,
                 target: 'remote-default',
                 workspacePath: '/srv/apps/kimibuilt',
+            }),
+        }));
+        expect(directAction.params.prompt).toContain('Implement the requested repository changes in the workspace.');
+        expect(directAction.params.prompt).toContain(objective);
+    });
+
+    test('surfaces the repo-then-deploy lane for mixed end-to-end build requests', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Fix the landing page in this repo, push it to GitHub, deploy it to k3s, and verify the rollout.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(expect.arrayContaining([
+            'remote-command',
+            'opencode-run',
+            'git-safe',
+            'k3s-deploy',
+        ]));
+        expect(toolPolicy.workflow).toEqual(expect.objectContaining({
+            lane: 'repo-then-deploy',
+            stage: 'implementing',
+            status: 'active',
+        }));
+    });
+
+    test('runs the repo-to-deploy workflow through opencode, git-safe, k3s-deploy, and remote verification', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Implemented, pushed, deployed, and verified the requested change.', 'resp_repo_deploy')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'opencode-run',
+                    data: {
+                        workspacePath: '/srv/apps/kimibuilt',
+                        summary: 'Landing page updated.',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'git-safe',
+                    data: {
+                        action: 'remote-info',
+                        branch: 'main',
+                        stdout: 'branch: main\nupstream: origin/main',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'git-safe',
+                    data: {
+                        action: 'save-and-push',
+                        branch: 'main',
+                        stdout: 'pushed to origin/main',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'k3s-deploy',
+                    data: {
+                        action: 'sync-and-apply',
+                        stdout: 'deployment.apps/backend configured',
+                        host: '10.0.0.5:22',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: 'deployment "backend" successfully rolled out',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-repo-deploy', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Fix the landing page in this repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
+            sessionId: 'session-repo-deploy',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool.mock.calls.map((call) => call[0])).toEqual([
+            'opencode-run',
+            'git-safe',
+            'git-safe',
+            'k3s-deploy',
+            'remote-command',
+        ]);
+        expect(toolManager.executeTool.mock.calls[0][1]).toEqual(expect.objectContaining({
+            target: 'local',
+        }));
+        expect(toolManager.executeTool.mock.calls[0][1].prompt).toContain('Implement the requested repository changes in the workspace.');
+        expect(toolManager.executeTool.mock.calls[1][1]).toEqual(expect.objectContaining({
+            action: 'remote-info',
+        }));
+        expect(toolManager.executeTool.mock.calls[2][1]).toEqual(expect.objectContaining({
+            action: 'save-and-push',
+        }));
+        expect(toolManager.executeTool.mock.calls[3][1]).toEqual(expect.objectContaining({
+            action: 'sync-and-apply',
+        }));
+        expect(toolManager.executeTool.mock.calls[4][1]).toEqual(expect.objectContaining({
+            command: expect.stringContaining('kubectl rollout status deployment/'),
+        }));
+        expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+            'End-to-end builder workflow',
+            'Workflow completed after round 5',
+        ]));
+        expect(sessionStore.update).toHaveBeenCalledWith('session-repo-deploy', expect.objectContaining({
+            metadata: expect.objectContaining({
+                controlState: expect.objectContaining({
+                    workflow: expect.objectContaining({
+                        lane: 'repo-then-deploy',
+                        stage: 'completed',
+                        status: 'completed',
+                        progress: expect.objectContaining({
+                            implemented: true,
+                            saved: true,
+                            deployed: true,
+                            verified: true,
+                        }),
+                    }),
+                }),
+            }),
+        }));
+        expect(result.output).toBe('Implemented, pushed, deployed, and verified the requested change.');
+    });
+
+    test('runs the repo-only workflow through opencode-run and stops after implementation', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Implemented the requested repository change and summarized the result.', 'resp_repo_only')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'opencode-run',
+                data: {
+                    workspacePath: 'C:/Users/phill/KimiBuilt',
+                    summary: 'Auth module fixed.',
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-repo-only', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Fix the auth module in this repo and summarize the result.',
+            sessionId: 'session-repo-only',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+        expect(toolManager.executeTool).toHaveBeenCalledWith('opencode-run', expect.objectContaining({
+            target: 'local',
+            prompt: expect.stringContaining('Implement the requested repository changes in the workspace.'),
+        }), expect.any(Object));
+        expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+            'End-to-end builder workflow',
+            'Workflow completed after round 1',
+        ]));
+        expect(sessionStore.update).toHaveBeenCalledWith('session-repo-only', expect.objectContaining({
+            metadata: expect.objectContaining({
+                controlState: expect.objectContaining({
+                    workflow: expect.objectContaining({
+                        lane: 'repo-only',
+                        stage: 'completed',
+                        status: 'completed',
+                        progress: expect.objectContaining({
+                            implemented: true,
+                        }),
+                    }),
+                }),
+            }),
+        }));
+        expect(result.output).toBe('Implemented the requested repository change and summarized the result.');
+    });
+
+    test('runs the deploy-only workflow without entering the repo implementation lane', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Deployment completed and the rollout was verified.', 'resp_deploy_only')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn()
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'k3s-deploy',
+                    data: {
+                        action: 'sync-and-apply',
+                        stdout: 'deployment.apps/backend configured',
+                        host: '10.0.0.5:22',
+                    },
+                })
+                .mockResolvedValueOnce({
+                    success: true,
+                    toolId: 'remote-command',
+                    data: {
+                        stdout: 'deployment "backend" successfully rolled out',
+                        stderr: '',
+                        host: '10.0.0.5:22',
+                    },
+                }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-deploy-only', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Deploy the latest GitHub branch to k3s and verify the rollout.',
+            sessionId: 'session-deploy-only',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool.mock.calls.map((call) => call[0])).toEqual([
+            'k3s-deploy',
+            'remote-command',
+        ]);
+        expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+            'End-to-end builder workflow',
+            'Workflow completed after round 2',
+        ]));
+        expect(sessionStore.update).toHaveBeenCalledWith('session-deploy-only', expect.objectContaining({
+            metadata: expect.objectContaining({
+                controlState: expect.objectContaining({
+                    workflow: expect.objectContaining({
+                        lane: 'deploy-only',
+                        stage: 'completed',
+                        status: 'completed',
+                        progress: expect.objectContaining({
+                            deployed: true,
+                            verified: true,
+                        }),
+                    }),
+                }),
+            }),
+        }));
+        expect(result.output).toBe('Deployment completed and the rollout was verified.');
+    });
+
+    test('blocks a mixed repo-and-deploy workflow when opencode is unavailable for the required repo lane', async () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                    .includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn(),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-blocked-workflow', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Fix the auth module in this repo on the server, push it to GitHub, deploy it to k3s, and verify the rollout.',
+            sessionId: 'session-blocked-workflow',
+            executionProfile: 'remote-build',
+            metadata: {
+                remoteBuildAutonomyApproved: true,
+            },
+            toolContext: {
+                opencodeService: {
+                    getExecutionCapabilities: () => ({
+                        localReady: true,
+                        remoteReady: false,
+                    }),
+                },
+            },
+            stream: false,
+        });
+
+        expect(toolManager.executeTool).not.toHaveBeenCalled();
+        expect(llmClient.createResponse).not.toHaveBeenCalled();
+        expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
+            'End-to-end builder workflow',
+            'End-to-end builder workflow blocked',
+        ]));
+        expect(result.output).toContain('End-to-end builder blocked for:');
+        expect(result.output).toContain('`opencode-run` is not ready');
+        expect(sessionStore.update).toHaveBeenCalledWith('session-blocked-workflow', expect.objectContaining({
+            metadata: expect.objectContaining({
+                controlState: expect.objectContaining({
+                    workflow: expect.objectContaining({
+                        lane: 'repo-then-deploy',
+                        stage: 'blocked',
+                        status: 'blocked',
+                        lastError: expect.stringContaining('`opencode-run` is not ready'),
+                    }),
+                }),
             }),
         }));
     });

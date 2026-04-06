@@ -39,6 +39,12 @@ const {
     REMOTE_BUILD_EXECUTION_PROFILE,
     PROFILE_TOOL_ALLOWLISTS,
 } = require('./tool-execution-profiles');
+const {
+    advanceEndToEndBuilderWorkflow,
+    buildEndToEndWorkflowPlan,
+    evaluateEndToEndBuilderWorkflow,
+    inferEndToEndBuilderWorkflow,
+} = require('./runtime-workflows/end-to-end-builder');
 const { hasWorkloadIntent } = require('./workloads/natural-language');
 const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
@@ -2124,6 +2130,28 @@ function buildTerminalWorkloadCreationOutput(toolEvents = []) {
     return title ? `${title} created.` : 'Deferred workload created.';
 }
 
+function buildEndToEndWorkflowBlockedOutput(workflow = null) {
+    if (!workflow || typeof workflow !== 'object') {
+        return 'The end-to-end builder workflow is blocked.';
+    }
+
+    const objective = truncateText(normalizeInlineText(workflow.objective || ''), 240);
+    const completionCriteria = Array.isArray(workflow.completionCriteria)
+        ? workflow.completionCriteria.map((entry) => normalizeInlineText(entry)).filter(Boolean)
+        : [];
+
+    return [
+        objective
+            ? `End-to-end builder blocked for: ${objective}`
+            : 'End-to-end builder blocked.',
+        `Lane: ${workflow.lane || 'unknown'}.`,
+        workflow.lastError || 'The workflow cannot continue with the current runtime capabilities.',
+        completionCriteria.length > 0
+            ? `Pending criteria: ${completionCriteria.join('; ')}.`
+            : '',
+    ].filter(Boolean).join('\n');
+}
+
 function shouldRepairInvalidRuntimeResponse({ output = '', toolEvents = [], toolPolicy = {} } = {}) {
     return isInvalidRuntimeResponseText(output)
         && Array.isArray(toolPolicy?.candidateToolIds)
@@ -3223,6 +3251,17 @@ class ConversationOrchestrator extends EventEmitter {
             recentMessages: resolvedRecentMessages,
             toolContext,
         });
+        let endToEndWorkflow = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            ? toolPolicy.workflow || null
+            : null;
+        if (endToEndWorkflow) {
+            endToEndWorkflow = evaluateEndToEndBuilderWorkflow({
+                workflow: endToEndWorkflow,
+                toolPolicy,
+                remoteToolId: toolPolicy.preferredRemoteToolId,
+            });
+            toolPolicy.workflow = endToEndWorkflow;
+        }
 
         this.emit('task:start', {
             task: { type: taskType, objective },
@@ -3303,6 +3342,18 @@ class ConversationOrchestrator extends EventEmitter {
                 },
             }));
 
+            if (endToEndWorkflow) {
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'workflow',
+                    name: 'End-to-end builder workflow',
+                    details: {
+                        lane: endToEndWorkflow.lane,
+                        stage: endToEndWorkflow.stage,
+                        status: endToEndWorkflow.status,
+                    },
+                }));
+            }
+
             if (resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
                 executionTrace.push(createExecutionTraceEntry({
                     type: 'approval',
@@ -3318,6 +3369,62 @@ class ConversationOrchestrator extends EventEmitter {
                         maxAutonomousExtensions: autonomyExtensionBudget.maxUses || 0,
                     },
                 }));
+            }
+
+            if (endToEndWorkflow?.status === 'blocked') {
+                runtimeMode = 'workflow-blocked';
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'workflow',
+                    name: 'End-to-end builder workflow blocked',
+                    status: 'error',
+                    details: {
+                        lane: endToEndWorkflow.lane,
+                        stage: endToEndWorkflow.stage,
+                        error: endToEndWorkflow.lastError || null,
+                    },
+                }));
+                finalResponse = this.withResponseMetadata(buildSyntheticResponse({
+                    output: buildEndToEndWorkflowBlockedOutput(endToEndWorkflow),
+                    responseId: `resp_workflow_blocked_${Date.now()}`,
+                    model: model || null,
+                    metadata: {
+                        workflowBlocked: true,
+                        toolEvents,
+                    },
+                }), {
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolEvents,
+                    toolPolicy,
+                    autonomyApproved,
+                    executionTrace,
+                });
+                output = extractResponseText(finalResponse);
+
+                return this.completeConversationRun({
+                    sessionId,
+                    ownerId,
+                    userText: rawObjective,
+                    objective,
+                    taskType,
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolPolicy,
+                    toolEvents,
+                    output,
+                    finalResponse,
+                    startedAt,
+                    metadata,
+                    clientSurface,
+                    memoryKeywords,
+                    memoryTrace,
+                    autonomyApproved,
+                    executionTrace,
+                    stream,
+                    controlStatePatch: {
+                        workflow: endToEndWorkflow,
+                    },
+                });
             }
 
             const deterministicWorkflow = buildDeterministicRemoteWorkflow({
@@ -3527,6 +3634,29 @@ class ConversationOrchestrator extends EventEmitter {
                 let planSource = 'none';
                 const planningStartedAt = new Date().toISOString();
 
+                if (endToEndWorkflow) {
+                    endToEndWorkflow = evaluateEndToEndBuilderWorkflow({
+                        workflow: endToEndWorkflow,
+                        toolPolicy,
+                        remoteToolId: toolPolicy.preferredRemoteToolId,
+                    });
+                    toolPolicy.workflow = endToEndWorkflow;
+
+                    if (endToEndWorkflow?.status === 'blocked') {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'workflow',
+                            name: `Workflow blocked before round ${round}`,
+                            status: 'error',
+                            details: {
+                                lane: endToEndWorkflow.lane,
+                                stage: endToEndWorkflow.stage,
+                                error: endToEndWorkflow.lastError || null,
+                            },
+                        }));
+                        break;
+                    }
+                }
+
                 if (round === 1) {
                     const directAction = this.buildDirectAction({
                         objective,
@@ -3541,6 +3671,18 @@ class ConversationOrchestrator extends EventEmitter {
                         runtimeMode = 'direct-tool';
                         nextPlan = [directAction];
                         planSource = 'direct';
+                    }
+                }
+
+                if (nextPlan.length === 0 && endToEndWorkflow) {
+                    nextPlan = buildEndToEndWorkflowPlan({
+                        workflow: endToEndWorkflow,
+                        toolPolicy,
+                        remoteToolId: toolPolicy.preferredRemoteToolId,
+                    });
+                    if (nextPlan.length > 0) {
+                        runtimeMode = 'workflow-tools';
+                        planSource = 'workflow';
                     }
                 }
 
@@ -3763,6 +3905,51 @@ class ConversationOrchestrator extends EventEmitter {
                     },
                 }));
 
+                if (endToEndWorkflow && roundToolEvents.length > 0) {
+                    endToEndWorkflow = advanceEndToEndBuilderWorkflow({
+                        workflow: endToEndWorkflow,
+                        toolEvents: roundToolEvents,
+                    });
+
+                    if (endToEndWorkflow) {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'workflow',
+                            name: `Workflow state after round ${round}`,
+                            details: {
+                                lane: endToEndWorkflow.lane,
+                                stage: endToEndWorkflow.stage,
+                                status: endToEndWorkflow.status,
+                                progress: endToEndWorkflow.progress,
+                            },
+                        }));
+                    }
+
+                    if (endToEndWorkflow?.status === 'completed') {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'workflow',
+                            name: `Workflow completed after round ${round}`,
+                            details: {
+                                lane: endToEndWorkflow.lane,
+                                stage: endToEndWorkflow.stage,
+                            },
+                        }));
+                        break;
+                    }
+
+                    if (endToEndWorkflow?.status === 'blocked') {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'workflow',
+                            name: `Workflow blocked after round ${round}`,
+                            details: {
+                                lane: endToEndWorkflow.lane,
+                                stage: endToEndWorkflow.stage,
+                                error: endToEndWorkflow.lastError || null,
+                            },
+                        }));
+                        break;
+                    }
+                }
+
                 if (autonomyApproved && budgetExceeded) {
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'budget',
@@ -3890,6 +4077,58 @@ class ConversationOrchestrator extends EventEmitter {
                 if (!autonomyApproved || blockingRoundFailure || roundToolEvents.length === 0) {
                     break;
                 }
+            }
+
+            if (endToEndWorkflow?.status === 'blocked') {
+                runtimeMode = 'workflow-blocked';
+                const blockedOutput = [
+                    buildEndToEndWorkflowBlockedOutput(endToEndWorkflow),
+                    toolEvents.length > 0
+                        ? buildFallbackSynthesisText({ objective, toolEvents })
+                        : '',
+                ].filter(Boolean).join('\n\n');
+                finalResponse = this.withResponseMetadata(buildSyntheticResponse({
+                    output: blockedOutput,
+                    responseId: `resp_workflow_blocked_${Date.now()}`,
+                    model: model || null,
+                    metadata: {
+                        workflowBlocked: true,
+                        toolEvents,
+                    },
+                }), {
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolEvents,
+                    toolPolicy,
+                    autonomyApproved,
+                    executionTrace,
+                });
+                output = extractResponseText(finalResponse);
+
+                return this.completeConversationRun({
+                    sessionId,
+                    ownerId,
+                    userText: rawObjective,
+                    objective,
+                    taskType,
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolPolicy,
+                    toolEvents,
+                    output,
+                    finalResponse,
+                    startedAt,
+                    metadata,
+                    clientSurface,
+                    memoryKeywords,
+                    memoryTrace,
+                    autonomyApproved,
+                    executionTrace,
+                    stream,
+                    controlStatePatch: {
+                        workflow: endToEndWorkflow,
+                    },
+                });
             }
 
             const finalResponseStartedAt = new Date().toISOString();
@@ -4067,7 +4306,7 @@ class ConversationOrchestrator extends EventEmitter {
                 autonomyApproved,
                 executionTrace,
                 stream,
-                controlStatePatch: {},
+                controlStatePatch: endToEndWorkflow ? { workflow: endToEndWorkflow } : {},
             });
         } catch (error) {
             this.emit('task:error', {
@@ -4129,10 +4368,8 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
-        const opencodeTarget = hasOpencodeIntent ? inferOpencodeTarget(objective, session) : 'local';
-        const opencodeTargetReady = hasOpencodeIntent
-            ? isOpencodeTargetReady(toolContext, opencodeTarget)
-            : false;
+        const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
+        const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt);
         const inferredWorkload = buildCanonicalWorkloadAction({
             request: objective,
         }, {
@@ -4157,6 +4394,33 @@ class ConversationOrchestrator extends EventEmitter {
         const sshContext = resolveSshRequestContext(objective, session);
         const hasSshDefaults = hasUsableSshDefaults();
         const hasReachableSshTarget = Boolean(hasSshDefaults || sshContext.target?.host);
+        const workflowOpencodeTarget = inferOpencodeTarget(objective, session);
+        const repositoryPath = String(
+            toolContext?.repositoryPath
+            || config.deploy.defaultRepositoryPath
+            || '',
+        ).trim();
+        const workflowSeed = executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            ? inferEndToEndBuilderWorkflow({
+                objective,
+                session,
+                workspacePath: resolvePreferredOpencodeWorkspacePath({
+                    session,
+                    toolContext,
+                    target: workflowOpencodeTarget,
+                }),
+                repositoryPath,
+                opencodeTarget: workflowOpencodeTarget,
+                remoteTarget: sshContext.target || null,
+            })
+            : null;
+        const workflowNeedsRepoLane = workflowSeed?.lane === 'repo-only' || workflowSeed?.lane === 'repo-then-deploy';
+        const workflowNeedsDeployLane = workflowSeed?.lane === 'deploy-only' || workflowSeed?.lane === 'repo-then-deploy';
+        const shouldConsiderOpencodeTarget = hasOpencodeIntent || workflowNeedsRepoLane;
+        const opencodeTarget = shouldConsiderOpencodeTarget ? workflowOpencodeTarget : 'local';
+        const opencodeTargetReady = shouldConsiderOpencodeTarget
+            ? isOpencodeTargetReady(toolContext, opencodeTarget)
+            : false;
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
             if (!isDeferredWorkloadRun && hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
@@ -4181,8 +4445,14 @@ class ConversationOrchestrator extends EventEmitter {
             if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add(remoteToolId);
             }
-            if (hasOpencodeIntent && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
+            if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
                 candidates.add('opencode-run');
+            }
+            if ((explicitGitIntent || workflowNeedsDeployLane) && allowedToolIds.includes('git-safe')) {
+                candidates.add('git-safe');
+            }
+            if ((explicitK3sDeployIntent || workflowNeedsDeployLane) && allowedToolIds.includes('k3s-deploy')) {
+                candidates.add('k3s-deploy');
             }
             if (allowedToolIds.includes('docker-exec')) {
                 candidates.add('docker-exec');
@@ -4331,6 +4601,8 @@ class ConversationOrchestrator extends EventEmitter {
                 target: opencodeTarget,
                 ready: opencodeTargetReady,
             },
+            preferredRemoteToolId: remoteToolId,
+            workflow: workflowSeed,
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
@@ -4407,6 +4679,18 @@ class ConversationOrchestrator extends EventEmitter {
                 params: documentWorkflowParams,
             };
         }
+
+        if (toolPolicy.workflow) {
+            const workflowPlan = buildEndToEndWorkflowPlan({
+                workflow: toolPolicy.workflow,
+                toolPolicy,
+                remoteToolId,
+            });
+            if (workflowPlan.length === 1) {
+                return workflowPlan[0];
+            }
+        }
+
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
             && searchQuery) {

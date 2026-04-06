@@ -415,9 +415,13 @@ function hasExplicitImageGenerationIntent(text = '') {
         return false;
     }
 
-    if (hasImplicitImageArtifactFollowupReference(normalized)
-        && !/\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b/i.test(normalized)) {
-        return false;
+    if (hasImplicitImageArtifactFollowupReference(normalized)) {
+        const hasDirectImageAuthoringCue = /\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|illustration|illustrations|render|renders|artwork|cover image|cover art|poster)\b[\s\S]{0,24}\b(of|showing|depicting|featuring|based on)\b/i.test(normalized)
+            || /\b(new|another|fresh|more)\s+(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+            || /\b(generate|create|render|design|draw|illustrate|produce|craft)\b[\s\S]{0,24}\b(new|another|fresh|more)\b[\s\S]{0,24}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized);
+        if (!hasDirectImageAuthoringCue) {
+            return false;
+        }
     }
 
     return /\b(generate|create|make|render|design|draw|illustrate|produce|craft)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|illustration|illustrations|render|renders|artwork|cover image|cover art|poster)\b/i.test(normalized)
@@ -638,7 +642,8 @@ function isSshContinuationPrompt(text = '', { allowGenericContinuation = false }
 
     const genericContinuation = /^(continue|finish|keep going|go ahead|next|then|retry|rerun|re-run|recheck)\b/.test(normalized)
         || /\b(keep going|go ahead|retry that|rerun that|re-run that|recheck that|keep working on it)\b/.test(normalized);
-    const remoteSpecificLanguage = /\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|node|namespace|pod|deployment|service|container|docker|helm|traefik|ingress|tls|ssl|acme|let'?s encrypt|certificate|cert|journalctl|systemctl|restart|rollout|daemonset|statefulset|logs?|tunnel)\b/.test(normalized);
+    const remoteSpecificLanguage = /\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|node|namespace|pod|deployment|service|container|docker|helm|traefik|ingress|tls|ssl|acme|let'?s encrypt|certificate|cert|journalctl|systemctl|restart|rollout|daemonset|statefulset|logs?|tunnel)\b/.test(normalized)
+        || /\b(deployed|live|production)\b[\s\S]{0,20}\b(site|app|service)\b/.test(normalized);
 
     return remoteSpecificLanguage || (allowGenericContinuation && genericContinuation);
 }
@@ -765,10 +770,15 @@ function resolveSshRequestContext(text = '', session = null) {
         && isSshContinuationPrompt(prompt, {
             allowGenericContinuation: hasRecentRemoteWorkingState(session),
         });
+    const retryLikeExplicitContinuation = explicitIntent
+        && stickySsh
+        && target?.host
+        && /\b(try again|retry|rerun|re-run|recheck)\b/.test(normalizedPrompt);
     const effectivePrompt = continuation
+        || retryLikeExplicitContinuation
         ? `SSH into ${formatSshTarget(target)} and ${prompt}`
         : prompt;
-    const retryLikeContinuation = continuation
+    const retryLikeContinuation = (continuation || retryLikeExplicitContinuation)
         && /\b(try again|retry|rerun|re-run|recheck)\b/.test(normalizedPrompt);
     const previousCommand = String(controlState?.remoteWorkingState?.lastCommand || '').trim();
     const command = extractRequestedSshCommand(effectivePrompt)
@@ -776,8 +786,8 @@ function resolveSshRequestContext(text = '', session = null) {
 
     return {
         explicitIntent,
-        continuation,
-        shouldTreatAsSsh: explicitIntent || continuation,
+        continuation: continuation || retryLikeExplicitContinuation,
+        shouldTreatAsSsh: explicitIntent || continuation || retryLikeExplicitContinuation,
         effectivePrompt,
         target,
         command,

@@ -932,6 +932,84 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('forces user-checkpoint for survey creation requests that should not become workload or research', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Lets make plans. Give me some ideas in a survey of some things we could build';
+        const toolContext = {
+            clientSurface: 'web-chat',
+            userCheckpointPolicy: {
+                enabled: true,
+                remaining: 2,
+                pending: null,
+            },
+            workloadService: {
+                isAvailable: () => true,
+            },
+        };
+
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            { toolContext },
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            { toolContext },
+        );
+        const toolChoice = __testUtils.buildAutomaticToolChoice(
+            selectedTools,
+            'responses',
+            { prompt, toolContext },
+        );
+
+        expect(__testUtils.hasExplicitUserCheckpointInteractionIntent(prompt)).toBe(true);
+        expect(selectedTools.map((tool) => tool.id)).toContain('user-checkpoint');
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'user-checkpoint',
+        });
+        expect(__testUtils.buildDeterministicPreflightActions(selectedTools, prompt)).toEqual([]);
+    });
+
+    test('forces user-checkpoint for direct survey requests that explicitly reject workload', () => {
+        const toolManager = createToolManager();
+        const prompt = 'can we do the survey no, no workload';
+        const toolContext = {
+            clientSurface: 'web-chat',
+            userCheckpointPolicy: {
+                enabled: true,
+                remaining: 2,
+                pending: null,
+            },
+            workloadService: {
+                isAvailable: () => true,
+            },
+        };
+
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            { toolContext },
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            { toolContext },
+        );
+        const toolChoice = __testUtils.buildAutomaticToolChoice(
+            selectedTools,
+            'responses',
+            { prompt, toolContext },
+        );
+
+        expect(__testUtils.hasExplicitUserCheckpointInteractionIntent(prompt)).toBe(true);
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'user-checkpoint',
+        });
+    });
+
     test('extracts a single checkpoint from a numbered prose questionnaire fallback', () => {
         const checkpoint = __testUtils.extractQuestionnaireCheckpointFromText([
             'Use these 5 and reply with the option letter for each.',

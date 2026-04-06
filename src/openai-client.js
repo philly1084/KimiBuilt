@@ -927,13 +927,26 @@ function hasExplicitUserCheckpointInteractionIntent(prompt = '') {
     const asksToBeAsked = /\bask me\b/i.test(text)
         || /\bask that as\b/i.test(text)
         || /\bcan you ask\b/i.test(text)
-        || /\bask (?:this|that|those)\b[\s\S]{0,20}\bas\b/i.test(text);
+        || /\bask (?:this|that|those)\b[\s\S]{0,20}\bas\b/i.test(text)
+        || /\bdo (?:the |a )?survey\b/i.test(text)
+        || /\bsurvey directly\b/i.test(text);
     const mentionsInlineUi = /\b(inline|popup|card|clickable|choice|choices|option|options)\b/i.test(text)
         && /\b(survey|questionnaire|questionaire|checkpoint)\b/i.test(text);
     const mentionsToolOrSurface = /\b(tool|ui|web[- ]chat)\b/i.test(text) && mentionsQuestionnaire;
     const asksForCheckpointCard = /\b(turn|make|convert|open|use|show|render)\b[\s\S]{0,40}\b(user[- ]checkpoint|checkpoint card|survey card|inline survey|inline questionnaire)\b/i.test(text);
+    const asksForStructuredSurvey = /\b(?:give|make|create|build|do)\b[\s\S]{0,30}\b(?:a|an|some)?\s*survey\b/i.test(text)
+        || /\b(?:in|as)\s+a?\s*survey\b/i.test(text)
+        || /\bsurvey of\b/i.test(text);
+    const rejectsWorkloadForSurvey = /\bno workload\b/i.test(text) && mentionsQuestionnaire;
 
-    return mentionsQuestionnaire && (asksToBeAsked || mentionsInlineUi || mentionsToolOrSurface || asksForCheckpointCard);
+    return mentionsQuestionnaire && (
+        asksToBeAsked
+        || mentionsInlineUi
+        || mentionsToolOrSurface
+        || asksForCheckpointCard
+        || asksForStructuredSurvey
+        || rejectsWorkloadForSurvey
+    );
 }
 
 function extractExplicitWebResearchQuery(prompt = '') {
@@ -1162,6 +1175,10 @@ function buildImagePromptFromArtifactRequestForPreflight(text = '') {
 
 function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
+    if (availableToolIds.has(USER_CHECKPOINT_TOOL_ID) && hasExplicitUserCheckpointInteractionIntent(prompt)) {
+        return [];
+    }
+
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
@@ -1946,16 +1963,6 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         return null;
     }
 
-    if (!isDeferredWorkloadRun
-        && availableToolIds.has('agent-workload')
-        && (
-            hasWorkloadIntent(prompt)
-            || canonicalWorkload?.trigger?.type === 'cron'
-            || canonicalWorkload?.trigger?.type === 'once'
-        )) {
-        return 'agent-workload';
-    }
-
     const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
     if (availableToolIds.has(USER_CHECKPOINT_TOOL_ID)
         && checkpointPolicy.enabled === true
@@ -1966,6 +1973,16 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
             || hasExplicitUserCheckpointInteractionIntent(prompt)
         )) {
         return USER_CHECKPOINT_TOOL_ID;
+    }
+
+    if (!isDeferredWorkloadRun
+        && availableToolIds.has('agent-workload')
+        && (
+            hasWorkloadIntent(prompt)
+            || canonicalWorkload?.trigger?.type === 'cron'
+            || canonicalWorkload?.trigger?.type === 'once'
+        )) {
+        return 'agent-workload';
     }
 
     if (explicitK3sDeployIntent && availableToolIds.has('k3s-deploy')) {

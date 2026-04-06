@@ -160,38 +160,127 @@ function extractScenarioTime(input = '') {
     return { ...DEFAULT_TIME_INFO };
 }
 
-function buildOneTimeRunAt(lowerScenario = '', timeInfo = DEFAULT_TIME_INFO, now = new Date()) {
+function getZonedDateParts(date = new Date(), timezone = 'UTC') {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: normalizeTimezone(timezone || getDefaultTimezone()),
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const readPart = (type) => Number(parts.find((entry) => entry.type === type)?.value || 0);
+
+    return {
+        year: readPart('year'),
+        month: readPart('month'),
+        day: readPart('day'),
+        hour: readPart('hour'),
+        minute: readPart('minute'),
+        second: readPart('second'),
+    };
+}
+
+function buildUtcDateFromZonedParts(parts = {}, timezone = 'UTC') {
+    const utcGuess = Date.UTC(
+        Number(parts.year) || 0,
+        Math.max(0, (Number(parts.month) || 1) - 1),
+        Number(parts.day) || 1,
+        Number(parts.hour) || 0,
+        Number(parts.minute) || 0,
+        Number(parts.second) || 0,
+        0,
+    );
+    const guessDate = new Date(utcGuess);
+    const guessParts = getZonedDateParts(guessDate, timezone);
+    const targetAsUtc = Date.UTC(
+        Number(parts.year) || 0,
+        Math.max(0, (Number(parts.month) || 1) - 1),
+        Number(parts.day) || 1,
+        Number(parts.hour) || 0,
+        Number(parts.minute) || 0,
+        Number(parts.second) || 0,
+        0,
+    );
+    const guessAsUtc = Date.UTC(
+        guessParts.year || 0,
+        Math.max(0, (guessParts.month || 1) - 1),
+        guessParts.day || 1,
+        guessParts.hour || 0,
+        guessParts.minute || 0,
+        guessParts.second || 0,
+        0,
+    );
+
+    return new Date(utcGuess + (targetAsUtc - guessAsUtc));
+}
+
+function addDaysToZonedDateParts(parts = {}, dayCount = 0) {
+    const day = new Date(Date.UTC(
+        Number(parts.year) || 0,
+        Math.max(0, (Number(parts.month) || 1) - 1),
+        Number(parts.day) || 1,
+        0,
+        0,
+        0,
+        0,
+    ));
+    day.setUTCDate(day.getUTCDate() + dayCount);
+
+    return {
+        year: day.getUTCFullYear(),
+        month: day.getUTCMonth() + 1,
+        day: day.getUTCDate(),
+    };
+}
+
+function buildOneTimeRunAt(lowerScenario = '', timeInfo = DEFAULT_TIME_INFO, now = new Date(), timezone = 'UTC') {
     const baseNow = now instanceof Date ? new Date(now.getTime()) : new Date(now);
     const relativeDelayMs = extractRelativeDelayMs(lowerScenario);
     if (relativeDelayMs != null) {
         return new Date(baseNow.getTime() + relativeDelayMs);
     }
 
-    const runAt = new Date(baseNow.getTime());
-    runAt.setSeconds(0, 0);
-    runAt.setHours(timeInfo.hour, timeInfo.minute, 0, 0);
+    const resolvedTimezone = normalizeTimezone(timezone || getDefaultTimezone());
+    const zonedNow = getZonedDateParts(baseNow, resolvedTimezone);
+    const buildRunAt = (dateParts, hour, minute) => buildUtcDateFromZonedParts({
+        ...dateParts,
+        hour,
+        minute,
+        second: 0,
+    }, resolvedTimezone);
+    const nextLocalHour = buildRunAt(
+        addDaysToZonedDateParts(zonedNow, Math.floor((zonedNow.hour + 1) / 24)),
+        (zonedNow.hour + 1) % 24,
+        0,
+    );
+    const sameDay = {
+        year: zonedNow.year,
+        month: zonedNow.month,
+        day: zonedNow.day,
+    };
+    let runAt = buildRunAt(sameDay, timeInfo.hour, timeInfo.minute);
 
     if (/\btomorrow\b/i.test(lowerScenario)) {
-        runAt.setDate(runAt.getDate() + 1);
-        return runAt;
+        return buildRunAt(addDaysToZonedDateParts(zonedNow, 1), timeInfo.hour, timeInfo.minute);
     }
 
     if (/\blater today\b/i.test(lowerScenario) || /\blater\b/i.test(lowerScenario)) {
-        if (runAt <= baseNow) {
-            runAt.setHours(baseNow.getHours() + 1, 0, 0, 0);
-        }
-        return runAt;
+        return runAt <= baseNow ? nextLocalHour : runAt;
     }
 
     if (new RegExp(`\\b${TODAY_SCHEDULE_FRAGMENT}`, 'i').test(lowerScenario)) {
         if (runAt <= baseNow) {
-            runAt.setDate(runAt.getDate() + 1);
+            runAt = buildRunAt(addDaysToZonedDateParts(zonedNow, 1), timeInfo.hour, timeInfo.minute);
         }
         return runAt;
     }
 
     if (runAt <= baseNow) {
-        runAt.setHours(baseNow.getHours() + 1, 0, 0, 0);
+        runAt = nextLocalHour;
     }
 
     return runAt;
@@ -251,12 +340,20 @@ function extractTaskPromptFromScenario(scenario = '') {
         taskPrompt = taskPrompt.replace(pattern, '');
     });
     taskPrompt = taskPrompt.replace(
-        /^(?:please\s+)?(?:set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job)?\s*(?:to\s+)?/i,
+        /^(?:please\s+)?(?:set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job)\s*(?:to\s+)?/i,
         '',
     );
     taskPrompt = taskPrompt.replace(/^(?:can|could|would)\s+you\s+/i, '');
     taskPrompt = taskPrompt.replace(
-        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:cron|scheduled?|deferred)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job|check)?\s*(?:later\s*)?(?:to\s+)?/i,
+        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?cron\s*(?:later\s*)?(?:to\s+)?/i,
+        '',
+    );
+    taskPrompt = taskPrompt.replace(
+        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?(?:(?:cron|scheduled?|deferred)\s+)?(?:(?:daily|weekly|hourly|nightly|recurring|one[- ]time)\s+)?(?:(?:agent|assistant)\s+)?(?:workload|automation|follow-?up|task|job|check)\s*(?:later\s*)?(?:to\s+)?/i,
+        '',
+    );
+    taskPrompt = taskPrompt.replace(
+        /^(?:please\s+)?(?:run|set(?:\s+(?:this|it))?\s+up|schedule(?:\s+(?:this|it))?|create|make|add|queue|save)\s+(?:(?:a|an)\s+)?to\s+/i,
         '',
     );
     taskPrompt = taskPrompt.replace(/^(?:have|let)\s+(?:the\s+)?(?:agent|assistant)\s+/i, '');
@@ -340,7 +437,7 @@ function hasWorkloadIntent(text = '') {
 
     const hasExplicitWorkloadSetup = [
         /\b(set up|setup|schedule|create|make|add|queue|save)\b[\s\S]{0,24}\b(?:an?\s+|the\s+)?(?:automation|workload|follow-?up|reminder|cron(?:\s+job)?|scheduled\s+job|scheduled\s+task|recurring\s+job|recurring\s+task)\b/,
-        new RegExp(`\\b(set up|setup|schedule|create|make|add|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
+        new RegExp(`\\b(set up|setup|schedule|queue|save)\\b[\\s\\S]{0,60}\\b${scheduleIntentFragment}\\b`),
     ].some((pattern) => pattern.test(normalized));
 
     const hasTimedTaskRequest = [
@@ -492,7 +589,7 @@ function parseWorkloadScenario(scenario = '', options = {}) {
     )) {
         trigger = {
             type: 'once',
-            runAt: buildOneTimeRunAt(lowerScenario, timeInfo, now).toISOString(),
+            runAt: buildOneTimeRunAt(lowerScenario, timeInfo, now, resolvedTimezone).toISOString(),
         };
     } else if (/(every hour|hourly)/i.test(lowerScenario)) {
         trigger = {

@@ -115,7 +115,7 @@ describe('ConversationRunService', () => {
         expect(memoryService.rememberResponse).toHaveBeenCalledWith(
             'session-1',
             result.outputText,
-            { ownerId: 'user-1' },
+            expect.objectContaining({ ownerId: 'user-1', memoryScope: 'chat' }),
         );
     });
 
@@ -195,7 +195,8 @@ describe('ConversationRunService', () => {
         expect(maybeGenerateOutputArtifact).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-1',
             outputFormat: 'pdf',
-            content: 'Penguin headlines\n\n- Emperor penguins...',
+            content: expect.stringContaining('Penguin headlines'),
+            mode: 'chat',
             prompt: '',
             responseId: 'resp-1',
         }));
@@ -293,7 +294,7 @@ describe('ConversationRunService', () => {
 
         expect(maybeGenerateOutputArtifact).toHaveBeenCalledWith(expect.objectContaining({
             outputFormat: 'pdf',
-            content: 'Cluster plan\n\n- Review node health\n- Review pods',
+            content: expect.stringContaining('Cluster plan'),
         }));
         expect(result.artifactMessage).toBe('Created the PDF artifact (cluster-plan.pdf).');
     });
