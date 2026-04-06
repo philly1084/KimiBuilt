@@ -1,4 +1,7 @@
-const { buildWebChatSessionMessages } = require('./web-chat-message-state');
+const {
+    buildFrontendAssistantMetadata,
+    buildWebChatSessionMessages,
+} = require('./web-chat-message-state');
 
 describe('buildWebChatSessionMessages', () => {
     test('assigns strictly increasing timestamps within one exchange', () => {
@@ -83,5 +86,39 @@ describe('buildWebChatSessionMessages', () => {
             displayContent: expect.stringContaining('```survey'),
         }));
         expect(messages[1].metadata.trace).toBeUndefined();
+    });
+
+    test('derives survey display content from tool events when explicit display content is absent', () => {
+        const metadata = buildFrontendAssistantMetadata({
+            taskType: 'chat',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'user-checkpoint',
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'user-checkpoint',
+                    data: {
+                        checkpoint: {
+                            id: 'checkpoint-derive',
+                            title: 'Quick test',
+                            question: 'Which direction should we take?',
+                            options: [
+                                { id: 'a', label: 'A' },
+                                { id: 'b', label: 'B' },
+                            ],
+                        },
+                    },
+                },
+            }],
+        });
+
+        expect(metadata).toEqual(expect.objectContaining({
+            taskType: 'chat',
+            displayContent: expect.stringContaining('```survey'),
+        }));
+        expect(metadata.displayContent).toContain('"id": "checkpoint-derive"');
     });
 });

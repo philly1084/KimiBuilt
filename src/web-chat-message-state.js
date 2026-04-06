@@ -99,11 +99,13 @@ function buildFrontendAssistantMetadata(metadata = null) {
         nextMetadata.taskType = metadata.taskType.trim();
     }
 
-    const displayContent = typeof metadata.displayContent === 'string' && metadata.displayContent.trim()
+    const explicitDisplayContent = typeof metadata.displayContent === 'string' && metadata.displayContent.trim()
         ? metadata.displayContent.trim()
         : (typeof metadata.display_content === 'string' && metadata.display_content.trim()
             ? metadata.display_content.trim()
             : '');
+    const derivedDisplayContent = explicitDisplayContent || buildSurveyDisplayContentFromToolEvents(metadata.toolEvents || metadata.tool_events || []);
+    const displayContent = derivedDisplayContent;
     if (displayContent) {
         nextMetadata.displayContent = displayContent;
     }
