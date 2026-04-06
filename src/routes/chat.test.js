@@ -53,6 +53,7 @@ jest.mock('../ai-route-utils', () => ({
     shouldDeferArtifactGenerationToWorkload: jest.fn(() => false),
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
+    stripInjectedNotesPageEditDirective: jest.fn((text) => text),
     resolveReasoningEffort: jest.fn(() => null),
     resolveSshRequestContext: jest.fn(),
     extractSshSessionMetadataFromToolEvents: jest.fn(() => null),
@@ -87,6 +88,7 @@ const {
     resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    stripInjectedNotesPageEditDirective,
     resolveReasoningEffort,
 } = require('../ai-route-utils');
 
@@ -365,6 +367,55 @@ describe('/api/chat route', () => {
         expect(response.body.artifacts).toEqual([
             expect.objectContaining({ id: 'pdf-artifact-1', filename: 'page-export.pdf' }),
         ]);
+    });
+
+    test('strips the injected notes page-edit directive before artifact inference on /api/chat', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Create a page about penguins.\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Put the result into page blocks. Do not reply with chat prose alone. Do not create standalone HTML, file, export, artifact, or download-link output unless the user explicitly asked for that.',
+        });
+        stripInjectedNotesPageEditDirective.mockImplementation((text) => (
+            String(text).replace(/\n\nInterpret "page" as the current notes page shown in this editor[\s\S]*$/i, '')
+        ));
+        require('../ai-route-utils').inferRequestedOutputFormat.mockImplementation((text) => (
+            /\bweb page\b/i.test(text) || /\bartifact\b/i.test(text) ? 'html' : null
+        ));
+        shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-notes-chat-1',
+                model: 'gpt-4o',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Returned through normal runtime' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Create a page about penguins.\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Put the result into page blocks. Do not reply with chat prose alone. Do not create standalone HTML, file, export, artifact, or download-link output unless the user explicitly asked for that.',
+                stream: false,
+                metadata: { taskType: 'notes', clientSurface: 'notes' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(stripInjectedNotesPageEditDirective).toHaveBeenCalled();
+        expect(require('../ai-route-utils').inferRequestedOutputFormat).toHaveBeenCalledWith('Create a page about penguins.');
+        expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
+        expect(executeConversationRuntime).toHaveBeenCalled();
     });
 
     test('pre-generates image artifacts before direct PDF creation for mixed requests', async () => {
