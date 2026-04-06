@@ -327,6 +327,12 @@ function inferRequestedOutputFormat(text = '') {
 
     const hasArtifactIntent = hasExplicitArtifactGenerationIntent(normalized);
     const hasBuildIntent = /\b(create|make|generate|build|produce|render|prepare|draft)\b/.test(normalized);
+    const hasWebsiteArtifactSubject = (
+        /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
+        || isDashboardRequest(normalized)
+    );
+    const hasPrototypeHtmlCue = /\b(demo|prototype|mockup|mock-up|wireframe|microsite)\b/.test(normalized);
+    const hasExplicitHtmlCue = /\bhtml\b/.test(normalized);
 
     if ((/\b(power\s*query|\.(pq|m)\b)/.test(normalized) && hasArtifactIntent)
         || /\b(power\s*query)\s+(?:file|script|artifact|export)\b/.test(normalized)) {
@@ -354,11 +360,11 @@ function inferRequestedOutputFormat(text = '') {
         return 'mermaid';
     }
 
-    if ((hasArtifactIntent || hasBuildIntent)
-        && (
-            /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
-            || isDashboardRequest(normalized)
-        )) {
+    if (hasWebsiteArtifactSubject && (
+        hasExplicitStandaloneHtmlIntent(normalized)
+        || (hasExplicitHtmlCue && hasBuildIntent)
+        || (hasPrototypeHtmlCue && hasBuildIntent)
+    )) {
         return 'html';
     }
 
@@ -375,6 +381,12 @@ function isArtifactContinuationPrompt(text = '') {
         return false;
     }
 
+    if (hasImplementationTransitionIntent(normalized)
+        && !hasExplicitStandaloneHtmlIntent(normalized)
+        && !hasExplicitArtifactDeliveryIntent(normalized)) {
+        return false;
+    }
+
     const continuationPatterns = [
         /^(continue|finish|refine|revise|update|improve|polish|expand|edit|redo|rework)\b/,
         /\b(another pass|next pass|keep going|work on it|finish it|continue it|same one|current page content)\b/,
@@ -384,9 +396,29 @@ function isArtifactContinuationPrompt(text = '') {
     return continuationPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function hasImplementationTransitionIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(start|begin|kick off|move|switch)\b[\s\S]{0,24}\b(making|building|implementing|coding|developing|working)\b/,
+        /\b(start|begin|go ahead and|let'?s|lets|can you|please)\b[\s\S]{0,24}\b(build|make|implement|code|develop|wire up|ship)\b[\s\S]{0,24}\b(it|this|that|the app|the site|the website|the landing page|the product|the project|the implementation)\b/,
+        /\b(move|switch)\b[\s\S]{0,24}\b(into|to)\b[\s\S]{0,24}\b(implementation|building|coding|development)\b/,
+        /\b(make it real|actually build it|actually make it|turn this into the real)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasImplicitArtifactFollowupReference(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
+        return false;
+    }
+
+    if (hasImplementationTransitionIntent(normalized)
+        && !hasExplicitStandaloneHtmlIntent(normalized)
+        && !hasExplicitArtifactDeliveryIntent(normalized)) {
         return false;
     }
 
@@ -879,6 +911,12 @@ function inferOutputFormatFromSession(text = '', session = null) {
     const lastOutputFormat = normalizeFormat(session?.metadata?.lastOutputFormat || '');
     const lastGeneratedArtifactId = session?.metadata?.lastGeneratedArtifactId || '';
     if (!lastOutputFormat || !lastGeneratedArtifactId) {
+        return null;
+    }
+
+    if (hasImplementationTransitionIntent(text)
+        && !hasExplicitStandaloneHtmlIntent(text)
+        && !hasExplicitArtifactDeliveryIntent(text)) {
         return null;
     }
 

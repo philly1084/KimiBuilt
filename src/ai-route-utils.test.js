@@ -209,10 +209,11 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Export this as a Mermaid file')).toBe('mermaid');
     });
 
-    test('inferRequestedOutputFormat treats landing-page and frontend-demo requests as html artifacts', () => {
-        expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBe('html');
+    test('inferRequestedOutputFormat only auto-selects html for explicit html or prototype-style website requests', () => {
+        expect(inferRequestedOutputFormat('Build a landing page for a climate startup')).toBeNull();
         expect(inferRequestedOutputFormat('Create a frontend demo microsite for our product launch')).toBe('html');
         expect(inferRequestedOutputFormat('Create an admin dashboard HTML for customer support ops')).toBe('html');
+        expect(inferRequestedOutputFormat('Make a website mockup for a fintech launch')).toBe('html');
     });
 
     test('hasExplicitMermaidFileIntent only returns true for file-like Mermaid requests', () => {
@@ -359,6 +360,15 @@ describe('ai-route-utils', () => {
         })).toBe('mermaid');
     });
 
+    test('inferOutputFormatFromSession exits sticky html continuation on implementation-transition turns', () => {
+        expect(inferOutputFormatFromSession('Start making it on the server instead of showing more examples.', {
+            metadata: {
+                lastOutputFormat: 'html',
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        })).toBeNull();
+    });
+
     test('resolveArtifactContextIds falls back to the last generated artifact on continuation turns', () => {
         expect(resolveArtifactContextIds({
             metadata: {
@@ -397,6 +407,14 @@ describe('ai-route-utils', () => {
                 lastGeneratedArtifactId: 'artifact-1',
             },
         }, [], 'deploy the site online and verify the public route')).toEqual([]);
+    });
+
+    test('resolveArtifactContextIds does not keep html artifacts attached on implementation-transition turns', () => {
+        expect(resolveArtifactContextIds({
+            metadata: {
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+        }, [], 'Go ahead and build it for real on the server now.')).toEqual([]);
     });
 
     test('maybePrepareImagesForArtifactPrompt executes image generation and merges artifact ids', async () => {
