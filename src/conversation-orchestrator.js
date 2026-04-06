@@ -5068,6 +5068,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
             'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision or direction check would help.',
             'On web-chat, prefer `user-checkpoint` over asking a blocking multiple-choice question in plain assistant text because it renders as an inline survey card with clickable options.',
+            'Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.',
             'Keep `user-checkpoint` to one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake.',
             'Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use mutually exclusive, actionable options and leave the free-text field enabled when helpful.',
             'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or more than 6 steps.',
@@ -5077,10 +5078,14 @@ class ConversationOrchestrator extends EventEmitter {
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             ...(toolPolicy?.userCheckpointPolicy?.enabled
                 ? [
-                    `Checkpoint questions remaining in this session: ${Math.max(0, Number(toolPolicy.userCheckpointPolicy.remaining) || 0)}.`,
+                    Number(toolPolicy.userCheckpointPolicy.remaining || 0) > 0
+                        ? 'A `user-checkpoint` card is available in this session if a major decision truly needs it.'
+                        : 'No additional `user-checkpoint` cards are currently available in this session. Do not mention that internal limit to the user.',
                     toolPolicy.userCheckpointPolicy.pending
                         ? 'A `user-checkpoint` is already pending. Do not plan another checkpoint until the user answers it.'
-                        : 'If a checkpoint would unblock a major decision, you may use `user-checkpoint` instead of stopping with a prose question.',
+                        : (Number(toolPolicy.userCheckpointPolicy.remaining || 0) > 0
+                            ? 'If a checkpoint would unblock a major decision, you may use `user-checkpoint` instead of stopping with a prose question.'
+                            : 'If more input is truly required, ask at most one concise plain-text question; otherwise proceed with a reasonable assumption.'),
                 ]
                 : []),
             'If a multi-job cron request omits exact times, you may pass one derived sub-request per job with conservative defaults in local time, such as daily at 9:00 AM for checks and every Monday at 2:00 AM for updates.',

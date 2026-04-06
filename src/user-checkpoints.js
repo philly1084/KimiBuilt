@@ -1,6 +1,6 @@
 const { getSessionControlState } = require('./runtime-control-state');
 
-const DEFAULT_MAX_USER_CHECKPOINTS = 2;
+const DEFAULT_MAX_USER_CHECKPOINTS = 8;
 const MAX_USER_CHECKPOINT_STEPS = 6;
 const USER_CHECKPOINT_TOOL_ID = 'user-checkpoint';
 const USER_CHECKPOINT_SURFACE = 'web-chat';
@@ -261,12 +261,13 @@ function getUserCheckpointState(session = null) {
         ? controlState.userCheckpoint
         : {};
 
-    const maxQuestions = clampInteger(
+    const storedMaxQuestions = clampInteger(
         rawState.maxQuestions,
         1,
-        4,
+        12,
         DEFAULT_MAX_USER_CHECKPOINTS,
     );
+    const maxQuestions = Math.max(DEFAULT_MAX_USER_CHECKPOINTS, storedMaxQuestions);
     const askedCount = clampInteger(rawState.askedCount, 0, maxQuestions, 0);
 
     return {
@@ -451,14 +452,16 @@ function buildUserCheckpointInstructions(policy = {}) {
     const lines = [
         '[User checkpoint policy]',
         'Before major implementation, refactoring, or long multi-step work, you may pause to ask the user for one high-impact decision.',
-        `Maximum checkpoint questions in this session: ${policy.maxQuestions || DEFAULT_MAX_USER_CHECKPOINTS}.`,
-        `Remaining checkpoint questions in this session: ${Math.max(0, Number(policy.remaining) || 0)}.`,
+        Number(policy.remaining || 0) > 0
+            ? 'A checkpoint card is still available in this session if one concise user decision would materially help.'
+            : 'No additional checkpoint cards are currently available in this session.',
         policy.pending
             ? `A checkpoint is already pending (${policy.pending.id}). Do not ask another one until the user answers it.`
             : 'If you truly need that decision, call the `user-checkpoint` tool instead of asking in free-form prose.',
         'Do not call or mention `request_user_input` in this runtime. Use `user-checkpoint` for web-chat questionnaires.',
         'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise choice or direction check would materially help.',
         'On the web-chat surface, do not ask a blocking multiple-choice question as plain assistant text when `user-checkpoint` is available; use the tool so the UI can render inline options.',
+        'Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.',
         'Do not claim that the questionnaire rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.',
         'If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not turn that into a multi-question quiz, personality test, or numbered prose form.',
         'If the user asks you to ask them a survey, questionnaire, inline survey card, or checkpoint card, call `user-checkpoint` directly instead of replying with sample survey text, markdown checkboxes, or an offer to turn it into a card later.',
@@ -468,7 +471,8 @@ function buildUserCheckpointInstructions(policy = {}) {
         'Keep the checkpoint concise: one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake or back-and-forth.',
         'Supported step types are single-choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and keep the optional free-text path available when helpful.',
         `Do not turn checkpoints into long forms or sprawling questionnaires. Keep them to at most ${MAX_USER_CHECKPOINT_STEPS} steps unless the product adds a richer form surface.`,
-        'If there are no checkpoint questions remaining, proceed with the best reasonable assumption and state that assumption briefly.',
+        'If there are no checkpoint questions remaining, do not output a prose questionnaire, numbered list of questions, or pseudo-survey.',
+        'If more user input is truly required after no checkpoint cards remain, do not say the quota or budget is exhausted; ask at most one concise plain-text question or proceed with the best reasonable assumption and state that assumption briefly.',
         'When the user sends a message starting with `Survey response (` treat it as the answer to the checkpoint and continue the work.',
     ];
 

@@ -35,7 +35,8 @@ describe('user checkpoint helpers', () => {
         expect(policy).toEqual(expect.objectContaining({
             enabled: true,
             askedCount: 1,
-            remaining: 1,
+            maxQuestions: 8,
+            remaining: 7,
             pending: expect.objectContaining({
                 id: 'checkpoint-1',
                 question: 'Which path should I take?',
@@ -63,8 +64,8 @@ describe('user checkpoint helpers', () => {
     test('checkpoint instructions explicitly forbid plain-text multiple-choice questions in web-chat', () => {
         const instructions = buildUserCheckpointInstructions({
             enabled: true,
-            maxQuestions: 2,
-            remaining: 2,
+            maxQuestions: 8,
+            remaining: 7,
             pending: null,
         });
 
@@ -79,6 +80,9 @@ describe('user checkpoint helpers', () => {
         expect(instructions).toContain('Prefer `user-checkpoint` over a prose "which option do you want?" message');
         expect(instructions).toContain('one card with one visible step at a time');
         expect(instructions).toContain('Supported step types are single-choice, multi-choice, text, date, time, and datetime');
+        expect(instructions).toContain('Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.');
+        expect(instructions).toContain('do not output a prose questionnaire');
+        expect(instructions).toContain('do not say the quota or budget is exhausted');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {
@@ -120,6 +124,7 @@ describe('user checkpoint helpers', () => {
         }));
         expect(patch).toEqual(expect.objectContaining({
             userCheckpoint: expect.objectContaining({
+                maxQuestions: 8,
                 askedCount: 1,
                 pending: expect.objectContaining({
                     id: 'checkpoint-2',

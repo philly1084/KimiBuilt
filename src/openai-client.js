@@ -2192,6 +2192,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `user-checkpoint` for a high-impact decision before major work instead of asking a plain-text multiple-choice question.');
         guidance.push('- In this runtime, do not call or mention `request_user_input`. `user-checkpoint` is the correct questionnaire tool for web chat.');
         guidance.push('- On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision would materially help.');
+        guidance.push('- Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.');
         guidance.push('- Do not tell the user that a questionnaire tool failed or expose internal mode/tool errors. If `user-checkpoint` is attached, use it directly.');
         guidance.push('- Do not claim that the inline survey card rendered, popped up, was dismissed, or was answered unless the transcript explicitly shows the user response.');
         guidance.push('- Prefer `user-checkpoint` over a prose "which option do you want?" message when one short choice would unblock progress or keep the user involved.');
@@ -2200,6 +2201,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and keep the built-in free-text path available when helpful.');
         guidance.push('- Do not turn `user-checkpoint` into long forms, sprawling questionnaires, or more than 6 steps.');
         guidance.push('- If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not write a multi-question quiz or personality test as assistant text.');
+        guidance.push('- If no checkpoint cards remain, do not say the quota is exhausted. Ask at most one concise plain-text question or proceed with a reasonable assumption.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'git-safe')) {
