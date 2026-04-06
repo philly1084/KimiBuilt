@@ -23,6 +23,9 @@ const {
     mergeControlState,
 } = require('./runtime-control-state');
 const {
+    buildWebChatSessionMessages,
+} = require('./web-chat-message-state');
+const {
     buildScopedSessionMetadata,
     resolveClientSurface,
     resolveSessionScope,
@@ -5715,6 +5718,7 @@ class ConversationOrchestrator extends EventEmitter {
             memoryKeywords,
             autonomyApproved,
             controlStatePatch,
+            assistantMetadata: tracedResponse?.metadata || null,
         });
 
         const trace = {
@@ -5783,6 +5787,7 @@ class ConversationOrchestrator extends EventEmitter {
         memoryKeywords = [],
         autonomyApproved = false,
         controlStatePatch = {},
+        assistantMetadata = null,
     }) {
         const currentSession = ownerId && this.sessionStore?.getOwned
             ? await this.sessionStore.getOwned(sessionId, ownerId)
@@ -5849,10 +5854,18 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (this.sessionStore?.appendMessages) {
-            await this.sessionStore.appendMessages(sessionId, [
-                { role: 'user', content: userText },
-                { role: 'assistant', content: assistantText },
-            ]);
+            const persistedMessages = String(clientSurface || '').trim().toLowerCase() === 'web-chat'
+                ? buildWebChatSessionMessages({
+                    userText,
+                    assistantText,
+                    toolEvents,
+                    assistantMetadata,
+                })
+                : [
+                    { role: 'user', content: userText },
+                    { role: 'assistant', content: assistantText },
+                ];
+            await this.sessionStore.appendMessages(sessionId, persistedMessages);
         }
 
         const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);

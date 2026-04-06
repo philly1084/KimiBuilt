@@ -3079,6 +3079,46 @@ class ChatApp {
         return annotatedMessages;
     }
 
+    async recoverPendingSurveyFromBackend(sessionId, parentMessageId = '') {
+        if (!sessionId) {
+            return;
+        }
+
+        try {
+            await sessionManager.loadSessions();
+            if (sessionManager.currentSessionId !== sessionId) {
+                return;
+            }
+
+            const currentMessage = parentMessageId
+                ? this.getSessionMessage(sessionId, parentMessageId)
+                : null;
+            if (currentMessage) {
+                const resurfacedMessage = this.attachPendingCheckpointDisplayContent(currentMessage, sessionId);
+                if (resurfacedMessage !== currentMessage) {
+                    this.upsertSessionMessage(sessionId, resurfacedMessage);
+                }
+            }
+
+            const messages = this.syncAnnotatedSurveyStates(sessionId);
+            const surveyMessage = messages.find((message) => (
+                message?.role === 'assistant'
+                && Boolean(this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''))
+            ));
+
+            if (!surveyMessage) {
+                return;
+            }
+
+            this.renderMessages(messages);
+            this.playCueForAssistantMessage(surveyMessage, []);
+            this.updateSessionInfo();
+            uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+        } catch (error) {
+            console.warn('Failed to recover pending survey from backend session state:', error);
+        }
+    }
+
     hasSurveyToolEvent(toolEvents = []) {
         return (Array.isArray(toolEvents) ? toolEvents : []).some((event) => (
             (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'user-checkpoint'
@@ -3643,6 +3683,10 @@ class ChatApp {
             message?.syntheticUserCheckpoint === true
             || this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''),
         );
+        const hasVisibleSurveyMessage = messages.some((message) => (
+            message?.role === 'assistant'
+            && Boolean(this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''))
+        ));
 
         if (insertedSurveyMessage) {
             this.renderMessages(messages);
@@ -3658,6 +3702,10 @@ class ChatApp {
 
         if (Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
             this.appendToolSelectionMessages(parentMessageId, chunk.toolEvents);
+        }
+
+        if (this.hasSurveyToolEvent(chunk.toolEvents) && !hasVisibleSurveyMessage) {
+            void this.recoverPendingSurveyFromBackend(sessionId, parentMessageId);
         }
         
         // Update session info (timestamp changed)
