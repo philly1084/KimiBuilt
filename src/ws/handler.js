@@ -471,6 +471,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         );
         const execution = await executeConversationRuntime(ws.app, {
             input: effectiveMessage,
+            session,
             sessionId: session.id,
             memoryInput: message,
             previousResponseId: session.previousResponseId,
@@ -522,7 +523,11 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 }
 
                 if (!execution.handledPersistence) {
-                    await sessionStore.recordResponse(session.id, event.response.id);
+                    await sessionStore.recordResponse(
+                        session.id,
+                        event.response.id,
+                        event.response?.metadata?.promptState ? { promptState: event.response.metadata.promptState } : null,
+                    );
                     memoryService.rememberResponse(session.id, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                         sourceSurface: clientSurface || taskType,
                         memoryKeywords,
@@ -658,6 +663,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
         );
         const execution = await executeConversationRuntime(ws.app, {
             input: existingContent ? `${message}\n\nExisting content:\n${existingContent}` : message,
+            session,
             sessionId: session.id,
             memoryInput: message,
             previousResponseId: session.previousResponseId,
@@ -689,7 +695,11 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(session.id, response.id);
+            await sessionStore.recordResponse(
+                session.id,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
 
         const outputText = extractResponseText(response);
@@ -817,6 +827,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
         );
         const execution = await executeConversationRuntime(ws.app, {
             input: notation,
+            session,
             sessionId: session.id,
             memoryInput: notation,
             previousResponseId: session.previousResponseId,
@@ -848,7 +859,11 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(session.id, response.id);
+            await sessionStore.recordResponse(
+                session.id,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
 
         const outputText = extractResponseText(response);

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const OpenAI = require('openai');
 const { config } = require('./config');
 const { runtimeDiagnostics } = require('./runtime-diagnostics');
@@ -550,6 +551,78 @@ function normalizeMessageContent(content) {
     return '';
 }
 
+function collectInputSystemMessages(input = null) {
+    const inputMessages = Array.isArray(input) ? input : null;
+    if (!inputMessages) {
+        return [];
+    }
+
+    return inputMessages
+        .filter((entry) => entry?.role === 'system')
+        .map((entry) => normalizeMessageContent(entry.content))
+        .filter(Boolean);
+}
+
+function mergeInstructions(instructions = null, inputSystemMessages = []) {
+    return [instructions, ...inputSystemMessages]
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function hashPromptText(text = '') {
+    const normalized = String(text || '');
+    if (!normalized) {
+        return null;
+    }
+
+    return crypto
+        .createHash('sha256')
+        .update(normalized, 'utf8')
+        .digest('hex');
+}
+
+function buildPromptState({
+    instructions = null,
+    input = null,
+    previousPromptState = null,
+    previousResponseId = null,
+    apiMode = 'chat',
+} = {}) {
+    const inputSystemMessages = collectInputSystemMessages(input);
+    const mergedInstructions = mergeInstructions(instructions, inputSystemMessages);
+    const instructionsFingerprint = hashPromptText(mergedInstructions);
+    const previousInstructionsFingerprint = typeof previousPromptState === 'string'
+        ? previousPromptState
+        : previousPromptState?.instructionsFingerprint || null;
+    const canReuseThreadedPrompt = Boolean(
+        apiMode === 'responses'
+        && previousResponseId
+        && instructionsFingerprint
+        && previousInstructionsFingerprint
+        && previousInstructionsFingerprint === instructionsFingerprint,
+    );
+
+    return {
+        instructionsFingerprint,
+        previousInstructionsFingerprint,
+        canReuseThreadedPrompt,
+        mergedInstructions,
+    };
+}
+
+function attachKimibuiltMetadata(response = {}, metadata = {}) {
+    if (!response || typeof response !== 'object' || !metadata || typeof metadata !== 'object') {
+        return response;
+    }
+
+    response._kimibuilt = {
+        ...(response._kimibuilt && typeof response._kimibuilt === 'object' ? response._kimibuilt : {}),
+        ...metadata,
+    };
+
+    return response;
+}
+
 function buildMessages({
     input,
     instructions = null,
@@ -558,15 +631,7 @@ function buildMessages({
 }) {
     const messages = [];
     const inputMessages = Array.isArray(input) ? input : null;
-    const inputSystemMessages = inputMessages
-        ? inputMessages
-            .filter((entry) => entry?.role === 'system')
-            .map((entry) => normalizeMessageContent(entry.content))
-            .filter(Boolean)
-        : [];
-    const mergedInstructions = [instructions, ...inputSystemMessages]
-        .filter(Boolean)
-        .join('\n\n');
+    const mergedInstructions = mergeInstructions(instructions, collectInputSystemMessages(input));
 
     if (mergedInstructions) {
         messages.push({
@@ -3446,7 +3511,7 @@ function normalizeModelResponse(response) {
         : normalizeChatResponse(response);
 }
 
-async function* normalizeChatCompletionsStream(stream) {
+async function* normalizeChatCompletionsStream(stream, metadata = {}) {
     let responseId = null;
     let model = null;
     let created = null;
@@ -3477,7 +3542,7 @@ async function* normalizeChatCompletionsStream(stream) {
         if (isTerminalFinishReason(finishReason)) {
             yield {
                 type: 'response.completed',
-                response: normalizeChatResponse({
+                response: normalizeChatResponse(attachKimibuiltMetadata({
                     id: responseId,
                     created,
                     model,
@@ -3488,13 +3553,13 @@ async function* normalizeChatCompletionsStream(stream) {
                         },
                         finish_reason: finishReason,
                     }],
-                }),
+                }, metadata)),
             };
         }
     }
 }
 
-async function* normalizeStreamResponse(stream) {
+async function* normalizeStreamResponse(stream, metadata = {}) {
     for await (const chunk of stream) {
         if (chunk.type === 'response.output_text.delta' && chunk.delta) {
             yield {
@@ -3506,7 +3571,7 @@ async function* normalizeStreamResponse(stream) {
         if (chunk.type === 'response.completed' && chunk.response) {
             yield {
                 type: 'response.completed',
-                response: normalizeResponsesApiResponse(chunk.response),
+                response: normalizeResponsesApiResponse(attachKimibuiltMetadata(chunk.response, metadata)),
             };
         }
 
@@ -3516,7 +3581,8 @@ async function* normalizeStreamResponse(stream) {
     }
 }
 
-async function* synthesizeStreamResponse(response) {
+async function* synthesizeStreamResponse(response, metadata = {}) {
+    attachKimibuiltMetadata(response, metadata);
     const responseId = response?.id || `resp_${Date.now()}`;
     const model = response?.model || null;
     const text = getModelResponseText(response);
@@ -3545,6 +3611,7 @@ async function* synthesizeStreamResponse(response) {
 async function createResponse({
     input,
     previousResponseId = null,
+    previousPromptState = null,
     contextMessages = [],
     recentMessages = [],
     instructions = null,
@@ -3557,21 +3624,28 @@ async function createResponse({
     executionProfile = 'default',
 }) {
     const openai = getClient();
+    const apiMode = resolveOpenAIApiMode();
+    const promptState = buildPromptState({
+        instructions,
+        input,
+        previousPromptState,
+        previousResponseId,
+        apiMode,
+    });
     const messages = buildMessages({
         input,
-        instructions,
+        instructions: promptState.canReuseThreadedPrompt ? null : instructions,
         contextMessages,
-        recentMessages,
+        recentMessages: promptState.canReuseThreadedPrompt ? [] : recentMessages,
     });
 
     const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);
-    const apiMode = resolveOpenAIApiMode();
     const params = {
         model: model || config.openai.model,
         input: buildResponsesInput(messages),
         stream,
     };
-    if (previousResponseId && apiMode === 'responses') {
+    if (promptState.canReuseThreadedPrompt) {
         params.previous_response_id = previousResponseId;
         runtimeDiagnostics.incrementResponseThreadChains();
     }
@@ -3587,8 +3661,15 @@ async function createResponse({
     }
     const prompt = getLastUserText(messages);
 
-    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}, reasoning=${normalizedReasoningEffort || 'default'}, apiMode=${apiMode}`);
+    console.log(`[OpenAI] Creating response: model=${params.model}, stream=${stream}, messages=${messages.length}, reasoning=${normalizedReasoningEffort || 'default'}, apiMode=${apiMode}, promptReuse=${promptState.canReuseThreadedPrompt}`);
     console.log('[OpenAI] Full params:', JSON.stringify(params, null, 2));
+    const kimibuiltMetadata = {
+        promptState: {
+            instructionsFingerprint: promptState.instructionsFingerprint,
+            previousInstructionsFingerprint: promptState.previousInstructionsFingerprint,
+            reusedThreadedPrompt: promptState.canReuseThreadedPrompt,
+        },
+    };
 
     try {
         if (enableAutomaticToolCalls) {
@@ -3631,7 +3712,8 @@ async function createResponse({
 
                 if (directToolResponse) {
                     console.log(`[OpenAI] Direct required tool execution completed for '${requiredToolId}'`);
-                    return stream ? synthesizeStreamResponse(directToolResponse) : normalizeModelResponse(directToolResponse);
+                    attachKimibuiltMetadata(directToolResponse, kimibuiltMetadata);
+                    return stream ? synthesizeStreamResponse(directToolResponse, kimibuiltMetadata) : normalizeModelResponse(directToolResponse);
                 }
 
                 const toolResponse = await runAutomaticToolLoop(openai, {
@@ -3644,7 +3726,8 @@ async function createResponse({
 
                 if (toolResponse) {
                     console.log('[OpenAI] Automatic tool orchestration completed');
-                    return stream ? synthesizeStreamResponse(toolResponse) : normalizeModelResponse(toolResponse);
+                    attachKimibuiltMetadata(toolResponse, kimibuiltMetadata);
+                    return stream ? synthesizeStreamResponse(toolResponse, kimibuiltMetadata) : normalizeModelResponse(toolResponse);
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
@@ -3663,7 +3746,8 @@ async function createResponse({
 
         if (apiMode === 'responses') {
             const response = await openai.responses.create(params);
-            return stream ? normalizeStreamResponse(response) : normalizeModelResponse(response);
+            attachKimibuiltMetadata(response, kimibuiltMetadata);
+            return stream ? normalizeStreamResponse(response, kimibuiltMetadata) : normalizeModelResponse(response);
         }
 
         const chatParams = {
@@ -3678,7 +3762,8 @@ async function createResponse({
             chatParams.reasoning_effort = normalizedReasoningEffort;
         }
         const response = await openai.chat.completions.create(chatParams);
-        return stream ? normalizeChatCompletionsStream(response) : normalizeChatResponse(response);
+        attachKimibuiltMetadata(response, kimibuiltMetadata);
+        return stream ? normalizeChatCompletionsStream(response, kimibuiltMetadata) : normalizeChatResponse(response);
     } catch (error) {
         console.error('[OpenAI] Error creating response:', error.message);
         console.error('[OpenAI] Error type:', error.type);
@@ -3749,12 +3834,16 @@ module.exports = {
         buildAutomaticToolDefinitions,
         buildAutomaticToolGuidance,
         buildAutomaticToolChoice,
+        buildPromptState,
         buildDeterministicPreflightActions,
         buildResponsesInput,
+        collectInputSystemMessages,
         extractExplicitWebResearchQuery,
         extractRequestedDirectoryPath,
         getResponseApiText,
         getChatCompletionText,
+        hashPromptText,
+        mergeInstructions,
         normalizeOpenAIApiMode,
         normalizeMessageContent,
         normalizeChatCompletionsStream,

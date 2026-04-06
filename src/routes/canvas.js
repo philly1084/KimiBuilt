@@ -282,6 +282,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
 
         const execution = await executeConversationRuntime(req.app, {
             input: message,
+            session,
             sessionId,
             memoryInput: message,
             previousResponseId: session.previousResponseId,
@@ -315,7 +316,11 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(
+                sessionId,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
 
         const outputText = extractResponseText(response);

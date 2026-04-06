@@ -135,6 +135,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
 
         const execution = await executeConversationRuntime(req.app, {
             input: notation,
+            session,
             sessionId,
             memoryInput: notation,
             previousResponseId: session.previousResponseId,
@@ -168,7 +169,11 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(
+                sessionId,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
 
         const outputText = extractResponseText(response);

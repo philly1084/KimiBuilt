@@ -1055,19 +1055,40 @@ class SessionStore {
         return this.toClientMessage(index >= 0 ? nextMessages[index] : storedMessage);
     }
 
-    async recordResponse(id, responseId) {
+    async recordResponse(id, responseId, metadataUpdates = null) {
         await this.initialize();
 
         if (!this.usePostgres) {
             const session = this.sessions.get(id);
             if (!session) return null;
 
-            session.previousResponseId = responseId;
-            session.messageCount += 1;
-            session.updatedAt = new Date().toISOString();
-            this.sessions.set(id, session);
+            const next = {
+                ...session,
+                previousResponseId: responseId,
+                messageCount: (session.messageCount || 0) + 1,
+                metadata: metadataUpdates
+                    ? this.normalizeMetadata({
+                        ...(session.metadata || {}),
+                        ...metadataUpdates,
+                    })
+                    : session.metadata,
+                updatedAt: new Date().toISOString(),
+            };
+            this.sessions.set(id, next);
             await this.persistFallbackState();
-            return session;
+            return next;
+        }
+
+        let nextMetadata = null;
+        if (metadataUpdates && typeof metadataUpdates === 'object' && Object.keys(metadataUpdates).length > 0) {
+            const current = await this.get(id);
+            if (!current) {
+                return null;
+            }
+            nextMetadata = this.normalizeMetadata({
+                ...(current.metadata || {}),
+                ...metadataUpdates,
+            });
         }
 
         const result = await postgres.query(
@@ -1075,11 +1096,12 @@ class SessionStore {
                 UPDATE sessions
                 SET previous_response_id = $2,
                     message_count = message_count + 1,
+                    metadata = COALESCE($3::jsonb, metadata),
                     updated_at = NOW()
                 WHERE id = $1
                 RETURNING *
             `,
-            [id, responseId],
+            [id, responseId, nextMetadata ? JSON.stringify(nextMetadata) : null],
         );
 
         return this.toSession(result.rows[0]);

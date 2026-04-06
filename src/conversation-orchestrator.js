@@ -5795,7 +5795,11 @@ class ConversationOrchestrator extends EventEmitter {
         }, currentSession || null);
 
         if (this.sessionStore?.recordResponse) {
-            await this.sessionStore.recordResponse(sessionId, responseId);
+            await this.sessionStore.recordResponse(
+                sessionId,
+                responseId,
+                finalResponse?.metadata?.promptState ? { promptState: finalResponse.metadata.promptState } : null,
+            );
         }
 
         if (this.memoryService?.rememberResponse) {

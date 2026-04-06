@@ -77,6 +77,7 @@ class ConversationRunService {
 
         const execution = await executeConversationRuntime(this.app, {
             input: message,
+            session: resolvedSession,
             sessionId,
             memoryInput: message,
             previousResponseId: resolvedSession.previousResponseId,
@@ -114,7 +115,11 @@ class ConversationRunService {
         const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, resolvedSession);
 
         if (!execution.handledPersistence) {
-            await this.sessionStore.recordResponse(sessionId, response.id);
+            await this.sessionStore.recordResponse(
+                sessionId,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
             if (outputText) {
                 this.memoryService.rememberResponse(sessionId, outputText, memoryMetadata);
             }

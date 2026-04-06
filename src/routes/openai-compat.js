@@ -861,6 +861,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         ? { role: message.role, content: effectiveInput }
                         : { role: message.role, content: message.content }
                 )),
+                session,
                 sessionId,
                 memoryInput: lastUserText,
                 loadContextMessages: Boolean(lastUserText),
@@ -935,7 +936,13 @@ router.post('/chat/completions', async (req, res, next) => {
 
                     const toolEvents = resolvedCompletion.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
-                        await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
+                        await sessionStore.recordResponse(
+                            sessionId,
+                            resolvedCompletion.response.id,
+                            resolvedCompletion.response?.metadata?.promptState
+                                ? { promptState: resolvedCompletion.response.metadata.promptState }
+                                : null,
+                        );
                         memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
@@ -1003,6 +1010,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessages,
+            session,
             sessionId,
             memoryInput: lastUserText,
             loadContextMessages: Boolean(lastUserText),
@@ -1037,7 +1045,11 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         let response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(
+                sessionId,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
         let outputText = extractResponseText(response);
         const resolvedCompatResponse = resolveCompatAssistantText({
@@ -1057,6 +1069,7 @@ router.post('/chat/completions', async (req, res, next) => {
             console.warn(`[OpenAICompat] Retrying placeholder direct response as remote-build. sessionId=${sessionId}`);
             const retriedExecution = await executeConversationRuntime(req.app, {
                 input: effectiveMessages,
+                session,
                 sessionId,
                 memoryInput: lastUserText,
                 loadContextMessages: Boolean(lastUserText),
@@ -1469,6 +1482,7 @@ router.post('/responses', async (req, res, next) => {
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: runtimeInput,
+                session,
                 sessionId,
                 memoryInput: userInput,
                 loadContextMessages: Boolean(userInput),
@@ -1525,7 +1539,13 @@ router.post('/responses', async (req, res, next) => {
                     }
 
                     if (!execution.handledPersistence) {
-                        await sessionStore.recordResponse(sessionId, resolvedCompletion.response.id);
+                        await sessionStore.recordResponse(
+                            sessionId,
+                            resolvedCompletion.response.id,
+                            resolvedCompletion.response?.metadata?.promptState
+                                ? { promptState: resolvedCompletion.response.metadata.promptState }
+                                : null,
+                        );
                         memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
@@ -1586,6 +1606,7 @@ router.post('/responses', async (req, res, next) => {
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         const execution = await executeConversationRuntime(req.app, {
             input: runtimeInput,
+            session,
             sessionId,
             memoryInput: userInput,
             loadContextMessages: Boolean(userInput),
@@ -1619,7 +1640,11 @@ router.post('/responses', async (req, res, next) => {
         });
         let response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(
+                sessionId,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
         let outputText = extractResponseText(response);
         const resolvedCompatResponse = resolveCompatAssistantText({
@@ -1639,6 +1664,7 @@ router.post('/responses', async (req, res, next) => {
             console.warn(`[OpenAICompat] Retrying placeholder direct response as remote-build. sessionId=${sessionId}`);
             const retriedExecution = await executeConversationRuntime(req.app, {
                 input: runtimeInput,
+                session,
                 sessionId,
                 memoryInput: userInput,
                 loadContextMessages: Boolean(userInput),

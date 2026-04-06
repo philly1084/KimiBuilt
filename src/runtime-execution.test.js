@@ -166,6 +166,29 @@ describe('runtime-execution', () => {
         expect(result.runtimeMode).toBe('direct');
     });
 
+    test('passes prior prompt state from the session into direct runtime responses', async () => {
+        await executeConversationRuntime({
+            locals: {},
+        }, {
+            sessionId: 'session-4',
+            input: 'Continue.',
+            memoryInput: 'Continue.',
+            session: {
+                metadata: {
+                    promptState: {
+                        instructionsFingerprint: 'abc123',
+                    },
+                },
+            },
+        });
+
+        expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            previousPromptState: {
+                instructionsFingerprint: 'abc123',
+            },
+        }));
+    });
+
     test('accepts legacy and compatibility executor flags', () => {
         expect(resolveConversationExecutorFlag({ useAgentExecutor: true })).toBe(true);
         expect(resolveConversationExecutorFlag({ use_agent_executor: true })).toBe(true);

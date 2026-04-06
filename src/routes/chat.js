@@ -421,6 +421,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
             const execution = await executeConversationRuntime(req.app, {
                 input: effectiveMessage,
+                session,
                 sessionId,
                 memoryInput: message,
                 previousResponseId: session.previousResponseId,
@@ -473,7 +474,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
                     const toolEvents = event.response?.metadata?.toolEvents || [];
                     if (!execution.handledPersistence) {
-                        await sessionStore.recordResponse(sessionId, event.response.id);
+                        await sessionStore.recordResponse(
+                            sessionId,
+                            event.response.id,
+                            event.response?.metadata?.promptState ? { promptState: event.response.metadata.promptState } : null,
+                        );
                         memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
                             sourceSurface: clientSurface || taskType,
                             memoryKeywords,
@@ -561,6 +566,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessage,
+            session,
             sessionId,
             memoryInput: message,
             previousResponseId: session.previousResponseId,
@@ -593,7 +599,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         });
         const response = execution.response;
         if (!execution.handledPersistence) {
-            await sessionStore.recordResponse(sessionId, response.id);
+            await sessionStore.recordResponse(
+                sessionId,
+                response.id,
+                response?.metadata?.promptState ? { promptState: response.metadata.promptState } : null,
+            );
         }
 
         const outputText = extractResponseText(response);

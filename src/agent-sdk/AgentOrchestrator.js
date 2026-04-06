@@ -573,6 +573,7 @@ class AgentOrchestrator {
           userText: objective,
           assistantText: output,
           responseId: response?.id || null,
+          promptState: response?.metadata?.promptState || null,
           toolEvents,
         });
         const trace = this.buildConversationTrace({
@@ -740,6 +741,7 @@ class AgentOrchestrator {
       userText: this.getConversationObjective(input),
       assistantText: output,
       responseId: response.id,
+      promptState: response?.metadata?.promptState || null,
       toolEvents,
     });
     const conversationTrace = this.buildConversationTrace({
@@ -1140,6 +1142,7 @@ class AgentOrchestrator {
               userText,
               assistantText: fullText,
               responseId: event.response?.id || null,
+              promptState: event.response?.metadata?.promptState || null,
               toolEvents,
             });
             const trace = orchestrator.buildConversationTrace({
@@ -1375,6 +1378,7 @@ class AgentOrchestrator {
     userText,
     assistantText,
     responseId,
+    promptState = null,
     toolEvents = [],
   }) {
     if (!sessionId) {
@@ -1383,7 +1387,11 @@ class AgentOrchestrator {
 
     if (this.sessionStore?.recordResponse && responseId) {
       try {
-        await this.sessionStore.recordResponse(sessionId, responseId);
+        await this.sessionStore.recordResponse(
+          sessionId,
+          responseId,
+          promptState ? { promptState } : null,
+        );
       } catch (error) {
         console.error('[AgentOrchestrator] Failed to record response ID:', error.message);
       }

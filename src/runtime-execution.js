@@ -290,6 +290,7 @@ async function executeConversationRuntime(app, params = {}) {
             memoryScope,
             toolContext: scopedToolContext,
             executionProfile,
+            previousPromptState: params.previousPromptState || params.session?.metadata?.promptState || null,
             contextMessages,
             recentMessages,
         }),

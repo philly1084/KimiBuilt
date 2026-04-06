@@ -243,6 +243,29 @@ describe('SessionStore recent message continuity', () => {
         }
     });
 
+    test('recordResponse persists prompt-state metadata alongside the previous response id', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' }, 'prompt-state-session');
+
+        await store.recordResponse(session.id, 'resp_prompt_123', {
+            promptState: {
+                instructionsFingerprint: 'fingerprint-123',
+            },
+        });
+
+        const updated = await store.get(session.id);
+        expect(updated).toEqual(expect.objectContaining({
+            previousResponseId: 'resp_prompt_123',
+            metadata: expect.objectContaining({
+                promptState: {
+                    instructionsFingerprint: 'fingerprint-123',
+                },
+            }),
+        }));
+    });
+
     test('keeps ui-only rich messages in session history while excluding them from recent transcript continuity', async () => {
         const store = new SessionStore();
         store.initialized = true;
