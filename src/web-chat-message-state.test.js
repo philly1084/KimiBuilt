@@ -121,4 +121,29 @@ describe('buildWebChatSessionMessages', () => {
         }));
         expect(metadata.displayContent).toContain('"id": "checkpoint-derive"');
     });
+
+    test('normalizes raw checkpoint JSON display content into a survey fence', () => {
+        const metadata = buildFrontendAssistantMetadata({
+            displayContent: JSON.stringify({
+                id: 'checkpoint-mnnicelx',
+                title: 'Choose a direction',
+                question: 'Which branch should we continue from?',
+                options: [
+                    { id: 'dashboard-ui', label: 'Dashboard UI' },
+                    { id: 'cluster-deployment', label: 'Cluster deployment' },
+                ],
+                steps: [
+                    {
+                        id: 'step-1',
+                        question: 'Which branch should we continue from?',
+                        inputType: 'choice',
+                        options: '[truncated]',
+                    },
+                ],
+            }),
+        });
+
+        expect(metadata.displayContent).toContain('```survey');
+        expect(metadata.displayContent).toContain('"checkpoint-mnnicelx"');
+    });
 });

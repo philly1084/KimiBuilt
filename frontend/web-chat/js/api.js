@@ -155,10 +155,42 @@ function normalizeAssistantMetadata(value) {
         nextMetadata.taskType = value.taskType.trim();
     }
 
+    const normalizeSurveyDisplayContent = (rawValue = '') => {
+        const normalized = String(rawValue || '').trim();
+        if (!normalized) {
+            return '';
+        }
+
+        if (/```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(normalized)) {
+            return normalized;
+        }
+
+        try {
+            const parsed = JSON.parse(normalized);
+            const looksLikeSurvey = parsed
+                && typeof parsed === 'object'
+                && (
+                    Array.isArray(parsed.steps)
+                    || Array.isArray(parsed.questions)
+                    || typeof parsed.question === 'string'
+                    || Array.isArray(parsed.options)
+                    || Array.isArray(parsed.choices)
+                );
+
+            if (looksLikeSurvey) {
+                return `\`\`\`survey\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+            }
+        } catch (_error) {
+            // Keep the original value when it is not valid JSON.
+        }
+
+        return normalized;
+    };
+
     const displayContent = typeof value.displayContent === 'string' && value.displayContent.trim()
-        ? value.displayContent.trim()
+        ? normalizeSurveyDisplayContent(value.displayContent.trim())
         : (typeof value.display_content === 'string' && value.display_content.trim()
-            ? value.display_content.trim()
+            ? normalizeSurveyDisplayContent(value.display_content.trim())
             : '');
     if (displayContent) {
         nextMetadata.displayContent = displayContent;

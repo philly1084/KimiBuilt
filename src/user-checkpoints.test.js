@@ -194,6 +194,43 @@ describe('user checkpoint helpers', () => {
         }));
     });
 
+    test('falls back to top-level question and options when step payload is malformed', () => {
+        const checkpoint = normalizeCheckpointRequest({
+            id: 'checkpoint-fallback',
+            title: 'Choose a direction',
+            question: 'Which branch should we continue from?',
+            options: [
+                { id: 'dashboard-ui', label: 'Dashboard UI' },
+                { id: 'cluster-deployment', label: 'Cluster deployment' },
+                { id: 'end-to-end-launch-flow', label: 'End-to-end launch flow' },
+            ],
+            steps: [
+                {
+                    id: 'step-1',
+                    question: 'Which branch should we continue from?',
+                    inputType: 'choice',
+                    options: '[truncated]',
+                },
+            ],
+        });
+
+        expect(checkpoint).toEqual(expect.objectContaining({
+            id: 'checkpoint-fallback',
+            question: 'Which branch should we continue from?',
+            steps: [
+                expect.objectContaining({
+                    question: 'Which branch should we continue from?',
+                    inputType: 'choice',
+                    options: [
+                        { id: 'dashboard-ui', label: 'Dashboard UI' },
+                        { id: 'cluster-deployment', label: 'Cluster deployment' },
+                        { id: 'end-to-end-launch-flow', label: 'End-to-end launch flow' },
+                    ],
+                }),
+            ],
+        }));
+    });
+
     test('normalizes questionnaire aliases like questions, choices, and *_choice types', () => {
         const checkpoint = normalizeCheckpointRequest({
             type: 'survey',

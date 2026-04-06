@@ -193,19 +193,20 @@ function normalizeCheckpointSteps(value = {}) {
     const rawSteps = Array.isArray(source.steps)
         ? source.steps
         : (Array.isArray(source.questions) ? source.questions : []);
-    const legacyStep = rawSteps.length === 0
-        ? normalizeCheckpointStep({
-            ...source,
-            options: source.options || source.choices || [],
-            inputType: source.inputType || source.type || source.kind || '',
-        }, 0)
-        : null;
-
-    const steps = rawSteps.length > 0
+    const legacyStep = normalizeCheckpointStep({
+        ...source,
+        options: source.options || source.choices || [],
+        inputType: source.inputType || source.type || source.kind || '',
+    }, 0);
+    const normalizedRawSteps = rawSteps.length > 0
         ? rawSteps
             .map((step, index) => normalizeCheckpointStep(step, index))
             .filter(Boolean)
             .slice(0, MAX_USER_CHECKPOINT_STEPS)
+        : [];
+
+    const steps = normalizedRawSteps.length > 0
+        ? normalizedRawSteps
         : (legacyStep ? [legacyStep] : []);
 
     return steps;

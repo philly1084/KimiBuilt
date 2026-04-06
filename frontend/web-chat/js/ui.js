@@ -784,18 +784,19 @@ class UIHelpers {
         const rawSteps = Array.isArray(value.steps)
             ? value.steps
             : (Array.isArray(value.questions) ? value.questions : []);
-        const legacyStep = rawSteps.length === 0
-            ? this.normalizeSurveyStep({
-                ...value,
-                options: value.options || value.choices,
-            }, 0)
-            : null;
-
-        return rawSteps.length > 0
+        const legacyStep = this.normalizeSurveyStep({
+            ...value,
+            options: value.options || value.choices,
+        }, 0);
+        const normalizedRawSteps = rawSteps.length > 0
             ? rawSteps
                 .map((step, index) => this.normalizeSurveyStep(step, index))
                 .filter(Boolean)
                 .slice(0, 6)
+            : [];
+
+        return normalizedRawSteps.length > 0
+            ? normalizedRawSteps
             : (legacyStep ? [legacyStep] : []);
     }
 

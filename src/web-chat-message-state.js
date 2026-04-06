@@ -64,6 +64,34 @@ function buildSurveyDisplayContentFromToolEvents(toolEvents = []) {
     return surveyFence;
 }
 
+function normalizeSurveyDisplayContent(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    if (/```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(normalized)) {
+        return normalized;
+    }
+
+    const parsed = parseLenientJson(normalized);
+    const looksLikeSurvey = parsed
+        && typeof parsed === 'object'
+        && (
+            Array.isArray(parsed.steps)
+            || Array.isArray(parsed.questions)
+            || typeof parsed.question === 'string'
+            || Array.isArray(parsed.options)
+            || Array.isArray(parsed.choices)
+        );
+
+    if (!looksLikeSurvey) {
+        return normalized;
+    }
+
+    return buildSurveyFenceContent(parsed) || normalized;
+}
+
 function shouldCollapseArtifactTranscript(artifact) {
     const format = String(artifact?.format || '').toLowerCase();
     const filename = String(artifact?.filename || '').toLowerCase();
@@ -100,9 +128,9 @@ function buildFrontendAssistantMetadata(metadata = null) {
     }
 
     const explicitDisplayContent = typeof metadata.displayContent === 'string' && metadata.displayContent.trim()
-        ? metadata.displayContent.trim()
+        ? normalizeSurveyDisplayContent(metadata.displayContent.trim())
         : (typeof metadata.display_content === 'string' && metadata.display_content.trim()
-            ? metadata.display_content.trim()
+            ? normalizeSurveyDisplayContent(metadata.display_content.trim())
             : '');
     const derivedDisplayContent = explicitDisplayContent || buildSurveyDisplayContentFromToolEvents(metadata.toolEvents || metadata.tool_events || []);
     const displayContent = derivedDisplayContent;
