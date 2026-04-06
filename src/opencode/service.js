@@ -10,6 +10,7 @@ const { config } = require('../config');
 const { listModels } = require('../openai-client');
 const settingsController = require('../routes/admin/settings.controller');
 const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
+const { resolvePreferredWritableFile } = require('../runtime-state-paths');
 const { OpenCodeLocalClient, OpenCodeRemoteClient, extractMessageText } = require('./client');
 const {
     assertRemoteGatewayBaseURLReachable,
@@ -1137,7 +1138,11 @@ class OpenCodeService {
 
     async ensureLocalInstanceDir(key) {
         const dataDir = config.persistence?.dataDir || path.join(process.cwd(), 'data');
-        const instanceDir = path.join(dataDir, 'opencode', safeInstanceSlug(key));
+        const instanceDirMarker = resolvePreferredWritableFile(
+            path.join(dataDir, 'opencode', safeInstanceSlug(key), '.instance'),
+            ['opencode', safeInstanceSlug(key), '.instance'],
+        );
+        const instanceDir = path.dirname(instanceDirMarker);
         await fs.mkdir(instanceDir, { recursive: true });
         return instanceDir;
     }

@@ -395,6 +395,22 @@ describe('end-to-end builder workflow', () => {
         expect(workflow).toBeNull();
     });
 
+    test('does not classify opencode command-help prompts as implementation workflows', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Use remote build to give a command to opencode.',
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+            opencodeTarget: 'remote-default',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        expect(workflow).toBeNull();
+    });
+
     test('blocks a repo-then-deploy workflow when repository implementation is required but opencode is unavailable', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the auth service in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',

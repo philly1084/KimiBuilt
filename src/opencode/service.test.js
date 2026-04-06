@@ -1,8 +1,18 @@
 'use strict';
 
+const path = require('path');
+
 jest.mock('../openai-client', () => ({
     listModels: jest.fn(async () => []),
 }));
+
+jest.mock('../runtime-state-paths', () => {
+    const actual = jest.requireActual('../runtime-state-paths');
+    return {
+        ...actual,
+        resolvePreferredWritableFile: jest.fn((targetPath) => targetPath),
+    };
+});
 
 jest.mock('./client', () => {
     const state = {
@@ -56,6 +66,7 @@ jest.mock('./client', () => {
 const { config } = require('../config');
 const settingsController = require('../routes/admin/settings.controller');
 const { listModels } = require('../openai-client');
+const { resolvePreferredWritableFile } = require('../runtime-state-paths');
 const { __mock: opencodeClientMock } = require('./client');
 const {
     OpenCodeService,
@@ -402,5 +413,29 @@ describe('OpenCode service helpers', () => {
             binaryPath: 'opencode',
         }));
         expect(opencodeClientMock.lastRemoteClient.sshTool.executeSSH).toHaveBeenCalledTimes(1);
+    });
+
+    test('falls back to a writable state directory for local instance storage', async () => {
+        const mkdirSpy = jest.spyOn(require('fs').promises, 'mkdir').mockResolvedValue(undefined);
+        const fallbackMarker = path.join('/home/kimibuilt/.kimibuilt', 'opencode', 'fallback-key', '.instance');
+        resolvePreferredWritableFile.mockReturnValue(fallbackMarker);
+
+        const service = new OpenCodeService({
+            store: {
+                isAvailable: () => true,
+            },
+        });
+
+        try {
+            const instanceDir = await service.ensureLocalInstanceDir('local::workspace');
+            expect(resolvePreferredWritableFile).toHaveBeenCalledWith(
+                expect.stringContaining(path.join('data', 'opencode')),
+                expect.any(Array),
+            );
+            expect(mkdirSpy).toHaveBeenCalledWith(path.dirname(fallbackMarker), { recursive: true });
+            expect(instanceDir).toBe(path.dirname(fallbackMarker));
+        } finally {
+            mkdirSpy.mockRestore();
+        }
     });
 });

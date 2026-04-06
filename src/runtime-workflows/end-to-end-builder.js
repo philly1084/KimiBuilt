@@ -73,9 +73,23 @@ function hasDiscoveryPlanningIntent(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasOpencodeUsageIntent(text = '') {
+    const normalized = normalizeText(text).toLowerCase();
+    if (!normalized || !/\bopencode\b/.test(normalized)) {
+        return false;
+    }
+
+    return [
+        /\b(command|commands|syntax|usage|help|docs?|documentation|example|examples|flags?|arguments?|parameters?)\b/,
+        /\b(how|what)\b[\s\S]{0,20}\b(use|run|invoke|call)\b[\s\S]{0,20}\bopencode\b/,
+        /\bgive\b[\s\S]{0,20}\b(command|commands|example|examples)\b[\s\S]{0,20}\bopencode\b/,
+        /\bopencode\b[\s\S]{0,24}\b(command|commands|syntax|usage|help|docs?|documentation|example|examples)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasRepoImplementationIntent(text = '') {
     const normalized = normalizeText(text).toLowerCase();
-    if (!normalized || hasDiscoveryPlanningIntent(normalized)) {
+    if (!normalized || hasDiscoveryPlanningIntent(normalized) || hasOpencodeUsageIntent(normalized)) {
         return false;
     }
 

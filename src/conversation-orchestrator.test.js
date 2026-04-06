@@ -3480,6 +3480,8 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('cover URL, properties, and default model');
         expect(instructions).toContain('create hierarchy and interaction instead of a flat stack');
         expect(instructions).toContain('hero image or ai_image');
+        expect(instructions).toContain('designed opening cluster');
+        expect(instructions).toContain('editorial-explainer pattern');
         expect(instructions).toContain('If a substantial notes page only uses headings');
     });
 
@@ -4256,6 +4258,68 @@ describe('ConversationOrchestrator', () => {
         ]));
         expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
         expect(directAction).toBeNull();
+    });
+
+    test('treats opencode command-help prompts as documentation instead of repo implementation', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'tool-doc-read', 'web-search']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Use remote build to give a command to opencode.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {},
+        });
+
+        expect(toolPolicy.workflow).toBeNull();
+        expect(toolPolicy.candidateToolIds).toContain('tool-doc-read');
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
+        expect(directAction).toEqual({
+            tool: 'tool-doc-read',
+            reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
+            params: {
+                toolId: 'opencode-run',
+            },
+        });
     });
 
     test('surfaces the repo-then-deploy lane for mixed end-to-end build requests', () => {

@@ -294,16 +294,20 @@ Approved page plan:
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
+        expect(prompt).toContain('VISUAL PAGE RECIPES:');
         expect(prompt).toContain('BLOCK CAPABILITY PLAYBOOK:');
         expect(prompt).toContain('FRONTEND FEATURES YOU CAN USE:');
         expect(prompt).toContain('PAGE DESIGN MANUAL:');
         expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
         expect(prompt).toContain('TEMPLATE EXECUTION CHECKLIST:');
+        expect(prompt).toContain('VISUAL DESIGN CHECKLIST:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Think in page roles, not just paragraphs');
         expect(prompt).toContain('Treat style as part of the page system');
         expect(prompt).toContain('visual hierarchy as required work');
+        expect(prompt).toContain('Editorial Explainer [editorial-explainer]');
+        expect(prompt).toContain('Avoid more than two plain text blocks in a row');
         expect(prompt).toContain('Page metadata: Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel`');
         expect(prompt).toContain('Properties: `properties` accepts an array of `{key, value}` pairs');
         expect(prompt).toContain('Nested structure: Blocks can include `children`');
@@ -329,6 +333,22 @@ Approved page plan:
 
         expect(Array.isArray(templates)).toBe(true);
         expect(templates[0].id).toBe('project');
+    });
+
+    test('selects an explainer-oriented template for educational topic pages', () => {
+        const agent = loadAgent();
+        const templates = agent._selectNotesPageTemplates(
+            'Create a polished page about penguins with science facts, habitat notes, and quick facts.',
+            {
+                title: 'Penguins',
+                blockCount: 0,
+                blocks: [],
+                outline: [],
+            }
+        );
+
+        expect(Array.isArray(templates)).toBe(true);
+        expect(templates[0].id).toBe('explainer');
     });
 
     test('expands oversized single-block rebuild actions into multiple page blocks', () => {
@@ -472,6 +492,51 @@ Approved page plan:
                 content: 'Source Note',
                 textColor: 'gray',
             }),
+        ]));
+    });
+
+    test('converts quick facts lists into a richer explainer layout cluster', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [
+                    { type: 'heading_1', content: 'Suns and the Science of Suns' },
+                    { type: 'text', content: 'The Sun is a star and gives Earth light and heat.' },
+                    { type: 'heading_2', content: 'Quick Facts' },
+                    { type: 'bulleted_list', content: 'The Sun is a star.' },
+                    { type: 'bulleted_list', content: 'It gives Earth light and heat.' },
+                    { type: 'bulleted_list', content: 'Many stars in the night sky are other suns.' },
+                    { type: 'heading_2', content: 'Stay Safe' },
+                    { type: 'text', content: 'Never look directly at the Sun with your eyes. It can damage your vision.' },
+                ],
+            },
+        ], 'Build a polished explainer page about suns with quick facts and a safety note.', {
+            title: 'Untitled',
+            blockCount: 0,
+            outline: [],
+            blocks: [],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].icon).toBe('💡');
+        expect(normalizedActions[0].properties).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'Type', value: 'Explainer' }),
+            expect.objectContaining({ key: 'Mode', value: 'Visual knowledge page' }),
+        ]));
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'ai_image' }),
+            expect.objectContaining({
+                type: 'database',
+                content: expect.objectContaining({
+                    columns: expect.arrayContaining(['Quick fact']),
+                }),
+            }),
+            expect.objectContaining({
+                type: 'callout',
+                color: 'orange',
+            }),
+            expect.objectContaining({ type: 'divider' }),
         ]));
     });
 

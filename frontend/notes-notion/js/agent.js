@@ -30,6 +30,26 @@ const Agent = (function() {
             ],
         }),
         Object.freeze({
+            id: 'explainer',
+            name: 'Editorial Explainer',
+            useWhen: 'Educational topic pages, science notes, animal or place explainers, and polished knowledge pages that should feel visual and approachable.',
+            matchers: [/\bexplainer\b/, /\bwhat is\b/, /\bhow does\b/, /\bwhy does\b/, /\bfacts?\b/, /\bscience\b/, /\bspecies\b/, /\banimal\b/, /\blearn\b/, /\babout\b/],
+            structure: [
+                'heading_1 for the topic or big question',
+                'callout with the big idea or headline takeaway',
+                'image or ai_image hero near the top',
+                'database or list for quick facts or at-a-glance details',
+                'heading_2 sections for how it works, why it matters, habitat/history/process, or notable traits',
+                'toggle or callout for warnings, safety notes, or deeper detail',
+                'heading_2 for sources, references, or next questions',
+            ],
+            designRules: [
+                'Make the opening feel editorial, not like pasted homework notes.',
+                'Use a hero visual and a strong big-idea callout in the first screenful.',
+                'Break factual content into quick-scan clusters such as quick facts, warnings, sources, and themed sections.',
+            ],
+        }),
+        Object.freeze({
             id: 'research',
             name: 'Research Page',
             useWhen: 'Topic pages, research notes, explainers, and source-backed investigations.',
@@ -72,7 +92,7 @@ const Agent = (function() {
             id: 'meeting',
             name: 'Meeting Notes',
             useWhen: 'Meetings, workshops, interviews, retros, and collaborative sessions.',
-            matchers: [/\bmeeting\b/, /\bnotes\b/, /\bagenda\b/, /\battendees?\b/, /\bdecisions?\b/, /\bretro\b/, /\binterview\b/],
+            matchers: [/\bmeeting\b/, /\bagenda\b/, /\battendees?\b/, /\bdecisions?\b/, /\bretro\b/, /\binterview\b/],
             structure: [
                 'heading_1 for the meeting title',
                 'text block for date, owner, or context',
@@ -252,6 +272,16 @@ const Agent = (function() {
             heroPromptSuffix: 'editorial desk scene',
             heroCaptionPrefix: 'Brief visual',
         }),
+        explainer: Object.freeze({
+            pageIcon: '💡',
+            calloutIcon: '✨',
+            calloutColor: 'orange',
+            sectionTextColor: 'blue',
+            supportingTextColor: 'gray',
+            sourceHeading: 'Sources and Further Reading',
+            heroPromptSuffix: 'editorial educational reference photo',
+            heroCaptionPrefix: 'Lead visual',
+        }),
         research: Object.freeze({
             pageIcon: '🔎',
             calloutIcon: '🧭',
@@ -313,18 +343,72 @@ const Agent = (function() {
             heroCaptionPrefix: 'Mood visual',
         }),
     });
+    const NOTES_VISUAL_PAGE_RECIPES = Object.freeze([
+        Object.freeze({
+            id: 'editorial-explainer',
+            name: 'Editorial Explainer',
+            appliesTo: ['explainer', 'research', 'brief'],
+            useWhen: 'Topic pages, animal pages, science notes, place explainers, and polished educational content.',
+            topCluster: 'Use the first screenful for page icon/title, compact properties, a big-idea callout, and a hero image or ai_image.',
+            bodyRhythm: 'Alternate short text with quick facts, lists, quotes, warnings, or databases. Avoid more than two plain text blocks in a row.',
+            supportCluster: 'Close with bookmark sources, a toggle appendix, or a compact research note cluster.',
+            styling: 'Use colored section labels, muted gray support notes, and captions that feel editorial rather than mechanical.',
+        }),
+        Object.freeze({
+            id: 'knowledge-hub',
+            name: 'Knowledge Hub',
+            appliesTo: ['research', 'documentation'],
+            useWhen: 'Source-backed pages that should feel like a small research center rather than a report dump.',
+            topCluster: 'Lead with a summary callout and either a hero reference image or a clear source cue near the top.',
+            bodyRhythm: 'Group findings by theme and use bookmarks, toggles, diagrams, or databases for evidence and depth.',
+            supportCluster: 'Keep a dedicated sources or references section that is visually distinct from the synthesis sections.',
+            styling: 'Use blue or green section labels for themes, with gray text for appendix or verification notes.',
+        }),
+        Object.freeze({
+            id: 'operating-board',
+            name: 'Operating Board',
+            appliesTo: ['project', 'dashboard'],
+            useWhen: 'Plans, trackers, dashboards, launches, and execution pages.',
+            topCluster: 'Make the page status-first with icon, properties, a snapshot callout, and a tracker or database near the top.',
+            bodyRhythm: 'Use compact sections for goals, blockers, owners, and next moves instead of narrative prose.',
+            supportCluster: 'Leave follow-up items visible as todo blocks and keep references tucked into a lighter support cluster.',
+            styling: 'Use green accents for status, muted notes for context, and clear section separators so the page feels operational.',
+        }),
+        Object.freeze({
+            id: 'guided-reference',
+            name: 'Guided Reference',
+            appliesTo: ['documentation'],
+            useWhen: 'How-to pages, SOPs, guides, onboarding, and technical references.',
+            topCluster: 'Start with scope, audience, and a warning or prerequisite callout before the main steps.',
+            bodyRhythm: 'Mix numbered steps, code or diagram blocks, and short explanatory text so the page stays task-oriented.',
+            supportCluster: 'Use toggles for FAQ depth and bookmarks for external references.',
+            styling: 'Keep the page clean and procedural with blue labels, warning callouts, and restrained visual accents.',
+        }),
+        Object.freeze({
+            id: 'session-record',
+            name: 'Session Record',
+            appliesTo: ['meeting', 'journal'],
+            useWhen: 'Meetings, reflections, interviews, retros, and log-style pages.',
+            topCluster: 'Use title, context metadata, and a summary callout before the detailed notes.',
+            bodyRhythm: 'Break the middle into highlights, decisions, reflections, and follow-up sections rather than one chronological wall of notes.',
+            supportCluster: 'Use toggles for raw detail and todo blocks for explicit next steps.',
+            styling: 'Keep the tone light and readable with muted support copy and only a few accent blocks.',
+        }),
+    ]);
     const NOTES_PAGE_DESIGN_MANUAL = Object.freeze([
         'Design quality is part of correctness in notes mode. If the result feels like raw Markdown pasted into a page, it is not finished.',
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive details, sources, and next steps.',
         'Aim for a true Notion feel: one obvious focal block near the top, clear section rhythm, muted supporting notes, and at least one visual or source cluster when the page is substantial.',
         'Treat style as part of the page system, not decoration after the fact: use page icon, colored section labels, muted secondary copy, and accent callouts to create hierarchy.',
         'Avoid a long ladder of heading followed by paragraph repeated all the way down the page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
+        'Treat the first screenful like a designed landing zone for the note: title, summary, and visual support should appear early instead of making the page start as a wall of text.',
         'Research pages should usually feel like a small knowledge hub: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of hiding them in prose.',
         'When the topic is visual, real-world, product-like, place-based, or research-driven, include a hero image or ai_image near the top instead of leaving the page text-only.',
         'Operational pages should feel usable, not literary: use databases for repeated fields, todos for actions, and visible status or decision callouts near the top.',
         'Use toggles for optional depth, appendices, research notes, or background material so the main page stays scannable but still interactive.',
         'When a page is meant to look polished, upgrade page metadata too: title, icon, and section rhythm should feel intentional, not accidental.',
         'Use styling on purpose: accent callouts, muted gray support copy, section label colors where helpful, and image/bookmark blocks that make the page feel designed instead of dumped.',
+        'On a substantial page, avoid more than two plain text blocks in a row without a visual, callout, quote, list, divider, bookmark, toggle, or database to reset the rhythm.',
     ]);
     let initPromise = null;
 
@@ -757,9 +841,13 @@ const Agent = (function() {
             : '';
 
         if (!blockCount) {
-            if (template.id === 'brief' || template.id === 'documentation') {
+            if (template.id === 'brief' || template.id === 'documentation' || template.id === 'explainer') {
                 score += 1;
             }
+        }
+
+        if (template.id === 'explainer' && /\b(what is|how does|why does|facts?|science|species|animal|planet|sun|star|history|habitat|life cycle)\b/.test(signalText)) {
+            score += 4;
         }
 
         if (template.id === 'project' && (blockTypes.has('todo') || /\b(goals?|timeline|milestones?|owners?|resources?)\b/.test(outlineText))) {
@@ -800,7 +888,7 @@ const Agent = (function() {
         }
 
         return NOTES_PAGE_TEMPLATES
-            .filter((template) => ['brief', 'documentation', 'project'].includes(template.id))
+            .filter((template) => ['explainer', 'brief', 'documentation'].includes(template.id))
             .slice(0, limit)
             .map((template, index) => ({
                 ...template,
@@ -829,6 +917,49 @@ const Agent = (function() {
         ].join('\n')).join('\n\n');
     }
 
+    function selectNotesVisualRecipes(question = '', pageContext = null, templateMatches = []) {
+        const matches = Array.isArray(templateMatches) && templateMatches.length > 0
+            ? templateMatches
+            : selectNotesPageTemplates(question, pageContext, { limit: 2 });
+        const templateIds = new Set(matches.map((template) => template.id));
+
+        const recipes = NOTES_VISUAL_PAGE_RECIPES.filter((recipe) =>
+            Array.isArray(recipe.appliesTo) && recipe.appliesTo.some((templateId) => templateIds.has(templateId))
+        );
+
+        if (recipes.length > 0) {
+            return recipes.slice(0, 2);
+        }
+
+        return NOTES_VISUAL_PAGE_RECIPES.slice(0, 2);
+    }
+
+    function buildVisualRecipeGuidance(question = '', pageContext = null, templateMatches = []) {
+        const recipes = selectNotesVisualRecipes(question, pageContext, templateMatches);
+        return recipes.map((recipe, index) => [
+            `${index + 1}. ${recipe.name} [${recipe.id}]`,
+            `   Use when: ${recipe.useWhen}`,
+            `   Top cluster: ${recipe.topCluster}`,
+            `   Body rhythm: ${recipe.bodyRhythm}`,
+            `   Support cluster: ${recipe.supportCluster}`,
+            `   Styling: ${recipe.styling}`,
+        ].join('\n')).join('\n\n');
+    }
+
+    function buildVisualRecipeChecklist(question = '', pageContext = null, templateMatches = []) {
+        const leadRecipe = selectNotesVisualRecipes(question, pageContext, templateMatches)[0] || null;
+        if (!leadRecipe) {
+            return '- Make the first screenful feel designed and avoid long runs of plain text blocks.';
+        }
+
+        return [
+            `- Visual recipe: ${leadRecipe.name}.`,
+            `- Lead cluster target: ${leadRecipe.topCluster}`,
+            `- Rhythm target: ${leadRecipe.bodyRhythm}`,
+            `- Support cluster target: ${leadRecipe.supportCluster}`,
+        ].join('\n');
+    }
+
     function buildBlockCapabilityPlaybook() {
         return NOTES_BLOCK_PLAYBOOK.map((entry) => [
             `- ${entry.type}: ${entry.whenToUse}`,
@@ -844,6 +975,8 @@ const Agent = (function() {
 
     function buildTemplateRequiredPalette(templateId = 'brief') {
         switch (templateId) {
+            case 'explainer':
+                return ['callout', 'hero image/ai_image', 'quick facts database or list cluster', 'bookmark or toggle support section'];
             case 'research':
                 return ['callout', 'hero image/ai_image', 'bookmark source cluster', 'toggle for deep detail'];
             case 'project':
@@ -863,6 +996,12 @@ const Agent = (function() {
 
     function buildTemplateMetadataSuggestions(templateId = 'brief') {
         switch (templateId) {
+            case 'explainer':
+                return [
+                    { key: 'Type', value: 'Explainer' },
+                    { key: 'Mode', value: 'Visual knowledge page' },
+                    { key: 'Audience', value: 'General reader' },
+                ];
             case 'research':
                 return [
                     { key: 'Type', value: 'Research' },
@@ -916,6 +1055,12 @@ const Agent = (function() {
 
     function buildTemplateFrontendMoves(templateId = 'brief') {
         switch (templateId) {
+            case 'explainer':
+                return [
+                    'Use page metadata so the page opens with icon, compact properties, and a clear page identity.',
+                    'Give the first screenful a hero image or ai_image instead of opening with only text.',
+                    'Use a quick-facts cluster, warning callout, or source bookmarks to keep the page interactive.',
+                ];
             case 'research':
                 return [
                     'Set a page icon and compact research properties.',
@@ -986,7 +1131,7 @@ const Agent = (function() {
             opportunities.push('- Add a `callout` for the key takeaway or headline insight instead of leaving it buried in text.');
         }
 
-        if ((/\b(compare|comparison|status|tracker|metrics?|kpis?|owners?|timeline|matrix|table|database)\b/.test(signalText) || templateIds.has('dashboard') || templateIds.has('project'))
+        if ((/\b(compare|comparison|status|tracker|metrics?|kpis?|owners?|timeline|matrix|table|database|quick facts?|at a glance|key facts?)\b/.test(signalText) || templateIds.has('dashboard') || templateIds.has('project') || templateIds.has('explainer'))
             && !currentTypes.has('database')) {
             opportunities.push('- Consider a `database` block if the page has repeated structured data, status items, comparisons, or ownership.');
         }
@@ -1001,13 +1146,13 @@ const Agent = (function() {
             opportunities.push('- A `mermaid` block may communicate process or structure better than another paragraph.');
         }
 
-        if ((/\b(photo|visual|image|hero|animal|place|product|look|appearance|species)\b/.test(signalText) || templateIds.has('research'))
+        if ((/\b(photo|visual|image|hero|animal|place|product|look|appearance|species|planet|science|habitat)\b/.test(signalText) || templateIds.has('research') || templateIds.has('explainer'))
             && !currentTypes.has('image')
             && !currentTypes.has('ai_image')) {
             opportunities.push('- Add an `image` or `ai_image` block when the topic benefits from a strong visual on the page.');
         }
 
-        if ((/\b(faq|questions|appendix|details|background|deep dive|extra context)\b/.test(signalText) || templateIds.has('documentation'))
+        if ((/\b(faq|questions|appendix|details|background|deep dive|extra context|sources?|further reading)\b/.test(signalText) || templateIds.has('documentation') || templateIds.has('explainer'))
             && !currentTypes.has('toggle')) {
             opportunities.push('- Use `toggle` blocks to keep optional details interactive instead of crowding the main flow.');
         }
@@ -1162,6 +1307,29 @@ const Agent = (function() {
         };
     }
 
+    function countMaxPlainBlockRun(blocks = []) {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+            return 0;
+        }
+
+        const plainTypes = new Set(['text', 'bulleted_list', 'numbered_list']);
+        let currentRun = 0;
+        let maxRun = 0;
+
+        blocks.forEach((block) => {
+            const type = canonicalizeBlockType(block?.type || 'text');
+            if (plainTypes.has(type)) {
+                currentRun += 1;
+                maxRun = Math.max(maxRun, currentRun);
+                return;
+            }
+
+            currentRun = 0;
+        });
+
+        return maxRun;
+    }
+
     function hasMeaningfulPageIcon(pageContext = null) {
         const icon = String(pageContext?.icon || '').trim();
         return Boolean(icon && !/^note$/i.test(icon));
@@ -1242,6 +1410,8 @@ const Agent = (function() {
     function buildFallbackCalloutText(templateId = 'brief', subject = '') {
         const safeSubject = subject || 'This page';
         switch (templateId) {
+            case 'explainer':
+                return `${safeSubject}: open with the big idea, then make the page easy to scan with quick facts, clear sections, and visual support.`;
             case 'research':
                 return `${safeSubject} at a glance: the page should surface the strongest themes, the clearest evidence, and why the topic matters.`;
             case 'project':
@@ -1324,7 +1494,7 @@ const Agent = (function() {
         }
 
         const stats = analyzeStructuredBlocks(blocks);
-        if (stats.typeCounts.toggle > 0 || !['research', 'documentation'].includes(template?.id)) {
+        if (stats.typeCounts.toggle > 0 || !['explainer', 'research', 'documentation'].includes(template?.id)) {
             return blocks;
         }
 
@@ -1366,13 +1536,123 @@ const Agent = (function() {
         return blocks;
     }
 
+    function maybeConvertQuickFactsToDatabase(blocks = [], { template = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length < 4) {
+            return blocks;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        if (stats.typeCounts.database > 0 || !['explainer', 'research'].includes(template?.id)) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        for (let index = 0; index < nextBlocks.length - 2; index++) {
+            const heading = nextBlocks[index];
+            const headingType = canonicalizeBlockType(heading?.type || '');
+            const headingText = extractBlockDefinitionText(heading).trim();
+            if (!/^heading_/.test(headingType) || !/\b(quick facts?|fun facts?|at a glance|key facts?)\b/i.test(headingText)) {
+                continue;
+            }
+
+            const listItems = [];
+            let scanIndex = index + 1;
+            while (scanIndex < nextBlocks.length) {
+                const candidate = nextBlocks[scanIndex];
+                const candidateType = canonicalizeBlockType(candidate?.type || '');
+                if (!['bulleted_list', 'numbered_list'].includes(candidateType)) {
+                    break;
+                }
+                const text = extractBlockDefinitionText(candidate).trim();
+                if (text) {
+                    listItems.push(text);
+                }
+                scanIndex += 1;
+            }
+
+            if (listItems.length < 3) {
+                continue;
+            }
+
+            const colonHeavy = listItems.filter((item) => /:/.test(item)).length >= Math.ceil(listItems.length / 2);
+            const databaseContent = colonHeavy
+                ? {
+                    columns: ['Fact', 'Detail'],
+                    rows: listItems.map((item) => {
+                        const parts = item.split(/:\s*/, 2);
+                        return [parts[0] || 'Fact', parts[1] || ''];
+                    }),
+                    sortColumn: null,
+                    sortDirection: 'asc',
+                }
+                : {
+                    columns: ['Quick fact'],
+                    rows: listItems.map((item) => [item]),
+                    sortColumn: null,
+                    sortDirection: 'asc',
+                };
+
+            nextBlocks.splice(index + 1, listItems.length, {
+                type: 'database',
+                content: databaseContent,
+            });
+            return nextBlocks;
+        }
+
+        return blocks;
+    }
+
+    function maybeConvertWarningTextToCallout(blocks = [], { template = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length < 3) {
+            return blocks;
+        }
+
+        const stats = analyzeStructuredBlocks(blocks);
+        if (stats.typeCounts.callout > 1 || !['explainer', 'research', 'documentation'].includes(template?.id)) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        for (let index = 0; index < nextBlocks.length - 1; index++) {
+            const heading = nextBlocks[index];
+            const body = nextBlocks[index + 1];
+            const headingType = canonicalizeBlockType(heading?.type || '');
+            const bodyType = canonicalizeBlockType(body?.type || '');
+            const headingText = extractBlockDefinitionText(heading).trim();
+
+            if (!/^heading_/.test(headingType) || !/\b(stay safe|safety|warning|watch out|important|caution)\b/i.test(headingText)) {
+                continue;
+            }
+
+            if (!['text', 'quote'].includes(bodyType)) {
+                continue;
+            }
+
+            const bodyText = extractBlockDefinitionText(body).trim();
+            if (bodyText.length < 40 || bodyText.length > 240) {
+                continue;
+            }
+
+            nextBlocks[index + 1] = {
+                type: 'callout',
+                content: {
+                    text: truncateStructuredSummary(bodyText, 220),
+                    icon: '⚠️',
+                },
+                color: 'orange',
+            };
+            return nextBlocks;
+        }
+
+        return blocks;
+    }
+
     function ensureSupportSectionDivider(blocks = [], { template = null } = {}) {
         if (!Array.isArray(blocks) || blocks.length < 6) {
             return blocks;
         }
 
-        const stats = analyzeStructuredBlocks(blocks);
-        if (stats.typeCounts.divider > 0 || !['research', 'documentation', 'meeting'].includes(template?.id)) {
+        if (!['explainer', 'research', 'documentation', 'meeting'].includes(template?.id)) {
             return blocks;
         }
 
@@ -1398,17 +1678,49 @@ const Agent = (function() {
         return blocks;
     }
 
+    function ensureLeadClusterDivider(blocks = [], { template = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length < 6) {
+            return blocks;
+        }
+
+        if (!['explainer', 'research', 'brief', 'documentation'].includes(template?.id)) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        const firstSectionIndex = nextBlocks.findIndex((block, index) =>
+            index >= 2 && ['heading_2', 'heading_3'].includes(canonicalizeBlockType(block?.type || ''))
+        );
+
+        if (firstSectionIndex < 3) {
+            return blocks;
+        }
+
+        const leadCluster = nextBlocks.slice(0, firstSectionIndex);
+        const hasDesignedLead = leadCluster.some((block) => ['callout', 'image', 'ai_image', 'bookmark', 'database', 'quote'].includes(canonicalizeBlockType(block?.type || '')));
+        if (!hasDesignedLead) {
+            return blocks;
+        }
+
+        if (canonicalizeBlockType(nextBlocks[firstSectionIndex - 1]?.type || '') === 'divider') {
+            return blocks;
+        }
+
+        nextBlocks.splice(firstSectionIndex, 0, { type: 'divider', content: '' });
+        return nextBlocks;
+    }
+
     function shouldPreferHeroVisual({ template = null, question = '', blocks = [] } = {}) {
         const signalText = [
             String(question || ''),
             ...blocks.slice(0, 12).map((block) => extractBlockDefinitionText(block)),
         ].join('\n').toLowerCase();
 
-        if (['research', 'brief', 'journal'].includes(template?.id)) {
+        if (['explainer', 'research', 'brief', 'journal'].includes(template?.id)) {
             return true;
         }
 
-        return /\b(animal|wildlife|bird|species|nature|ocean|sea|mountain|city|travel|product|brand|design|visual|photo|look|appearance|gallery|place|landscape)\b/.test(signalText);
+        return /\b(animal|wildlife|bird|species|nature|ocean|sea|mountain|city|travel|product|brand|design|visual|photo|look|appearance|gallery|place|landscape|science|habitat|planet|star)\b/.test(signalText);
     }
 
     function buildTemplateHeroImageBlock({ template = null, preset = null, action = null, context = null, question = '' } = {}) {
@@ -1674,6 +1986,7 @@ const Agent = (function() {
         }
 
         const stats = analyzeStructuredBlocks(blocks);
+        const maxPlainRun = countMaxPlainBlockRun(blocks);
         const structuralRequest = /\b(create|make|build|draft|write|turn|convert|organize|restructure|brief|report|guide|proposal|page|notes?)\b/i.test(String(question || ''));
         const substantial = stats.blockCount >= 6
             || stats.textChars >= 420
@@ -1685,12 +1998,21 @@ const Agent = (function() {
         }
 
         switch (template?.id) {
+            case 'explainer':
+                return stats.typeCounts.callout === 0
+                    || stats.visualSupportCount === 0
+                    || stats.styledBlockCount === 0
+                    || stats.typeCounts.database === 0
+                    || stats.typeCounts.toggle === 0
+                    || maxPlainRun >= 3
+                    || stats.longTextCount > 1;
             case 'research':
                 return stats.typeCounts.callout === 0
                     || stats.typeCounts.bookmark === 0
                     || stats.visualSupportCount === 0
                     || stats.styledBlockCount === 0
                     || stats.layoutSupportCount < 3
+                    || maxPlainRun >= 3
                     || stats.longTextCount > 1;
             case 'project':
             case 'dashboard':
@@ -1710,6 +2032,7 @@ const Agent = (function() {
                     || stats.visualSupportCount === 0
                     || stats.styledBlockCount === 0
                     || stats.layoutSupportCount < 2
+                    || maxPlainRun >= 3
                     || stats.longTextCount > 1;
         }
     }
@@ -1739,7 +2062,10 @@ const Agent = (function() {
             let nextBlocks = action.blocks.map((block) => cloneStructuredValue(block));
             nextBlocks = ensureTemplateCalloutBlock(nextBlocks, { template, preset, action, context, question });
             nextBlocks = ensureHeroVisualBlock(nextBlocks, { template, preset, action, context, question });
+            nextBlocks = maybeConvertQuickFactsToDatabase(nextBlocks, { template });
+            nextBlocks = maybeConvertWarningTextToCallout(nextBlocks, { template });
             nextBlocks = maybeConvertSupportNoteToToggle(nextBlocks, { template });
+            nextBlocks = ensureLeadClusterDivider(nextBlocks, { template });
             nextBlocks = ensureSupportSectionDivider(nextBlocks, { template });
             nextBlocks = ensureSourceBookmarkBlocks(nextBlocks, { preset, toolEvents });
             nextBlocks = applyTemplateDesignDecorations(nextBlocks, { preset });
@@ -1854,6 +2180,8 @@ const Agent = (function() {
         const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
         const designManual = buildNotesPageDesignManual();
         const templateChecklist = buildTemplateExecutionChecklist(templateMatches);
+        const visualRecipeGuidance = buildVisualRecipeGuidance(question, pageContext, templateMatches);
+        const visualRecipeChecklist = buildVisualRecipeChecklist(question, pageContext, templateMatches);
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -1889,6 +2217,9 @@ ${pageSetup}
 BEST-FIT PAGE TEMPLATES:
 ${templateGuidance}
 
+VISUAL PAGE RECIPES:
+${visualRecipeGuidance}
+
 BLOCK CAPABILITY PLAYBOOK:
 ${blockPlaybook}
 
@@ -1903,6 +2234,9 @@ ${blockOpportunities}
 
 TEMPLATE EXECUTION CHECKLIST:
 ${templateChecklist}
+
+VISUAL DESIGN CHECKLIST:
+${visualRecipeChecklist}
 
 PAGE DESIGN CRITERIA:
 ${designCriteria}
@@ -1965,6 +2299,9 @@ BLOCK DESIGN HEURISTICS:
 - Before finalizing notes-actions, do a palette audit and check whether callout, database, bookmark, image/ai_image, mermaid, toggle, quote, todo, divider, code, or math would improve the page.
 - For a polished Notion-like page, treat visual hierarchy as required work, not optional polish: use a focal block near the top, style section labels with textColor where helpful, and give secondary notes a quieter tone.
 - Use the frontend metadata surface when it improves the result: page icon, cover URL, compact properties, and page default model are all available in notes mode.
+- Prefer a designed first screenful: title/icon, a focal callout, and a hero visual or source cue should usually appear before the deeper body sections.
+- On substantial pages, avoid more than two plain text blocks in a row without breaking the cadence with a richer block.
+- If the page has a "Quick Facts", "At a Glance", or "Key Facts" section, consider a database block instead of leaving it as a plain bullet pile.
 
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
@@ -1990,6 +2327,7 @@ GUIDELINES:
 - Ask the user only when blocked by missing secrets or credentials, a genuinely ambiguous product decision, or a destructive action that needs approval.
 - For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
 - Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
+- Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.

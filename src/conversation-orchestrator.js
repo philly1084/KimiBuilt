@@ -988,7 +988,10 @@ function buildNotesSynthesisInstructions() {
         'Use the frontend metadata surface when it improves the page: `update_page` can set title, icon, cover URL, properties, and default model.',
         'Blocks can also use `color`, `textColor`, `children`, and text `formatting` to create hierarchy and interaction instead of a flat stack of plain paragraphs.',
         'Avoid a long heading-then-paragraph ladder for the whole page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
+        'Give the first screenful a designed opening cluster: title or icon, a focal callout, and a hero image, ai_image, or clear source cue when the topic supports it.',
+        'On substantial pages, avoid more than two plain text blocks in a row without breaking the cadence with a richer block type.',
         'Research pages should read like compact knowledge hubs: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of burying them in prose.',
+        'Topic and educational pages should usually follow an editorial-explainer pattern: big-idea callout, hero visual, quick-facts cluster, then themed sections and sources.',
         'For polished or Notion-like pages, make the design visible in the blocks: page icon, focal callout, hero image or ai_image when the topic supports it, colored section labels, and muted supporting notes.',
         'If a substantial notes page only uses headings, plain text, and list blocks, do a palette audit before finalizing and check whether a richer block type would improve readability or interaction.',
         'Do not ship research, dashboard, documentation, or polished briefing pages as only plain headings and paragraphs unless the user explicitly asked for a minimal layout.',
@@ -2002,9 +2005,27 @@ function hasExplicitLocalSandboxIntent(text = '') {
         || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
 }
 
+function hasOpencodeToolUsageIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized || !/\bopencode\b/.test(normalized)) {
+        return false;
+    }
+
+    return [
+        /\b(command|commands|syntax|usage|help|docs?|documentation|example|examples|flags?|arguments?|parameters?)\b/,
+        /\b(how|what)\b[\s\S]{0,20}\b(use|run|invoke|call)\b[\s\S]{0,20}\bopencode\b/,
+        /\bgive\b[\s\S]{0,20}\b(command|commands|example|examples)\b[\s\S]{0,20}\bopencode\b/,
+        /\bopencode\b[\s\S]{0,24}\b(command|commands|syntax|usage|help|docs?|documentation|example|examples)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasExplicitOpencodeImplementationIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
+        return false;
+    }
+
+    if (hasOpencodeToolUsageIntent(normalized)) {
         return false;
     }
 
@@ -2014,7 +2035,7 @@ function hasExplicitOpencodeImplementationIntent(text = '') {
 
 function hasOpencodeRepoWorkIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
-    if (!normalized || hasDiscoveryPlanningIntentText(normalized)) {
+    if (!normalized || hasDiscoveryPlanningIntentText(normalized) || hasOpencodeToolUsageIntent(normalized)) {
         return false;
     }
 
@@ -4431,6 +4452,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasAssetCatalogIntent = hasIndexedAssetIntentText(prompt);
+        const hasOpencodeUsageIntent = hasOpencodeToolUsageIntent(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
         const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
@@ -4558,6 +4580,9 @@ class ConversationOrchestrator extends EventEmitter {
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
             }
+            if (hasOpencodeUsageIntent && allowedToolIds.includes('tool-doc-read')) {
+                candidates.add('tool-doc-read');
+            }
             if (!shouldPreferRemoteWebsiteSource
                 && allowedToolIds.includes('file-write')
                 && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
@@ -4633,6 +4658,9 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('k3s-deploy');
             }
             if (/\btool\b[\s\S]{0,40}\b(help|doc|docs|documentation|how)\b/.test(prompt) && allowedToolIds.includes('tool-doc-read')) {
+                candidates.add('tool-doc-read');
+            }
+            if (hasOpencodeUsageIntent && allowedToolIds.includes('tool-doc-read')) {
                 candidates.add('tool-doc-read');
             }
             if (hasArchitectureIntent && allowedToolIds.includes('architecture-design')) {
@@ -4754,6 +4782,17 @@ class ConversationOrchestrator extends EventEmitter {
                 tool: DOCUMENT_WORKFLOW_TOOL_ID,
                 reason: 'Verified research results are already available, so the document workflow can generate the requested deliverable now.',
                 params: documentWorkflowParams,
+            };
+        }
+
+        if (toolPolicy.candidateToolIds.includes('tool-doc-read')
+            && hasOpencodeToolUsageIntent(objective)) {
+            return {
+                tool: 'tool-doc-read',
+                reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
+                params: {
+                    toolId: 'opencode-run',
+                },
             };
         }
 
