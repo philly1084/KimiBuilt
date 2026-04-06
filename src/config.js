@@ -229,4 +229,10 @@ function validate() {
     }
 }
 
-module.exports = { config, validate };
+// Preserve the nested export used in app code while also exposing top-level
+// config sections for older tests and callers that require('./config').runtime.
+module.exports = {
+    ...config,
+    config,
+    validate,
+};

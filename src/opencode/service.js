@@ -51,6 +51,7 @@ class OpenCodeService {
         const ssh = typeof settingsController.getEffectiveSshConfig === 'function'
             ? settingsController.getEffectiveSshConfig()
             : {};
+        const capabilities = this.getExecutionCapabilities();
 
         return {
             enabled: effective.enabled !== false,
@@ -65,6 +66,83 @@ class OpenCodeService {
             remoteAutoInstall: effective.remoteAutoInstall === true,
             sshConfigured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
             activeInstances: this.instances.size,
+            persistenceReady: capabilities.persistenceReady,
+            localReady: capabilities.localReady,
+            remoteReady: capabilities.remoteReady,
+            localIssues: capabilities.localIssues,
+            remoteIssues: capabilities.remoteIssues,
+            remoteGatewayReachable: capabilities.remoteGatewayReachable,
+            remoteGatewayError: capabilities.remoteGatewayError,
+        };
+    }
+
+    getExecutionCapabilities() {
+        const effective = this.getEffectiveConfig();
+        const ssh = typeof settingsController.getEffectiveSshConfig === 'function'
+            ? settingsController.getEffectiveSshConfig()
+            : {};
+        const enabled = effective.enabled !== false;
+        const persistenceReady = this.isAvailable();
+        const sshConfigured = Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath));
+        const localWorkspaceConfigured = Boolean(
+            (Array.isArray(effective.allowedWorkspaceRoots) && effective.allowedWorkspaceRoots.some(Boolean))
+            || config.deploy.defaultRepositoryPath
+            || process.cwd(),
+        );
+        const remoteWorkspaceConfigured = Boolean(String(effective.remoteDefaultWorkspace || '').trim());
+
+        let remoteGatewayReachable = true;
+        let remoteGatewayError = null;
+        try {
+            assertRemoteGatewayBaseURLReachable();
+        } catch (error) {
+            remoteGatewayReachable = false;
+            remoteGatewayError = error.message;
+        }
+
+        const localIssues = [];
+        const remoteIssues = [];
+
+        if (!enabled) {
+            localIssues.push('disabled');
+            remoteIssues.push('disabled');
+        }
+
+        if (!persistenceReady) {
+            localIssues.push('postgres-persistence-required');
+            remoteIssues.push('postgres-persistence-required');
+        }
+
+        if (!localWorkspaceConfigured) {
+            localIssues.push('local-workspace-unconfigured');
+        }
+
+        if (!sshConfigured) {
+            remoteIssues.push('ssh-unconfigured');
+        }
+
+        if (!remoteWorkspaceConfigured) {
+            remoteIssues.push('remote-workspace-unconfigured');
+        }
+
+        if (!remoteGatewayReachable) {
+            remoteIssues.push('remote-gateway-unreachable');
+        }
+
+        return {
+            enabled,
+            persistenceReady,
+            sshConfigured,
+            localWorkspaceConfigured,
+            remoteWorkspaceConfigured,
+            remoteGatewayReachable,
+            remoteGatewayError,
+            remoteAutoInstall: effective.remoteAutoInstall === true,
+            localIssues,
+            remoteIssues,
+            localReady: localIssues.length === 0,
+            remoteReady: remoteIssues.length === 0,
+            anyReady: localIssues.length === 0 || remoteIssues.length === 0,
         };
     }
 
@@ -724,17 +802,60 @@ class OpenCodeService {
 
         const connection = await remoteClient.resolveConnection();
         const shell = remoteClient.sshTool;
+        const configuredBinary = String(effective.binaryPath || 'opencode').trim() || 'opencode';
+        const autoInstallEnabled = effective.remoteAutoInstall === true;
+        const resolvedBinaryScript = [
+            `configured_binary=${shell.quoteShellArg(configuredBinary)}`,
+            'resolved_binary=""',
+            'export PATH="$HOME/.opencode/bin:$PATH"',
+            'if command -v "$configured_binary" >/dev/null 2>&1; then',
+            '  resolved_binary=$(command -v "$configured_binary")',
+            'elif [ -x "$configured_binary" ]; then',
+            '  resolved_binary="$configured_binary"',
+            'elif command -v opencode >/dev/null 2>&1; then',
+            '  resolved_binary=$(command -v opencode)',
+            'elif [ -x "$HOME/.opencode/bin/opencode" ]; then',
+            '  resolved_binary="$HOME/.opencode/bin/opencode"',
+            'fi',
+            `if [ -z "$resolved_binary" ] && [ ${autoInstallEnabled ? '1' : '0'} -eq 1 ]; then`,
+            '  arch=$(uname -m 2>/dev/null || echo unknown)',
+            '  case "$arch" in',
+            '    x86_64|amd64|aarch64|arm64) ;;',
+            '    *) echo "__KIMIBUILT_OPENCODE_UNSUPPORTED_ARCH__:$arch"; exit 123 ;;',
+            '  esac',
+            '  if ! command -v curl >/dev/null 2>&1; then',
+            '    echo "__KIMIBUILT_OPENCODE_INSTALL_NEEDS_CURL__"',
+            '    exit 124',
+            '  fi',
+            '  if ! command -v bash >/dev/null 2>&1; then',
+            '    echo "__KIMIBUILT_OPENCODE_INSTALL_NEEDS_BASH__"',
+            '    exit 125',
+            '  fi',
+            '  curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path',
+            '  export PATH="$HOME/.opencode/bin:$PATH"',
+            '  if command -v "$configured_binary" >/dev/null 2>&1; then',
+            '    resolved_binary=$(command -v "$configured_binary")',
+            '  elif [ -x "$configured_binary" ]; then',
+            '    resolved_binary="$configured_binary"',
+            '  elif command -v opencode >/dev/null 2>&1; then',
+            '    resolved_binary=$(command -v opencode)',
+            '  elif [ -x "$HOME/.opencode/bin/opencode" ]; then',
+            '    resolved_binary="$HOME/.opencode/bin/opencode"',
+            '  fi',
+            'fi',
+            'if [ -z "$resolved_binary" ]; then',
+            '  echo "__KIMIBUILT_OPENCODE_MISSING__"',
+            '  exit 127',
+            'fi',
+        ].join('\n');
         const bootstrapScript = [
             'set -eu',
             `mkdir -p -- ${shell.quoteShellArg(configDir)}`,
             `printf '%s' ${shell.quoteShellArg(configB64)} | base64 -d > ${shell.quoteShellArg(configPath)}`,
-            `if ! command -v ${shell.quoteShellArg(effective.binaryPath || 'opencode')} >/dev/null 2>&1; then`,
-            '  echo "__KIMIBUILT_OPENCODE_MISSING__"',
-            '  exit 127',
-            'fi',
+            resolvedBinaryScript,
             `if ! curl -sS -u ${shell.quoteShellArg(`${authUsername}:${authPassword}`)} http://127.0.0.1:${port}/global/health >/dev/null 2>&1; then`,
             `  cd -- ${shell.quoteShellArg(workspacePath)}`,
-            `  nohup env ${envAssignments} ${shell.quoteShellArg(effective.binaryPath || 'opencode')} serve --hostname 127.0.0.1 --port ${port} > ${shell.quoteShellArg(logPath)} 2>&1 < /dev/null &`,
+            `  nohup env ${envAssignments} "$resolved_binary" serve --hostname 127.0.0.1 --port ${port} > ${shell.quoteShellArg(logPath)} 2>&1 < /dev/null &`,
             'fi',
             '',
         ].join('\n');
@@ -749,6 +870,21 @@ class OpenCodeService {
                 const missing = new Error('Remote host does not have the opencode binary installed');
                 missing.statusCode = 503;
                 throw missing;
+            }
+            if (combined.includes('__KIMIBUILT_OPENCODE_UNSUPPORTED_ARCH__')) {
+                const unsupported = new Error('Remote OpenCode auto-install only supports x64 and arm64 Linux hosts');
+                unsupported.statusCode = 503;
+                throw unsupported;
+            }
+            if (combined.includes('__KIMIBUILT_OPENCODE_INSTALL_NEEDS_CURL__')) {
+                const missingCurl = new Error('Remote OpenCode auto-install requires curl on the target host');
+                missingCurl.statusCode = 503;
+                throw missingCurl;
+            }
+            if (combined.includes('__KIMIBUILT_OPENCODE_INSTALL_NEEDS_BASH__')) {
+                const missingBash = new Error('Remote OpenCode auto-install requires bash on the target host');
+                missingBash.statusCode = 503;
+                throw missingBash;
             }
             throw error;
         }

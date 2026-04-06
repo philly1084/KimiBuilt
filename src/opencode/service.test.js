@@ -4,9 +4,59 @@ jest.mock('../openai-client', () => ({
     listModels: jest.fn(async () => []),
 }));
 
+jest.mock('./client', () => {
+    const state = {
+        lastRemoteClient: null,
+    };
+
+    class MockOpenCodeLocalClient {}
+
+    class MockOpenCodeRemoteClient {
+        constructor({ port, username, password, sshConfig }) {
+            this.port = port;
+            this.username = username;
+            this.password = password;
+            this.sshConfig = sshConfig;
+            this.waitForHealth = jest.fn(async () => ({ ok: true }));
+            this.resolveConnection = jest.fn(async () => ({
+                host: sshConfig.host,
+                port: sshConfig.port || 22,
+                username: sshConfig.username,
+                password: sshConfig.password || '',
+                privateKeyPath: sshConfig.privateKeyPath || '',
+            }));
+            this.openGlobalEventStream = jest.fn(async () => undefined);
+            this.sshTool = {
+                quoteShellArg: jest.fn((value) => `'${String(value).replace(/'/g, `'\"'\"'`)}'`),
+                executeSSH: jest.fn(async () => ({
+                    stdout: '',
+                    stderr: '',
+                    exitCode: 0,
+                })),
+                getConnectionConfig: jest.fn(async ({ host, port, username }) => ({
+                    host: host || sshConfig.host,
+                    port: port || sshConfig.port || 22,
+                    username: username || sshConfig.username,
+                    password: sshConfig.password || '',
+                    privateKeyPath: sshConfig.privateKeyPath || '',
+                })),
+            };
+            state.lastRemoteClient = this;
+        }
+    }
+
+    return {
+        OpenCodeLocalClient: MockOpenCodeLocalClient,
+        OpenCodeRemoteClient: MockOpenCodeRemoteClient,
+        extractMessageText: jest.fn(() => ''),
+        __mock: state,
+    };
+});
+
 const { config } = require('../config');
 const settingsController = require('../routes/admin/settings.controller');
 const { listModels } = require('../openai-client');
+const { __mock: opencodeClientMock } = require('./client');
 const {
     OpenCodeService,
     buildOpenCodeGatewayModels,
@@ -17,10 +67,15 @@ const {
 describe('OpenCode service helpers', () => {
     const originalApiBaseURL = settingsController.settings.api.baseURL;
     const originalGatewayApiKey = config.opencode.gatewayApiKey;
+    const originalGetEffectiveSshConfig = settingsController.getEffectiveSshConfig;
+    const originalGetEffectiveOpencodeConfig = settingsController.getEffectiveOpencodeConfig;
 
     afterEach(() => {
         settingsController.settings.api.baseURL = originalApiBaseURL;
         config.opencode.gatewayApiKey = originalGatewayApiKey;
+        settingsController.getEffectiveSshConfig = originalGetEffectiveSshConfig;
+        settingsController.getEffectiveOpencodeConfig = originalGetEffectiveOpencodeConfig;
+        opencodeClientMock.lastRemoteClient = null;
         jest.clearAllMocks();
     });
 
@@ -171,5 +226,83 @@ describe('OpenCode service helpers', () => {
                 isSmallModel: true,
             }),
         ]));
+    });
+
+    test('reports local and remote OpenCode readiness separately', () => {
+        settingsController.settings.api.baseURL = 'http://127.0.0.1:3000';
+        settingsController.getEffectiveSshConfig = jest.fn(() => ({
+            enabled: false,
+            host: '',
+            port: 22,
+            username: '',
+            password: '',
+            privateKeyPath: '',
+        }));
+        settingsController.getEffectiveOpencodeConfig = jest.fn(() => ({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: [],
+            remoteAutoInstall: false,
+        }));
+
+        const service = new OpenCodeService({
+            store: {
+                isAvailable: () => true,
+            },
+        });
+
+        expect(service.getExecutionCapabilities()).toEqual(expect.objectContaining({
+            persistenceReady: true,
+            localReady: true,
+            remoteReady: false,
+            localIssues: [],
+            remoteIssues: expect.arrayContaining([
+                'ssh-unconfigured',
+                'remote-gateway-unreachable',
+            ]),
+        }));
+    });
+
+    test('includes the official remote auto-install bootstrap when enabled', async () => {
+        settingsController.settings.api.baseURL = 'https://kimibuilt.example.com';
+        settingsController.getEffectiveSshConfig = jest.fn(() => ({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        }));
+        settingsController.getEffectiveOpencodeConfig = jest.fn(() => ({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: [],
+            remoteAutoInstall: true,
+        }));
+
+        const service = new OpenCodeService({
+            store: {
+                isAvailable: () => true,
+            },
+        });
+        service.buildManagedConfig = jest.fn(async () => ({
+            provider: {},
+        }));
+
+        await service.startRemoteInstance('remote-run-1', '/srv/apps/kimibuilt', 'manual');
+
+        const bootstrapScript = opencodeClientMock.lastRemoteClient.sshTool.executeSSH.mock.calls[0][1];
+        expect(bootstrapScript).toContain('curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path');
+        expect(bootstrapScript).toContain('export PATH="$HOME/.opencode/bin:$PATH"');
+        expect(bootstrapScript).toContain('__KIMIBUILT_OPENCODE_INSTALL_NEEDS_CURL__');
+        expect(opencodeClientMock.lastRemoteClient.waitForHealth).toHaveBeenCalledTimes(1);
     });
 });

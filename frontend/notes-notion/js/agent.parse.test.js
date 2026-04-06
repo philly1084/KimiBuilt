@@ -295,13 +295,20 @@ Approved page plan:
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('BLOCK CAPABILITY PLAYBOOK:');
+        expect(prompt).toContain('FRONTEND FEATURES YOU CAN USE:');
         expect(prompt).toContain('PAGE DESIGN MANUAL:');
         expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
+        expect(prompt).toContain('TEMPLATE EXECUTION CHECKLIST:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Think in page roles, not just paragraphs');
         expect(prompt).toContain('Treat style as part of the page system');
         expect(prompt).toContain('visual hierarchy as required work');
+        expect(prompt).toContain('Page metadata: Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel`');
+        expect(prompt).toContain('Properties: `properties` accepts an array of `{key, value}` pairs');
+        expect(prompt).toContain('Nested structure: Blocks can include `children`');
+        expect(prompt).toContain('Recommended metadata: Type: Research');
+        expect(prompt).toContain('Required palette: callout + hero image/ai_image + bookmark source cluster + toggle for deep detail');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
         expect(prompt).toContain('callout: Key takeaways');
@@ -394,6 +401,11 @@ Approved page plan:
         expect(normalizedActions).toHaveLength(1);
         expect(normalizedActions[0].icon).toBe('🔎');
         expect(normalizedActions[0].title).toBe('Penguins: Built for Water, Pressed by Change');
+        expect(normalizedActions[0].properties).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'Type', value: 'Research' }),
+            expect.objectContaining({ key: 'Mode', value: 'Knowledge hub' }),
+            expect.objectContaining({ key: 'Evidence', value: 'Source-linked' }),
+        ]));
         expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 type: 'callout',

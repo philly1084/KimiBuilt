@@ -89,6 +89,8 @@ function buildNotesSurfacePrompt() {
     'Use richer blocks intentionally: callout for takeaways or warnings, bookmark for sources, database for comparisons or trackers, toggle for optional detail, mermaid for flows, image/ai_image for visuals, todo for next steps, and quote for emphasized lines.',
     'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive detail, sources, and next steps.',
     'Treat design quality as part of correctness in notes mode: the page should feel intentionally composed, not like raw Markdown pasted into blocks.',
+    'Use the frontend metadata surface when it improves the page: update_page can set title, icon, cover URL, properties, and default model.',
+    'Blocks can also use color, textColor, children, and text formatting to create hierarchy and interaction instead of a flat stack of plain paragraphs.',
     'Avoid a long heading-then-paragraph ladder for the whole page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
     'Research pages should read like compact knowledge hubs: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of burying them in prose.',
     'For polished or Notion-like pages, make the design visible in the blocks: page icon, focal callout, hero image or ai_image when the topic supports it, colored section labels, and muted supporting notes.',

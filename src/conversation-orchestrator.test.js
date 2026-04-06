@@ -3418,6 +3418,8 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('Available block palette includes');
         expect(instructions).toContain('Think in page roles, not just paragraphs');
         expect(instructions).toContain('Treat design quality as part of correctness in notes mode');
+        expect(instructions).toContain('cover URL, properties, and default model');
+        expect(instructions).toContain('create hierarchy and interaction instead of a flat stack');
         expect(instructions).toContain('hero image or ai_image');
         expect(instructions).toContain('If a substantial notes page only uses headings');
     });
@@ -3986,6 +3988,63 @@ describe('ConversationOrchestrator', () => {
                 workspacePath: '/srv/apps/kimibuilt',
             }),
         }));
+    });
+
+    test('does not offer opencode-run for remote repo work when the remote target is unavailable', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Fix the failing tests in this repo on the server and refactor the auth module.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                opencodeService: {
+                    getExecutionCapabilities: () => ({
+                        localReady: true,
+                        remoteReady: false,
+                    }),
+                },
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
+        expect(toolPolicy.opencode).toEqual({
+            target: 'remote-default',
+            ready: false,
+        });
     });
 
     test('keeps infrastructure-only remote build work on remote-command', () => {

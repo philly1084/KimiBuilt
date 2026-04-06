@@ -58,11 +58,12 @@ function isInternalClusterBaseURL(baseURL = '') {
   }
 }
 
-function buildRuntimeSummary(toolManager) {
+function buildRuntimeSummary(toolManager, options = {}) {
   const ssh = settingsController.getEffectiveSshConfig();
   const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
     ? settingsController.getEffectiveOpencodeConfig()
     : {};
+  const opencodeCapabilities = options.opencodeService?.getExecutionCapabilities?.() || null;
 
   return {
     source: 'backend',
@@ -91,12 +92,20 @@ function buildRuntimeSummary(toolManager) {
       localGatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'local' }),
       allowedWorkspaceRoots: opencode.allowedWorkspaceRoots || [],
       remoteDefaultWorkspace: opencode.remoteDefaultWorkspace || '',
+      persistenceReady: opencodeCapabilities?.persistenceReady ?? null,
+      localReady: opencodeCapabilities?.localReady ?? null,
+      remoteReady: opencodeCapabilities?.remoteReady ?? null,
+      localIssues: opencodeCapabilities?.localIssues || [],
+      remoteIssues: opencodeCapabilities?.remoteIssues || [],
+      remoteGatewayReachable: opencodeCapabilities?.remoteGatewayReachable ?? null,
+      remoteGatewayError: opencodeCapabilities?.remoteGatewayError || null,
+      remoteAutoInstall: opencodeCapabilities?.remoteAutoInstall ?? (opencode.remoteAutoInstall === true),
       sshConfigured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
     },
   };
 }
 
-function buildToolRuntime(toolId) {
+function buildToolRuntime(toolId, options = {}) {
   if (isRemoteCommandToolId(toolId)) {
     const ssh = settingsController.getEffectiveSshConfig();
     return {
@@ -148,8 +157,9 @@ function buildToolRuntime(toolId) {
     const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
       ? settingsController.getEffectiveOpencodeConfig()
       : {};
+    const capabilities = options.opencodeService?.getExecutionCapabilities?.() || null;
     return {
-      configured: opencode.enabled !== false,
+      configured: capabilities ? Boolean(capabilities.anyReady) : opencode.enabled !== false,
       provider: 'kimibuilt-openai-compatible',
       gatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'remote-default' }),
       localGatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'local' }),
@@ -157,6 +167,14 @@ function buildToolRuntime(toolId) {
       defaultModel: opencode.defaultModel || '',
       allowedWorkspaceRoots: opencode.allowedWorkspaceRoots || [],
       remoteDefaultWorkspace: opencode.remoteDefaultWorkspace || '',
+      persistenceReady: capabilities?.persistenceReady ?? null,
+      localConfigured: capabilities?.localReady ?? true,
+      remoteConfigured: capabilities?.remoteReady ?? Boolean(opencode.remoteDefaultWorkspace),
+      localIssues: capabilities?.localIssues || [],
+      remoteIssues: capabilities?.remoteIssues || [],
+      remoteGatewayReachable: capabilities?.remoteGatewayReachable ?? null,
+      remoteGatewayError: capabilities?.remoteGatewayError || null,
+      remoteAutoInstall: capabilities?.remoteAutoInstall ?? (opencode.remoteAutoInstall === true),
       sshConfigured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
     };
   }
@@ -241,6 +259,7 @@ function isToolVisibleByRuntime(toolId, runtime = null, support = null) {
 
 async function buildFrontendToolCatalog({ req, category = null, sessionId = null, includeAllTools = false }) {
   const toolManager = await ensureToolManagerInitialized();
+  const opencodeService = req.app?.locals?.opencodeService || null;
   const { executionProfile } = await resolveToolExecutionProfile(req, sessionId);
   const allowedToolIds = getAllowedToolIdsForProfile(executionProfile);
 
@@ -249,7 +268,7 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
     .filter((tool) => tool.id !== 'ssh-execute');
 
   const enrichedTools = await Promise.all(manifestTools.map(async (tool) => {
-    const runtime = buildToolRuntime(tool.id);
+    const runtime = buildToolRuntime(tool.id, { opencodeService });
     const docMetadata = await getToolDocMetadata(tool.id);
     const availableInExecutionProfile = allowedToolIds.includes(tool.id);
     const runtimeVisible = isToolVisibleByRuntime(tool.id, runtime, docMetadata.support);
@@ -465,7 +484,7 @@ router.get('/available', async (req, res) => {
         categories: [...new Set(tools.map(t => t.category))],
         executionProfile,
         includeAllTools,
-        runtime: buildRuntimeSummary(toolManager),
+        runtime: buildRuntimeSummary(toolManager, { opencodeService: req.app?.locals?.opencodeService || null }),
       }
     });
   } catch (error) {
@@ -592,7 +611,7 @@ router.get('/:id', async (req, res) => {
         category: tool.category,
         version: tool.version,
         manifest,
-        runtime: buildToolRuntime(id),
+        runtime: buildToolRuntime(id, { opencodeService: req.app?.locals?.opencodeService || null }),
         skill: skill ? {
           enabled: skill.enabled,
           triggerPatterns: skill.triggerPatterns,
@@ -603,7 +622,7 @@ router.get('/:id', async (req, res) => {
         ...docMetadata,
       },
       meta: {
-        runtime: buildRuntimeSummary(toolManager),
+        runtime: buildRuntimeSummary(toolManager, { opencodeService: req.app?.locals?.opencodeService || null }),
       },
     });
   } catch (error) {

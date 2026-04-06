@@ -908,6 +908,8 @@ function buildNotesSynthesisInstructions() {
         'Use richer blocks intentionally: `callout` for takeaways or warnings, `bookmark` for sources, `database` for comparisons or trackers, `toggle` for optional detail, `mermaid` for process/structure, `image` or `ai_image` for visuals, `todo` for next steps, and `quote` for emphasized excerpts.',
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive detail, sources, and next steps.',
         'Treat design quality as part of correctness in notes mode: the page should feel intentionally composed, not like raw Markdown pasted into blocks.',
+        'Use the frontend metadata surface when it improves the page: `update_page` can set title, icon, cover URL, properties, and default model.',
+        'Blocks can also use `color`, `textColor`, `children`, and text `formatting` to create hierarchy and interaction instead of a flat stack of plain paragraphs.',
         'Avoid a long heading-then-paragraph ladder for the whole page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
         'Research pages should read like compact knowledge hubs: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of burying them in prose.',
         'For polished or Notion-like pages, make the design visible in the blocks: page icon, focal callout, hero image or ai_image when the topic supports it, colored section labels, and muted supporting notes.',
@@ -1319,6 +1321,8 @@ function buildRemoteWebsiteSourceInspectionCommand() {
         'else',
         `  echo "configured target directory not found: ${targetDirectory}"`,
         'fi',
+        "(test -f /root/website.html && echo /root/website.html || true)",
+        "(find /root /srv /var/www -maxdepth 3 -type f \\( -name 'website.html' -o -name 'index.html' -o -name '*.html' -o -name '*.yaml' -o -name '*.yml' \\) 2>/dev/null | head -n 40 || true)",
         "(kubectl get configmap -A -o name 2>/dev/null | grep -Ei 'web|site|html|page|nginx|frontend' | head -n 20 || true)",
     ].join(' && ');
 }
@@ -1517,11 +1521,17 @@ function buildRemoteConfigMapApplyCommand(htmlBody = '', configMapName = 'websit
     }
 
     const encoded = Buffer.from(body, 'utf8').toString('base64');
+    const preview = body
+        .replace(/\s+/g, ' ')
+        .replace(/[^\x20-\x7E]/g, '')
+        .slice(0, 160)
+        .trim();
     const safeConfigMapName = String(configMapName || 'website-html').trim() || 'website-html';
     const awkConfigMapName = safeConfigMapName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
     return [
         'set -e',
+        ...(preview ? [`# HTML preview: ${preview}`] : []),
         `cm=${shellQuote(safeConfigMapName)}`,
         `ns=$(kubectl get configmap -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '$2 == "${awkConfigMapName}" { print $1; exit }')`,
         'if [ -z "$ns" ]; then echo "ConfigMap not found: $cm" >&2; exit 1; fi',
@@ -1539,7 +1549,7 @@ function buildRemoteConfigMapApplyCommand(htmlBody = '', configMapName = 'websit
 
 function parseKubernetesInitContainerFailure(output = '') {
     const text = String(output || '');
-    if (!text || !/\bInit Containers:\b/.test(text) || !/\b(CrashLoopBackOff|Exit Code:\s*[1-9])\b/.test(text)) {
+    if (!text || !/Init Containers:/.test(text) || !/(CrashLoopBackOff|Exit Code:\s*[1-9])/.test(text)) {
         return null;
     }
 
@@ -1626,6 +1636,9 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
 
     const combinedContext = [objective, instructions].filter(Boolean).join('\n');
     const internalArtifactUrl = extractInternalArtifactUrl(combinedContext);
+    const latestEvent = Array.isArray(toolEvents) && toolEvents.length > 0
+        ? toolEvents[toolEvents.length - 1]
+        : null;
 
     if (hasRemoteWebsiteUpdateIntent(objective) && !hasExplicitLocalArtifactReference(objective)) {
         const missingLocalHtmlArtifact = [...(Array.isArray(toolEvents) ? toolEvents : [])]
@@ -1638,6 +1651,30 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
                 reason: 'A local HTML artifact could not be read. Inspect the remote website source and cluster ConfigMaps instead of blocking on the missing local file.',
                 params: {
                     command: buildRemoteWebsiteSourceInspectionCommand(),
+                },
+            }];
+        }
+
+        const lastArtifactFetch = getLastSuccessfulToolEvent(toolEvents, 'web-fetch');
+        const lastArtifactFetchArgs = parseToolCallArguments(lastArtifactFetch?.toolCall?.function?.arguments || '{}');
+        const fetchedArtifactUrl = extractInternalArtifactUrl(lastArtifactFetchArgs?.url || '');
+        const fetchedHtmlBody = typeof lastArtifactFetch?.result?.data?.body === 'string'
+            ? lastArtifactFetch.result.data.body.trim()
+            : '';
+
+        if (internalArtifactUrl
+            && fetchedArtifactUrl
+            && normalizeShellCommand(fetchedArtifactUrl) === normalizeShellCommand(internalArtifactUrl)
+            && fetchedHtmlBody
+            && canonicalizeRemoteToolId(latestEvent?.toolCall?.function?.name || latestEvent?.result?.toolId || '') === 'web-fetch') {
+            return [{
+                tool: remoteToolId,
+                reason: 'Use the artifact content fetched locally by this runtime to update the remote website ConfigMap instead of asking the target server to curl the backend artifact URL.',
+                params: {
+                    command: buildRemoteConfigMapApplyCommand(
+                        fetchedHtmlBody,
+                        extractRemoteWebsiteConfigMapName(toolEvents),
+                    ),
                 },
             }];
         }
@@ -1674,29 +1711,6 @@ function buildRemoteFollowupPlanFromToolEvents({ objective = '', instructions = 
                 reason: 'The previous verification relied on page titles, which may be empty. Verify the mounted HTML body and public response content directly instead.',
                 params: {
                     command: buildRemoteWebsiteBodyVerificationCommand(),
-                },
-            }];
-        }
-
-        const lastArtifactFetch = getLastSuccessfulToolEvent(toolEvents, 'web-fetch');
-        const lastArtifactFetchArgs = parseToolCallArguments(lastArtifactFetch?.toolCall?.function?.arguments || '{}');
-        const fetchedArtifactUrl = extractInternalArtifactUrl(lastArtifactFetchArgs?.url || '');
-        const fetchedHtmlBody = typeof lastArtifactFetch?.result?.data?.body === 'string'
-            ? lastArtifactFetch.result.data.body.trim()
-            : '';
-
-        if (internalArtifactUrl
-            && fetchedArtifactUrl
-            && normalizeShellCommand(fetchedArtifactUrl) === normalizeShellCommand(internalArtifactUrl)
-            && fetchedHtmlBody) {
-            return [{
-                tool: remoteToolId,
-                reason: 'Use the artifact content fetched locally by this runtime to update the remote website ConfigMap instead of asking the target server to curl the backend artifact URL.',
-                params: {
-                    command: buildRemoteConfigMapApplyCommand(
-                        fetchedHtmlBody,
-                        extractRemoteWebsiteConfigMapName(toolEvents),
-                    ),
                 },
             }];
         }
@@ -1960,6 +1974,24 @@ function resolvePreferredOpencodeWorkspacePath({ session = null, toolContext = {
     ).trim();
 }
 
+function isOpencodeTargetReady(toolContext = {}, target = 'local') {
+    const service = toolContext?.opencodeService || null;
+    if (!service || typeof service.getExecutionCapabilities !== 'function') {
+        return true;
+    }
+
+    const capabilities = service.getExecutionCapabilities();
+    if (!capabilities || typeof capabilities !== 'object') {
+        return true;
+    }
+
+    if (target === 'remote-default') {
+        return capabilities.remoteReady !== false;
+    }
+
+    return capabilities.localReady !== false;
+}
+
 function hasArchitectureDesignIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -2065,10 +2097,29 @@ function shouldRepairInvalidRuntimeResponse({ output = '', toolEvents = [], tool
         && toolEvents.length > 0;
 }
 
+function canonicalizeSignatureValue(value) {
+    if (value == null || typeof value !== 'object') {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((entry) => canonicalizeSignatureValue(entry));
+    }
+
+    return Object.keys(value)
+        .sort((left, right) => left.localeCompare(right))
+        .reduce((accumulator, key) => {
+            accumulator[key] = canonicalizeSignatureValue(value[key]);
+            return accumulator;
+        }, {});
+}
+
 function normalizeStepSignature(step = {}) {
     return JSON.stringify({
         tool: canonicalizeRemoteToolId(String(step?.tool || '').trim()),
-        params: step?.params && typeof step.params === 'object' ? step.params : {},
+        params: step?.params && typeof step.params === 'object'
+            ? canonicalizeSignatureValue(step.params)
+            : {},
     });
 }
 
@@ -2670,6 +2721,10 @@ function summarizeAutonomyProgress(toolEvents = [], failureSummary = null) {
             && uniqueStepSignatures > 0
             && (summary?.blockingFailures?.length || 0) === 0,
     };
+}
+
+function planSignalsFurtherAutonomousWork(steps = []) {
+    return (Array.isArray(steps) ? steps : []).some((step) => /\b(first|next|then|after|before|follow(?:ed)? by|continue|retry|again|remaining|start|begin)\b/i.test(String(step?.reason || '').trim()));
 }
 
 function maybeExtendAutonomyBudget({
@@ -3374,6 +3429,7 @@ class ConversationOrchestrator extends EventEmitter {
 
                 round += 1;
                 let nextPlan = [];
+                let planSource = 'none';
                 const planningStartedAt = new Date().toISOString();
 
                 if (round === 1) {
@@ -3389,6 +3445,7 @@ class ConversationOrchestrator extends EventEmitter {
                     if (directAction) {
                         runtimeMode = 'direct-tool';
                         nextPlan = [directAction];
+                        planSource = 'direct';
                     }
                 }
 
@@ -3411,6 +3468,9 @@ class ConversationOrchestrator extends EventEmitter {
                     if (nextPlan.length > 0 && runtimeMode === 'plain') {
                         runtimeMode = 'planned-tools';
                     }
+                    if (nextPlan.length > 0) {
+                        planSource = 'planned';
+                    }
                 }
 
                 nextPlan = filterRepeatedPlanSteps(nextPlan, executedStepSignatures, executedStepSignatureCounts);
@@ -3432,6 +3492,7 @@ class ConversationOrchestrator extends EventEmitter {
                         && (nextPlan.length === 0 || shouldPreferRemoteFollowupPlan(toolEvents))) {
                         nextPlan = guidedRemotePlan;
                         runtimeMode = 'guided-tools';
+                        planSource = 'guided-remote';
                     }
                 }
 
@@ -3449,6 +3510,7 @@ class ConversationOrchestrator extends EventEmitter {
                     if (guidedResearchPlan.length > 0) {
                         nextPlan = guidedResearchPlan;
                         runtimeMode = 'guided-tools';
+                        planSource = 'guided-research';
                     }
                 }
 
@@ -3466,6 +3528,7 @@ class ConversationOrchestrator extends EventEmitter {
                     if (guidedDocumentPlan.length > 0) {
                         nextPlan = guidedDocumentPlan;
                         runtimeMode = 'guided-tools';
+                        planSource = 'guided-document';
                     }
                 }
 
@@ -3606,22 +3669,6 @@ class ConversationOrchestrator extends EventEmitter {
                 }));
 
                 if (autonomyApproved && budgetExceeded) {
-                    const extended = maybeExtendAutonomyBudget({
-                        autonomyApproved,
-                        reason: 'time-limit-during-round',
-                        startedAt,
-                        round,
-                        toolEvents,
-                        lastProgress: lastAutonomyProgress,
-                        budgetState,
-                        extensionBudget: autonomyExtensionBudget,
-                        executionTrace,
-                    });
-
-                    if (extended) {
-                        continue;
-                    }
-
                     executionTrace.push(createExecutionTraceEntry({
                         type: 'budget',
                         name: 'Autonomous execution time budget reached',
@@ -3653,6 +3700,53 @@ class ConversationOrchestrator extends EventEmitter {
                             })),
                         },
                     }));
+                }
+
+                if (autonomyApproved
+                    && planSource === 'guided-remote'
+                    && !roundFailed
+                    && !blockingRoundFailure) {
+                    const pendingGuidedRemotePlan = filterRepeatedPlanSteps(
+                        buildRemoteFollowupPlanFromToolEvents({
+                            objective,
+                            instructions,
+                            executionProfile: resolvedProfile,
+                            toolPolicy,
+                            toolEvents,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
+
+                    if (pendingGuidedRemotePlan.length === 0
+                        && !planSignalsFurtherAutonomousWork(nextPlan)) {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'planning',
+                            name: `Stop after guided remote round ${round}`,
+                            details: {
+                                round,
+                                reason: 'A deterministic remote follow-up succeeded and no further guided remote step remains.',
+                            },
+                        }));
+                        break;
+                    }
+                }
+
+                if (autonomyApproved
+                    && autonomyApprovalSource === 'config'
+                    && !roundFailed
+                    && !blockingRoundFailure
+                    && roundToolEvents.length > 0
+                    && !planSignalsFurtherAutonomousWork(nextPlan)) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'planning',
+                        name: `Stop after round ${round}`,
+                        details: {
+                            round,
+                            reason: 'Config-default autonomy should not keep looping after a successful round unless the plan itself signals more follow-up work.',
+                        },
+                    }));
+                    break;
                 }
 
                 if (roundToolEvents.some((event) => isTerminalWorkloadCreationEvent(event))) {
@@ -3928,6 +4022,10 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
+        const opencodeTarget = hasOpencodeIntent ? inferOpencodeTarget(objective, session) : 'local';
+        const opencodeTargetReady = hasOpencodeIntent
+            ? isOpencodeTargetReady(toolContext, opencodeTarget)
+            : false;
         const inferredWorkload = buildCanonicalWorkloadAction({
             request: objective,
         }, {
@@ -3976,7 +4074,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add(remoteToolId);
             }
-            if (hasOpencodeIntent && allowedToolIds.includes('opencode-run')) {
+            if (hasOpencodeIntent && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
                 candidates.add('opencode-run');
             }
             if (allowedToolIds.includes('docker-exec')) {
@@ -4121,6 +4219,10 @@ class ConversationOrchestrator extends EventEmitter {
                 enabled: userCheckpointPolicy.enabled === true,
                 remaining: Math.max(0, Number(userCheckpointPolicy.remaining) || 0),
                 pending: userCheckpointPolicy.pending || null,
+            },
+            opencode: {
+                target: opencodeTarget,
+                ready: opencodeTargetReady,
             },
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
@@ -4613,6 +4715,7 @@ class ConversationOrchestrator extends EventEmitter {
                 ? [
                     `For ${remoteToolId}, host, username, and port may be omitted when the runtime already has a configured default target or sticky session target.`,
                     `For server work, prefer trying ${remoteToolId} before asking the user for host details again.`,
+                    'do not repeat the same command back-to-back without an intervening fix or new reason.',
                     'Assume a Linux server and prefer Ubuntu-friendly commands unless tool results prove otherwise.',
                     'For remote-build work, verify architecture with uname -m before installing binaries and prefer arm64/aarch64 assets when applicable.',
                     'For Kubernetes troubleshooting, if a pod describe or status result shows CrashLoopBackOff, an init container failure, or Exit Code > 0, the next step is usually kubectl logs for the failing container or init container rather than asking the user what to run next.',
@@ -4622,6 +4725,7 @@ class ConversationOrchestrator extends EventEmitter {
                     ? [
                         `${remoteToolId} is still available for this request even if the runtime target is not yet verified in this prompt.`,
                         `Do not claim ${remoteToolId} is unavailable; call it when SSH or remote-build work is requested and let the tool return the actual missing-target or credential error if configuration is incomplete.`,
+                        'do not repeat the same command back-to-back without an intervening fix or new reason.',
                         'For Kubernetes pod failures, follow describe/status output with kubectl logs for the failing container before handing work back to the user.',
                         'When planning server commands, prefer Ubuntu-friendly standard utilities and avoid assuming rg, ifconfig, netstat, or docker-compose are installed.',
                       ]
@@ -4630,6 +4734,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         const plannerOutput = await this.completeText(prompt, { model, reasoningEffort });
         const parsed = safeJsonParse(plannerOutput);
+        const plannerReturnedSteps = Array.isArray(parsed?.steps);
         const requestedSteps = (Array.isArray(parsed?.steps) ? parsed.steps : [])
             .slice(0, MAX_PLAN_STEPS)
             .map((step) => this.normalizePlannedStep(step, {
@@ -4643,6 +4748,10 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (requestedSteps.length > 0) {
             return requestedSteps;
+        }
+
+        if (plannerReturnedSteps) {
+            return [];
         }
 
         return this.buildFallbackPlan({
@@ -5119,6 +5228,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`For server work, try ${remoteToolId} against the configured default or sticky session target before asking for host details again.`);
             parts.push('Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.');
             parts.push(`When calling ${remoteToolId}, always include a concrete command string. Omitting host/username/port is allowed when the runtime target is already configured, but omitting command is never allowed.`);
+            parts.push('do not repeat the same command back-to-back without an intervening fix or new reason.');
             parts.push('Prefer Ubuntu/Linux standard commands and verify architecture with `uname -m` before installing binaries or choosing downloads.');
             parts.push('For Kubernetes pod failures, follow describe/status output with `kubectl logs` for the failing container or init container instead of asking the user to run that next step.');
             parts.push('For remote website or HTML updates, prefer the remote file, ConfigMap, or deployed content as the source of truth unless the user explicitly provided a local artifact or path.');
@@ -5128,6 +5238,7 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push(`${remoteToolId} is available for this request even if the target is not currently verified in the prompt context.`);
             parts.push(`Do not claim the SSH tool is unavailable. Try ${remoteToolId} for explicit SSH or remote-build work and report the concrete tool error if the runtime lacks a configured target.`);
             parts.push(`When calling ${remoteToolId}, always include a concrete command string.`);
+            parts.push('do not repeat the same command back-to-back without an intervening fix or new reason.');
             parts.push('When constructing remote commands, assume Ubuntu/Linux defaults first and avoid depending on nonstandard utilities unless you have verified they exist.');
         }
 

@@ -199,6 +199,48 @@ const Agent = (function() {
             guidance: 'Use sparingly to create breathing room, not after every heading.',
         }),
     ]);
+    const NOTES_FRONTEND_FEATURE_PLAYBOOK = Object.freeze([
+        Object.freeze({
+            area: 'Page metadata',
+            guidance: 'Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel` when the page should feel complete, branded, or easier to scan.',
+        }),
+        Object.freeze({
+            area: 'Cover image',
+            guidance: 'If you have a direct image URL or a resolved image block, you may set `cover` to give the page a true hero treatment instead of leaving the top visually empty.',
+        }),
+        Object.freeze({
+            area: 'Properties',
+            guidance: '`properties` accepts an array of `{key, value}` pairs shown under the title. Use them for page type, status, mode, audience, or other compact metadata.',
+        }),
+        Object.freeze({
+            area: 'Block styling',
+            guidance: 'All inserted or replaced blocks may use `color` and `textColor`. Use accent colors for focal blocks and muted gray for secondary notes or appendix material.',
+        }),
+        Object.freeze({
+            area: 'Inline formatting',
+            guidance: 'Text-like blocks may include `formatting` such as `{bold, italic, underline, strikethrough, code}` when a line needs emphasis without becoming a separate block.',
+        }),
+        Object.freeze({
+            area: 'Nested structure',
+            guidance: 'Blocks can include `children`. Use nested content especially under toggles or other parent blocks when the page should feel interactive instead of flat.',
+        }),
+        Object.freeze({
+            area: 'Visuals',
+            guidance: 'Use `image` for known URLs and `ai_image` for AI generation or Unsplash search. `ai_image` supports `source`, `prompt`, `imageUrl`, `size`, `quality`, and `style`.',
+        }),
+        Object.freeze({
+            area: 'Source cards',
+            guidance: 'Use `bookmark` blocks for real links. They render as rich cards with title, description, favicon, and optional preview image.',
+        }),
+        Object.freeze({
+            area: 'Structured data',
+            guidance: 'Use `database` with `{columns, rows, sortColumn, sortDirection}` for trackers, comparisons, owners, metrics, and matrices instead of long repeated lists.',
+        }),
+        Object.freeze({
+            area: 'Diagrams and equations',
+            guidance: 'Use `mermaid` for flows, systems, and sequences, and `math` for LaTeX equations or formulas.',
+        }),
+    ]);
     const NOTES_TEMPLATE_DESIGN_PRESETS = Object.freeze({
         brief: Object.freeze({
             pageIcon: '📌',
@@ -778,9 +820,12 @@ const Agent = (function() {
         return matches.map((template, index) => [
             `${index + 1}. ${template.name} [${template.id}]`,
             `   Use when: ${template.useWhen}`,
+            `   Recommended metadata: ${buildTemplateMetadataSummary(template.id)}`,
+            `   Required palette: ${buildTemplateRequiredPalette(template.id).join(' + ')}`,
             '   Suggested block flow:',
             ...template.structure.map((step) => `   - ${step}`),
             `   Design moves: ${template.designRules.join(' ')}`,
+            `   Frontend moves: ${buildTemplateFrontendMoves(template.id).join(' ')}`,
         ].join('\n')).join('\n\n');
     }
 
@@ -789,6 +834,145 @@ const Agent = (function() {
             `- ${entry.type}: ${entry.whenToUse}`,
             `  Use guidance: ${entry.guidance}`,
         ].join('\n')).join('\n');
+    }
+
+    function buildFrontendFeatureGuide() {
+        return NOTES_FRONTEND_FEATURE_PLAYBOOK.map((entry) => [
+            `- ${entry.area}: ${entry.guidance}`,
+        ].join('\n')).join('\n');
+    }
+
+    function buildTemplateRequiredPalette(templateId = 'brief') {
+        switch (templateId) {
+            case 'research':
+                return ['callout', 'hero image/ai_image', 'bookmark source cluster', 'toggle for deep detail'];
+            case 'project':
+                return ['callout', 'database or tracker', 'todo next steps', 'styled section headings'];
+            case 'meeting':
+                return ['callout or summary block', 'agenda/notes hierarchy', 'todo action items', 'supporting divider or toggle'];
+            case 'documentation':
+                return ['callout', 'numbered steps or code', 'toggle or FAQ section', 'bookmark references'];
+            case 'dashboard':
+                return ['callout', 'database', 'compact highlights section', 'todo or blocker section'];
+            case 'journal':
+                return ['callout', 'short reflection sections', 'todo or priorities', 'optional visual or quote'];
+            default:
+                return ['callout', 'list for scannability', 'clear next-step or closeout section'];
+        }
+    }
+
+    function buildTemplateMetadataSuggestions(templateId = 'brief') {
+        switch (templateId) {
+            case 'research':
+                return [
+                    { key: 'Type', value: 'Research' },
+                    { key: 'Mode', value: 'Knowledge hub' },
+                    { key: 'Evidence', value: 'Source-linked' },
+                ];
+            case 'project':
+                return [
+                    { key: 'Type', value: 'Project' },
+                    { key: 'Status', value: 'Active draft' },
+                    { key: 'Mode', value: 'Working plan' },
+                ];
+            case 'meeting':
+                return [
+                    { key: 'Type', value: 'Meeting' },
+                    { key: 'Mode', value: 'Action log' },
+                    { key: 'Status', value: 'Open' },
+                ];
+            case 'documentation':
+                return [
+                    { key: 'Type', value: 'Documentation' },
+                    { key: 'Audience', value: 'Reader guide' },
+                    { key: 'Status', value: 'Draft' },
+                ];
+            case 'dashboard':
+                return [
+                    { key: 'Type', value: 'Dashboard' },
+                    { key: 'Cadence', value: 'Snapshot' },
+                    { key: 'Mode', value: 'Operational' },
+                ];
+            case 'journal':
+                return [
+                    { key: 'Type', value: 'Journal' },
+                    { key: 'Mode', value: 'Reflection' },
+                    { key: 'Status', value: 'Personal note' },
+                ];
+            default:
+                return [
+                    { key: 'Type', value: 'Brief' },
+                    { key: 'Layout', value: 'Scan-first' },
+                    { key: 'Status', value: 'Draft' },
+                ];
+        }
+    }
+
+    function buildTemplateMetadataSummary(templateId = 'brief') {
+        return buildTemplateMetadataSuggestions(templateId)
+            .map((entry) => `${entry.key}: ${entry.value}`)
+            .join(', ');
+    }
+
+    function buildTemplateFrontendMoves(templateId = 'brief') {
+        switch (templateId) {
+            case 'research':
+                return [
+                    'Set a page icon and compact research properties.',
+                    'Lead with a hero visual or reference image when the topic benefits from it.',
+                    'Use bookmarks instead of prose-only citations.',
+                ];
+            case 'project':
+                return [
+                    'Use update_page metadata so the page reads like a live working surface.',
+                    'Prefer a database over repeated bullet lists for workstreams or owners.',
+                    'Keep next actions visible as todo blocks.',
+                ];
+            case 'meeting':
+                return [
+                    'Use properties for the meeting type or status when useful.',
+                    'Separate discussion from decisions and follow-up blocks.',
+                    'Use toggles for raw notes or appendix material.',
+                ];
+            case 'documentation':
+                return [
+                    'Use properties to clarify document type or audience.',
+                    'Keep setup or process sections procedural, not essay-like.',
+                    'Use bookmarks for linked references and toggles for FAQ depth.',
+                ];
+            case 'dashboard':
+                return [
+                    'Use page metadata and database blocks to make the page feel operational.',
+                    'Keep the top of the page status-first.',
+                    'Use compact supporting sections rather than long prose.',
+                ];
+            case 'journal':
+                return [
+                    'Use a personal icon and light metadata only if it improves the page.',
+                    'Keep sections short and revisitable.',
+                    'A quote or visual can help the page feel intentional without becoming busy.',
+                ];
+            default:
+                return [
+                    'Use page metadata when it helps the page feel complete.',
+                    'Lead with one focal block and one scannable support block.',
+                    'Keep the page compact and deliberate.',
+                ];
+        }
+    }
+
+    function buildTemplateExecutionChecklist(templateMatches = []) {
+        const leadTemplate = Array.isArray(templateMatches) && templateMatches.length > 0 ? templateMatches[0] : null;
+        if (!leadTemplate) {
+            return '- Use the strongest matching page recipe and make the design visible in blocks and metadata.';
+        }
+
+        return [
+            `- Lead recipe: ${leadTemplate.name}.`,
+            `- Add or preserve metadata: ${buildTemplateMetadataSummary(leadTemplate.id)}.`,
+            `- Minimum block mix: ${buildTemplateRequiredPalette(leadTemplate.id).join(', ')}.`,
+            `- Frontend moves: ${buildTemplateFrontendMoves(leadTemplate.id).join(' ')}`,
+        ].join('\n');
     }
 
     function buildBlockOpportunityGuidance(question = '', pageContext = null, templateMatches = []) {
@@ -976,6 +1160,36 @@ const Agent = (function() {
             typeCounts,
             layoutSupportCount,
         };
+    }
+
+    function hasMeaningfulPageIcon(pageContext = null) {
+        const icon = String(pageContext?.icon || '').trim();
+        return Boolean(icon && !/^note$/i.test(icon));
+    }
+
+    function inferCoverUrlFromBlocks(blocks = []) {
+        if (!Array.isArray(blocks)) {
+            return '';
+        }
+
+        for (const block of blocks) {
+            const type = canonicalizeBlockType(block?.type || '');
+            if (type === 'image') {
+                const url = String(block?.content?.url || '').trim();
+                if (/^https?:\/\//i.test(url)) {
+                    return url;
+                }
+            }
+
+            if (type === 'ai_image') {
+                const url = String(block?.content?.imageUrl || block?.content?.downloadUrl || '').trim();
+                if (/^https?:\/\//i.test(url)) {
+                    return url;
+                }
+            }
+        }
+
+        return '';
     }
 
     function buildPageContextFromGeneratedBlocks(blocks = [], context = null) {
@@ -1291,6 +1505,36 @@ const Agent = (function() {
         });
     }
 
+    function applyTemplatePageMetadata(action = null, { template = null, preset = null, context = null, question = '' } = {}) {
+        if (!action || typeof action !== 'object') {
+            return action;
+        }
+
+        const nextAction = {
+            ...action,
+        };
+        const wantsDesignedPage = /\b(design|designed|polished|beautiful|styled|visual|notion|notion-like|dashboard|brief|report)\b/i.test(String(question || ''));
+        const existingProperties = Array.isArray(context?.properties) ? context.properties : [];
+
+        if (!nextAction.icon && (!hasMeaningfulPageIcon(context) || wantsDesignedPage) && preset?.pageIcon) {
+            nextAction.icon = preset.pageIcon;
+        }
+
+        if ((!Array.isArray(nextAction.properties) || nextAction.properties.length === 0)
+            && (existingProperties.length === 0 || wantsDesignedPage)) {
+            nextAction.properties = buildTemplateMetadataSuggestions(template?.id || 'brief');
+        }
+
+        if (!nextAction.cover && !context?.hasCover) {
+            const coverUrl = inferCoverUrlFromBlocks(nextAction.blocks);
+            if (coverUrl) {
+                nextAction.cover = coverUrl;
+            }
+        }
+
+        return nextAction;
+    }
+
     function extractSourceBookmarksFromToolEvents(toolEvents = []) {
         if (!Array.isArray(toolEvents) || toolEvents.length === 0) {
             return [];
@@ -1524,7 +1768,12 @@ const Agent = (function() {
                 }
             }
 
-            return enhancedAction;
+            return applyTemplatePageMetadata(enhancedAction, {
+                template,
+                preset,
+                context,
+                question,
+            });
         });
     }
 
@@ -1563,16 +1812,22 @@ const Agent = (function() {
 
         const selection = getSelectionSnapshot(pageContext);
         const properties = Array.isArray(pageContext.properties) ? pageContext.properties.length : 0;
+        const propertyList = Array.isArray(pageContext.properties) && pageContext.properties.length > 0
+            ? pageContext.properties.map((prop) => `${prop.key}: ${prop.value}`).join(', ')
+            : 'None';
         const outlineItems = pageContext.outline?.length || 0;
         const setupLines = [
             `Page title: ${pageContext.title || 'Untitled'}`,
             `Page id: ${pageContext.pageId || 'unknown'}`,
+            `Page icon: ${pageContext.icon || '(none)'}`,
+            `Has cover: ${pageContext.hasCover ? 'yes' : 'no'}`,
             `Block count: ${pageContext.blockCount}`,
             `Word count: ${pageContext.wordCount}`,
             `Reading time: ${pageContext.readingTime} min`,
             `Default model: ${pageContext.defaultModel || state.selectedModel}`,
             `Outline headings: ${outlineItems}`,
             `Properties: ${properties}`,
+            `Property values: ${propertyList}`,
             `Last updated: ${formatTimestamp(pageContext.lastUpdated)}`,
             `Selection: ${selection.selectedBlockSummary}`,
             `Supported text colors: default, ${NOTES_COLOR_OPTIONS.join(', ')}`,
@@ -1595,8 +1850,10 @@ const Agent = (function() {
         const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
         const blockPlaybook = buildBlockCapabilityPlaybook();
+        const frontendFeatureGuide = buildFrontendFeatureGuide();
         const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
         const designManual = buildNotesPageDesignManual();
+        const templateChecklist = buildTemplateExecutionChecklist(templateMatches);
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -1635,11 +1892,17 @@ ${templateGuidance}
 BLOCK CAPABILITY PLAYBOOK:
 ${blockPlaybook}
 
+FRONTEND FEATURES YOU CAN USE:
+${frontendFeatureGuide}
+
 PAGE DESIGN MANUAL:
 ${designManual}
 
 BLOCK OPPORTUNITIES FOR THIS REQUEST:
 ${blockOpportunities}
+
+TEMPLATE EXECUTION CHECKLIST:
+${templateChecklist}
 
 PAGE DESIGN CRITERIA:
 ${designCriteria}
@@ -1701,6 +1964,7 @@ BLOCK DESIGN HEURISTICS:
 - If headings, text, and bullets are the only blocks in a substantial page draft, you almost certainly have not used the full page palette yet.
 - Before finalizing notes-actions, do a palette audit and check whether callout, database, bookmark, image/ai_image, mermaid, toggle, quote, todo, divider, code, or math would improve the page.
 - For a polished Notion-like page, treat visual hierarchy as required work, not optional polish: use a focal block near the top, style section labels with textColor where helpful, and give secondary notes a quieter tone.
+- Use the frontend metadata surface when it improves the result: page icon, cover URL, compact properties, and page default model are all available in notes mode.
 
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
@@ -1737,6 +2001,8 @@ GUIDELINES:
 - In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
+- You may include \`formatting\` on text-like blocks using \`{bold, italic, underline, strikethrough, code}\`.
+- You may include \`children\` on blocks when nested content improves the page, especially under toggles.
 - Do not invent block IDs - only use IDs that exist in the page
 - Keep assistant_reply concise unless user asks for detailed explanation
 - If generating Mermaid diagrams, include clean diagram code in a \`\`\`mermaid block
