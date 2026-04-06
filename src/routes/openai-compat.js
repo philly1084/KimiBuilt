@@ -34,7 +34,7 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { getSessionControlState } = require('../runtime-control-state');
-const { buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const {
     buildScopedSessionMetadata,
     resolveSessionScope,
@@ -968,6 +968,7 @@ router.post('/chat/completions', async (req, res, next) => {
                             assistantText: fullText,
                             toolEvents,
                             artifacts,
+                            assistantMetadata: resolvedCompletion.response?.metadata,
                         }));
                     }
                     completeRuntimeTask(runtimeTask?.id, {
@@ -987,6 +988,8 @@ router.post('/chat/completions', async (req, res, next) => {
                         artifacts,
                         tool_events: toolEvents,
                         toolEvents,
+                        assistant_metadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
+                        assistantMetadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
                     })}\n\n`);
                     res.write('data: [DONE]\n\n');
                 }
@@ -1125,6 +1128,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 assistantText: outputText,
                 toolEvents: response?.metadata?.toolEvents || [],
                 artifacts,
+                assistantMetadata: response?.metadata,
             }));
         }
         completeRuntimeTask(runtimeTask?.id, {
@@ -1158,6 +1162,8 @@ router.post('/chat/completions', async (req, res, next) => {
             artifacts,
             tool_events: response?.metadata?.toolEvents || [],
             toolEvents: response?.metadata?.toolEvents || [],
+            assistant_metadata: buildFrontendAssistantMetadata(response?.metadata),
+            assistantMetadata: buildFrontendAssistantMetadata(response?.metadata),
         });
     } catch (err) {
         failRuntimeTask(runtimeTask?.id, {
@@ -1551,6 +1557,7 @@ router.post('/responses', async (req, res, next) => {
                             assistantText: fullText,
                             toolEvents: resolvedCompletion.response?.metadata?.toolEvents || [],
                             artifacts,
+                            assistantMetadata: resolvedCompletion.response?.metadata,
                         }));
                     }
                     completeRuntimeTask(runtimeTask?.id, {
@@ -1560,7 +1567,14 @@ router.post('/responses', async (req, res, next) => {
                         duration: Date.now() - startedAt,
                         metadata: resolvedCompletion.response?.metadata || {},
                     });
-                    res.write(`data: ${JSON.stringify({ type: 'response.completed', response: resolvedCompletion.response, session_id: sessionId, artifacts })}\n\n`);
+                    res.write(`data: ${JSON.stringify({
+                        type: 'response.completed',
+                        response: resolvedCompletion.response,
+                        session_id: sessionId,
+                        artifacts,
+                        assistant_metadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
+                        assistantMetadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
+                    })}\n\n`);
                 }
             }
 
@@ -1694,6 +1708,7 @@ router.post('/responses', async (req, res, next) => {
                 assistantText: outputText,
                 toolEvents: response?.metadata?.toolEvents || [],
                 artifacts,
+                assistantMetadata: response?.metadata,
             }));
         }
         completeRuntimeTask(runtimeTask?.id, {
@@ -1708,6 +1723,8 @@ router.post('/responses', async (req, res, next) => {
             ...response,
             session_id: sessionId,
             artifacts,
+            assistant_metadata: buildFrontendAssistantMetadata(response?.metadata),
+            assistantMetadata: buildFrontendAssistantMetadata(response?.metadata),
         });
     } catch (err) {
         failRuntimeTask(runtimeTask?.id, {

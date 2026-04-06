@@ -27,7 +27,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
-const { buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const {
     buildScopedSessionMetadata,
@@ -581,6 +581,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                         assistantText: fullText,
                         toolEvents: event.response?.metadata?.toolEvents || [],
                         artifacts,
+                        assistantMetadata: event.response?.metadata,
                     }));
                 }
                 completeRuntimeTask(runtimeTask?.id, {
@@ -595,6 +596,8 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     sessionId: session.id,
                     responseId: event.response.id,
                     artifacts,
+                    assistant_metadata: buildFrontendAssistantMetadata(event.response?.metadata),
+                    assistantMetadata: buildFrontendAssistantMetadata(event.response?.metadata),
                 }));
             }
         }

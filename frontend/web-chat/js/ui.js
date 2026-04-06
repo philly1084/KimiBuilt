@@ -1392,6 +1392,194 @@ class UIHelpers {
         return rendered;
     }
 
+    sanitizeAssistantHtml(html = '') {
+        return DOMPurify.sanitize(html, {
+            ALLOWED_TAGS: [
+                'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins',
+                'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                'ul', 'ol', 'li',
+                'blockquote', 'hr',
+                'code', 'pre',
+                'a', 'img',
+                'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                'div', 'span', 'button', 'i',
+                'input', 'textarea', 'label'
+            ],
+            ALLOWED_ATTR: [
+                'href', 'title', 'target', 'rel', 'src', 'alt',
+                'class', 'data-code', 'onclick', 'type', 'checked', 'disabled',
+                'aria-label', 'aria-hidden', 'aria-checked',
+                'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide',
+                'data-message-id', 'data-survey-id', 'data-allow-multiple', 'data-max-selections',
+                'data-step-id', 'data-step-input-type', 'data-step-required', 'data-step-allow-multiple', 'data-step-max-selections',
+                'data-current-step-index', 'data-option-id', 'data-option-label', 'data-submitted',
+                'placeholder', 'rows', 'maxlength', 'role', 'value', 'style'
+            ],
+            ALLOW_DATA_ATTR: false,
+        });
+    }
+
+    normalizeStructuredAssistantMarkdown(source = '') {
+        return String(source || '')
+            .split(/(```[\s\S]*?```)/g)
+            .map((segment) => {
+                if (/^```[\s\S]*```$/.test(segment)) {
+                    return segment;
+                }
+
+                return this.restoreFlattenedMarkdownBlocks(segment);
+            })
+            .join('');
+    }
+
+    restoreFlattenedMarkdownBlocks(source = '') {
+        let text = String(source || '').replace(/\r\n?/g, '\n');
+        if (!text.trim()) {
+            return text;
+        }
+
+        const wrappedQuoteMatch = text.match(/^"([\s\S]*)"$/);
+        if (wrappedQuoteMatch && /(?:#{2,6}\s|\d+\.\s|[*-]\s)/.test(wrappedQuoteMatch[1])) {
+            text = wrappedQuoteMatch[1];
+        }
+
+        if (!/[^\n]\s+(?:#{2,6}\s|\d+\.\s|[*-]\s)/.test(text)) {
+            return text.trim();
+        }
+
+        return text
+            .replace(/([.!?:])(?=#{2,6}\s)/g, '$1\n\n')
+            .replace(/([.!?:])(?=\d+\.\s)/g, '$1\n')
+            .replace(/([.!?:])(?=[*-]\s)/g, '$1\n')
+            .replace(/([^\n])\s+(?=#{2,6}\s)/g, '$1\n\n')
+            .replace(/([^\n])\s+(?=\d+\.\s)/g, '$1\n')
+            .replace(/([^\n])\s+(?=[*-]\s)/g, '$1\n')
+            .replace(/([^\n])\s+(?=(?:Style|Overview|Summary|Recommendation|Next Step|Next Steps):)/g, '$1\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+
+    looksLikeAgentBrief(markdown = '', message = {}) {
+        const normalized = String(markdown || '').trim();
+        if (normalized.length < 180) {
+            return false;
+        }
+
+        const hasStructure = /(^|\n)#{2,6}\s/m.test(normalized)
+            || /(^|\n)\d+\.\s/m.test(normalized)
+            || /(^|\n)[*-]\s/m.test(normalized);
+        if (!hasStructure) {
+            return false;
+        }
+
+        if (message?.agentExecutor === true || message?.metadata?.agentExecutor === true) {
+            return true;
+        }
+
+        return /based on your survey response|here['’]s what i(?: have|'ve) prepared|would you like|this (?:diagram|wireframe|plan|architecture)/i.test(normalized);
+    }
+
+    buildAgentBriefSections(markdown = '') {
+        const normalized = String(markdown || '').trim();
+        const headingMatch = normalized.match(/^#{2,6}\s+(.+)$/m);
+        let intro = '';
+        let title = '';
+        let bodyMarkdown = normalized;
+        let footer = '';
+
+        if (headingMatch) {
+            title = String(headingMatch[1] || '').trim();
+            intro = normalized.slice(0, headingMatch.index).trim();
+            bodyMarkdown = normalized.slice(headingMatch.index + headingMatch[0].length).trim();
+        } else {
+            const sections = normalized.split(/\n{2,}/).filter(Boolean);
+            if (sections.length > 1) {
+                intro = sections[0].trim();
+                bodyMarkdown = sections.slice(1).join('\n\n').trim();
+            }
+        }
+
+        const footerMatch = bodyMarkdown.match(/\n\n([^#\n][\s\S]*\?)$/);
+        if (footerMatch && footerMatch[1].length <= 320) {
+            footer = footerMatch[1].trim();
+            bodyMarkdown = bodyMarkdown.slice(0, footerMatch.index).trim();
+        }
+
+        return {
+            title,
+            intro,
+            bodyMarkdown: bodyMarkdown || normalized,
+            footer,
+        };
+    }
+
+    buildAssistantRenderPlan(messageOrContent, isStreaming = false) {
+        const message = messageOrContent && typeof messageOrContent === 'object'
+            ? messageOrContent
+            : { content: messageOrContent };
+        const content = message.displayContent ?? message.content;
+        if (!content) {
+            return {
+                html: isStreaming ? '<span class="streaming-cursor" aria-hidden="true"></span>' : '',
+                variant: 'default',
+            };
+        }
+
+        const surveyRenderPlan = this.buildSurveyRenderPlan(content, message);
+        const normalizedMarkdown = this.normalizeStructuredAssistantMarkdown(surveyRenderPlan.markdown);
+
+        if (this.looksLikeAgentBrief(normalizedMarkdown, message)) {
+            const sections = this.buildAgentBriefSections(normalizedMarkdown);
+            const introHtml = sections.intro
+                ? this.sanitizeAssistantHtml(marked.parse(sections.intro))
+                : '';
+            const bodyHtml = this.sanitizeAssistantHtml(marked.parse(sections.bodyMarkdown));
+            const footerHtml = sections.footer
+                ? `<div class="agent-brief-card__footer">
+                        <div class="agent-brief-card__hint">Next move</div>
+                        <div class="agent-brief-card__next">${this.escapeHtml(sections.footer)}</div>
+                    </div>`
+                : '';
+            let html = `
+                <div class="agent-brief-card">
+                    <div class="agent-brief-card__eyebrow">${message?.agentExecutor === true || message?.metadata?.agentExecutor === true ? 'Agent Result' : 'Structured Reply'}</div>
+                    ${sections.title ? `
+                    <div class="agent-brief-card__title-row">
+                        <h3 class="agent-brief-card__title">${this.escapeHtml(sections.title)}</h3>
+                        ${(message?.agentExecutor === true || message?.metadata?.agentExecutor === true)
+                            ? '<span class="agent-brief-card__badge">Autonomous</span>'
+                            : ''}
+                    </div>
+                    ` : ''}
+                    ${introHtml ? `<div class="agent-brief-card__intro">${introHtml}</div>` : ''}
+                    <div class="agent-brief-card__body">${bodyHtml}</div>
+                    ${footerHtml}
+                </div>
+            `;
+
+            if (isStreaming) {
+                html += '<span class="streaming-cursor" aria-hidden="true"></span>';
+            }
+
+            return {
+                html,
+                variant: 'agent-brief',
+            };
+        }
+
+        let html = this.sanitizeAssistantHtml(marked.parse(normalizedMarkdown));
+        html = this.replaceSurveyRenderTokens(html, surveyRenderPlan.surveys);
+
+        if (isStreaming) {
+            html += '<span class="streaming-cursor" aria-hidden="true"></span>';
+        }
+
+        return {
+            html,
+            variant: 'default',
+        };
+    }
+
     renderMessage(message, isStreaming = false) {
         if (message.type === 'unsplash-search') {
             return this.renderUnsplashSearchMessage(message);
@@ -1438,9 +1626,19 @@ class UIHelpers {
             message.content :
             (message.displayContent ?? message.content);
 
+        const assistantRenderPlan = isUser
+            ? null
+            : this.buildAssistantRenderPlan(message, isStreaming);
         const content = isUser ? 
             this.renderUserMessage(renderedContent) :
-            this.renderAssistantMessage(message, isStreaming);
+            assistantRenderPlan.html;
+        const messageTextClass = isUser
+            ? ''
+            : `markdown-content${assistantRenderPlan?.variant === 'agent-brief' ? ' message-text--agent-brief' : ''}`;
+
+        if (assistantRenderPlan?.variant === 'agent-brief') {
+            messageEl.classList.add('message--agent-brief');
+        }
 
         const time = this.formatTime(message.timestamp);
         const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
@@ -1462,7 +1660,7 @@ class UIHelpers {
                         ` : ''}
                     </div>
                 </div>
-                <div class="message-text ${isUser ? '' : 'markdown-content'}">
+                <div class="message-text ${messageTextClass}">
                     ${content}
                 </div>
             </div>
@@ -1482,51 +1680,7 @@ class UIHelpers {
     }
 
     renderAssistantMessage(messageOrContent, isStreaming = false) {
-        const message = messageOrContent && typeof messageOrContent === 'object'
-            ? messageOrContent
-            : { content: messageOrContent };
-        const content = message.displayContent ?? message.content;
-        if (!content) return '';
-
-        const surveyRenderPlan = this.buildSurveyRenderPlan(content, message);
-        
-        // Parse markdown
-        let html = marked.parse(surveyRenderPlan.markdown);
-        
-        // Sanitize HTML with stricter config
-        html = DOMPurify.sanitize(html, {
-            ALLOWED_TAGS: [
-                'p', 'br', 'strong', 'em', 'u', 's', 'del', 'ins',
-                'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-                'ul', 'ol', 'li',
-                'blockquote', 'hr',
-                'code', 'pre',
-                'a', 'img',
-                'table', 'thead', 'tbody', 'tr', 'th', 'td',
-                'div', 'span', 'button', 'i',
-                'input', 'textarea', 'label'
-            ],
-            ALLOWED_ATTR: [
-                'href', 'title', 'target', 'rel', 'src', 'alt', 
-                'class', 'data-code', 'onclick', 'type', 'checked', 'disabled',
-                'aria-label', 'aria-hidden', 'aria-checked',
-                'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide',
-                'data-message-id', 'data-survey-id', 'data-allow-multiple', 'data-max-selections',
-                'data-step-id', 'data-step-input-type', 'data-step-required', 'data-step-allow-multiple', 'data-step-max-selections',
-                'data-current-step-index', 'data-option-id', 'data-option-label', 'data-submitted',
-                'placeholder', 'rows', 'maxlength', 'role', 'value', 'style'
-            ],
-            ALLOW_DATA_ATTR: false
-        });
-
-        html = this.replaceSurveyRenderTokens(html, surveyRenderPlan.surveys);
-
-        // Add streaming cursor if needed
-        if (isStreaming) {
-            html += '<span class="streaming-cursor" aria-hidden="true"></span>';
-        }
-
-        return html;
+        return this.buildAssistantRenderPlan(messageOrContent, isStreaming).html;
     }
 
     toggleSurveyOption(button) {
@@ -2196,7 +2350,10 @@ class UIHelpers {
         if (isUser) {
             textEl.textContent = content;
         } else {
-            textEl.innerHTML = this.renderAssistantMessage({ id: messageId, content }, isStreaming);
+            const renderPlan = this.buildAssistantRenderPlan({ id: messageId, content }, isStreaming);
+            messageEl.classList.toggle('message--agent-brief', renderPlan.variant === 'agent-brief');
+            textEl.classList.toggle('message-text--agent-brief', renderPlan.variant === 'agent-brief');
+            textEl.innerHTML = renderPlan.html;
             this.highlightCodeBlocks(textEl);
             this.renderMermaidDiagrams(textEl);
             this.reinitializeIcons(textEl);
@@ -2225,7 +2382,10 @@ class UIHelpers {
         const newText = currentText + content;
         
         // Re-render as markdown
-        textEl.innerHTML = this.renderAssistantMessage({ id: messageId, content: newText }, true);
+        const renderPlan = this.buildAssistantRenderPlan({ id: messageId, content: newText }, true);
+        messageEl.classList.toggle('message--agent-brief', renderPlan.variant === 'agent-brief');
+        textEl.classList.toggle('message-text--agent-brief', renderPlan.variant === 'agent-brief');
+        textEl.innerHTML = renderPlan.html;
         this.highlightCodeBlocks(textEl);
         this.renderMermaidDiagrams(textEl);
         this.reinitializeIcons(textEl);

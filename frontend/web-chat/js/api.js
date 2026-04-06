@@ -140,6 +140,48 @@ function extractAssistantText(value) {
     return '';
 }
 
+function normalizeAssistantMetadata(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const nextMetadata = {};
+
+    if (value.agentExecutor === true) {
+        nextMetadata.agentExecutor = true;
+    }
+
+    if (typeof value.taskType === 'string' && value.taskType.trim()) {
+        nextMetadata.taskType = value.taskType.trim();
+    }
+
+    return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+}
+
+function extractAssistantMetadata(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const sources = [
+        value.assistantMetadata,
+        value.assistant_metadata,
+        value.response?.assistantMetadata,
+        value.response?.assistant_metadata,
+        value.response?.metadata,
+        value.metadata,
+    ];
+
+    for (const source of sources) {
+        const normalized = normalizeAssistantMetadata(source);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    return null;
+}
+
 function isRemoteBuildAutonomyApproved() {
     try {
         const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY) ?? '';
@@ -472,6 +514,7 @@ class OpenAIAPIClient extends EventTarget {
                     sessionId: this.currentSessionId,
                     artifacts: [],
                     toolEvents: [],
+                    assistantMetadata: null,
                 };
                 
                 try {
@@ -492,6 +535,7 @@ class OpenAIAPIClient extends EventTarget {
                                         sessionId: pendingDone.sessionId || this.currentSessionId,
                                         artifacts: pendingDone.artifacts || [],
                                         toolEvents: pendingDone.toolEvents || [],
+                                        assistantMetadata: pendingDone.assistantMetadata || null,
                                     };
                                     return;
                                 }
@@ -517,12 +561,18 @@ class OpenAIAPIClient extends EventTarget {
                                         pendingDone.toolEvents = toolEvents;
                                     }
 
+                                    const assistantMetadata = extractAssistantMetadata(parsed);
+                                    if (assistantMetadata) {
+                                        pendingDone.assistantMetadata = assistantMetadata;
+                                    }
+
                                     if (parsed.type === 'done') {
                                         yield {
                                             type: 'done',
                                             sessionId: pendingDone.sessionId || this.currentSessionId,
                                             artifacts: pendingDone.artifacts || [],
                                             toolEvents: pendingDone.toolEvents || [],
+                                            assistantMetadata: pendingDone.assistantMetadata || null,
                                         };
                                         return;
                                     }
@@ -539,6 +589,7 @@ class OpenAIAPIClient extends EventTarget {
                                             sessionId: pendingDone.sessionId || this.currentSessionId,
                                             artifacts: pendingDone.artifacts || [],
                                             toolEvents: pendingDone.toolEvents || [],
+                                            assistantMetadata: pendingDone.assistantMetadata || null,
                                         };
                                         return;
                                     }
@@ -564,6 +615,7 @@ class OpenAIAPIClient extends EventTarget {
                     sessionId: pendingDone.sessionId || this.currentSessionId,
                     artifacts: pendingDone.artifacts || [],
                     toolEvents: pendingDone.toolEvents || [],
+                    assistantMetadata: pendingDone.assistantMetadata || null,
                 };
                 return;
                 
@@ -603,6 +655,8 @@ class OpenAIAPIClient extends EventTarget {
             const stream = await this.client.chat.completions.create(params, {
                 signal: signal
             });
+
+            let pendingAssistantMetadata = null;
             
             for await (const chunk of stream) {
                 // Check if aborted
@@ -623,19 +677,30 @@ class OpenAIAPIClient extends EventTarget {
                 if (chunk.session_id) {
                     this.currentSessionId = chunk.session_id;
                 }
+
+                const assistantMetadata = extractAssistantMetadata(chunk);
+                if (assistantMetadata) {
+                    pendingAssistantMetadata = assistantMetadata;
+                }
                 
                 if (this.isTerminalFinishReason(chunk.choices[0]?.finish_reason)) {
                     yield {
                         type: 'done',
                         sessionId: this.currentSessionId,
                         toolEvents: this.extractToolEvents(chunk),
+                        assistantMetadata: pendingAssistantMetadata,
                     };
                     return;
                 }
             }
             
             // Ensure we always send done
-            yield { type: 'done', sessionId: this.currentSessionId, toolEvents: [] };
+            yield {
+                type: 'done',
+                sessionId: this.currentSessionId,
+                toolEvents: [],
+                assistantMetadata: pendingAssistantMetadata,
+            };
         } catch (error) {
             if (error.name === 'AbortError') {
                 yield { type: 'error', error: 'Request cancelled', cancelled: true };
@@ -724,6 +789,7 @@ class OpenAIAPIClient extends EventTarget {
                 ),
                 sessionId: this.currentSessionId,
                 toolEvents: this.extractToolEvents(response),
+                assistantMetadata: extractAssistantMetadata(response),
             };
         } catch (error) {
             console.error('Chat error:', error);
@@ -778,6 +844,7 @@ class OpenAIAPIClient extends EventTarget {
                     ),
                     sessionId: this.currentSessionId,
                     toolEvents: this.extractToolEvents(data),
+                    assistantMetadata: extractAssistantMetadata(data),
                 };
             } catch (error) {
                 lastError = error;

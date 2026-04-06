@@ -29,7 +29,7 @@ const {
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
-const { buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const {
     buildScopedSessionMetadata,
@@ -532,6 +532,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                             assistantText: fullText,
                             toolEvents,
                             artifacts,
+                            assistantMetadata: event.response?.metadata,
                         }));
                     }
                     completeRuntimeTask(runtimeTask?.id, {
@@ -541,7 +542,15 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         duration: Date.now() - startedAt,
                         metadata: event.response?.metadata || {},
                     });
-                    res.write(`data: ${JSON.stringify({ type: 'done', sessionId, responseId: event.response.id, artifacts, toolEvents })}\n\n`);
+                    res.write(`data: ${JSON.stringify({
+                        type: 'done',
+                        sessionId,
+                        responseId: event.response.id,
+                        artifacts,
+                        toolEvents,
+                        assistant_metadata: buildFrontendAssistantMetadata(event.response?.metadata),
+                        assistantMetadata: buildFrontendAssistantMetadata(event.response?.metadata),
+                    })}\n\n`);
                 }
             }
 
@@ -647,6 +656,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 assistantText: outputText,
                 toolEvents: response?.metadata?.toolEvents || [],
                 artifacts,
+                assistantMetadata: response?.metadata,
             }));
         }
 

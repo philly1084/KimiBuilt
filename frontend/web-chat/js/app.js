@@ -3578,6 +3578,18 @@ class ChatApp {
         uiHelpers.hideTypingIndicator();
 
         let currentMessage = this.getSessionMessage(sessionId, parentMessageId);
+        if (currentMessage && chunk.assistantMetadata && typeof chunk.assistantMetadata === 'object') {
+            const updatedMessage = {
+                ...currentMessage,
+                ...chunk.assistantMetadata,
+                metadata: {
+                    ...(currentMessage.metadata || {}),
+                    ...chunk.assistantMetadata,
+                },
+            };
+            this.upsertSessionMessage(sessionId, updatedMessage);
+            currentMessage = updatedMessage;
+        }
         if (currentMessage && Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
             const updatedMessage = this.attachSurveyDisplayContent(currentMessage, chunk.toolEvents);
             if (updatedMessage !== currentMessage) {

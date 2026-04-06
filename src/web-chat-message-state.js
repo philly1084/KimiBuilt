@@ -84,6 +84,24 @@ function buildArtifactSummary(artifacts = []) {
     return `Created ${files.length} files. Use Download below.`;
 }
 
+function buildFrontendAssistantMetadata(metadata = null) {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        return {};
+    }
+
+    const nextMetadata = {};
+
+    if (metadata.agentExecutor === true) {
+        nextMetadata.agentExecutor = true;
+    }
+
+    if (typeof metadata.taskType === 'string' && metadata.taskType.trim()) {
+        nextMetadata.taskType = metadata.taskType.trim();
+    }
+
+    return nextMetadata;
+}
+
 function extractHostLabel(value = '') {
     try {
         return new URL(String(value || '').trim()).hostname.replace(/^www\./i, '');
@@ -456,6 +474,7 @@ function buildWebChatSessionMessages({
     assistantText = '',
     toolEvents = [],
     artifacts = [],
+    assistantMetadata: inputAssistantMetadata = null,
     timestamp = null,
 } = {}) {
     const userTimestamp = offsetIsoTimestamp(timestamp, 0);
@@ -467,6 +486,10 @@ function buildWebChatSessionMessages({
         parentMessageId: assistantMessageId,
         timestamp: assistantTimestamp,
     });
+    const mergedAssistantMetadata = {
+        ...assistantMetadata,
+        ...buildFrontendAssistantMetadata(inputAssistantMetadata),
+    };
     const sequencedAuxiliaryMessages = auxiliaryMessages.map((message, index) => ({
         ...message,
         timestamp: offsetIsoTimestamp(assistantTimestamp, index + 1),
@@ -484,7 +507,7 @@ function buildWebChatSessionMessages({
             role: 'assistant',
             content: stripNullCharacters(String(assistantText || '')).trim(),
             timestamp: assistantTimestamp,
-            metadata: assistantMetadata,
+            metadata: mergedAssistantMetadata,
         },
         ...sequencedAuxiliaryMessages,
     ].filter((message) => message.role && message.content);
@@ -492,6 +515,7 @@ function buildWebChatSessionMessages({
 
 module.exports = {
     buildArtifactSummary,
+    buildFrontendAssistantMetadata,
     buildWebChatAssistantEnvelope,
     buildWebChatSessionMessages,
 };

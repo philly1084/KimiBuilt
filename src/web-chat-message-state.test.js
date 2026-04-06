@@ -63,4 +63,23 @@ describe('buildWebChatSessionMessages', () => {
         expect(messages[1].metadata.displayContent).toContain('"question": "What visual and functional style should the new HTML follow?"');
         expect(messages[1].metadata.displayContent).not.toContain('Choose an option below and I will continue from there.');
     });
+
+    test('preserves frontend-safe assistant metadata for agent replies', () => {
+        const messages = buildWebChatSessionMessages({
+            userText: 'Sketch the system layout.',
+            assistantText: '### Architecture\n\n- Gateway\n- Services',
+            assistantMetadata: {
+                agentExecutor: true,
+                taskType: 'chat',
+                trace: { steps: 4 },
+            },
+            timestamp: '2026-04-05T12:30:00.000Z',
+        });
+
+        expect(messages[1].metadata).toEqual(expect.objectContaining({
+            agentExecutor: true,
+            taskType: 'chat',
+        }));
+        expect(messages[1].metadata.trace).toBeUndefined();
+    });
 });
