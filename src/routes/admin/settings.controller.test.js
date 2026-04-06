@@ -136,6 +136,18 @@ describe('settings.controller personality support', () => {
     expect(effective.gatewayBaseURL).toBeUndefined();
   });
 
+  test('keeps opaque GitHub token env names in the effective OpenCode config', () => {
+    controller.settings.integrations.opencode.providerEnvAllowlist = ['OPENAI_API_KEY'];
+
+    const effective = controller.getEffectiveOpencodeConfig();
+
+    expect(effective.providerEnvAllowlist).toEqual(expect.arrayContaining([
+      'OPENAI_API_KEY',
+      'GITHUB_TOKEN',
+      'GH_TOKEN',
+    ]));
+  });
+
   test('resetting the personality restores default settings and soul file content', async () => {
     controller.settings.personality = {
       enabled: false,

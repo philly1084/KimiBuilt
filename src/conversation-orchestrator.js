@@ -1998,11 +1998,27 @@ function hasOpencodeRepoWorkIntent(text = '') {
     return repoContext && codeWorkIntent && !infraOnlyIntent;
 }
 
+function hasExplicitRemoteRepoWorkspaceIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized || !hasOpencodeRepoWorkIntent(normalized)) {
+        return false;
+    }
+
+    return [
+        /\b(remote|server|ssh|host)\b[\s\S]{0,40}\b(repo|repository|workspace|codebase|project|app|service|package|module)\b/,
+        /\b(repo|repository|workspace|codebase|project|app|service|package|module)\b[\s\S]{0,40}\b(remote|server|ssh|host)\b/,
+        /\b(on|in|inside|within)\b[\s\S]{0,20}\b(the )?(server|remote host|remote machine)\b/,
+        /\b(remote workspace|server workspace|remote repo|server repo)\b/,
+        /\b\/var\/www\/|\b\/srv\/|\b\/opt\/|\b\/home\/[a-z0-9._-]+\//,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function inferOpencodeTarget(objective = '', session = null) {
     const normalized = String(objective || '').trim().toLowerCase();
     const sshContext = resolveSshRequestContext(objective, session);
+    const remoteRepoIntent = hasExplicitRemoteRepoWorkspaceIntent(normalized);
 
-    if ((sshContext.shouldTreatAsSsh || /\b(remote|server|ssh|host)\b/.test(normalized))
+    if (remoteRepoIntent
         && (hasUsableSshDefaults() || sshContext.target?.host)) {
         return 'remote-default';
     }

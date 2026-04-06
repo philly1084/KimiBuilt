@@ -160,6 +160,8 @@ const config = {
             'OPENAI_API_KEY',
             'OPENAI_BASE_URL',
             'OPENAI_MODEL',
+            'GITHUB_TOKEN',
+            'GH_TOKEN',
             'ANTHROPIC_API_KEY',
             'GOOGLE_API_KEY',
             'OPENROUTER_API_KEY',

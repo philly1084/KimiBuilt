@@ -4050,6 +4050,77 @@ describe('ConversationOrchestrator', () => {
         expect(directAction.params.prompt).toContain(objective);
     });
 
+    test('keeps opencode local when the repo is local and only deployment is remote', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'git-safe', 'k3s-deploy', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Use this repo to build the backend package locally, push it to GitHub, then deploy it to the remote k3s cluster and verify the rollout.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
+        expect(toolPolicy.opencode).toEqual({
+            target: 'local',
+            ready: true,
+        });
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'opencode-run',
+            params: expect.objectContaining({
+                target: 'local',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            }),
+        }));
+    });
+
     test('keeps discovery-first server build prompts out of the repo implementation lane', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

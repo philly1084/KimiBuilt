@@ -306,6 +306,60 @@ describe('OpenCode service helpers', () => {
         expect(opencodeClientMock.lastRemoteClient.waitForHealth).toHaveBeenCalledTimes(1);
     });
 
+    test('passes opaque GitHub token env vars through to the remote OpenCode runtime', async () => {
+        const originalGitHubToken = process.env.GITHUB_TOKEN;
+        const originalGhToken = process.env.GH_TOKEN;
+        process.env.GITHUB_TOKEN = 'ghp_test_secret';
+        process.env.GH_TOKEN = 'ghs_test_secret';
+        settingsController.settings.api.baseURL = 'https://kimibuilt.example.com';
+        settingsController.getEffectiveSshConfig = jest.fn(() => ({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        }));
+        settingsController.getEffectiveOpencodeConfig = jest.fn(() => ({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['GITHUB_TOKEN', 'GH_TOKEN'],
+            remoteAutoInstall: false,
+        }));
+
+        const service = new OpenCodeService({
+            store: {
+                isAvailable: () => true,
+            },
+        });
+        service.buildManagedConfig = jest.fn(async () => ({
+            provider: {},
+        }));
+
+        try {
+            await service.startRemoteInstance('remote-run-2', '/srv/apps/kimibuilt', 'manual');
+        } finally {
+            if (originalGitHubToken === undefined) {
+                delete process.env.GITHUB_TOKEN;
+            } else {
+                process.env.GITHUB_TOKEN = originalGitHubToken;
+            }
+            if (originalGhToken === undefined) {
+                delete process.env.GH_TOKEN;
+            } else {
+                process.env.GH_TOKEN = originalGhToken;
+            }
+        }
+
+        const bootstrapScript = opencodeClientMock.lastRemoteClient.sshTool.executeSSH.mock.calls[0][1];
+        expect(bootstrapScript).toContain("GITHUB_TOKEN='ghp_test_secret'");
+        expect(bootstrapScript).toContain("GH_TOKEN='ghs_test_secret'");
+    });
+
     test('bootstraps the remote OpenCode runtime using the configured workspace', async () => {
         settingsController.settings.api.baseURL = 'https://kimibuilt.example.com';
         settingsController.getEffectiveSshConfig = jest.fn(() => ({

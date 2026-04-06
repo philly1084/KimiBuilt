@@ -13,6 +13,8 @@ const {
 } = require('../../agent-soul');
 const { resolvePreferredWritableFile } = require('../../runtime-state-paths');
 
+const OPENCODE_OPAQUE_ENV_KEYS = ['GITHUB_TOKEN', 'GH_TOKEN'];
+
 class SettingsController {
   constructor() {
     this.settings = {
@@ -457,6 +459,16 @@ class SettingsController {
 
   getEffectiveOpencodeConfig() {
     const stored = this.settings?.integrations?.opencode || {};
+    const providerEnvAllowlist = this.normalizeStringArray(
+      stored.providerEnvAllowlist,
+      config.opencode.providerEnvAllowlist || [],
+    );
+
+    for (const key of OPENCODE_OPAQUE_ENV_KEYS) {
+      if (!providerEnvAllowlist.includes(key)) {
+        providerEnvAllowlist.push(key);
+      }
+    }
 
     return {
       enabled: stored.enabled !== false && config.opencode.enabled !== false,
@@ -468,10 +480,7 @@ class SettingsController {
         config.opencode.allowedWorkspaceRoots || [],
       ),
       remoteDefaultWorkspace: String(stored.remoteDefaultWorkspace || config.opencode.remoteDefaultWorkspace || '').trim(),
-      providerEnvAllowlist: this.normalizeStringArray(
-        stored.providerEnvAllowlist,
-        config.opencode.providerEnvAllowlist || [],
-      ),
+      providerEnvAllowlist,
       remoteAutoInstall: stored.remoteAutoInstall === true || config.opencode.remoteAutoInstall === true,
     };
   }
