@@ -2454,6 +2454,33 @@ function extractQuestionnaireCheckpointFromText(text = '') {
     return null;
 }
 
+function extractQuestionnaireCheckpointFromJson(text = '') {
+    const parsed = parseLenientJson(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+    }
+
+    const type = String(parsed.type || parsed.kind || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[_\s]+/g, '-');
+    const hasCheckpointShape = Array.isArray(parsed.steps)
+        || Array.isArray(parsed.questions)
+        || Boolean(parsed.question || parsed.prompt || parsed.ask);
+    const looksLikeCheckpoint = !type
+        || ['survey', 'questionnaire', 'checkpoint', 'user-checkpoint'].includes(type);
+
+    if (!hasCheckpointShape || !looksLikeCheckpoint) {
+        return null;
+    }
+
+    try {
+        return normalizeCheckpointRequest(parsed);
+    } catch (_error) {
+        return null;
+    }
+}
+
 function maybeRecoverUserCheckpointResponse({
     response = null,
     selectedTools = [],
@@ -2478,7 +2505,9 @@ function maybeRecoverUserCheckpointResponse({
         return null;
     }
 
-    const checkpoint = extractQuestionnaireCheckpointFromText(getModelResponseText(response));
+    const responseText = getModelResponseText(response);
+    const checkpoint = extractQuestionnaireCheckpointFromJson(responseText)
+        || extractQuestionnaireCheckpointFromText(responseText);
     if (!checkpoint) {
         return null;
     }

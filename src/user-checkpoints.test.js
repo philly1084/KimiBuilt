@@ -193,4 +193,57 @@ describe('user checkpoint helpers', () => {
             ],
         }));
     });
+
+    test('normalizes questionnaire aliases like questions, choices, and *_choice types', () => {
+        const checkpoint = normalizeCheckpointRequest({
+            type: 'survey',
+            title: 'Quick Preferences',
+            questions: [
+                {
+                    id: 'focus',
+                    type: 'single_choice',
+                    prompt: 'What should we focus on right now?',
+                    choices: [
+                        { value: 'plan', label: 'Planning a new project' },
+                        { value: 'build', label: 'Building something concrete' },
+                    ],
+                },
+                {
+                    id: 'output',
+                    type: 'multiple_choice',
+                    prompt: 'What outputs would be useful?',
+                    choices: [
+                        { value: 'code', label: 'Code snippet or script' },
+                        { value: 'doc', label: 'Documentation or notes' },
+                        { value: 'design', label: 'Wireframe or diagram' },
+                    ],
+                },
+            ],
+        });
+
+        expect(checkpoint).toEqual(expect.objectContaining({
+            title: 'Quick Preferences',
+            steps: [
+                expect.objectContaining({
+                    id: 'focus',
+                    question: 'What should we focus on right now?',
+                    inputType: 'choice',
+                    options: [
+                        { id: 'plan', label: 'Planning a new project' },
+                        { id: 'build', label: 'Building something concrete' },
+                    ],
+                }),
+                expect.objectContaining({
+                    id: 'output',
+                    question: 'What outputs would be useful?',
+                    inputType: 'multi-choice',
+                    options: [
+                        { id: 'code', label: 'Code snippet or script' },
+                        { id: 'doc', label: 'Documentation or notes' },
+                        { id: 'design', label: 'Wireframe or diagram' },
+                    ],
+                }),
+            ],
+        }));
+    });
 });

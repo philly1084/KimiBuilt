@@ -37,6 +37,7 @@ describe('tool execution profiles', () => {
         const toolIds = getAllowedToolIdsForProfile(REMOTE_BUILD_EXECUTION_PROFILE);
 
         expect(toolIds).toContain('k3s-deploy');
+        expect(toolIds).toContain('opencode-run');
         expect(toolIds).toContain('code-sandbox');
         expect(toolIds).not.toContain('code-execute');
         expect(HIDDEN_FRONTEND_TOOL_IDS).toContain('code-execute');

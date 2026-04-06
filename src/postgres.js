@@ -203,6 +203,67 @@ class PostgresManager {
         await this.query('CREATE INDEX IF NOT EXISTS idx_agent_runs_claim_expires_at ON agent_runs(claim_expires_at)');
         await this.query('CREATE INDEX IF NOT EXISTS idx_agent_run_events_run_id_created_at ON agent_run_events(run_id, created_at DESC)');
 
+        await this.query(`
+            CREATE TABLE IF NOT EXISTS opencode_session_bindings (
+                id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                session_id TEXT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                target TEXT NOT NULL,
+                workspace_path TEXT NOT NULL,
+                opencode_session_id TEXT NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+
+        await this.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_opencode_session_bindings_unique
+            ON opencode_session_bindings(owner_id, session_id, target, workspace_path)
+        `);
+        await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_session_bindings_opencode_session_id ON opencode_session_bindings(opencode_session_id)');
+
+        await this.query(`
+            CREATE TABLE IF NOT EXISTS opencode_runs (
+                id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                session_id TEXT NULL REFERENCES sessions(id) ON DELETE SET NULL,
+                opencode_session_id TEXT NULL,
+                target TEXT NOT NULL,
+                workspace_path TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                agent TEXT NOT NULL DEFAULT 'build',
+                model TEXT NULL,
+                approval_mode TEXT NOT NULL DEFAULT 'manual',
+                async BOOLEAN NOT NULL DEFAULT FALSE,
+                status TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                diff JSONB NOT NULL DEFAULT '[]'::jsonb,
+                error JSONB NOT NULL DEFAULT '{}'::jsonb,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                started_at TIMESTAMPTZ NULL,
+                finished_at TIMESTAMPTZ NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+
+        await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_runs_owner_id_created_at ON opencode_runs(owner_id, created_at DESC)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_runs_session_id_created_at ON opencode_runs(session_id, created_at DESC)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_runs_status_created_at ON opencode_runs(status, created_at DESC)');
+        await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_runs_opencode_session_id ON opencode_runs(opencode_session_id)');
+
+        await this.query(`
+            CREATE TABLE IF NOT EXISTS opencode_run_events (
+                id BIGSERIAL PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES opencode_runs(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+        await this.query('CREATE INDEX IF NOT EXISTS idx_opencode_run_events_run_id_id ON opencode_run_events(run_id, id ASC)');
+
         return true;
     }
 

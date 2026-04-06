@@ -28,6 +28,47 @@ describe('ToolManager image tools', () => {
 
     expect(toolManager.getTool('git-safe')).toBeTruthy();
     expect(toolManager.getTool('k3s-deploy')).toBeTruthy();
+    expect(toolManager.getTool('opencode-run')).toBeTruthy();
+  });
+
+  test('routes opencode-run through the injected OpenCode service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const opencodeService = {
+      createRun: jest.fn(),
+      runTool: jest.fn(async () => ({
+        async: false,
+        runId: 'run-1',
+        status: 'completed',
+        workspacePath: '/srv/apps/kimibuilt',
+        summary: 'Build fixed.',
+      })),
+    };
+
+    const result = await toolManager.executeTool('opencode-run', {
+      prompt: 'Fix the build in this repo.',
+      workspacePath: '/srv/apps/kimibuilt',
+      target: 'remote-default',
+    }, {
+      sessionId: 'session-1',
+      ownerId: 'user-1',
+      opencodeService,
+    });
+
+    expect(result.success).toBe(true);
+    expect(opencodeService.runTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Fix the build in this repo.',
+        workspacePath: '/srv/apps/kimibuilt',
+        target: 'remote-default',
+      }),
+      expect.objectContaining({
+        ownerId: 'user-1',
+        sessionId: 'session-1',
+      }),
+    );
+    expect(result.data.summary).toBe('Build fixed.');
   });
 
   test('normalizes markdown-wrapped image URLs before validation', async () => {

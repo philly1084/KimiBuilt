@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { config } = require('../config');
+const { isAuthorizedOpenCodeGatewayRequest } = require('../opencode/gateway');
 
 function base64UrlEncode(input) {
     return Buffer.from(input)
@@ -213,6 +214,11 @@ function isApiRequest(req) {
 function requireAuth(req, res, next) {
     if (!isAuthEnabled()) {
         req.user = { username: 'anonymous', role: 'open' };
+        return next();
+    }
+
+    if (req.path.startsWith('/v1') && isAuthorizedOpenCodeGatewayRequest(req)) {
+        req.user = { username: 'opencode', role: 'internal-gateway' };
         return next();
     }
 

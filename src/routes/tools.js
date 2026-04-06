@@ -10,6 +10,9 @@ const { getToolManager } = require('../agent-sdk/tools');
 const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
+const {
+  resolveOpenCodeGatewayBaseURL,
+} = require('../opencode/gateway');
 const { sessionStore } = require('../session-store');
 const { inferExecutionProfile } = require('../runtime-execution');
 const { canonicalizeRemoteToolId, isRemoteCommandToolId, isSuspiciousSshTargetHost } = require('../ai-route-utils');
@@ -57,6 +60,9 @@ function isInternalClusterBaseURL(baseURL = '') {
 
 function buildRuntimeSummary(toolManager) {
   const ssh = settingsController.getEffectiveSshConfig();
+  const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
+    ? settingsController.getEffectiveOpencodeConfig()
+    : {};
 
   return {
     source: 'backend',
@@ -75,6 +81,17 @@ function buildRuntimeSummary(toolManager) {
       username: ssh.username || '',
       hasPassword: Boolean(ssh.password),
       hasPrivateKey: Boolean(ssh.privateKeyPath),
+    },
+    opencode: {
+      enabled: opencode.enabled !== false,
+      binaryPath: opencode.binaryPath || 'opencode',
+      defaultAgent: opencode.defaultAgent || 'build',
+      defaultModel: opencode.defaultModel || '',
+      gatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'remote-default' }),
+      localGatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'local' }),
+      allowedWorkspaceRoots: opencode.allowedWorkspaceRoots || [],
+      remoteDefaultWorkspace: opencode.remoteDefaultWorkspace || '',
+      sshConfigured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
     },
   };
 }
@@ -123,6 +140,24 @@ function buildToolRuntime(toolId) {
       configured: Boolean(process.env.DOCKER_HOST),
       provider: 'docker',
       dockerHost: process.env.DOCKER_HOST || '',
+    };
+  }
+
+  if (toolId === 'opencode-run') {
+    const ssh = settingsController.getEffectiveSshConfig();
+    const opencode = typeof settingsController.getEffectiveOpencodeConfig === 'function'
+      ? settingsController.getEffectiveOpencodeConfig()
+      : {};
+    return {
+      configured: opencode.enabled !== false,
+      provider: 'kimibuilt-openai-compatible',
+      gatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'remote-default' }),
+      localGatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target: 'local' }),
+      defaultAgent: opencode.defaultAgent || 'build',
+      defaultModel: opencode.defaultModel || '',
+      allowedWorkspaceRoots: opencode.allowedWorkspaceRoots || [],
+      remoteDefaultWorkspace: opencode.remoteDefaultWorkspace || '',
+      sshConfigured: Boolean(ssh.enabled && ssh.host && ssh.username && (ssh.password || ssh.privateKeyPath)),
     };
   }
 
@@ -191,6 +226,10 @@ function isToolVisibleByRuntime(toolId, runtime = null, support = null) {
 
   if (toolId === 'k3s-deploy') {
     return Boolean(support?.runtime?.ready || runtime?.configured);
+  }
+
+  if (toolId === 'opencode-run') {
+    return Boolean(runtime?.configured);
   }
 
   if (['web-search', 'image-generate', 'image-search-unsplash'].includes(toolId)) {
@@ -273,6 +312,7 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
     timezone,
     now,
     toolManager,
+    opencodeService: req.app?.locals?.opencodeService || null,
     tools: {
       get: (toolId) => toolManager.getTool(toolId),
     },

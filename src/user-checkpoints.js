@@ -112,7 +112,7 @@ function normalizeCheckpointOption(option = {}, index = 0) {
     }
 
     const description = trimText(option.description || option.details || option.hint || '');
-    const id = slugifyOptionId(option.id || label, `option-${index + 1}`);
+    const id = slugifyOptionId(option.id || option.value || label, `option-${index + 1}`);
 
     return {
         id,
@@ -190,10 +190,13 @@ function normalizeCheckpointStep(step = {}, index = 0) {
 
 function normalizeCheckpointSteps(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
-    const rawSteps = Array.isArray(source.steps) ? source.steps : [];
+    const rawSteps = Array.isArray(source.steps)
+        ? source.steps
+        : (Array.isArray(source.questions) ? source.questions : []);
     const legacyStep = rawSteps.length === 0
         ? normalizeCheckpointStep({
             ...source,
+            options: source.options || source.choices || [],
             inputType: source.inputType || source.type || source.kind || '',
         }, 0)
         : null;

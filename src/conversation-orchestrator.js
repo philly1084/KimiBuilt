@@ -1909,6 +1909,55 @@ function hasExplicitLocalSandboxIntent(text = '') {
         || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
 }
 
+function hasOpencodeRepoWorkIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const repoContext = /\b(this repo|the repo|repository|workspace|codebase|project|app|service|package|module)\b/.test(normalized);
+    const codeWorkIntent = /\b(implement|implementation|fix|refactor|rewrite|update|modify|edit|patch|add|create|build|compile|test|run tests?|debug)\b/.test(normalized);
+    const infraOnlyIntent = /\b(kubectl|kubernetes|k8s|deployment|deploy|rollout|restart|systemctl|journalctl|ingress|pod|cluster|node|server health|uptime|hostname|dns|tls|certificate|logs?)\b/.test(normalized)
+        && !repoContext;
+
+    return repoContext && codeWorkIntent && !infraOnlyIntent;
+}
+
+function inferOpencodeTarget(objective = '', session = null) {
+    const normalized = String(objective || '').trim().toLowerCase();
+    const sshContext = resolveSshRequestContext(objective, session);
+
+    if ((sshContext.shouldTreatAsSsh || /\b(remote|server|ssh|host)\b/.test(normalized))
+        && (hasUsableSshDefaults() || sshContext.target?.host)) {
+        return 'remote-default';
+    }
+
+    return 'local';
+}
+
+function resolvePreferredOpencodeWorkspacePath({ session = null, toolContext = {}, target = 'local' } = {}) {
+    const opencodeConfig = typeof settingsController.getEffectiveOpencodeConfig === 'function'
+        ? settingsController.getEffectiveOpencodeConfig()
+        : {};
+
+    if (target === 'remote-default') {
+        return String(
+            toolContext?.remoteWorkspacePath
+            || session?.metadata?.lastOpencodeWorkspacePath
+            || opencodeConfig.remoteDefaultWorkspace
+            || '',
+        ).trim();
+    }
+
+    return String(
+        toolContext?.workspacePath
+        || toolContext?.repositoryPath
+        || session?.metadata?.lastOpencodeWorkspacePath
+        || config.deploy.defaultRepositoryPath
+        || '',
+    ).trim();
+}
+
 function hasArchitectureDesignIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -3876,6 +3925,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
+        const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
         const inferredWorkload = buildCanonicalWorkloadAction({
             request: objective,
         }, {
@@ -3923,6 +3973,9 @@ class ConversationOrchestrator extends EventEmitter {
 
             if (remoteToolId && (sshContext.shouldTreatAsSsh || executionProfile === REMOTE_BUILD_EXECUTION_PROFILE)) {
                 candidates.add(remoteToolId);
+            }
+            if (hasOpencodeIntent && allowedToolIds.includes('opencode-run')) {
+                candidates.add('opencode-run');
             }
             if (allowedToolIds.includes('docker-exec')) {
                 candidates.add('docker-exec');
@@ -4190,6 +4243,27 @@ class ConversationOrchestrator extends EventEmitter {
                 reason: 'Explicit image-generation request should start by materializing reusable image artifacts.',
                 params: {
                     prompt: buildImagePromptFromArtifactRequest(objective),
+                },
+            };
+        }
+
+        if (toolPolicy.candidateToolIds.includes('opencode-run') && hasOpencodeRepoWorkIntent(objective)) {
+            const target = inferOpencodeTarget(objective, session);
+            const workspacePath = resolvePreferredOpencodeWorkspacePath({
+                session,
+                toolContext,
+                target,
+            });
+
+            return {
+                tool: 'opencode-run',
+                reason: target === 'remote-default'
+                    ? 'Repo-level code work on the remote workspace should start with the managed OpenCode runtime.'
+                    : 'Repo-level code work should start with the managed OpenCode runtime.',
+                params: {
+                    prompt: objective,
+                    target,
+                    ...(workspacePath ? { workspacePath } : {}),
                 },
             };
         }
@@ -4469,6 +4543,9 @@ class ConversationOrchestrator extends EventEmitter {
             'Only use tools listed above.',
             'Do not invent SSH hosts, usernames, file paths, or credentials.',
             'Every `remote-command` step must include a non-empty `params.command` string.',
+            'Use `opencode-run` for repo or workspace implementation, fix, refactor, build, compile, and test work when the request is about changing code rather than one-off host operations.',
+            'Every `opencode-run` step must include a non-empty `params.prompt` string. Include `params.workspacePath` when the runtime or session already identifies the workspace, and use `params.target` set to `remote-default` only for remote repository work.',
+            'Keep `remote-command` for kubectl, host inspection, package installs, logs, restarts, deployments, DNS, TLS, and other infrastructure operations.',
             'Every `agent-workload` step must use the deferred workload schema only: `{"tool":"agent-workload","reason":"why","params":{"action":"create_from_scenario","request":"the full original user request","timezone":"IANA/Zone"}}`.',
             'Do not parse the schedule, cron, or remote command yourself for `agent-workload`; pass the full original request and let the runtime canonicalize it.',
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
@@ -5007,6 +5084,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `git-safe remote-info` when you need to verify the current branch, HEAD revision, upstream tracking, or configured remotes before pushing.');
             parts.push('Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
             parts.push('Do not claim generic local shell or sandbox limits for Git work when `git-safe` is available. Continue through the constrained Git tool path instead.');
+        }
+
+        if (allowedToolIds.includes('opencode-run')) {
+            parts.push('Use `opencode-run` for long-form repository work: implementing changes, fixing bugs, refactoring, building, compiling, and testing in a codebase or workspace.');
+            parts.push('Point `opencode-run` at the local workspace by default, or use `target: "remote-default"` when the request is clearly about the remote repository workspace.');
+            parts.push('Keep `remote-command` for infrastructure work such as kubectl, logs, restarts, service inspection, package installs, and deployment operations.');
         }
 
         if (allowedToolIds.includes('web-scrape')) {

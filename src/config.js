@@ -143,6 +143,39 @@ const config = {
         defaultBranch: process.env.KIMIBUILT_DEPLOY_BRANCH || 'master',
     },
 
+    opencode: {
+        enabled: process.env.OPENCODE_ENABLED !== 'false',
+        binaryPath: process.env.OPENCODE_BINARY_PATH || 'opencode',
+        defaultAgent: process.env.OPENCODE_DEFAULT_AGENT || 'build',
+        defaultModel: process.env.OPENCODE_DEFAULT_MODEL || '',
+        gatewayApiKey: process.env.OPENCODE_GATEWAY_API_KEY || '',
+        allowedWorkspaceRoots: String(
+            process.env.OPENCODE_ALLOWED_WORKSPACE_ROOTS || process.env.DEFAULT_GIT_REPOSITORY_PATH || process.cwd(),
+        )
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+        remoteDefaultWorkspace: process.env.OPENCODE_REMOTE_DEFAULT_WORKSPACE || '',
+        providerEnvAllowlist: String(process.env.OPENCODE_PROVIDER_ENV_ALLOWLIST || [
+            'OPENAI_API_KEY',
+            'OPENAI_BASE_URL',
+            'OPENAI_MODEL',
+            'ANTHROPIC_API_KEY',
+            'GOOGLE_API_KEY',
+            'OPENROUTER_API_KEY',
+            'XAI_API_KEY',
+            'AZURE_OPENAI_API_KEY',
+            'AZURE_OPENAI_ENDPOINT',
+            'AWS_ACCESS_KEY_ID',
+            'AWS_SECRET_ACCESS_KEY',
+            'AWS_REGION',
+        ].join(','))
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+        remoteAutoInstall: process.env.OPENCODE_REMOTE_AUTO_INSTALL === 'true',
+    },
+
     runtime: {
         remoteBuildAutonomyDefault: process.env.REMOTE_BUILD_AUTONOMY_DEFAULT !== 'false',
         remoteBuildMaxAutonomousRounds: Math.max(

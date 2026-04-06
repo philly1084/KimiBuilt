@@ -653,7 +653,7 @@ class UIHelpers {
             return null;
         }
 
-        const id = String(option.id || label)
+        const id = String(option.id || option.value || label)
             .trim()
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
@@ -730,7 +730,9 @@ class UIHelpers {
             return null;
         }
 
-        const options = (Array.isArray(step.options) ? step.options : [])
+        const options = (Array.isArray(step.options)
+            ? step.options
+            : (Array.isArray(step.choices) ? step.choices : []))
             .map((option, optionIndex) => this.normalizeSurveyOption(option, optionIndex))
             .filter(Boolean)
             .slice(0, 5);
@@ -779,11 +781,13 @@ class UIHelpers {
             return [];
         }
 
-        const rawSteps = Array.isArray(value.steps) ? value.steps : [];
+        const rawSteps = Array.isArray(value.steps)
+            ? value.steps
+            : (Array.isArray(value.questions) ? value.questions : []);
         const legacyStep = rawSteps.length === 0
             ? this.normalizeSurveyStep({
                 ...value,
-                options: value.options,
+                options: value.options || value.choices,
             }, 0)
             : null;
 
@@ -813,7 +817,7 @@ class UIHelpers {
         };
     }
 
-    normalizeSurveyDefinition(value = null) {
+    normalizeSurveyDefinition(value = null, fallbackId = '') {
         if (!value || typeof value !== 'object') {
             return null;
         }
@@ -824,7 +828,7 @@ class UIHelpers {
         }
 
         return {
-            id: String(value.id || `survey-${Date.now().toString(36)}`).trim(),
+            id: String(value.id || fallbackId || `survey-${Date.now().toString(36)}`).trim(),
             title: String(value.title || 'Choose a direction').trim() || 'Choose a direction',
             whyThisMatters: String(value.whyThisMatters || value.context || value.rationale || '').trim(),
             steps,
@@ -970,7 +974,15 @@ class UIHelpers {
         const fencedMatch = source.match(/```(?:survey|kb-survey)\s*([\s\S]*?)```/i);
         if (fencedMatch?.[1]) {
             const parsed = this.parseJsonSafely(fencedMatch[1]);
-            const normalized = this.normalizeSurveyDefinition(parsed);
+            const normalized = this.normalizeSurveyDefinition(parsed, fallbackId);
+            if (normalized) {
+                return normalized;
+            }
+        }
+
+        const parsed = this.parseJsonSafely(source);
+        if (parsed) {
+            const normalized = this.normalizeSurveyDefinition(parsed, fallbackId);
             if (normalized) {
                 return normalized;
             }
@@ -1320,7 +1332,7 @@ class UIHelpers {
     buildSurveyRenderPlan(content = '', message = {}) {
         const source = String(content || '');
         if (!/```(?:survey|kb-survey)/i.test(source)) {
-            const inferredSurvey = this.extractPlainSurveyDefinition(source, message?.id || '');
+            const inferredSurvey = this.extractSurveyDefinitionFromContent(source, message?.id || '');
             if (inferredSurvey) {
                 const token = `KB_SURVEY_TOKEN_${String(message?.id || 'message').replace(/[^a-z0-9_-]/gi, '_')}_0`;
                 return {

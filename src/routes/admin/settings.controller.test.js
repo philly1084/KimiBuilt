@@ -18,6 +18,16 @@ jest.mock('../../config', () => ({
       password: '',
       jwtSecret: '',
     },
+    opencode: {
+      enabled: true,
+      binaryPath: 'opencode',
+      defaultAgent: 'build',
+      defaultModel: 'gpt-4o',
+      allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+      remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+      providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+      remoteAutoInstall: false,
+    },
   },
 }));
 
@@ -113,6 +123,17 @@ describe('settings.controller personality support', () => {
       filePath: 'soul.md',
     }));
     expect(publicSettings.integrations.ssh.password).toBeUndefined();
+  });
+
+  test('prefers stored OpenCode settings over config defaults where appropriate', () => {
+    controller.settings.integrations.opencode.binaryPath = '/custom/opencode';
+    controller.settings.integrations.opencode.defaultAgent = 'plan';
+
+    const effective = controller.getEffectiveOpencodeConfig();
+
+    expect(effective.binaryPath).toBe('/custom/opencode');
+    expect(effective.defaultAgent).toBe('plan');
+    expect(effective.gatewayBaseURL).toBeUndefined();
   });
 
   test('resetting the personality restores default settings and soul file content', async () => {

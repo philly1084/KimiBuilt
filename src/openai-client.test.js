@@ -1012,6 +1012,81 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(recovered?._kimibuilt?.toolEvents?.[0]?.result?.data?.recovered).toBe(true);
     });
 
+    test('recovers a real user-checkpoint response from raw json questionnaire output', () => {
+        const recovered = __testUtils.maybeRecoverUserCheckpointResponse({
+            response: {
+                choices: [{
+                    message: {
+                        content: [
+                            'json',
+                            '{',
+                            '  "type": "survey",',
+                            '  "id": "working-questaire-1",',
+                            '  "title": "Quick Preferences",',
+                            '  "questions": [',
+                            '    {',
+                            '      "id": "focus",',
+                            '      "type": "single_choice",',
+                            '      "prompt": "What should we focus on right now?",',
+                            '      "options": [',
+                            '        { "value": "plan", "label": "Planning a new project" },',
+                            '        { "value": "build", "label": "Building something concrete" }',
+                            '      ]',
+                            '    },',
+                            '    {',
+                            '      "id": "output",',
+                            '      "type": "multiple_choice",',
+                            '      "prompt": "What outputs would be useful?",',
+                            '      "options": [',
+                            '        { "value": "code", "label": "Code snippet or script" },',
+                            '        { "value": "doc", "label": "Documentation or notes" }',
+                            '      ]',
+                            '    }',
+                            '  ]',
+                            '}',
+                            "That's the JSON for a working questionnaire.",
+                        ].join('\n'),
+                    },
+                }],
+            },
+            selectedTools: [{ id: 'user-checkpoint' }],
+            toolEvents: [],
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 2,
+                    pending: null,
+                },
+            },
+            model: 'gpt-test',
+        });
+
+        expect(recovered?.output?.[0]?.content?.[0]?.text || '').toContain('```survey');
+        expect(recovered?._kimibuilt?.toolEvents?.[0]?.result?.toolId).toBe('user-checkpoint');
+        expect(recovered?._kimibuilt?.toolEvents?.[0]?.result?.data?.checkpoint).toEqual(expect.objectContaining({
+            id: 'working-questaire-1',
+            title: 'Quick Preferences',
+            steps: [
+                expect.objectContaining({
+                    id: 'focus',
+                    inputType: 'choice',
+                    options: [
+                        expect.objectContaining({ id: 'plan', label: 'Planning a new project' }),
+                        expect.objectContaining({ id: 'build', label: 'Building something concrete' }),
+                    ],
+                }),
+                expect.objectContaining({
+                    id: 'output',
+                    inputType: 'multi-choice',
+                    options: [
+                        expect.objectContaining({ id: 'code', label: 'Code snippet or script' }),
+                        expect.objectContaining({ id: 'doc', label: 'Documentation or notes' }),
+                    ],
+                }),
+            ],
+        }));
+    });
+
     test('offers document-workflow for research-backed deck generation when document service is available', () => {
         const toolManager = createToolManager();
         const prompt = 'Research vacation pricing in Halifax and build a slide deck I can review.';

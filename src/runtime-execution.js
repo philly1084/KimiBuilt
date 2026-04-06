@@ -222,6 +222,7 @@ async function executeConversationRuntime(app, params = {}) {
         ...(params.toolContext || {}),
         model: params?.toolContext?.model || params.model || null,
         documentService: params?.toolContext?.documentService || app?.locals?.documentService || null,
+        opencodeService: params?.toolContext?.opencodeService || app?.locals?.opencodeService || null,
     };
     const clientSurface = String(
         params.clientSurface

@@ -92,6 +92,7 @@ class ConversationRunService {
                 memoryService: this.memoryService,
                 ownerId,
                 workloadService: this.app?.locals?.agentWorkloadService,
+                opencodeService: this.app?.locals?.opencodeService || null,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
@@ -248,6 +249,7 @@ class ConversationRunService {
             memoryService: this.memoryService,
             ownerId,
             workloadService: this.app?.locals?.agentWorkloadService,
+            opencodeService: this.app?.locals?.opencodeService || null,
             executionProfile: metadata.executionProfile || null,
         });
 
@@ -275,7 +277,9 @@ class ConversationRunService {
                 username: params.username || null,
                 port: params.port || null,
             })
-            : JSON.stringify(result.data || {}, null, 2);
+            : toolId === 'opencode-run'
+                ? formatOpenCodeToolResult(result.data || {})
+                : JSON.stringify(result.data || {}, null, 2);
         const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, resolvedSession);
 
         if (outputText) {
@@ -441,6 +445,32 @@ class ConversationRunService {
             artifactMessage,
         };
     }
+}
+
+function formatOpenCodeToolResult(data = {}) {
+    const lines = [
+        `OpenCode ${String(data.status || 'completed').trim() || 'completed'} in ${data.workspacePath || 'workspace'} using the ${data.agent || 'build'} agent.`,
+    ];
+
+    if (data.summary) {
+        lines.push('', String(data.summary).trim());
+    }
+
+    const changedFiles = Array.isArray(data.diff)
+        ? data.diff
+            .map((entry) => String(entry?.path || entry?.file || entry?.newPath || '').trim())
+            .filter(Boolean)
+        : [];
+
+    if (changedFiles.length > 0) {
+        lines.push('', 'Changed files:', ...changedFiles.map((filePath) => `- ${filePath}`));
+    }
+
+    if (!data.summary && changedFiles.length === 0 && data.message) {
+        lines.push('', String(data.message).trim());
+    }
+
+    return lines.join('\n').trim();
 }
 
 module.exports = {

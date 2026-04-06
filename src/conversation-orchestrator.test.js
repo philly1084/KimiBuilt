@@ -1,5 +1,6 @@
 jest.mock('./routes/admin/settings.controller', () => ({
     getEffectiveSshConfig: jest.fn(),
+    getEffectiveOpencodeConfig: jest.fn(),
 }));
 
 const settingsController = require('./routes/admin/settings.controller');
@@ -38,6 +39,16 @@ describe('ConversationOrchestrator', () => {
             username: '',
             password: '',
             privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: '',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
         });
     });
 
@@ -3912,6 +3923,101 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).not.toContain('file-read');
         expect(toolPolicy.candidateToolIds).not.toContain('file-search');
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
+    });
+
+    test('prefers opencode-run for repo-level remote build work', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Fix the failing tests in this repo on the server and refactor the auth module.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {},
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'opencode-run',
+            params: expect.objectContaining({
+                prompt: objective,
+                target: 'remote-default',
+                workspacePath: '/srv/apps/kimibuilt',
+            }),
+        }));
+    });
+
+    test('keeps infrastructure-only remote build work on remote-command', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'web-search'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Use remote-build to inspect kubectl logs and restart the deployment.',
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('remote-command');
+        expect(toolPolicy.candidateToolIds).not.toContain('opencode-run');
     });
 
     test('keeps remote website replacement on remote-command and exposes local web-fetch when project memory includes internal artifact downloads', () => {

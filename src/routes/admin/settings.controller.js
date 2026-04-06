@@ -72,6 +72,16 @@ class SettingsController {
           username: '',
           password: '',
           privateKeyPath: '',
+        },
+        opencode: {
+          enabled: config.opencode.enabled !== false,
+          binaryPath: config.opencode.binaryPath || 'opencode',
+          defaultAgent: config.opencode.defaultAgent || 'build',
+          defaultModel: config.opencode.defaultModel || '',
+          allowedWorkspaceRoots: [...(config.opencode.allowedWorkspaceRoots || [])],
+          remoteDefaultWorkspace: config.opencode.remoteDefaultWorkspace || '',
+          providerEnvAllowlist: [...(config.opencode.providerEnvAllowlist || [])],
+          remoteAutoInstall: config.opencode.remoteAutoInstall === true,
         }
       }
     };
@@ -314,6 +324,50 @@ class SettingsController {
       };
     }
 
+    const opencodeUpdate = normalized.integrations?.opencode;
+    if (opencodeUpdate) {
+      const currentOpencode = this.settings?.integrations?.opencode || {};
+      const nextOpencode = {
+        ...opencodeUpdate,
+      };
+
+      if (nextOpencode.enabled !== undefined) {
+        nextOpencode.enabled = Boolean(nextOpencode.enabled);
+      }
+      if (nextOpencode.remoteAutoInstall !== undefined) {
+        nextOpencode.remoteAutoInstall = Boolean(nextOpencode.remoteAutoInstall);
+      }
+      if (nextOpencode.binaryPath !== undefined) {
+        nextOpencode.binaryPath = String(nextOpencode.binaryPath || '').trim() || currentOpencode.binaryPath || 'opencode';
+      }
+      if (nextOpencode.defaultAgent !== undefined) {
+        nextOpencode.defaultAgent = String(nextOpencode.defaultAgent || '').trim().toLowerCase() || currentOpencode.defaultAgent || 'build';
+      }
+      if (nextOpencode.defaultModel !== undefined) {
+        nextOpencode.defaultModel = String(nextOpencode.defaultModel || '').trim();
+      }
+      if (nextOpencode.remoteDefaultWorkspace !== undefined) {
+        nextOpencode.remoteDefaultWorkspace = String(nextOpencode.remoteDefaultWorkspace || '').trim();
+      }
+      if (nextOpencode.allowedWorkspaceRoots !== undefined) {
+        nextOpencode.allowedWorkspaceRoots = this.normalizeStringArray(
+          nextOpencode.allowedWorkspaceRoots,
+          currentOpencode.allowedWorkspaceRoots || [],
+        );
+      }
+      if (nextOpencode.providerEnvAllowlist !== undefined) {
+        nextOpencode.providerEnvAllowlist = this.normalizeStringArray(
+          nextOpencode.providerEnvAllowlist,
+          currentOpencode.providerEnvAllowlist || [],
+        );
+      }
+
+      normalized.integrations = {
+        ...(normalized.integrations || {}),
+        opencode: nextOpencode,
+      };
+    }
+
     return normalized;
   }
 
@@ -334,6 +388,10 @@ class SettingsController {
       ssh.host = effective.host || '';
       ssh.port = effective.port || 22;
       ssh.username = effective.username || '';
+    }
+
+    if (publicSettings.integrations?.opencode) {
+      publicSettings.integrations.opencode = this.getEffectiveOpencodeConfig();
     }
 
     if (publicSettings.security) {
@@ -397,6 +455,39 @@ class SettingsController {
     };
   }
 
+  getEffectiveOpencodeConfig() {
+    const stored = this.settings?.integrations?.opencode || {};
+
+    return {
+      enabled: stored.enabled !== false && config.opencode.enabled !== false,
+      binaryPath: String(stored.binaryPath || config.opencode.binaryPath || 'opencode').trim() || 'opencode',
+      defaultAgent: String(stored.defaultAgent || config.opencode.defaultAgent || 'build').trim().toLowerCase() || 'build',
+      defaultModel: String(stored.defaultModel || config.opencode.defaultModel || '').trim(),
+      allowedWorkspaceRoots: this.normalizeStringArray(
+        stored.allowedWorkspaceRoots,
+        config.opencode.allowedWorkspaceRoots || [],
+      ),
+      remoteDefaultWorkspace: String(stored.remoteDefaultWorkspace || config.opencode.remoteDefaultWorkspace || '').trim(),
+      providerEnvAllowlist: this.normalizeStringArray(
+        stored.providerEnvAllowlist,
+        config.opencode.providerEnvAllowlist || [],
+      ),
+      remoteAutoInstall: stored.remoteAutoInstall === true || config.opencode.remoteAutoInstall === true,
+    };
+  }
+
+  normalizeStringArray(value, fallback = []) {
+    const source = Array.isArray(value)
+      ? value
+      : String(value || '')
+        .split(',');
+    const normalized = source
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+
+    return normalized.length > 0 ? Array.from(new Set(normalized)) : [...fallback];
+  }
+
   /**
    * Get default settings
    */
@@ -458,6 +549,16 @@ class SettingsController {
           username: '',
           password: '',
           privateKeyPath: '',
+        },
+        opencode: {
+          enabled: config.opencode.enabled !== false,
+          binaryPath: config.opencode.binaryPath || 'opencode',
+          defaultAgent: config.opencode.defaultAgent || 'build',
+          defaultModel: config.opencode.defaultModel || '',
+          allowedWorkspaceRoots: [...(config.opencode.allowedWorkspaceRoots || [])],
+          remoteDefaultWorkspace: config.opencode.remoteDefaultWorkspace || '',
+          providerEnvAllowlist: [...(config.opencode.providerEnvAllowlist || [])],
+          remoteAutoInstall: config.opencode.remoteAutoInstall === true,
         }
       }
     };

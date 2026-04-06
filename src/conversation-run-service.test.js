@@ -297,4 +297,81 @@ describe('ConversationRunService', () => {
         }));
         expect(result.artifactMessage).toBe('Created the PDF artifact (cluster-plan.pdf).');
     });
+
+    test('formats opencode structured execution results for the transcript', async () => {
+        const executeTool = jest.fn(async () => ({
+            success: true,
+            data: {
+                status: 'completed',
+                workspacePath: '/srv/apps/kimibuilt',
+                agent: 'build',
+                summary: 'Fixed the build failure and updated the config.',
+                diff: [
+                    { path: 'src/opencode/service.js' },
+                    { path: 'src/routes/tools.js' },
+                ],
+            },
+        }));
+        ensureRuntimeToolManager.mockResolvedValue({
+            executeTool,
+        });
+
+        const sessionStore = {
+            getOwned: jest.fn(async () => ({
+                id: 'session-1',
+                metadata: {},
+            })),
+            get: jest.fn(),
+            appendMessages: jest.fn(async () => null),
+            update: jest.fn(async () => null),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+        };
+        const service = new ConversationRunService({
+            app: { locals: { opencodeService: { id: 'svc' } } },
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await service.runStructuredExecution({
+            sessionId: 'session-1',
+            ownerId: 'user-1',
+            execution: {
+                tool: 'opencode-run',
+                params: {
+                    prompt: 'Fix the build failure in this repo.',
+                    workspacePath: '/srv/apps/kimibuilt',
+                    target: 'remote-default',
+                },
+            },
+            metadata: {
+                executionProfile: 'remote-build',
+                prompt: 'Fix the build failure in this repo.',
+            },
+        });
+
+        expect(executeTool).toHaveBeenCalledWith(
+            'opencode-run',
+            expect.objectContaining({
+                prompt: 'Fix the build failure in this repo.',
+                workspacePath: '/srv/apps/kimibuilt',
+                target: 'remote-default',
+            }),
+            expect.objectContaining({
+                sessionId: 'session-1',
+                ownerId: 'user-1',
+                opencodeService: { id: 'svc' },
+            }),
+        );
+        expect(result.outputText).toContain('OpenCode completed in /srv/apps/kimibuilt using the build agent.');
+        expect(result.outputText).toContain('Fixed the build failure and updated the config.');
+        expect(result.outputText).toContain('- src/opencode/service.js');
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', [
+            {
+                role: 'assistant',
+                content: result.outputText,
+            },
+        ]);
+    });
 });

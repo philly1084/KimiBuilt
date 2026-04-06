@@ -11,10 +11,11 @@ const VALID_TRIGGER_TYPES = new Set(['manual', 'once', 'cron']);
 const VALID_STAGE_CONDITIONS = new Set(['always', 'on_success', 'on_failure']);
 const BLOCKED_AUTONOMOUS_TOOL_IDS = new Set([
     'remote-command',
+    'opencode-run',
     'k3s-deploy',
     'docker-exec',
 ]);
-const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute']);
+const VALID_EXECUTION_TOOLS = new Set(['remote-command', 'ssh-execute', 'opencode-run']);
 
 function sanitizeText(value = '') {
     return String(value || '').trim();
@@ -68,7 +69,9 @@ function validateWorkloadPayload(payload = {}, options = {}) {
 
     let execution;
     try {
-        execution = normalizeExecution(payload.execution || payload.action || null);
+        execution = normalizeExecution(payload.execution || payload.action || null, {
+            defaultPrompt: prompt,
+        });
     } catch (error) {
         errors.push(error.message);
     }
@@ -161,7 +164,7 @@ function normalizePolicy(policy = {}) {
     };
 }
 
-function normalizeExecution(execution = null) {
+function normalizeExecution(execution = null, options = {}) {
     if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
         return null;
     }
@@ -179,6 +182,66 @@ function normalizeExecution(execution = null) {
     const rawParams = execution.params && typeof execution.params === 'object' && !Array.isArray(execution.params)
         ? execution.params
         : {};
+
+    if (normalizedTool === 'opencode-run') {
+        const prompt = sanitizeText(rawParams.prompt || execution.prompt || options.defaultPrompt || '');
+        if (!prompt) {
+            throw new Error('execution.params.prompt is required for structured workload execution');
+        }
+
+        const workspacePath = sanitizeText(
+            rawParams.workspacePath
+            || rawParams.workspace_path
+            || execution.workspacePath
+            || execution.workspace_path
+            || '',
+        );
+        if (!workspacePath) {
+            throw new Error('execution.params.workspacePath is required for opencode-run structured workload execution');
+        }
+
+        const target = sanitizeText(rawParams.target || execution.target || 'local').toLowerCase() || 'local';
+        if (!['local', 'remote-default'].includes(target)) {
+            throw new Error('execution.params.target must be "local" or "remote-default" for opencode-run');
+        }
+
+        const params = {
+            prompt,
+            workspacePath,
+            target,
+        };
+        const agent = sanitizeText(rawParams.agent || execution.agent || '');
+        const model = sanitizeText(rawParams.model || execution.model || '');
+        const approvalMode = sanitizeText(
+            rawParams.approvalMode
+            || rawParams.approval_mode
+            || execution.approvalMode
+            || execution.approval_mode
+            || '',
+        ).toLowerCase();
+
+        if (agent) {
+            params.agent = agent;
+        }
+        if (model) {
+            params.model = model;
+        }
+        if (approvalMode) {
+            if (!['manual', 'auto'].includes(approvalMode)) {
+                throw new Error('execution.params.approvalMode must be "manual" or "auto" for opencode-run');
+            }
+            params.approvalMode = approvalMode;
+        }
+        if (rawParams.async === true || execution.async === true) {
+            params.async = true;
+        }
+
+        return {
+            tool: normalizedTool,
+            params,
+        };
+    }
+
     const command = sanitizeText(rawParams.command || execution.command || '');
     if (!command) {
         throw new Error('execution.params.command is required for structured workload execution');
@@ -267,7 +330,9 @@ function normalizeStages(stages = [], options = {}) {
 
         let execution = null;
         try {
-            execution = normalizeExecution(stage.execution || stage.action || null);
+            execution = normalizeExecution(stage.execution || stage.action || null, {
+                defaultPrompt: stage.prompt || '',
+            });
         } catch (error) {
             throw new Error(`stages[${index}].${error.message}`);
         }
