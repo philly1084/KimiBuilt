@@ -199,4 +199,18 @@ router.get('/opencode/runtime', async (req, res, next) => {
   }
 });
 
+router.post('/opencode/bootstrap', async (req, res, next) => {
+  try {
+    const service = req.app.locals.opencodeService;
+    if (!service?.bootstrapRuntime) {
+      return res.status(503).json({ success: false, error: 'OpenCode runtime is not initialized' });
+    }
+
+    const result = await service.bootstrapRuntime(req.body || {});
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

@@ -109,4 +109,33 @@ describe('/api/admin workload routes', () => {
         expect(response.body.data.gateway.baseURL).toBe('https://kimibuilt.example.com/v1');
         expect(response.body.data.models[0].id).toBe('gpt-4o');
     });
+
+    test('bootstraps the OpenCode runtime from the admin dashboard', async () => {
+        const opencodeService = {
+            bootstrapRuntime: jest.fn(async () => ({
+                status: 'ready',
+                target: 'remote-default',
+                workspacePath: '/var/www/test.demoserver2.buzz',
+                message: 'Remote OpenCode is ready for /var/www/test.demoserver2.buzz.',
+            })),
+        };
+        const app = buildApp({
+            isAvailable: jest.fn(() => true),
+        }, opencodeService);
+
+        const response = await request(app)
+            .post('/api/admin/opencode/bootstrap')
+            .send({
+                target: 'remote-default',
+                workspacePath: '/var/www/test.demoserver2.buzz',
+            });
+
+        expect(response.status).toBe(200);
+        expect(opencodeService.bootstrapRuntime).toHaveBeenCalledWith({
+            target: 'remote-default',
+            workspacePath: '/var/www/test.demoserver2.buzz',
+        });
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.status).toBe('ready');
+    });
 });

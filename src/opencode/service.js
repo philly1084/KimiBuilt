@@ -202,6 +202,51 @@ class OpenCodeService {
         };
     }
 
+    async bootstrapRuntime(input = {}) {
+        const effective = this.getEffectiveConfig();
+        if (effective.enabled === false) {
+            const error = new Error('OpenCode integration is disabled');
+            error.statusCode = 503;
+            throw error;
+        }
+
+        const target = String(input.target || 'remote-default').trim().toLowerCase() || 'remote-default';
+        if (!['local', 'remote-default'].includes(target)) {
+            const error = new Error('target must be "local" or "remote-default"');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const approvalMode = String(input.approvalMode || input.approval_mode || 'manual').trim().toLowerCase() || 'manual';
+        if (!['manual', 'auto'].includes(approvalMode)) {
+            const error = new Error('approvalMode must be "manual" or "auto"');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const workspacePath = this.resolveWorkspacePath({
+            requestedPath: input.workspacePath || input.workspace_path || '',
+            target,
+            effectiveConfig: effective,
+        });
+        const instance = await this.ensureInstance(target, workspacePath, approvalMode);
+
+        return {
+            status: 'ready',
+            target,
+            workspacePath,
+            approvalMode,
+            instanceKey: instance.key,
+            activeInstances: this.instances.size,
+            binaryPath: effective.binaryPath || 'opencode',
+            remoteAutoInstall: effective.remoteAutoInstall === true,
+            gatewayBaseURL: resolveOpenCodeGatewayBaseURL({ target }),
+            message: target === 'remote-default'
+                ? `Remote OpenCode is ready for ${workspacePath}.`
+                : `Local OpenCode is ready for ${workspacePath}.`,
+        };
+    }
+
     async ensureAvailable() {
         if (!this.isAvailable()) {
             const error = new Error('OpenCode runs require Postgres persistence');

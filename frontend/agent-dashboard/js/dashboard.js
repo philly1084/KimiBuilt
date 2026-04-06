@@ -266,6 +266,15 @@ class Dashboard {
         document.getElementById('refreshOpenCodeRuntimeBtn')?.addEventListener('click', () => {
             this.loadOpenCodeRuntime();
         });
+
+        document.getElementById('opencodeSettingsForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveOpenCodeSettings();
+        });
+
+        document.getElementById('bootstrapOpenCodeRemoteBtn')?.addEventListener('click', () => {
+            this.bootstrapRemoteOpenCode();
+        });
         
         // API key visibility toggles
         document.getElementById('showApiKey')?.addEventListener('click', () => {
@@ -3145,6 +3154,81 @@ class Dashboard {
         }
     }
 
+    parseDelimitedList(value = '') {
+        return String(value || '')
+            .split(/\r?\n|,/)
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+    }
+
+    joinListForTextarea(values = []) {
+        return Array.isArray(values) ? values.join('\n') : '';
+    }
+
+    async saveOpenCodeSettings({ silent = false, refreshRuntime = true } = {}) {
+        try {
+            const settings = {
+                integrations: {
+                    opencode: {
+                        enabled: document.getElementById('opencodeEnabled').value === 'true',
+                        binaryPath: document.getElementById('opencodeBinaryPath').value.trim(),
+                        defaultAgent: document.getElementById('opencodeDefaultAgentInput').value.trim(),
+                        defaultModel: document.getElementById('opencodeDefaultModelInput').value.trim(),
+                        remoteDefaultWorkspace: document.getElementById('opencodeRemoteDefaultWorkspaceInput').value.trim(),
+                        allowedWorkspaceRoots: this.parseDelimitedList(document.getElementById('opencodeAllowedWorkspaceRootsInput').value),
+                        providerEnvAllowlist: this.parseDelimitedList(document.getElementById('opencodeProviderEnvAllowlistInput').value),
+                        remoteAutoInstall: document.getElementById('opencodeRemoteAutoInstallInput').checked,
+                    },
+                },
+            };
+
+            const response = await apiClient.put('/api/admin/settings', settings);
+            this.applySettings(this.unwrapApiPayload(response, settings));
+            if (refreshRuntime) {
+                await this.loadOpenCodeRuntime().catch(() => null);
+            }
+            if (!silent) {
+                this.showToast('OpenCode settings saved', 'success');
+            }
+            return settings;
+        } catch (error) {
+            console.error('Error saving OpenCode settings:', error);
+            if (!silent) {
+                this.showToast('Failed to save OpenCode settings', 'error');
+            }
+            throw error;
+        }
+    }
+
+    async bootstrapRemoteOpenCode() {
+        const summary = document.getElementById('opencodeBootstrapSummary');
+        const workspacePath = document.getElementById('opencodeRemoteDefaultWorkspaceInput')?.value.trim();
+
+        try {
+            if (summary) {
+                summary.textContent = 'Saving OpenCode settings and bootstrapping the remote workspace...';
+            }
+            await this.saveOpenCodeSettings({ silent: true, refreshRuntime: false });
+            const response = await apiClient.bootstrapOpenCodeRuntime({
+                target: 'remote-default',
+                ...(workspacePath ? { workspacePath } : {}),
+                approvalMode: 'manual',
+            });
+            const result = this.unwrapApiPayload(response, {});
+            await this.loadOpenCodeRuntime().catch(() => null);
+            if (summary) {
+                summary.textContent = result.message || `Remote OpenCode is ready for ${result.workspacePath || workspacePath || 'the configured workspace'}.`;
+            }
+            this.showToast(result.message || 'Remote OpenCode bootstrapped successfully', 'success');
+        } catch (error) {
+            console.error('Error bootstrapping remote OpenCode:', error);
+            if (summary) {
+                summary.textContent = error.message || 'Remote OpenCode bootstrap failed.';
+            }
+            this.showToast(error.message || 'Failed to bootstrap remote OpenCode', 'error');
+        }
+    }
+
     async resetPersonality() {
         if (!confirm('Reset soul.md to the default personality?')) {
             return;
@@ -3377,6 +3461,22 @@ class Dashboard {
                 : 'No complete SSH credential set is configured yet.';
             sshSummary.textContent = summary;
         }
+
+        const opencode = settings.integrations?.opencode || {};
+        this.setInputValue('opencodeEnabled', opencode.enabled !== false ? 'true' : 'false');
+        this.setInputValue('opencodeBinaryPath', opencode.binaryPath || 'opencode');
+        this.setInputValue('opencodeDefaultAgentInput', opencode.defaultAgent || 'build');
+        this.setInputValue('opencodeDefaultModelInput', opencode.defaultModel || '');
+        this.setInputValue('opencodeRemoteDefaultWorkspaceInput', opencode.remoteDefaultWorkspace || '');
+        this.setInputValue('opencodeAllowedWorkspaceRootsInput', this.joinListForTextarea(opencode.allowedWorkspaceRoots || []));
+        this.setInputValue('opencodeProviderEnvAllowlistInput', this.joinListForTextarea(opencode.providerEnvAllowlist || []));
+        this.setCheckboxValue('opencodeRemoteAutoInstallInput', opencode.remoteAutoInstall === true);
+        const opencodeBootstrapSummary = document.getElementById('opencodeBootstrapSummary');
+        if (opencodeBootstrapSummary) {
+            opencodeBootstrapSummary.textContent = opencode.remoteAutoInstall === true
+                ? 'Remote auto-install is enabled. Bootstrap will install `opencode` on the remote host if it is missing.'
+                : 'Remote auto-install is disabled. Install `opencode` on the remote host manually or enable auto-install before bootstrapping.';
+        }
     }
 
     renderOpenCodeRuntime(runtime = null, error = null) {
@@ -3469,6 +3569,8 @@ class Dashboard {
 
         if (workspacePolicy) {
             const items = [
+                `<div class="opencode-runtime-list-item"><strong>Binary path:</strong> <code>${this.escapeHtml(runtimeMeta.binaryPath || 'opencode')}</code></div>`,
+                `<div class="opencode-runtime-list-item"><strong>Remote auto-install:</strong> <code>${runtimeMeta.remoteAutoInstall === true ? 'enabled' : 'disabled'}</code></div>`,
                 runtimeMeta.remoteDefaultWorkspace
                     ? `<div class="opencode-runtime-list-item"><strong>Remote default workspace:</strong> <code>${this.escapeHtml(runtimeMeta.remoteDefaultWorkspace)}</code></div>`
                     : '',

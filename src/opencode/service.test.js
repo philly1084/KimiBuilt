@@ -305,4 +305,48 @@ describe('OpenCode service helpers', () => {
         expect(bootstrapScript).toContain('__KIMIBUILT_OPENCODE_INSTALL_NEEDS_CURL__');
         expect(opencodeClientMock.lastRemoteClient.waitForHealth).toHaveBeenCalledTimes(1);
     });
+
+    test('bootstraps the remote OpenCode runtime using the configured workspace', async () => {
+        settingsController.settings.api.baseURL = 'https://kimibuilt.example.com';
+        settingsController.getEffectiveSshConfig = jest.fn(() => ({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        }));
+        settingsController.getEffectiveOpencodeConfig = jest.fn(() => ({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/var/www/test.demoserver2.buzz',
+            providerEnvAllowlist: [],
+            remoteAutoInstall: true,
+        }));
+
+        const service = new OpenCodeService({
+            store: {
+                isAvailable: () => true,
+            },
+        });
+        service.buildManagedConfig = jest.fn(async () => ({
+            provider: {},
+        }));
+
+        const result = await service.bootstrapRuntime({
+            target: 'remote-default',
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+            status: 'ready',
+            target: 'remote-default',
+            workspacePath: '/var/www/test.demoserver2.buzz',
+            remoteAutoInstall: true,
+            binaryPath: 'opencode',
+        }));
+        expect(opencodeClientMock.lastRemoteClient.sshTool.executeSSH).toHaveBeenCalledTimes(1);
+    });
 });

@@ -1181,11 +1181,67 @@
                                     <div class="card-header">
                                         <div>
                                             <h3>OpenCode Gateway</h3>
-                                            <p class="text-muted">Managed OpenCode provider wiring, gateway auth status, and discovered model catalog.</p>
+                                            <p class="text-muted">Managed OpenCode provider wiring, remote bootstrap controls, gateway auth status, and discovered model catalog.</p>
                                         </div>
                                         <button type="button" class="btn btn-sm btn-ghost" id="refreshOpenCodeRuntimeBtn">Refresh</button>
                                     </div>
                                     <div class="card-body">
+                                        <form id="opencodeSettingsForm">
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="opencodeEnabled">Managed OpenCode Runtime</label>
+                                                    <select class="form-control" id="opencodeEnabled">
+                                                        <option value="true">Enabled</option>
+                                                        <option value="false">Disabled</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="opencodeBinaryPath">Remote Binary Path</label>
+                                                    <input type="text" class="form-control" id="opencodeBinaryPath" placeholder="opencode">
+                                                </div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="opencodeDefaultAgentInput">Default Agent</label>
+                                                    <select class="form-control" id="opencodeDefaultAgentInput">
+                                                        <option value="build">build</option>
+                                                        <option value="plan">plan</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="opencodeDefaultModelInput">Default OpenCode Model</label>
+                                                    <input type="text" class="form-control" id="opencodeDefaultModelInput" placeholder="Leave blank to auto-pick from the gateway">
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="opencodeRemoteDefaultWorkspaceInput">Remote Default Workspace</label>
+                                                <input type="text" class="form-control" id="opencodeRemoteDefaultWorkspaceInput" placeholder="/var/www/test.demoserver2.buzz">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="opencodeAllowedWorkspaceRootsInput">Allowed Local Workspace Roots</label>
+                                                <textarea class="form-control" id="opencodeAllowedWorkspaceRootsInput" rows="3" placeholder="One path per line or comma-separated"></textarea>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="opencodeProviderEnvAllowlistInput">Provider Environment Allowlist</label>
+                                                <textarea class="form-control" id="opencodeProviderEnvAllowlistInput" rows="3" placeholder="One env var per line or comma-separated"></textarea>
+                                            </div>
+                                            <div class="feature-item">
+                                                <div class="feature-info">
+                                                    <span class="feature-name">Remote Auto-Install</span>
+                                                    <span class="feature-desc">If the remote host is missing `opencode`, bootstrap will install it before starting the managed runtime.</span>
+                                                </div>
+                                                <label class="toggle">
+                                                    <input type="checkbox" id="opencodeRemoteAutoInstallInput">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                            <div class="form-actions">
+                                                <button type="submit" class="btn btn-primary">Save OpenCode Settings</button>
+                                                <button type="button" class="btn btn-ghost" id="bootstrapOpenCodeRemoteBtn">Bootstrap Remote OpenCode</button>
+                                            </div>
+                                            <p class="text-muted" id="opencodeBootstrapSummary">Save settings, then bootstrap the remote workspace to install or start OpenCode over SSH.</p>
+                                        </form>
+
                                         <div class="opencode-runtime-grid">
                                             <div class="opencode-runtime-item">
                                                 <span class="opencode-runtime-label">Remote Gateway</span>
