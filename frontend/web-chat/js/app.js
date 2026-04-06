@@ -1632,7 +1632,7 @@ class ChatApp {
     async sendPreparedMessage(content) {
         const normalizedContent = String(content || '').trim();
         if (!normalizedContent || this.isProcessing) {
-            return;
+            return false;
         }
 
         // Check if we need to create a session
@@ -1703,6 +1703,7 @@ class ChatApp {
             
             let hasReceivedContent = false;
             let retryCount = 0;
+            let streamFailed = false;
 
             // Stream the chat
             for await (const chunk of apiClient.streamChat(messages, model, this.currentAbortController.signal, reasoningEffort)) {
@@ -1720,6 +1721,7 @@ class ChatApp {
                         this.handleDone(chunk);
                         break;
                     case 'error':
+                        streamFailed = true;
                         if (chunk.cancelled) {
                             this.handleCancelled();
                         } else {
@@ -1738,9 +1740,12 @@ class ChatApp {
                         break;
                 }
             }
+
+            return !streamFailed;
         } catch (error) {
             console.error('Chat error:', error);
             this.handleError(error.message || 'Failed to get response');
+            return false;
         } finally {
             this.currentAbortController = null;
         }
@@ -1837,7 +1842,23 @@ class ChatApp {
             button.disabled = true;
         }
 
-        await this.sendPreparedMessage(responseContent);
+        const sendSucceeded = await this.sendPreparedMessage(responseContent);
+        if (!sendSucceeded) {
+            if (surveyMessage) {
+                surveyMessage.surveyState = this.buildSurveyStatePayload({
+                    survey,
+                    checkpointId: surveyId,
+                    status: 'draft',
+                    currentStepIndex,
+                    stepResponses,
+                });
+                this.upsertSessionMessage(sessionId, surveyMessage);
+                this.renderOrReplaceMessage(surveyMessage);
+            }
+
+            this.restoreLocalCheckpointPending(sessionId, survey);
+            uiHelpers.showToast('Questionnaire response was not sent. You can try again.', 'warning');
+        }
     }
 
     goToPreviousSurveyStep(trigger) {
@@ -2746,6 +2767,28 @@ class ChatApp {
                         summary: String(summary || '').trim(),
                         answeredAt: new Date().toISOString(),
                     },
+                },
+            };
+        });
+    }
+
+    restoreLocalCheckpointPending(sessionId, checkpoint = null) {
+        const normalizedCheckpoint = uiHelpers.normalizeSurveyDefinition(checkpoint);
+        if (!sessionId || !normalizedCheckpoint?.id) {
+            return;
+        }
+
+        this.updateLocalCheckpointControlState(sessionId, (currentControlState = {}) => {
+            const currentUserCheckpoint = currentControlState?.userCheckpoint
+                && typeof currentControlState.userCheckpoint === 'object'
+                ? currentControlState.userCheckpoint
+                : {};
+
+            return {
+                ...currentControlState,
+                userCheckpoint: {
+                    ...currentUserCheckpoint,
+                    pending: normalizedCheckpoint,
                 },
             };
         });

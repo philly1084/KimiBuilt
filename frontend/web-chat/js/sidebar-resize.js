@@ -26,17 +26,28 @@ class SidebarResizer {
   }
 
   checkStorageAvailability() {
+    if (window.__webChatStorageAvailable === false) {
+      return false;
+    }
+
+    if (window.sessionManager?.storageAvailable != null) {
+      return window.sessionManager.storageAvailable === true;
+    }
+
     try {
       const key = '__webchat_sidebar_storage_test__';
       localStorage.setItem(key, '1');
       localStorage.removeItem(key);
+      window.__webChatStorageAvailable = true;
       return true;
     } catch (_error) {
+      window.__webChatStorageAvailable = false;
       return false;
     }
   }
 
   storageGet(key) {
+    if (window.sessionManager?.safeStorageGet) return window.sessionManager.safeStorageGet(key);
     if (!this.storageAvailable) return null;
     try {
       return localStorage.getItem(key);
@@ -47,6 +58,7 @@ class SidebarResizer {
   }
 
   storageSet(key, value) {
+    if (window.sessionManager?.safeStorageSet) return window.sessionManager.safeStorageSet(key, value);
     if (!this.storageAvailable) return false;
     try {
       localStorage.setItem(key, value);

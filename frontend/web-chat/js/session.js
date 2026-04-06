@@ -25,18 +25,30 @@ class SessionManager extends EventTarget {
         this.migrateIfNeeded();
     }
 
+    setStorageAvailability(value) {
+        this.storageAvailable = value === true;
+        if (typeof window !== 'undefined') {
+            window.__webChatStorageAvailable = this.storageAvailable;
+        }
+        return this.storageAvailable;
+    }
+
     /**
      * Check if localStorage is available and not blocked by Tracking Prevention
      */
     checkStorageAvailability() {
+        if (typeof window !== 'undefined' && window.__webChatStorageAvailable === false) {
+            return this.setStorageAvailability(false);
+        }
+
         try {
             const test = '__storage_test__';
             localStorage.setItem(test, test);
             localStorage.removeItem(test);
-            return true;
+            return this.setStorageAvailability(true);
         } catch (e) {
             // Tracking Prevention can block storage in some browsers; continue without persistence.
-            return false;
+            return this.setStorageAvailability(false);
         }
     }
 
@@ -48,7 +60,7 @@ class SessionManager extends EventTarget {
         try {
             return localStorage.getItem(key);
         } catch (e) {
-            this.storageAvailable = false;
+            this.setStorageAvailability(false);
             return null;
         }
     }
@@ -68,10 +80,10 @@ class SessionManager extends EventTarget {
                     localStorage.setItem(key, value);
                     return true;
                 } catch (e2) {
-                    this.storageAvailable = false;
+                    this.setStorageAvailability(false);
                 }
             } else {
-                this.storageAvailable = false;
+                this.setStorageAvailability(false);
             }
             return false;
         }
@@ -86,7 +98,7 @@ class SessionManager extends EventTarget {
             localStorage.removeItem(key);
             return true;
         } catch (e) {
-            console.warn(`Failed to remove ${key} from localStorage:`, e);
+            this.setStorageAvailability(false);
             return false;
         }
     }
@@ -779,6 +791,10 @@ class SessionManager extends EventTarget {
     // ============================================
 
     saveToStorage() {
+        if (!this.storageAvailable) {
+            return false;
+        }
+
         try {
             const data = {
                 version: this.version,
@@ -797,6 +813,7 @@ class SessionManager extends EventTarget {
             
             this.safeStorageSet(this.storageKey, serialized);
             this.safeStorageSet(this.currentSessionKey, this.currentSessionId || '');
+            return true;
         } catch (error) {
             if (error.name === 'QuotaExceededError') {
                 console.error('Storage quota exceeded, cleaning up old sessions');
@@ -804,10 +821,15 @@ class SessionManager extends EventTarget {
             } else {
                 console.error('Failed to save to localStorage:', error);
             }
+            return false;
         }
     }
 
     loadFromStorage() {
+        if (!this.storageAvailable) {
+            return;
+        }
+
         try {
             const data = this.safeStorageGet(this.storageKey);
             if (data) {
@@ -852,6 +874,13 @@ class SessionManager extends EventTarget {
     }
 
     clearStorage() {
+        if (!this.storageAvailable) {
+            this.sessions = [];
+            this.sessionMessages.clear();
+            this.currentSessionId = null;
+            return;
+        }
+
         this.safeStorageRemove(this.storageKey);
         this.safeStorageRemove(this.currentSessionKey);
         this.sessions = [];
@@ -860,6 +889,10 @@ class SessionManager extends EventTarget {
     }
 
     migrateIfNeeded() {
+        if (!this.storageAvailable) {
+            return;
+        }
+
         // Migration from v1/v2 to v3
         const oldKeys = ['kimibuilt_sessions_v2', 'kimibuilt_sessions'];
         

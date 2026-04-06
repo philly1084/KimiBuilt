@@ -103,6 +103,10 @@ class UIHelpers {
     }
 
     checkStorageAvailability() {
+        if (window.__webChatStorageAvailable === false) {
+            return false;
+        }
+
         if (window.sessionManager?.storageAvailable != null) {
             return window.sessionManager.storageAvailable === true;
         }
@@ -111,8 +115,10 @@ class UIHelpers {
             const key = '__webchat_ui_storage_test__';
             localStorage.setItem(key, '1');
             localStorage.removeItem(key);
+            window.__webChatStorageAvailable = true;
             return true;
         } catch (_error) {
+            window.__webChatStorageAvailable = false;
             return false;
         }
     }

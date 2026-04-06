@@ -15,7 +15,6 @@
     function isRemoteBuildAutonomyApproved() {
         try {
             const stored = window.sessionManager?.safeStorageGet?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
-                ?? window.localStorage?.getItem?.(REMOTE_BUILD_AUTONOMY_STORAGE_KEY)
                 ?? '';
             const normalized = String(stored || '').trim().toLowerCase();
             if (!normalized) {
