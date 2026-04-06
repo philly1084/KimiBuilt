@@ -2910,19 +2910,11 @@ class ChatApp {
             const realMatch = matchingEntries.find((entry) => entry.match.synthetic !== true) || null;
             const syntheticMatches = matchingEntries.filter((entry) => entry.match.synthetic === true);
 
-            if (realMatch && this.isSurveyDisplayContent(realMatch.message?.displayContent || '')) {
-                nextMessages[realMatch.index] = {
-                    ...realMatch.message,
-                    displayContent: '',
-                    metadata: {
-                        ...(realMatch.message?.metadata || {}),
-                        displayContent: '',
-                    },
-                };
-                changed = true;
-            }
+            const realMatchHasSurveyDisplay = Boolean(
+                realMatch && this.isSurveyDisplayContent(realMatch.message?.displayContent || ''),
+            );
 
-            if (syntheticMatches.length === 0) {
+            if (!realMatchHasSurveyDisplay && syntheticMatches.length === 0) {
                 const baseTimeSource = realMatch?.message?.timestamp
                     || nextMessages[nextMessages.length - 1]?.timestamp
                     || '';
@@ -2942,7 +2934,7 @@ class ChatApp {
                     timestamp: new Date(baseTime + 1).toISOString(),
                 });
                 changed = true;
-            } else {
+            } else if (!realMatchHasSurveyDisplay) {
                 const [primarySynthetic, ...duplicateSynthetics] = syntheticMatches;
                 const expectedDisplayContent = this.buildSurveyFenceContent(pendingCheckpoint);
                 const currentSynthetic = primarySynthetic.message || {};
@@ -2965,6 +2957,10 @@ class ChatApp {
                     nextMessages = nextMessages.filter((_message, index) => !duplicateIndexes.has(index));
                     changed = true;
                 }
+            } else if (syntheticMatches.length > 0) {
+                const duplicateIndexes = new Set(syntheticMatches.map((entry) => entry.index));
+                nextMessages = nextMessages.filter((_message, index) => !duplicateIndexes.has(index));
+                changed = true;
             }
         }
 
