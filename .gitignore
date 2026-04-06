@@ -3,6 +3,7 @@ node_modules/
 
 # Environment (secrets)
 .env
+agent-notes.md
 
 # Test & Build
 coverage/

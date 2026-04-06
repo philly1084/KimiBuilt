@@ -15,6 +15,17 @@ jest.mock('../../agent-soul', () => ({
   writeSoulFile: jest.fn(),
 }));
 
+jest.mock('../../agent-notes', () => ({
+  getEffectiveAgentNotesConfig: jest.fn((settings = {}) => ({
+    enabled: settings.enabled !== false,
+    displayName: settings.displayName || 'Carryover Notes',
+    content: '# Carryover Notes\nCurrent carryover content\n',
+    absoluteFilePath: 'C:/Users/phill/KimiBuilt/agent-notes.md',
+    updatedAt: '2026-04-04T00:00:00.000Z',
+  })),
+  writeAgentNotesFile: jest.fn(),
+}));
+
 jest.mock('../../artifacts/artifact-service', () => ({
   artifactService: {
     getArtifactPlanInstructions: jest.fn(() => 'plan prompt'),
@@ -53,6 +64,7 @@ jest.mock('./settings.controller', () => ({
 }));
 
 const soulHelpers = require('../../agent-soul');
+const agentNotesHelpers = require('../../agent-notes');
 const settingsController = require('./settings.controller');
 const promptsController = require('./prompts.controller');
 
@@ -63,6 +75,10 @@ describe('admin prompts controller', () => {
       personality: {
         enabled: true,
         displayName: 'Agent Soul',
+      },
+      agentNotes: {
+        enabled: true,
+        displayName: 'Carryover Notes',
       },
     };
   });
@@ -128,6 +144,47 @@ describe('admin prompts controller', () => {
     }));
   });
 
+  test('updates the carryover notes surface and persists the renamed display name', async () => {
+    const req = {
+      params: { id: 'agent-notes' },
+      body: {
+        name: 'Phil Carryover',
+        content: '# Carryover Notes\n- Phil prefers terse status updates.\n',
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await promptsController.update(req, res);
+
+    expect(agentNotesHelpers.writeAgentNotesFile).toHaveBeenCalledWith('# Carryover Notes\n- Phil prefers terse status updates.\n');
+    expect(settingsController.deepMerge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentNotes: expect.objectContaining({
+          enabled: true,
+          displayName: 'Carryover Notes',
+        }),
+      }),
+      {
+        agentNotes: {
+          displayName: 'Phil Carryover',
+        },
+      },
+    );
+    expect(settingsController.saveSettings).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      readonly: false,
+      data: expect.objectContaining({
+        id: 'agent-notes',
+        name: 'Phil Carryover',
+        editable: true,
+      }),
+    }));
+  });
+
   test('rejects edits to code-backed prompt surfaces', async () => {
     const req = {
       params: { id: 'chat-continuity' },
@@ -145,6 +202,7 @@ describe('admin prompts controller', () => {
 
     expect(res.status).toHaveBeenCalledWith(410);
     expect(soulHelpers.writeSoulFile).not.toHaveBeenCalled();
+    expect(agentNotesHelpers.writeAgentNotesFile).not.toHaveBeenCalled();
     expect(settingsController.saveSettings).not.toHaveBeenCalled();
   });
 });

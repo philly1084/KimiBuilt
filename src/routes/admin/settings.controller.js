@@ -11,6 +11,11 @@ const {
   resetSoulFile,
   writeSoulFile,
 } = require('../../agent-soul');
+const {
+  getEffectiveAgentNotesConfig,
+  resetAgentNotesFile,
+  writeAgentNotesFile,
+} = require('../../agent-notes');
 const { resolvePreferredWritableFile } = require('../../runtime-state-paths');
 
 const OPENCODE_OPAQUE_ENV_KEYS = ['GITHUB_TOKEN', 'GH_TOKEN'];
@@ -50,6 +55,10 @@ class SettingsController {
       personality: {
         enabled: true,
         displayName: 'Agent Soul'
+      },
+      agentNotes: {
+        enabled: true,
+        displayName: 'Carryover Notes'
       },
       notifications: {
         enableEmail: false,
@@ -115,6 +124,7 @@ class SettingsController {
     try {
       const updates = JSON.parse(JSON.stringify(req.body || {}));
       this.applyPersonalityUpdate(updates);
+      this.applyAgentNotesUpdate(updates);
       const normalizedUpdates = this.normalizeIncomingSettings(updates);
 
       // Deep merge settings
@@ -130,7 +140,7 @@ class SettingsController {
       });
     } catch (error) {
       console.error('Error updating settings:', error);
-      res.status(500).json({ success: false, error: error.message });
+      res.status(error.statusCode || 500).json({ success: false, error: error.message });
     }
   }
 
@@ -147,10 +157,14 @@ class SettingsController {
         if (section === 'personality') {
           resetSoulFile();
         }
+        if (section === 'agentNotes') {
+          resetAgentNotesFile();
+        }
       } else {
         // Reset all
         this.settings = this.getDefaultSettings();
         resetSoulFile();
+        resetAgentNotesFile();
       }
 
       await this.saveSettings();
@@ -277,6 +291,39 @@ class SettingsController {
         normalized.personality = nextPersonality;
       }
     }
+    const agentNotesUpdate = normalized.agentNotes;
+
+    if (agentNotesUpdate && typeof agentNotesUpdate === 'object') {
+      const currentAgentNotes = this.settings?.agentNotes || {};
+      const nextAgentNotes = {
+        ...agentNotesUpdate,
+      };
+
+      if (nextAgentNotes.enabled !== undefined) {
+        nextAgentNotes.enabled = Boolean(nextAgentNotes.enabled);
+      }
+
+      if (nextAgentNotes.displayName !== undefined) {
+        nextAgentNotes.displayName = String(nextAgentNotes.displayName || '').trim()
+          || currentAgentNotes.displayName
+          || 'Carryover Notes';
+      }
+
+      delete nextAgentNotes.content;
+      delete nextAgentNotes.defaultContent;
+      delete nextAgentNotes.filePath;
+      delete nextAgentNotes.absoluteFilePath;
+      delete nextAgentNotes.updatedAt;
+      delete nextAgentNotes.source;
+      delete nextAgentNotes.characterLimit;
+      delete nextAgentNotes.characterCount;
+
+      if (Object.keys(nextAgentNotes).length === 0) {
+        delete normalized.agentNotes;
+      } else {
+        normalized.agentNotes = nextAgentNotes;
+      }
+    }
     const sshUpdate = normalized.integrations?.ssh;
 
     if (sshUpdate) {
@@ -378,6 +425,7 @@ class SettingsController {
     const ssh = publicSettings.integrations?.ssh;
     const authEnabled = Boolean(config.auth.username && config.auth.password && config.auth.jwtSecret);
     publicSettings.personality = this.getEffectivePersonalityConfig();
+    publicSettings.agentNotes = this.getEffectiveAgentNotesConfig();
 
     if (ssh) {
       const effective = this.getEffectiveSshConfig();
@@ -419,6 +467,10 @@ class SettingsController {
     return getEffectiveSoulConfig(this.settings?.personality || {});
   }
 
+  getEffectiveAgentNotesConfig() {
+    return getEffectiveAgentNotesConfig(this.settings?.agentNotes || {});
+  }
+
   applyPersonalityUpdate(updates = {}) {
     const personalityUpdate = updates?.personality;
     if (!personalityUpdate || typeof personalityUpdate !== 'object') {
@@ -427,6 +479,17 @@ class SettingsController {
 
     if (Object.prototype.hasOwnProperty.call(personalityUpdate, 'content')) {
       writeSoulFile(personalityUpdate.content);
+    }
+  }
+
+  applyAgentNotesUpdate(updates = {}) {
+    const agentNotesUpdate = updates?.agentNotes;
+    if (!agentNotesUpdate || typeof agentNotesUpdate !== 'object') {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(agentNotesUpdate, 'content')) {
+      writeAgentNotesFile(agentNotesUpdate.content);
     }
   }
 
@@ -534,6 +597,10 @@ class SettingsController {
       personality: {
         enabled: true,
         displayName: 'Agent Soul'
+      },
+      agentNotes: {
+        enabled: true,
+        displayName: 'Carryover Notes'
       },
       notifications: {
         enableEmail: false,

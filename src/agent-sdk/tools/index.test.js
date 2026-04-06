@@ -162,6 +162,40 @@ describe('ToolManager image tools', () => {
     expect(result.error).toContain('file-write requires a `content` string');
   });
 
+  test('writes durable carryover notes through agent-notes-write and enforces the character limit', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-agent-notes-tool-'));
+    const originalPath = process.env.KIMIBUILT_AGENT_NOTES_PATH;
+    process.env.KIMIBUILT_AGENT_NOTES_PATH = path.join(tempDir, 'agent-notes.md');
+
+    try {
+      const success = await toolManager.executeTool('agent-notes-write', {
+        content: '# Carryover Notes\n- Phil prefers concise diffs.\n',
+        reason: 'Useful collaboration detail for future sessions.',
+      });
+
+      expect(success.success).toBe(true);
+      expect(success.data.filePath).toContain('agent-notes.md');
+      expect(await fs.readFile(process.env.KIMIBUILT_AGENT_NOTES_PATH, 'utf8')).toBe('# Carryover Notes\n- Phil prefers concise diffs.\n');
+
+      const failure = await toolManager.executeTool('agent-notes-write', {
+        content: 'x'.repeat(5000),
+      });
+
+      expect(failure.success).toBe(false);
+      expect(failure.error).toContain('agent-notes.md cannot exceed');
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.KIMIBUILT_AGENT_NOTES_PATH;
+      } else {
+        process.env.KIMIBUILT_AGENT_NOTES_PATH = originalPath;
+      }
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test('recommends a document workflow through the document-workflow tool', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();

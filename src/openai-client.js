@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const OpenAI = require('openai');
 const { config } = require('./config');
 const { runtimeDiagnostics } = require('./runtime-diagnostics');
+const { AGENT_NOTES_CHAR_LIMIT } = require('./agent-notes');
 const settingsController = require('./routes/admin/settings.controller');
 const { normalizeReasoningEffort } = require('./ai-route-utils');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
@@ -169,6 +170,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-write',
     'file-search',
     'file-mkdir',
+    'agent-notes-write',
     'agent-workload',
     DOCUMENT_WORKFLOW_TOOL_ID,
     'git-safe',
@@ -201,6 +203,10 @@ class ToolOrchestrationError extends Error {
 
 function hasDedicatedMediaConfig() {
     return Boolean(normalizeModelId(config.media.apiKey));
+}
+
+function isAgentNotesAutoWriteEnabled() {
+    return settingsController.settings?.agentNotes?.enabled !== false;
 }
 
 function getImageProviderConfig() {
@@ -924,6 +930,10 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         return checkpointPolicy.enabled === true
             && Number(checkpointPolicy.remaining || 0) > 0
             && !checkpointPolicy.pending;
+    }
+
+    if (toolId === 'agent-notes-write') {
+        return isAgentNotesAutoWriteEnabled();
     }
 
     return true;
@@ -1944,6 +1954,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('file-search');
     }
 
+    if (availableToolIds.has('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
+        selectedIds.add('agent-notes-write');
+    }
+
     if (remoteToolId && (promptHasExplicitSshIntent(prompt) || shouldPreferRemoteWebsiteSource)) {
         selectedIds.add(remoteToolId);
     }
@@ -2174,6 +2188,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `file-write` to create or update local runtime files when the user asks for filesystem changes.');
         guidance.push('- Every `file-write` call must include both a `path` and the full file body as `content` in the same call. Do not call `file-write` with only a path.');
         guidance.push('- For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead of `file-write`.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'agent-notes-write')) {
+        guidance.push(`- Use \`agent-notes-write\` to maintain the durable carryover notes file for stable project context, Phil-specific collaboration facts, and future-useful ideas. Keep it under ${AGENT_NOTES_CHAR_LIMIT} characters.`);
+        guidance.push('- Rewrite the full notes file in each `agent-notes-write` call, keeping only concise, durable notes rather than temporary task state or long prose.');
+        guidance.push('- Do not store secrets, credentials, logs, or code snippets in the carryover notes.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-mkdir')) {

@@ -253,6 +253,14 @@ class Dashboard {
         document.getElementById('resetPersonalityBtn')?.addEventListener('click', () => {
             this.resetPersonality();
         });
+
+        document.getElementById('resetAgentNotesBtn')?.addEventListener('click', () => {
+            this.resetAgentNotes();
+        });
+
+        document.getElementById('agentNotesContent')?.addEventListener('input', () => {
+            this.syncAgentNotesCharacterCount();
+        });
         
         document.getElementById('apiSettingsForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -3106,6 +3114,11 @@ class Dashboard {
                     displayName: document.getElementById('personalityName').value.trim(),
                     content: document.getElementById('soulContent').value,
                 },
+                agentNotes: {
+                    enabled: document.getElementById('agentNotesEnabled').checked,
+                    displayName: document.getElementById('agentNotesName').value.trim(),
+                    content: document.getElementById('agentNotesContent').value,
+                },
             };
 
             const response = await apiClient.put('/api/admin/settings', settings);
@@ -3243,6 +3256,23 @@ class Dashboard {
         } catch (error) {
             console.error('Error resetting soul.md:', error);
             this.showToast('Failed to reset soul.md', 'error');
+        }
+    }
+
+    async resetAgentNotes() {
+        if (!confirm('Reset agent-notes.md to the default carryover notes template?')) {
+            return;
+        }
+
+        try {
+            const response = await apiClient.post('/api/admin/settings/reset', {
+                section: 'agentNotes',
+            });
+            this.applySettings(this.unwrapApiPayload(response, this.state.settings));
+            this.showToast('agent-notes.md reset to default', 'success');
+        } catch (error) {
+            console.error('Error resetting agent-notes.md:', error);
+            this.showToast('Failed to reset agent-notes.md', 'error');
         }
     }
 
@@ -3403,6 +3433,7 @@ class Dashboard {
         const api = settings.api || {};
         const features = settings.features || {};
         const personality = settings.personality || {};
+        const agentNotes = settings.agentNotes || {};
         const ssh = settings.integrations?.ssh || {};
 
         this.setInputValue('dashboardTitle', general.appName || 'Agent SDK Admin');
@@ -3436,6 +3467,23 @@ class Dashboard {
         if (soulFilePathLabel) {
             soulFilePathLabel.textContent = personality.filePath || 'soul.md';
         }
+
+        this.setCheckboxValue('agentNotesEnabled', agentNotes.enabled !== false);
+        this.setInputValue('agentNotesName', agentNotes.displayName || 'Carryover Notes');
+        this.setInputValue('agentNotesContent', agentNotes.content || '');
+        this.setInputValue(
+            'agentNotesUpdatedAt',
+            agentNotes.updatedAt ? this.formatDate(agentNotes.updatedAt) : 'Default content',
+        );
+        const agentNotesFilePathLabel = document.getElementById('agentNotesFilePathLabel');
+        if (agentNotesFilePathLabel) {
+            agentNotesFilePathLabel.textContent = agentNotes.filePath || 'agent-notes.md';
+        }
+        const agentNotesCharacterLimit = document.getElementById('agentNotesCharacterLimit');
+        if (agentNotesCharacterLimit) {
+            agentNotesCharacterLimit.textContent = String(agentNotes.characterLimit || 4000);
+        }
+        this.syncAgentNotesCharacterCount();
 
         this.syncModelOptions();
         this.setInputValue('defaultModel', models.defaultModel || 'gpt-4o');
@@ -3657,6 +3705,14 @@ class Dashboard {
         if (display) {
             display.textContent = input.value;
         }
+    }
+
+    syncAgentNotesCharacterCount() {
+        const input = document.getElementById('agentNotesContent');
+        const display = document.getElementById('agentNotesCharacterCount');
+        if (!input || !display) return;
+
+        display.textContent = String(input.value.length);
     }
     
     // ==================== MOCK DATA ====================

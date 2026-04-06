@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getEffectiveSoulConfig, writeSoulFile } = require('../../agent-soul');
+const { getEffectiveAgentNotesConfig, writeAgentNotesFile } = require('../../agent-notes');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../../runtime-prompts');
 const settingsController = require('./settings.controller');
@@ -13,7 +14,7 @@ const settingsController = require('./settings.controller');
 const MANAGED_MESSAGE = 'Managed prompt surfaces can be edited here. Code-backed runtime snapshots remain read-only.';
 const READ_ONLY_MESSAGE = 'This prompt surface is generated from application code and cannot be edited from the dashboard.';
 const FIXED_SURFACE_MESSAGE = 'Prompt surfaces are fixed slots. Create/delete is not supported here.';
-const EDITABLE_SURFACE_IDS = new Set(['agent-soul']);
+const EDITABLE_SURFACE_IDS = new Set(['agent-soul', 'agent-notes']);
 
 function estimateTokens(text = '') {
   const normalized = String(text || '').trim();
@@ -111,6 +112,7 @@ function buildPromptSurfaces() {
   const notesAgentPath = path.join(rootDir, 'frontend/notes-notion/js/agent.js');
   const artifactPath = path.join(rootDir, 'src/artifacts/artifact-service.js');
   const soul = getEffectiveSoulConfig(settingsController.settings?.personality || {});
+  const agentNotes = getEffectiveAgentNotesConfig(settingsController.settings?.agentNotes || {});
 
   return [
     {
@@ -125,6 +127,19 @@ function buildPromptSurfaces() {
       updatedAt: soul.updatedAt,
       usageModes: ['chat', 'openai-chat', 'openai-responses', 'canvas', 'notation', 'notes'],
       content: soul.content,
+    },
+    {
+      id: 'agent-notes',
+      name: agentNotes.displayName || 'Carryover Notes',
+      description: 'Persistent carryover notes loaded from agent-notes.md for durable project facts, Phil preferences, and future-useful ideas.',
+      assignment: 'shared runtime carryover memory',
+      category: 'runtime',
+      live: true,
+      editable: true,
+      sourceFile: agentNotes.absoluteFilePath,
+      updatedAt: agentNotes.updatedAt,
+      usageModes: ['chat', 'openai-chat', 'openai-responses', 'canvas', 'notation', 'notes'],
+      content: agentNotes.content,
     },
     {
       id: 'chat-continuity',
@@ -371,6 +386,18 @@ class PromptsController {
         );
         await settingsController.saveSettings();
       }
+      if (prompt.id === 'agent-notes') {
+        writeAgentNotesFile(content);
+        settingsController.settings = settingsController.deepMerge(
+          settingsController.settings,
+          {
+            agentNotes: {
+              displayName: name,
+            },
+          },
+        );
+        await settingsController.saveSettings();
+      }
 
       const savedPrompt = this.getSurfaceById(prompt.id);
       res.json({
@@ -381,7 +408,7 @@ class PromptsController {
       });
     } catch (error) {
       console.error('Error updating prompt surface:', error);
-      res.status(500).json({ success: false, error: error.message });
+      res.status(error.statusCode || 500).json({ success: false, error: error.message });
     }
   }
 

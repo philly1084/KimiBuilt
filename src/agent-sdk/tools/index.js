@@ -12,6 +12,10 @@ const { persistGeneratedImages } = require('../../generated-image-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const {
+  AGENT_NOTES_CHAR_LIMIT,
+  writeAgentNotesFile,
+} = require('../../agent-notes');
+const {
   hasSchedulingCue,
   summarizeTrigger,
 } = require('../../workloads/natural-language');
@@ -748,6 +752,47 @@ class ToolManager {
             encoding: {
               type: 'string',
               default: 'utf8'
+            }
+          }
+        }
+      },
+      {
+        id: 'agent-notes-write',
+        name: 'Agent Notes Writer',
+        category: 'system',
+        description: 'Update the persistent carryover notes file used for durable project context, Phil preferences, and future-useful ideas.',
+        backend: {
+          handler: async (params) => {
+            if (!Object.prototype.hasOwnProperty.call(params || {}, 'content')) {
+              throw new Error('agent-notes-write requires a `content` string.');
+            }
+            if (typeof params.content !== 'string') {
+              throw new Error('agent-notes-write `content` must be a string.');
+            }
+            const content = params.content;
+            const saved = writeAgentNotesFile(content);
+            return {
+              path: saved.absoluteFilePath,
+              filePath: saved.filePath,
+              characters: saved.characterCount,
+              characterLimit: saved.characterLimit,
+              updatedAt: saved.updatedAt,
+            };
+          },
+          sideEffects: ['write'],
+          timeout: 10000
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['content'],
+          properties: {
+            content: {
+              type: 'string',
+              description: `Full carryover notes file content. Rewrite the whole file compactly and keep it under ${AGENT_NOTES_CHAR_LIMIT} characters.`
+            },
+            reason: {
+              type: 'string',
+              description: 'Short explanation of why this durable note update matters for future sessions.'
             }
           }
         }

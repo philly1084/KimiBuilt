@@ -989,6 +989,42 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h3>Carryover Notes</h3>
+                                        <p class="text-muted">This markdown is loaded from <code id="agentNotesFilePathLabel">agent-notes.md</code> and injected as durable cross-session context. The runtime may update it when stable project notes, Phil-specific preferences, or future-useful ideas should persist.</p>
+                                        <div class="feature-item">
+                                            <div class="feature-info">
+                                                <span class="feature-name">Enable carryover notes</span>
+                                                <span class="feature-desc">Keep a compact, durable notes layer available to the model without mixing it into the personality file.</span>
+                                            </div>
+                                            <label class="toggle">
+                                                <input type="checkbox" id="agentNotesEnabled" checked>
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="agentNotesName">Display Name</label>
+                                                <input type="text" class="form-control" id="agentNotesName" value="Carryover Notes">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="agentNotesUpdatedAt">Last Updated</label>
+                                                <input type="text" class="form-control" id="agentNotesUpdatedAt" value="Default content" readonly>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="agentNotesContent">agent-notes.md</label>
+                                            <textarea class="form-control" id="agentNotesContent" rows="14" spellcheck="false" placeholder="# Carryover Notes&#10;&#10;## Project&#10;- Durable project notes worth carrying into future sessions&#10;&#10;## Phil&#10;- Stable preferences or working notes that help future collaboration"></textarea>
+                                            <p class="text-muted">Hard limit: <span id="agentNotesCharacterLimit">4000</span> characters. Current: <span id="agentNotesCharacterCount">0</span>.</p>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button type="submit" form="generalSettingsForm" class="btn btn-primary">Save Notes + General</button>
+                                            <button type="button" class="btn btn-ghost" id="resetAgentNotesBtn">Reset agent-notes.md</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Features Settings -->

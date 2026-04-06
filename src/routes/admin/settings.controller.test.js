@@ -46,10 +46,28 @@ jest.mock('../../agent-soul', () => ({
   resetSoulFile: jest.fn(),
 }));
 
+jest.mock('../../agent-notes', () => ({
+  getEffectiveAgentNotesConfig: jest.fn((settings = {}) => ({
+    enabled: settings.enabled !== false,
+    displayName: settings.displayName || 'Carryover Notes',
+    content: '# Carryover Notes\n',
+    defaultContent: '# Default Carryover Notes\n',
+    filePath: 'agent-notes.md',
+    absoluteFilePath: 'C:/Users/phill/KimiBuilt/agent-notes.md',
+    updatedAt: '2026-04-04T00:00:00.000Z',
+    source: 'file',
+    characterLimit: 4000,
+    characterCount: 19,
+  })),
+  writeAgentNotesFile: jest.fn(),
+  resetAgentNotesFile: jest.fn(),
+}));
+
 describe('settings.controller personality support', () => {
   let controller;
   let fsPromises;
   let soulHelpers;
+  let agentNotesHelpers;
   let consoleLogSpy;
   let consoleWarnSpy;
   let consoleErrorSpy;
@@ -64,6 +82,7 @@ describe('settings.controller personality support', () => {
 
     fsPromises = require('fs').promises;
     soulHelpers = require('../../agent-soul');
+    agentNotesHelpers = require('../../agent-notes');
     controller = require('./settings.controller');
     controller.settings = controller.getDefaultSettings();
   });
@@ -110,17 +129,60 @@ describe('settings.controller personality support', () => {
     }));
   });
 
-  test('getPublicSettings exposes effective personality metadata and strips ssh password', () => {
+  test('update writes agent-notes.md content and merges carryover metadata', async () => {
+    const req = {
+      body: {
+        agentNotes: {
+          enabled: false,
+          displayName: 'Ops Carryover',
+          content: '# Carryover Notes\n- Phil prefers concise summaries.\n',
+        },
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await controller.update(req, res);
+
+    expect(agentNotesHelpers.writeAgentNotesFile).toHaveBeenCalledWith('# Carryover Notes\n- Phil prefers concise summaries.\n');
+    expect(controller.settings.agentNotes).toEqual({
+      enabled: false,
+      displayName: 'Ops Carryover',
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        agentNotes: expect.objectContaining({
+          enabled: false,
+          displayName: 'Ops Carryover',
+          content: '# Carryover Notes\n',
+          filePath: 'agent-notes.md',
+          characterLimit: 4000,
+        }),
+      }),
+    }));
+  });
+
+  test('getPublicSettings exposes effective personality and carryover metadata and strips ssh password', () => {
     controller.settings.integrations.ssh.password = 'super-secret';
 
     const publicSettings = controller.getPublicSettings();
 
     expect(soulHelpers.getEffectiveSoulConfig).toHaveBeenCalledWith(controller.settings.personality);
+    expect(agentNotesHelpers.getEffectiveAgentNotesConfig).toHaveBeenCalledWith(controller.settings.agentNotes);
     expect(publicSettings.personality).toEqual(expect.objectContaining({
       enabled: true,
       displayName: 'Agent Soul',
       content: '# Soul\n',
       filePath: 'soul.md',
+    }));
+    expect(publicSettings.agentNotes).toEqual(expect.objectContaining({
+      enabled: true,
+      displayName: 'Carryover Notes',
+      content: '# Carryover Notes\n',
+      filePath: 'agent-notes.md',
     }));
     expect(publicSettings.integrations.ssh.password).toBeUndefined();
   });
@@ -174,6 +236,35 @@ describe('settings.controller personality support', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       message: 'personality settings reset',
+    }));
+  });
+
+  test('resetting the carryover notes restores default settings and notes file content', async () => {
+    controller.settings.agentNotes = {
+      enabled: false,
+      displayName: 'Custom Carryover',
+    };
+
+    const req = {
+      body: {
+        section: 'agentNotes',
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+
+    await controller.reset(req, res);
+
+    expect(agentNotesHelpers.resetAgentNotesFile).toHaveBeenCalled();
+    expect(controller.settings.agentNotes).toEqual({
+      enabled: true,
+      displayName: 'Carryover Notes',
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'agentNotes settings reset',
     }));
   });
 });

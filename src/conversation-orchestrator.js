@@ -73,6 +73,10 @@ const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /connection closed by remote host/i,
 ];
 
+function isAgentNotesAutoWriteEnabled() {
+    return settingsController.settings?.agentNotes?.enabled !== false;
+}
+
 function getDefaultWorkloadTimezone() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
@@ -4534,6 +4538,9 @@ class ConversationOrchestrator extends EventEmitter {
                 && /\b(create|make|mkdir)\b/.test(prompt)) {
                 candidates.add('file-mkdir');
             }
+            if (allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
+                candidates.add('agent-notes-write');
+            }
         } else {
             if (!isDeferredWorkloadRun && hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
                 candidates.add('agent-workload');
@@ -4580,6 +4587,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if (/\b(create|make|mkdir)\b[\s\S]{0,40}\b(folder|directory)\b/.test(prompt) && allowedToolIds.includes('file-mkdir')) {
                 candidates.add('file-mkdir');
+            }
+            if (allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
+                candidates.add('agent-notes-write');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
                 && allowedToolIds.includes('git-safe')) {
@@ -5109,6 +5119,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
+            'Use `agent-notes-write` only for concise, durable carryover notes that should help future sessions.',
+            'Good `agent-notes-write` candidates include stable project facts, Phil-specific collaboration preferences, and future-useful ideas or decisions.',
+            'Every `agent-notes-write` step must include the full replacement notes file as `params.content`.',
+            'Do not store secrets, code dumps, verbose logs, or temporary scratch notes in `agent-notes-write`.',
             ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasRemoteWebsiteUpdateIntent(planningPrompt)
                 ? [
                     'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',

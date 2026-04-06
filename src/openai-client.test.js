@@ -617,6 +617,21 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('confirm the action first');
     });
 
+    test('carryover notes guidance explains durable note usage', () => {
+        settingsController.settings.agentNotes = {
+            enabled: true,
+            displayName: 'Carryover Notes',
+        };
+
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'agent-notes-write' },
+        ]);
+
+        expect(guidance).toContain('durable carryover notes file');
+        expect(guidance).toContain('Phil-specific collaboration facts');
+        expect(guidance).toContain('under 4000 characters');
+    });
+
     test('image guidance encourages saving verified real images for documents', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
             { id: 'image-generate' },
@@ -652,6 +667,32 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(
             __testUtils.extractExplicitWebResearchQuery('Please do research on the best static site hosts for docs.'),
         ).toBe('the best static site hosts for docs');
+    });
+
+    test('always selects the carryover notes tool when it is available and enabled', () => {
+        settingsController.settings.agentNotes = {
+            enabled: true,
+            displayName: 'Carryover Notes',
+        };
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions([
+            { id: 'agent-notes-write' },
+        ], 'Summarize the latest product direction.');
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('agent-notes-write');
+    });
+
+    test('does not select the carryover notes tool when it is disabled', () => {
+        settingsController.settings.agentNotes = {
+            enabled: false,
+            displayName: 'Carryover Notes',
+        };
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions([
+            { id: 'agent-notes-write' },
+        ], 'Summarize the latest product direction.');
+
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('agent-notes-write');
     });
 
     test('extracts requested folder names for deterministic preflight', () => {
