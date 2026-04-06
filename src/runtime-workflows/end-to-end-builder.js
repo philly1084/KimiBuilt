@@ -79,7 +79,8 @@ function hasRepoImplementationIntent(text = '') {
         return false;
     }
 
-    const repoContext = /\b(repo|repository|code|codebase|workspace|project|app|application|frontend|backend|service|component)\b/.test(normalized);
+    const repoContext = /\b(repo|repository|code|codebase|workspace|project|app|application|frontend|backend|service|component)\b/.test(normalized)
+        || /\bopencode\b/.test(normalized);
     const changeIntent = /\b(fix|implement|build|create|update|change|refactor|add|remove|edit|patch|write|test|compile|ship)\b/.test(normalized);
 
     return repoContext && changeIntent;
@@ -102,12 +103,14 @@ function hasDeployIntent(text = '') {
     }
 
     const deployAction = /\b(deploy|redeploy|rollout|release|publish|ship live|put live|push live|apply|sync)\b/.test(normalized)
-        || /\b(sync and apply|sync-and-apply|apply manifests|rollout status)\b/.test(normalized);
+        || /\b(sync and apply|sync-and-apply|apply manifests|rollout status)\b/.test(normalized)
+        || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(normalized);
     const deployArtifact = /\b(git|github|branch|image|manifest|manifests|helm|repo|repository|tag|release|latest)\b/.test(normalized);
 
     return [
         deployAction && deployArtifact,
         /\b(sync and apply|sync-and-apply|apply manifests|rollout status)\b/.test(normalized),
+        /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(normalized),
     ].some(Boolean);
 }
 

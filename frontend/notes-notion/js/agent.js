@@ -2780,8 +2780,58 @@ GUIDELINES:
         return richTextScore > importedScore ? richTextBlocks : importedBlocks;
     }
 
+    function countInlineStructuralMarkers(text = '') {
+        const matches = String(text || '').match(/\s(?=(?:> |#{1,3}\s+|[-*]\s+|\d+\.\s+|\[![a-z_ -]+\]|!\[[^\]]*\]\([^)]+\)|---+))/g);
+        return matches ? matches.length : 0;
+    }
+
+    function looksLikeCollapsedStructuredMarkdown(sourceText = '') {
+        const normalized = String(sourceText || '').replace(/\r\n/g, '\n').trim();
+        if (!normalized) {
+            return false;
+        }
+
+        const lineCount = normalized.split('\n').filter(Boolean).length;
+        const inlineMarkerCount = countInlineStructuralMarkers(normalized);
+
+        if (inlineMarkerCount < 2) {
+            return false;
+        }
+
+        return lineCount <= 3;
+    }
+
+    function normalizeCollapsedStructuredMarkdown(sourceText = '') {
+        let value = stripUnsafeNullCharacters(sourceText).replace(/\r\n/g, '\n').trim();
+        if (!looksLikeCollapsedStructuredMarkdown(value)) {
+            return value;
+        }
+
+        const inlineMarkerPattern = /\s(?=(?:> |#{1,3}\s+|[-*]\s+|\d+\.\s+|\[![a-z_ -]+\]|!\[[^\]]*\]\([^)]+\)|---+))/g;
+        const firstMarkerIndex = value.search(inlineMarkerPattern);
+        const leadingChunk = firstMarkerIndex > 0 ? value.slice(0, firstMarkerIndex).trim() : '';
+        const markerAfterLeadingChunk = firstMarkerIndex > 0 ? value.slice(firstMarkerIndex + 1).trimStart() : '';
+
+        value = value.replace(inlineMarkerPattern, '\n');
+
+        if (leadingChunk
+            && leadingChunk.length <= 120
+            && !/^#{1,3}\s+/.test(leadingChunk)
+            && !isStructuralTextBoundary(leadingChunk)
+            && !/[.:;]$/.test(leadingChunk)
+            && /^(?:> |#{1,3}\s+|[-*]\s+|\d+\.\s+)/.test(markerAfterLeadingChunk)) {
+            value = `# ${leadingChunk}\n${value.slice(leadingChunk.length).trim()}`;
+        }
+
+        return value
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n[ \t]+/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+
     function buildBlocksFromRichText(sourceText = '') {
-        const text = String(sourceText || '').replace(/\r\n/g, '\n').trim();
+        const text = normalizeCollapsedStructuredMarkdown(sourceText);
         if (!text) {
             return [];
         }
@@ -2790,6 +2840,37 @@ GUIDELINES:
         const lines = text.split('\n');
         let index = 0;
         let usedTitle = false;
+
+        const splitInlineHeadingLine = (line = '') => {
+            const normalized = String(line || '').trim();
+            const markerMatch = normalized.match(/^(#{1,3})\s+(.+)$/);
+            if (!markerMatch) {
+                return null;
+            }
+
+            const body = markerMatch[2].trim();
+            const punctuationSplit = body.match(/^(.+?[?!])\s+(.+)$/);
+            if (punctuationSplit && punctuationSplit[1].split(/\s+/).length <= 10) {
+                return {
+                    heading: punctuationSplit[1].trim(),
+                    remainder: punctuationSplit[2].trim(),
+                };
+            }
+
+            const titleCaseSplit = body.match(/^((?:[A-Z][a-z'’\-]*\s+){1,5}[A-Z][a-z'’\-]*)\s+([A-Z][\s\S]+)$/);
+            if (titleCaseSplit) {
+                const headingWords = titleCaseSplit[1].trim().split(/\s+/).length;
+                const remainderWords = titleCaseSplit[2].trim().split(/\s+/).length;
+                if (headingWords <= 5 && remainderWords >= 3) {
+                    return {
+                        heading: titleCaseSplit[1].trim(),
+                        remainder: titleCaseSplit[2].trim(),
+                    };
+                }
+            }
+
+            return null;
+        };
 
         while (index < lines.length) {
             const rawLine = lines[index];
@@ -2887,13 +2968,23 @@ GUIDELINES:
             }
 
             const headingLevel = inferHeadingLevel(line, !usedTitle);
+            const explicitHeadingMatch = line.match(/^#{1,3}\s+/);
+            const inlineHeadingSplit = explicitHeadingMatch ? splitInlineHeadingLine(line) : null;
             const nextLine = lines[index + 1]?.trim() || '';
-            if (headingLevel && (!nextLine || !/^[a-z]/.test(nextLine))) {
+            if (headingLevel && (explicitHeadingMatch || !nextLine || !/^[a-z]/.test(nextLine))) {
                 blocks.push({
                     type: headingLevel,
-                    content: line.replace(/^#{1,3}\s+/, '').trim()
+                    content: inlineHeadingSplit
+                        ? inlineHeadingSplit.heading
+                        : line.replace(/^#{1,3}\s+/, '').trim()
                 });
                 usedTitle = true;
+                if (inlineHeadingSplit?.remainder) {
+                    blocks.push({
+                        type: 'text',
+                        content: inlineHeadingSplit.remainder,
+                    });
+                }
                 index += 1;
                 continue;
             }
@@ -3027,7 +3118,7 @@ GUIDELINES:
     }
 
     function extractPreferredBlocksFromSourceText(sourceText = '') {
-        const normalizedSourceText = stripUnsafeNullCharacters(sourceText);
+        const normalizedSourceText = normalizeCollapsedStructuredMarkdown(sourceText);
         const importedPage = window.ImportExport?.importFromMarkdown?.(normalizedSourceText);
         const importedBlocks = Array.isArray(importedPage?.blocks)
             ? importedPage.blocks.filter((block) => extractBlockTextValue(block).trim() || ['divider', 'image', 'ai_image'].includes(block.type))

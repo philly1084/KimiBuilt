@@ -144,6 +144,40 @@ class ArtifactStore {
         return result.rows.map((row) => toArtifact(row));
     }
 
+    async listAllWithSessions() {
+        const result = await postgres.query(
+            `
+                SELECT
+                    artifacts.id,
+                    artifacts.session_id,
+                    artifacts.parent_artifact_id,
+                    artifacts.direction,
+                    artifacts.source_mode,
+                    artifacts.filename,
+                    artifacts.extension,
+                    artifacts.mime_type,
+                    artifacts.size_bytes,
+                    artifacts.sha256,
+                    artifacts.extracted_text,
+                    artifacts.preview_html,
+                    artifacts.metadata,
+                    artifacts.vectorized_at,
+                    artifacts.created_at,
+                    artifacts.updated_at,
+                    COALESCE(sessions.metadata->>'ownerId', '') AS owner_id
+                FROM artifacts
+                LEFT JOIN sessions
+                    ON sessions.id = artifacts.session_id
+                ORDER BY artifacts.updated_at DESC
+            `,
+        );
+
+        return result.rows.map((row) => ({
+            ...toArtifact(row),
+            ownerId: row.owner_id || null,
+        }));
+    }
+
     async delete(id) {
         const result = await postgres.query('DELETE FROM artifacts WHERE id = $1', [id]);
         return result.rowCount > 0;

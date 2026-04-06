@@ -179,6 +179,20 @@ function hasDocumentWorkflowIntentText(text = '') {
     );
 }
 
+function hasIndexedAssetIntentText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(previous|earlier|prior|last|latest|same|that|those|these|uploaded|attached|generated|saved|worked on|working with)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b/i,
+        /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved)\b/i,
+        /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for)\b[\s\S]{0,40}\b(previous|earlier|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
+        /\b(asset|assets)\b[\s\S]{0,20}\b(search|index|indexed|catalog|catalogue|manager)\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasExplicitCheckpointRequestText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1988,6 +2002,16 @@ function hasExplicitLocalSandboxIntent(text = '') {
         || /\b(code sandbox|sandbox|locally|local code)\b/.test(normalized);
 }
 
+function hasExplicitOpencodeImplementationIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return /\bopencode\b/.test(normalized)
+        && /\b(implement|implementation|fix|refactor|rewrite|update|modify|edit|patch|add|create|make|build|compile|test|run tests?|debug)\b/.test(normalized);
+}
+
 function hasOpencodeRepoWorkIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized || hasDiscoveryPlanningIntentText(normalized)) {
@@ -1999,7 +2023,8 @@ function hasOpencodeRepoWorkIntent(text = '') {
     const infraOnlyIntent = /\b(kubectl|kubernetes|k8s|deployment|deploy|rollout|restart|systemctl|journalctl|ingress|pod|cluster|node|server health|uptime|hostname|dns|tls|certificate|logs?)\b/.test(normalized)
         && !repoContext;
 
-    return repoContext && codeWorkIntent && !infraOnlyIntent;
+    return (repoContext && codeWorkIntent && !infraOnlyIntent)
+        || hasExplicitOpencodeImplementationIntent(normalized);
 }
 
 function hasExplicitRemoteRepoWorkspaceIntent(text = '') {
@@ -4405,9 +4430,11 @@ class ConversationOrchestrator extends EventEmitter {
         const hasMigrationChangeIntent = hasMigrationIntent(prompt);
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
+        const hasAssetCatalogIntent = hasIndexedAssetIntentText(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
-        const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt);
+        const explicitK3sDeployIntent = /\b(deploy|rollout|apply|set image|update image|sync)\b[\s\S]{0,60}\b(k3s|k8s|kubernetes|kubectl|manifest|deployment|helm)\b/.test(prompt)
+            || /\b(add|install|put)\b[\s\S]{0,40}\b(to|on|into|in)\b[\s\S]{0,20}\b(k3s|k8s|kubernetes|cluster)\b/.test(prompt);
         const inferredWorkload = buildCanonicalWorkloadAction({
             request: objective,
         }, {
@@ -4528,6 +4555,9 @@ class ConversationOrchestrator extends EventEmitter {
             if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
                 candidates.add('image-from-url');
             }
+            if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
+                candidates.add('asset-search');
+            }
             if (!shouldPreferRemoteWebsiteSource
                 && allowedToolIds.includes('file-write')
                 && /\b(write|create|update|edit|save|patch|fix)\b/.test(prompt)) {
@@ -4575,6 +4605,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
                 candidates.add('image-from-url');
+            }
+            if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
+                candidates.add('asset-search');
             }
             if (/\b(read|open|show|print|cat)\b[\s\S]{0,40}\bfile\b/.test(prompt) && allowedToolIds.includes('file-read')) {
                 candidates.add('file-read');
@@ -5119,6 +5152,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
+            'Use `asset-search` when the user refers to a previous, earlier, uploaded, attached, generated, or saved image, document, PDF, or artifact.',
+            'Prefer `asset-search` before asking the user to resend a file that should already exist in prior artifacts or the local workspace.',
+            'Use `asset-search.params.kind = "image"` for visuals and `asset-search.params.kind = "document"` for PDFs, docs, HTML, markdown, and similar files.',
+            'Set `asset-search.params.includeContent = true` when the stored text preview would help choose the right document.',
             'Use `agent-notes-write` only for concise, durable carryover notes that should help future sessions.',
             'Good `agent-notes-write` candidates include stable project facts, Phil-specific collaboration preferences, and future-useful ideas or decisions.',
             'Every `agent-notes-write` step must include the full replacement notes file as `params.content`.',
@@ -5659,6 +5696,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-scrape` first, then call `document-workflow generate` with grounded `sources` built from those verified results.');
             parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
+        }
+
+        if (allowedToolIds.includes('asset-search')) {
+            parts.push('Use `asset-search` to find earlier images, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
+            parts.push('Use `asset-search kind:"image"` for prior visuals and `asset-search kind:"document"` for PDFs, docs, HTML, markdown, and similar files.');
+            parts.push('Set `asset-search includeContent:true` when you need the stored text preview from a document match, and use `refresh:true` if a very recent local file is missing from the index.');
         }
 
         if (toolEvents.length > 0) {

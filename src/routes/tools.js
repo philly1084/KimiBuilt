@@ -209,6 +209,7 @@ function buildToolRuntime(toolId, options = {}) {
   }
 
   if ([
+    'asset-search',
     'web-fetch',
     'web-scrape',
     'file-read',

@@ -64,6 +64,7 @@ router.post('/upload', async (req, res, next) => {
         sessionId = session.id;
         const artifact = await artifactService.uploadArtifact({
             sessionId,
+            session,
             mode,
             label,
             tags,

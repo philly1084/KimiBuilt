@@ -3,6 +3,7 @@ jest.mock('./artifact-store', () => ({
         create: jest.fn(),
         updateProcessing: jest.fn(),
         listBySession: jest.fn(),
+        listAllWithSessions: jest.fn(),
         get: jest.fn(),
         delete: jest.fn(),
         deleteBySession: jest.fn(),
@@ -37,8 +38,18 @@ jest.mock('../postgres', () => ({
     },
 }));
 
+jest.mock('../asset-manager', () => ({
+    assetManager: {
+        upsertArtifact: jest.fn().mockResolvedValue(null),
+        removeArtifact: jest.fn().mockResolvedValue(true),
+        removeArtifactsForSession: jest.fn().mockResolvedValue(0),
+    },
+    buildAssetManagerInstructions: jest.fn(() => ''),
+}));
+
 const { artifactService, extractResponseText, resolveCompletedResponseText } = require('./artifact-service');
 const { artifactStore } = require('./artifact-store');
+const { assetManager } = require('../asset-manager');
 const { postgres } = require('../postgres');
 const { renderArtifact } = require('./artifact-renderer');
 const { createResponse } = require('../openai-client');
@@ -73,6 +84,7 @@ describe('ArtifactService', () => {
             vectorizedAt: null,
         });
         artifactStore.listBySession.mockResolvedValue([]);
+        artifactStore.listAllWithSessions.mockResolvedValue([]);
         artifactStore.get.mockResolvedValue(null);
         renderArtifact.mockResolvedValue({
             filename: 'out.html',
@@ -108,6 +120,10 @@ describe('ArtifactService', () => {
         expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'session-1',
         }));
+        expect(assetManager.upsertArtifact).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'artifact-1' }),
+            expect.objectContaining({ session: null }),
+        );
     });
 
     test('extractResponseText handles direct output_text and mixed content item types', () => {

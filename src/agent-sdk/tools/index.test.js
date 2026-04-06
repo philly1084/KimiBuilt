@@ -4,8 +4,16 @@ jest.mock('../../artifacts/artifact-service', () => ({
   },
 }));
 
+jest.mock('../../asset-manager', () => ({
+  assetManager: {
+    searchAssets: jest.fn(),
+    upsertWorkspacePath: jest.fn(async () => null),
+  },
+}));
+
 const { ToolManager } = require('./index');
 const { artifactService } = require('../../artifacts/artifact-service');
+const { assetManager } = require('../../asset-manager');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -16,6 +24,8 @@ describe('ToolManager image tools', () => {
   beforeEach(() => {
     originalFetch = global.fetch;
     artifactService.generateArtifact.mockReset();
+    assetManager.searchAssets.mockReset();
+    assetManager.upsertWorkspacePath.mockClear();
   });
 
   afterEach(() => {
@@ -160,6 +170,49 @@ describe('ToolManager image tools', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('file-write requires a `content` string');
+  });
+
+  test('searches indexed assets through asset-search', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    assetManager.searchAssets.mockResolvedValue({
+      query: 'pricing pdf',
+      count: 1,
+      results: [
+        {
+          id: 'artifact:report-1',
+          sourceType: 'artifact',
+          kind: 'document',
+          filename: 'pricing-report.pdf',
+          artifactId: 'report-1',
+          downloadUrl: '/api/artifacts/report-1/download',
+        },
+      ],
+    });
+
+    const result = await toolManager.executeTool('asset-search', {
+      query: 'pricing pdf',
+      kind: 'document',
+      includeContent: true,
+    }, {
+      ownerId: 'phill',
+      sessionId: 'session-1',
+    });
+
+    expect(result.success).toBe(true);
+    expect(assetManager.searchAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'pricing pdf',
+        kind: 'document',
+        includeContent: true,
+      }),
+      expect.objectContaining({
+        ownerId: 'phill',
+        sessionId: 'session-1',
+      }),
+    );
+    expect(result.data.results[0].filename).toBe('pricing-report.pdf');
   });
 
   test('writes durable carryover notes through agent-notes-write and enforces the character limit', async () => {

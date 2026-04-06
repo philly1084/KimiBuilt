@@ -166,6 +166,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'image-generate',
     'image-search-unsplash',
     'image-from-url',
+    'asset-search',
     'file-read',
     'file-write',
     'file-search',
@@ -881,6 +882,20 @@ function hasInternalArtifactReference(prompt = '') {
         || /(?:^|[\s(])api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
         || /https?:\/\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source)
         || /https?:\/\/[^/\s]+\/api\/artifacts\/[a-f0-9-]+\/download\b/i.test(source);
+}
+
+function hasIndexedAssetIntent(prompt = '') {
+    const source = String(prompt || '').trim();
+    if (!source) {
+        return false;
+    }
+
+    return [
+        /\b(previous|earlier|prior|last|latest|same|that|those|these|uploaded|attached|generated|saved|worked on|working with)\b[\s\S]{0,50}\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b/i,
+        /\b(image|images|photo|photos|picture|pictures|document|documents|doc|docs|pdf|deck|slide deck|pptx|file|files|artifact|artifacts|attachment|attachments)\b[\s\S]{0,70}\b(from earlier|from before|from last time|we worked on|we were working with|you generated|you made|you created|uploaded|attached|saved)\b/i,
+        /\b(find|search|locate|list|show|open|use|reuse|reference|pull up|look for)\b[\s\S]{0,40}\b(previous|earlier|uploaded|attached|generated|saved|artifact|image|document|pdf|file|attachment)\b/i,
+        /\b(asset|assets)\b[\s\S]{0,20}\b(search|index|indexed|catalog|catalogue|manager)\b/i,
+    ].some((pattern) => pattern.test(source));
 }
 
 function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
@@ -1880,6 +1895,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const hasWorkloadSetupIntent = hasWorkloadIntent(prompt)
         || canonicalWorkload?.trigger?.type === 'cron'
         || canonicalWorkload?.trigger?.type === 'once';
+    const hasAssetCatalogIntent = hasIndexedAssetIntent(prompt);
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
@@ -1936,6 +1952,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
 
     if ((hasImageIntent && /\b(url|link|embed|use this)\b/i.test(normalizedPrompt)) || hasDirectImageUrl) {
         selectedIds.add('image-from-url');
+    }
+
+    if (hasAssetCatalogIntent && availableToolIds.has('asset-search')) {
+        selectedIds.add('asset-search');
     }
 
     if (!shouldPreferRemoteWebsiteSource && extractRequestedDirectoryPath(prompt)) {
@@ -2174,6 +2194,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(entry.id))) {
         guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
         guidance.push('- For HTML, PDF, and DOCX document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'asset-search')) {
+        guidance.push('- Use `asset-search` to find earlier images, PDFs, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
+        guidance.push('- Prefer `asset-search kind:"image"` for prior visuals and `asset-search kind:"document"` for PDFs, docs, HTML, markdown, and similar files.');
+        guidance.push('- Set `includeContent: true` when you need the stored text preview from a document match, and use `refresh: true` when a very recent local file is missing from the index.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-read')) {

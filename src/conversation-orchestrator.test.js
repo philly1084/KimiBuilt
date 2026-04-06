@@ -4121,6 +4121,76 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('treats explicit opencode create-and-deploy requests as repo work', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'opencode-run', 'k3s-deploy', 'git-safe', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Use opencode to create something small and add it to the k3s cluster as a smoke test.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
+        expect(toolPolicy.candidateToolIds).toContain('k3s-deploy');
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'opencode-run',
+            params: expect.objectContaining({
+                target: 'local',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            }),
+        }));
+        expect(directAction.params.prompt).toContain('Implement the requested repository changes in the workspace.');
+        expect(directAction.params.prompt).toContain(objective);
+    });
+
     test('keeps discovery-first server build prompts out of the repo implementation lane', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

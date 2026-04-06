@@ -10,6 +10,7 @@ const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
+const { assetManager } = require('../../asset-manager');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const {
   AGENT_NOTES_CHAR_LIMIT,
@@ -729,9 +730,16 @@ class ToolManager {
             const targetPath = path.resolve(normalized.path);
             await fs.mkdir(path.dirname(targetPath), { recursive: true });
             await fs.writeFile(targetPath, normalized.content, normalized.encoding || 'utf8');
+            let indexedAsset = null;
+            try {
+              indexedAsset = await assetManager.upsertWorkspacePath(targetPath);
+            } catch (error) {
+              console.warn('[ToolManager] Failed to index written asset:', error.message);
+            }
             return {
               path: targetPath,
               bytesWritten: Buffer.byteLength(normalized.content, normalized.encoding || 'utf8'),
+              assetIndexed: Boolean(indexedAsset),
             };
           },
           sideEffects: ['write'],
@@ -754,6 +762,73 @@ class ToolManager {
               default: 'utf8'
             }
           }
+        }
+      },
+      {
+        id: 'asset-search',
+        name: 'Asset Search',
+        category: 'system',
+        description: 'Search the indexed asset catalog for previous images, documents, uploaded artifacts, and workspace files.',
+        backend: {
+          handler: async (params = {}, context = {}) => assetManager.searchAssets(params, {
+            ownerId: context.ownerId || context.userId || null,
+            sessionId: context.sessionId || null,
+          }),
+          sideEffects: ['read'],
+          timeout: 30000
+        },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Keywords, filenames, or remembered phrases to match. Leave blank to list recent assets.'
+            },
+            kind: {
+              type: 'string',
+              enum: ['any', 'image', 'document'],
+              default: 'any'
+            },
+            sourceType: {
+              type: 'string',
+              enum: ['any', 'artifact', 'workspace'],
+              default: 'any'
+            },
+            sessionId: {
+              type: 'string',
+              description: 'Optional session id to narrow artifact matches.'
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 50,
+              default: 10
+            },
+            includeContent: {
+              type: 'boolean',
+              description: 'Include stored text previews for document-like matches when available.'
+            },
+            refresh: {
+              type: 'boolean',
+              description: 'Refresh the asset index before searching when a very recent file is missing.'
+            }
+          },
+          additionalProperties: false
+        },
+        skill: {
+          triggerPatterns: [
+            'find earlier image',
+            'find previous document',
+            'search uploaded file',
+            'search assets',
+            'asset manager',
+            'find that pdf from before'
+          ],
+          requiresConfirmation: false
+        },
+        frontend: {
+          exposeToFrontend: true,
+          icon: 'folder-search'
         }
       },
       {

@@ -6,6 +6,10 @@ jest.mock('./agent-notes', () => ({
   buildAgentNotesInstructions: jest.fn(() => '[Carryover notes memory]\nNotes content'),
 }));
 
+jest.mock('./asset-manager', () => ({
+  buildAssetManagerInstructions: jest.fn(() => '[Indexed asset manager]\nAsset search content'),
+}));
+
 jest.mock('./business-agent', () => ({
   isDefaultBusinessAgentProfile: jest.fn(() => false),
 }));
@@ -33,6 +37,7 @@ jest.mock('./runtime-control-state', () => ({
 
 const { buildSoulInstructions } = require('./agent-soul');
 const { buildAgentNotesInstructions } = require('./agent-notes');
+const { buildAssetManagerInstructions } = require('./asset-manager');
 const { buildSessionInstructions } = require('./session-instructions');
 
 describe('buildSessionInstructions', () => {
@@ -40,9 +45,10 @@ describe('buildSessionInstructions', () => {
     jest.clearAllMocks();
     buildSoulInstructions.mockReturnValue('[Agent soul]\nSoul content');
     buildAgentNotesInstructions.mockReturnValue('[Carryover notes memory]\nNotes content');
+    buildAssetManagerInstructions.mockReturnValue('[Indexed asset manager]\nAsset search content');
   });
 
-  test('injects the shared soul and carryover notes between base instructions and saved agent metadata', () => {
+  test('injects the shared soul, carryover notes, and indexed asset guidance between base instructions and saved agent metadata', () => {
     const result = buildSessionInstructions({
       metadata: {
         agent: {
@@ -61,20 +67,24 @@ describe('buildSessionInstructions', () => {
       enabled: true,
       displayName: 'Carryover Notes',
     });
+    expect(buildAssetManagerInstructions).toHaveBeenCalled();
     expect(result).toContain('Base instructions');
     expect(result).toContain('[Agent soul]\nSoul content');
     expect(result).toContain('[Carryover notes memory]\nNotes content');
+    expect(result).toContain('[Indexed asset manager]\nAsset search content');
     expect(result).toContain('Saved agent profile: Stay sharp.');
     expect(result).toContain('Agent name: Kimi');
     expect(result).toContain('Preferred workflow tools: remote-command, git-safe.');
     expect(result.indexOf('[Agent soul]')).toBeGreaterThan(result.indexOf('Base instructions'));
     expect(result.indexOf('[Carryover notes memory]')).toBeGreaterThan(result.indexOf('[Agent soul]'));
-    expect(result.indexOf('Saved agent profile: Stay sharp.')).toBeGreaterThan(result.indexOf('[Carryover notes memory]'));
+    expect(result.indexOf('[Indexed asset manager]')).toBeGreaterThan(result.indexOf('[Carryover notes memory]'));
+    expect(result.indexOf('Saved agent profile: Stay sharp.')).toBeGreaterThan(result.indexOf('[Indexed asset manager]'));
   });
 
-  test('omits the soul and notes blocks when neither is active', () => {
+  test('omits the soul, notes, and asset blocks when none are active', () => {
     buildSoulInstructions.mockReturnValueOnce('');
     buildAgentNotesInstructions.mockReturnValueOnce('');
+    buildAssetManagerInstructions.mockReturnValueOnce('');
 
     const result = buildSessionInstructions({
       metadata: {},

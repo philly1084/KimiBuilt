@@ -355,6 +355,37 @@ Approved page plan:
         expect(normalizedActions[0].blocks.length).toBeGreaterThan(1);
     });
 
+    test('rehydrates collapsed one-line markdown into structured notes blocks', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [{
+                    type: 'text',
+                    content: '☀️ Suns and the Science of Suns > Big idea: The Sun is a star that gives Earth light and heat. ## What Is a Sun? A sun is a star. - light for daytime - heat for life ## Stay Safe > Never look directly at the Sun with your eyes.',
+                }],
+            },
+        ], 'Create a researched page about suns with sections, solar safety, and key facts.', {
+            blockCount: 0,
+            outline: [],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_1', content: '☀️ Suns and the Science of Suns' }),
+            expect.objectContaining({
+                type: 'callout',
+                content: expect.objectContaining({
+                    text: expect.stringContaining('The Sun is a star'),
+                }),
+            }),
+            expect.objectContaining({ type: 'heading_2', content: 'What Is a Sun?' }),
+            expect.objectContaining({ type: 'bulleted_list', content: 'light for daytime' }),
+            expect.objectContaining({ type: 'heading_2', content: 'Stay Safe' }),
+        ]));
+        expect(normalizedActions[0].blocks.length).toBeGreaterThan(4);
+    });
+
     test('upgrades plain research rebuilds with richer support blocks and source bookmarks', () => {
         const agent = loadAgent();
         const normalizedActions = agent._normalizeStructuredPageActions([

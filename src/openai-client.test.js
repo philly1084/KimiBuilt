@@ -85,6 +85,21 @@ function createToolManager() {
                 },
             },
         }],
+        ['asset-search', {
+            id: 'asset-search',
+            name: 'Asset Search',
+            description: 'Search indexed images, documents, artifacts, and workspace files',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string' },
+                    kind: { type: 'string' },
+                    sourceType: { type: 'string' },
+                    includeContent: { type: 'boolean' },
+                    refresh: { type: 'boolean' },
+                },
+            },
+        }],
         ['file-read', {
             id: 'file-read',
             name: 'File Reader',
@@ -319,6 +334,7 @@ function createToolManager() {
         ['image-generate', { enabled: true, triggerPatterns: ['generate image', 'create image'], requiresConfirmation: false }],
         ['image-search-unsplash', { enabled: true, triggerPatterns: ['unsplash', 'image search'], requiresConfirmation: false }],
         ['image-from-url', { enabled: true, triggerPatterns: ['image url', 'embed image'], requiresConfirmation: false }],
+        ['asset-search', { enabled: true, triggerPatterns: ['search assets', 'find earlier document'], requiresConfirmation: false }],
         ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'], requiresConfirmation: false }],
         ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'], requiresConfirmation: true }],
         ['file-search', { enabled: true, triggerPatterns: ['find file', 'search files'], requiresConfirmation: false }],
@@ -644,6 +660,16 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('prefer `image-search-unsplash` and `image-from-url` over `image-generate`');
     });
 
+    test('asset search guidance explains how to recover prior files and visuals', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'asset-search' },
+        ]);
+
+        expect(guidance).toContain('find earlier images, PDFs, documents, uploaded artifacts, and workspace files');
+        expect(guidance).toContain('kind:"image"');
+        expect(guidance).toContain('includeContent: true');
+    });
+
     test('checkpoint guidance forbids request_user_input when user-checkpoint is attached', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
             { id: 'user-checkpoint' },
@@ -693,6 +719,15 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ], 'Summarize the latest product direction.');
 
         expect(selectedTools.map((tool) => tool.id)).not.toContain('agent-notes-write');
+    });
+
+    test('selects asset-search when the prompt refers to earlier documents or images', () => {
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions([
+            { id: 'asset-search' },
+            { id: 'document-workflow' },
+        ], 'Use the PDF we worked on earlier and the same image from before.');
+
+        expect(selectedTools.map((tool) => tool.id)).toContain('asset-search');
     });
 
     test('extracts requested folder names for deterministic preflight', () => {

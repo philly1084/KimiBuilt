@@ -1,5 +1,6 @@
 const { isDefaultBusinessAgentProfile } = require('./business-agent');
 const { buildSoulInstructions } = require('./agent-soul');
+const { buildAssetManagerInstructions } = require('./asset-manager');
 const { buildAgentNotesInstructions } = require('./agent-notes');
 const { buildProjectMemoryInstructions } = require('./project-memory');
 const settingsController = require('./routes/admin/settings.controller');
@@ -83,6 +84,11 @@ function buildSessionInstructions(session, baseInstructions = '') {
     const agentNotesInstructions = buildAgentNotesInstructions(settingsController.settings?.agentNotes || {});
     if (agentNotesInstructions) {
         parts.push(agentNotesInstructions);
+    }
+
+    const assetManagerInstructions = buildAssetManagerInstructions();
+    if (assetManagerInstructions) {
+        parts.push(assetManagerInstructions);
     }
 
     const agent = session?.metadata?.agent;

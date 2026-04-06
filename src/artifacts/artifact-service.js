@@ -7,6 +7,7 @@ const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMAT
 const { chunkText, escapeHtml, stripHtml, stripNullCharacters } = require('../utils/text');
 const { vectorStore } = require('../memory/vector-store');
 const { buildSessionInstructions } = require('../session-instructions');
+const { assetManager } = require('../asset-manager');
 const { postgres } = require('../postgres');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../unsplash-client');
 const {
@@ -1028,15 +1029,21 @@ class ArtifactService {
             vectorizedAt = await this.vectorizeArtifactText(artifact, extractedText);
         }
 
-        return artifactStore.updateProcessing(artifact.id, {
+        const storedArtifact = await artifactStore.updateProcessing(artifact.id, {
             extractedText,
             previewHtml,
             metadata,
             vectorizedAt,
         });
+        try {
+            await assetManager.upsertArtifact(storedArtifact, { session });
+        } catch (error) {
+            console.warn('[Artifacts] Failed to index stored artifact:', error.message);
+        }
+        return storedArtifact;
     }
 
-    async uploadArtifact({ sessionId, mode = 'chat', label = '', tags = [], file }) {
+    async uploadArtifact({ sessionId, session = null, mode = 'chat', label = '', tags = [], file }) {
         this.ensureEnabled();
 
         if (!file || !file.buffer || !file.filename) {
@@ -1076,6 +1083,7 @@ class ArtifactService {
         const format = normalizeFormat(extraction.format || requestedFormat);
         const artifact = await this.createStoredArtifact({
             sessionId,
+            session,
             direction: 'uploaded',
             sourceMode: mode,
             filename: file.filename,
@@ -1112,7 +1120,15 @@ class ArtifactService {
         if (!artifact) return false;
 
         await vectorStore.deleteArtifact(id);
-        return artifactStore.delete(id);
+        const deleted = await artifactStore.delete(id);
+        if (deleted) {
+            try {
+                await assetManager.removeArtifact(id);
+            } catch (error) {
+                console.warn('[Artifacts] Failed to remove artifact from asset index:', error.message);
+            }
+        }
+        return deleted;
     }
 
     async deleteArtifactsForSession(sessionId) {
@@ -1121,6 +1137,11 @@ class ArtifactService {
             await vectorStore.deleteArtifact(artifact.id);
         }
         await artifactStore.deleteBySession(sessionId);
+        try {
+            await assetManager.removeArtifactsForSession(sessionId);
+        } catch (error) {
+            console.warn('[Artifacts] Failed to clear session assets from asset index:', error.message);
+        }
     }
 
     async buildPromptContext(sessionId, artifactIds = []) {

@@ -14,6 +14,7 @@ describe('tool execution profiles', () => {
         expect(toolIds).toEqual(expect.arrayContaining([
             'git-safe',
             'agent-workload',
+            'asset-search',
             'security-scan',
             'architecture-design',
             'uml-generate',
