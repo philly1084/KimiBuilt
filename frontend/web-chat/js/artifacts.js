@@ -859,7 +859,11 @@
                 if (window.sessionManager?.currentSessionId) {
                     const sessionId = window.sessionManager.currentSessionId;
                     const messages = window.sessionManager.getMessages(sessionId) || [];
-                    const lastMessage = messages[messages.length - 1];
+                    const lastMessage = [...messages].reverse().find((message) => (
+                        message
+                        && message.role === 'assistant'
+                        && message.syntheticUserCheckpoint !== true
+                    ));
                     if (lastMessage && lastMessage.role === 'assistant') {
                         const artifactSummary = buildArtifactSummary(state.lastDone.artifacts);
                         const existingDisplayContent = String(lastMessage.displayContent || lastMessage.content || '');
