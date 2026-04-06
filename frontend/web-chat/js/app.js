@@ -3597,6 +3597,7 @@ class ChatApp {
         
         const sessionId = sessionManager.currentSessionId;
         const parentMessageId = this.currentStreamingMessageId;
+        const previousMessages = sessionManager.getMessages(sessionId).slice();
         
         // Finalize message
         sessionManager.finalizeLastMessage(sessionId);
@@ -3639,8 +3640,18 @@ class ChatApp {
         // Update UI
         const messages = this.syncAnnotatedSurveyStates(sessionId);
         const lastMessage = messages[messages.length - 1];
-        
-        if (lastMessage) {
+
+        const previousMessageIds = new Set(previousMessages.map((message) => message.id));
+        const newlyInsertedMessages = messages.filter((message) => !previousMessageIds.has(message.id));
+        const insertedSurveyMessage = newlyInsertedMessages.find((message) =>
+            message?.syntheticUserCheckpoint === true
+            || this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''),
+        );
+
+        if (insertedSurveyMessage) {
+            this.renderMessages(messages);
+            this.playCueForAssistantMessage(insertedSurveyMessage, chunk.toolEvents);
+        } else if (lastMessage) {
             this.renderOrReplaceMessage(lastMessage);
             this.playCueForAssistantMessage(lastMessage, chunk.toolEvents);
         }

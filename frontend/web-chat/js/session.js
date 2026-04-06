@@ -636,12 +636,13 @@ class SessionManager extends EventTarget {
         }
         
         const messages = this.sessionMessages.get(sessionId);
+        const hasExplicitId = typeof message?.id === 'string' && message.id.trim();
         
         // Check for duplicate messages (by content and timestamp within 1 second)
-        const isDuplicate = messages.some(m => 
-            m.role === message.role && 
-            m.content === message.content &&
-            Math.abs(new Date(m.timestamp) - new Date(message.timestamp)) < 1000
+        const isDuplicate = !hasExplicitId && messages.some((m) =>
+            m.role === message.role
+            && m.content === message.content
+            && Math.abs(new Date(m.timestamp) - new Date(message.timestamp)) < 1000
         );
         
         if (isDuplicate) {
