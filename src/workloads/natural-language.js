@@ -481,11 +481,15 @@ function parseWorkloadScenario(scenario = '', options = {}) {
     const timeInfo = extractScenarioTime(normalizedScenario);
     const prompt = extractTaskPromptFromScenario(normalizedScenario) || normalizedScenario;
     const title = deriveWorkloadTitle(prompt);
+    const hasRecurringCadence = /(every hour|hourly|weekday|weekdays|every workday|each workday|daily|every day|everyday|each day|nightly|every night|every evening|every morning)/i.test(lowerScenario)
+        || /\b(?:every|each)\s+(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/i.test(lowerScenario);
 
     let trigger = { type: 'manual' };
 
-    if (extractRelativeDelayMs(lowerScenario) != null
-        || new RegExp(`\\b(?:tomorrow|later today|later|once|one[- ]time|${TODAY_SCHEDULE_FRAGMENT})\\b`, 'i').test(lowerScenario)) {
+    if (!hasRecurringCadence && (
+        extractRelativeDelayMs(lowerScenario) != null
+        || new RegExp(`\\b(?:tomorrow|later today|later|once|one[- ]time|${TODAY_SCHEDULE_FRAGMENT})\\b`, 'i').test(lowerScenario)
+    )) {
         trigger = {
             type: 'once',
             runAt: buildOneTimeRunAt(lowerScenario, timeInfo, now).toISOString(),

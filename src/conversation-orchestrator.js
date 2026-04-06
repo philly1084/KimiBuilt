@@ -3,6 +3,7 @@ const { createResponse } = require('./openai-client');
 const { config } = require('./config');
 const { extractResponseText } = require('./artifacts/artifact-service');
 const settingsController = require('./routes/admin/settings.controller');
+const { inferExecutionProfile: inferRuntimeExecutionProfile } = require('./runtime-execution');
 const {
     buildImagePromptFromArtifactRequest,
     hasExplicitImageGenerationIntent,
@@ -451,6 +452,34 @@ function extractFetchBodyText(result = {}) {
         : body.replace(/\s+/g, ' ').trim();
 }
 
+function removeLeadingHtmlTitle(text = '', title = '') {
+    const normalizedText = normalizeInlineText(text);
+    const normalizedTitle = normalizeInlineText(title);
+    if (!normalizedText || !normalizedTitle) {
+        return normalizedText;
+    }
+
+    const escapedTitle = normalizedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return normalizedText
+        .replace(new RegExp(`^${escapedTitle}(?:\\s*[\\-:|]\\s*|\\s+)`, 'i'), '')
+        .trim();
+}
+
+function extractFetchSummaryText(data = {}) {
+    const body = String(data?.body || '').trim();
+    if (!body) {
+        return '';
+    }
+
+    const title = normalizeInlineText(data?.title || extractHtmlTitle(body));
+    const rawText = /<html\b|<body\b|<article\b|<main\b|<section\b/i.test(body)
+        ? stripHtmlToText(body)
+        : body.replace(/\s+/g, ' ').trim();
+    const cleaned = removeLeadingHtmlTitle(rawText, title);
+
+    return normalizeInlineText(cleaned || rawText);
+}
+
 function normalizeInlineText(value = '') {
     return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -502,7 +531,9 @@ function summarizeFetchedContent(data = {}) {
     const body = typeof data?.body === 'string' ? data.body : '';
     const contentType = String(data?.headers?.['content-type'] || data?.headers?.['Content-Type'] || '').trim().toLowerCase();
     const title = normalizeInlineText(data?.title || extractHtmlTitle(body));
-    const rawSummary = contentType.includes('html') ? stripHtmlToText(body) : body;
+    const rawSummary = contentType.includes('html')
+        ? extractFetchSummaryText(data)
+        : body.replace(/\s+/g, ' ').trim();
     const bodyPreview = truncateText(normalizeInlineText(rawSummary), 220);
 
     return [
@@ -557,6 +588,10 @@ function extractResearchSourceExcerpt(event = {}) {
     const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
     const data = event?.result?.data || {};
     const excerptLimit = config.memory.researchSourceExcerptChars;
+
+    if (toolId === 'web-fetch') {
+        return truncateText(normalizeInlineText(extractFetchSummaryText(data)), excerptLimit);
+    }
 
     if (toolId === 'web-scrape') {
         const direct = [
@@ -669,7 +704,7 @@ function buildResearchDossierFromToolEvents({ objective = '', toolEvents = [] } 
             const args = parseToolCallArguments(event?.toolCall?.function?.arguments || '{}');
             const url = String(data?.url || args?.url || '').trim();
             const searchResult = findSearchResultByUrl(searchResults, url);
-            const title = normalizeInlineText(data?.title || searchResult?.title || url);
+            const title = normalizeInlineText(data?.title || searchResult?.title || extractHtmlTitle(data?.body || '') || url);
             const snippet = truncateText(normalizeInlineText(searchResult?.snippet || ''), 260);
             const excerpt = extractResearchSourceExcerpt(event);
             const source = deriveResearchSourceLabel(url, searchResult?.source || data?.source || '');
@@ -2395,6 +2430,24 @@ function buildFallbackSynthesisText({ objective = '', toolEvents = [] } = {}) {
     const failures = events.length - successes;
     const normalizedObjective = truncateText(normalizeInlineText(objective), 280);
     const researchDossier = buildResearchDossierFromToolEvents({ objective, toolEvents: events });
+    const lastSearchEvent = getLastSuccessfulToolEvent(events, 'web-search');
+    const successfulFetches = events.filter((event) => {
+        const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
+        return toolId === 'web-fetch' && event?.result?.success !== false;
+    });
+    const onlyResearchToolEvents = events.every((event) => ['web-search', 'web-fetch', 'web-scrape'].includes(event?.toolCall?.function?.name || event?.result?.toolId || ''));
+    if (!lastSearchEvent && onlyResearchToolEvents && successfulFetches.length === 1) {
+        const fetchSummary = summarizeFetchedContent(successfulFetches[0]?.result?.data || {});
+        return [
+            'Based on the verified tool results, here is the best available answer.',
+            normalizedObjective ? `Request: ${normalizedObjective}` : '',
+            `Tool calls completed: ${events.length}. Successful: ${successes}. Failed: ${failures}.`,
+            '',
+            'Verified page summary:',
+            fetchSummary || summarizeToolEventForUser(successfulFetches[0]),
+        ].filter(Boolean).join('\n');
+    }
+
     const lines = [
         'Based on the verified tool results, here is the best available answer.',
         normalizedObjective ? `Request: ${normalizedObjective}` : '',
@@ -2953,6 +3006,39 @@ function buildSyntheticResponse({ output, responseId, model, metadata = {} }) {
     };
 }
 
+function normalizeModelResponseShape(response = null) {
+    if (!response || typeof response !== 'object') {
+        return response;
+    }
+
+    if (Array.isArray(response.output) && response.output.length > 0) {
+        return response;
+    }
+
+    const text = extractResponseText(response);
+    if (!text) {
+        return response;
+    }
+
+    const normalized = buildSyntheticResponse({
+        output: text,
+        responseId: response.id,
+        model: response.model,
+        metadata: response?.metadata && typeof response.metadata === 'object'
+            ? response.metadata
+            : {},
+    });
+
+    return {
+        ...response,
+        ...normalized,
+        metadata: {
+            ...(response?.metadata && typeof response.metadata === 'object' ? response.metadata : {}),
+            ...(normalized.metadata || {}),
+        },
+    };
+}
+
 async function* createSyntheticStream(response = {}) {
     const text = extractResponseText(response);
     if (text) {
@@ -3045,7 +3131,7 @@ class ConversationOrchestrator extends EventEmitter {
     } = {}) {
         const startedAt = Date.now();
         const setupStartedAt = new Date().toISOString();
-        const resolvedProfile = normalizeExecutionProfile(executionProfile);
+        const requestedProfile = normalizeExecutionProfile(executionProfile);
         const rawObjective = extractObjective(input, memoryInput);
         const runtimeToolManager = toolManager || this.toolManager;
         const clientSurface = resolveClientSurface({
@@ -3069,6 +3155,15 @@ class ConversationOrchestrator extends EventEmitter {
                 : ownerId && this.sessionStore?.getOwned
                     ? await this.sessionStore.getOwned(sessionId, ownerId)
                     : (this.sessionStore?.get ? await this.sessionStore.get(sessionId) : null);
+        const resolvedProfile = inferRuntimeExecutionProfile({
+            executionProfile: requestedProfile,
+            taskType,
+            input: rawObjective,
+            memoryInput: memoryInput || rawObjective,
+            metadata,
+            session,
+            clientSurface,
+        });
         const memoryScope = resolveSessionScope({
             ...scopedSessionMetadata,
             memoryScope: toolContext?.memoryScope || metadata?.memoryScope || metadata?.memory_scope || '',
@@ -3702,53 +3797,6 @@ class ConversationOrchestrator extends EventEmitter {
                     }));
                 }
 
-                if (autonomyApproved
-                    && planSource === 'guided-remote'
-                    && !roundFailed
-                    && !blockingRoundFailure) {
-                    const pendingGuidedRemotePlan = filterRepeatedPlanSteps(
-                        buildRemoteFollowupPlanFromToolEvents({
-                            objective,
-                            instructions,
-                            executionProfile: resolvedProfile,
-                            toolPolicy,
-                            toolEvents,
-                        }),
-                        executedStepSignatures,
-                        executedStepSignatureCounts,
-                    );
-
-                    if (pendingGuidedRemotePlan.length === 0
-                        && !planSignalsFurtherAutonomousWork(nextPlan)) {
-                        executionTrace.push(createExecutionTraceEntry({
-                            type: 'planning',
-                            name: `Stop after guided remote round ${round}`,
-                            details: {
-                                round,
-                                reason: 'A deterministic remote follow-up succeeded and no further guided remote step remains.',
-                            },
-                        }));
-                        break;
-                    }
-                }
-
-                if (autonomyApproved
-                    && autonomyApprovalSource === 'config'
-                    && !roundFailed
-                    && !blockingRoundFailure
-                    && roundToolEvents.length > 0
-                    && !planSignalsFurtherAutonomousWork(nextPlan)) {
-                    executionTrace.push(createExecutionTraceEntry({
-                        type: 'planning',
-                        name: `Stop after round ${round}`,
-                        details: {
-                            round,
-                            reason: 'Config-default autonomy should not keep looping after a successful round unless the plan itself signals more follow-up work.',
-                        },
-                    }));
-                    break;
-                }
-
                 if (roundToolEvents.some((event) => isTerminalWorkloadCreationEvent(event))) {
                     runtimeMode = runtimeMode || 'direct-tool';
                     const terminalOutput = buildTerminalWorkloadCreationOutput(roundToolEvents);
@@ -3792,6 +3840,53 @@ class ConversationOrchestrator extends EventEmitter {
                     });
                 }
 
+                if (autonomyApproved
+                    && planSource === 'guided-remote'
+                    && !roundFailed
+                    && !blockingRoundFailure) {
+                    const pendingGuidedRemotePlan = filterRepeatedPlanSteps(
+                        buildRemoteFollowupPlanFromToolEvents({
+                            objective,
+                            instructions,
+                            executionProfile: resolvedProfile,
+                            toolPolicy,
+                            toolEvents,
+                        }),
+                        executedStepSignatures,
+                        executedStepSignatureCounts,
+                    );
+
+                    if (pendingGuidedRemotePlan.length === 0
+                        && !planSignalsFurtherAutonomousWork(nextPlan)) {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'planning',
+                            name: `Stop after guided remote round ${round}`,
+                            details: {
+                                round,
+                                reason: 'A deterministic remote follow-up succeeded and no further guided remote step remains.',
+                            },
+                        }));
+                        break;
+                    }
+                }
+
+                if (autonomyApproved
+                    && autonomyApprovalSource === 'config'
+                    && !roundFailed
+                    && !blockingRoundFailure
+                    && roundToolEvents.length > 0
+                    && !planSignalsFurtherAutonomousWork(nextPlan)) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'planning',
+                        name: `Stop after round ${round}`,
+                        details: {
+                            round,
+                            reason: 'Config-default autonomy should not keep looping after a successful round unless the plan itself signals more follow-up work.',
+                        },
+                        }));
+                    break;
+                }
+
                 if (!autonomyApproved || blockingRoundFailure || roundToolEvents.length === 0) {
                     break;
                 }
@@ -3818,6 +3913,7 @@ class ConversationOrchestrator extends EventEmitter {
 
             output = extractResponseText(finalResponse);
             if (canRecoverFromInvalidRuntimeResponse({ output, toolEvents, toolPolicy })) {
+                const previousInvalidOutput = output;
                 const recoveryPlan = this.buildFallbackPlan({
                     objective,
                     session,
@@ -3884,8 +3980,9 @@ class ConversationOrchestrator extends EventEmitter {
                     }));
 
                     const recoveredResponseStartedAt = new Date().toISOString();
-                    finalResponse = await this.buildFinalResponse({
-                        input,
+                    runtimeMode = 'repaired-final';
+                    finalResponse = await this.repairInvalidFinalResponse({
+                        invalidOutput: previousInvalidOutput,
                         objective,
                         instructions,
                         contextMessages: resolvedContextMessages,
@@ -3900,8 +3997,18 @@ class ConversationOrchestrator extends EventEmitter {
                         autonomyApproved,
                         executionTrace,
                     });
-                    traceModelResponse(finalResponse, 'recovery-synthesis', recoveredResponseStartedAt);
+                    traceModelResponse(finalResponse, 'recovery-repair', recoveredResponseStartedAt);
                     output = extractResponseText(finalResponse);
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'repair',
+                        name: 'Response repair',
+                        startedAt: recoveredResponseStartedAt,
+                        endedAt: new Date().toISOString(),
+                        details: {
+                            reason: 'Recovered from an invalid runtime answer by executing deterministic tools and repairing the final response.',
+                            previousOutput: truncateText(previousInvalidOutput, 800),
+                        },
+                    }));
                 }
             }
 
@@ -5500,11 +5607,11 @@ class ConversationOrchestrator extends EventEmitter {
 
     async requestResponse(params = {}) {
         if (typeof this.llmClient?.createResponse === 'function') {
-            return this.llmClient.createResponse(params);
+            return normalizeModelResponseShape(await this.llmClient.createResponse(params));
         }
 
         console.warn('[ConversationOrchestrator] llmClient.createResponse is unavailable; falling back to openai-client.createResponse');
-        return createResponse(params);
+        return normalizeModelResponseShape(await createResponse(params));
     }
 }
 

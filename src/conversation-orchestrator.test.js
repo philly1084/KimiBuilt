@@ -94,7 +94,14 @@ describe('ConversationOrchestrator', () => {
             recentMessages: [{ role: 'assistant', content: 'Earlier answer' }],
         }));
         expect(sessionStore.recordResponse).toHaveBeenCalledWith('session-1', 'resp_plain');
-        expect(memoryService.rememberResponse).toHaveBeenCalledWith('session-1', 'Plain answer');
+        expect(memoryService.rememberResponse).toHaveBeenCalledWith(
+            'session-1',
+            'Plain answer',
+            expect.objectContaining({
+                memoryScope: 'global',
+                sourceSurface: 'chat',
+            }),
+        );
     });
 
     test('expands a truncated follow-up from recent transcript before asking the model for a plain response', async () => {

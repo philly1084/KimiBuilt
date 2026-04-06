@@ -465,6 +465,7 @@ function promptHasExplicitSshIntent(text = '') {
     return /\bssh\b/.test(normalized)
         || /\b(remote host|remote server|remote machine)\b/.test(normalized)
         || /\b(remote command|run remotely|execute remotely)\b/.test(normalized)
+        || /\bremote into\b/.test(normalized)
         || /\b(login to|log into|ssh into|ssh to|connect to)\b/.test(normalized);
 }
 
