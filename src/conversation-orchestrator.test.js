@@ -29,6 +29,15 @@ function buildResponse(text, id = 'resp_test') {
     };
 }
 
+function buildResponseWithPromptState(text, id = 'resp_test_prompt_state', promptState = { stage: 'test' }) {
+    return {
+        ...buildResponse(text, id),
+        metadata: {
+            promptState,
+        },
+    };
+}
+
 describe('ConversationOrchestrator', () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -101,6 +110,49 @@ describe('ConversationOrchestrator', () => {
                 memoryScope: 'global',
                 sourceSurface: 'chat',
             }),
+        );
+    });
+
+    test('persists promptState metadata without crashing the conversation completion path', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(
+                buildResponseWithPromptState('Prompt state answer', 'resp_prompt_state', { plan: 'keep' }),
+            ),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn(() => null),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-prompt-state', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue([]),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Answer directly with prompt state.',
+            sessionId: 'session-prompt-state',
+            stream: false,
+        });
+
+        expect(result.output).toBe('Prompt state answer');
+        expect(sessionStore.recordResponse).toHaveBeenCalledWith(
+            'session-prompt-state',
+            'resp_prompt_state',
+            { promptState: { plan: 'keep' } },
         );
     });
 

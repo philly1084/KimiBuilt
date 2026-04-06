@@ -5708,6 +5708,7 @@ class ConversationOrchestrator extends EventEmitter {
             objective,
             assistantText: output,
             responseId: tracedResponse.id,
+            promptState: tracedResponse?.metadata?.promptState || null,
             toolEvents,
             executionProfile,
             clientSurface,
@@ -5775,6 +5776,7 @@ class ConversationOrchestrator extends EventEmitter {
         objective = '',
         assistantText,
         responseId,
+        promptState = null,
         toolEvents = [],
         executionProfile = DEFAULT_EXECUTION_PROFILE,
         clientSurface = '',
@@ -5795,11 +5797,15 @@ class ConversationOrchestrator extends EventEmitter {
         }, currentSession || null);
 
         if (this.sessionStore?.recordResponse) {
-            await this.sessionStore.recordResponse(
-                sessionId,
-                responseId,
-                finalResponse?.metadata?.promptState ? { promptState: finalResponse.metadata.promptState } : null,
-            );
+            if (promptState) {
+                await this.sessionStore.recordResponse(
+                    sessionId,
+                    responseId,
+                    { promptState },
+                );
+            } else {
+                await this.sessionStore.recordResponse(sessionId, responseId);
+            }
         }
 
         if (this.memoryService?.rememberResponse) {
