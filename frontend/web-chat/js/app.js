@@ -2673,6 +2673,10 @@ class ChatApp {
         return `synthetic-user-checkpoint-${normalizedId || 'pending'}`;
     }
 
+    isSurveyDisplayContent(value = '') {
+        return /```(?:survey|kb-survey)\s*[\s\S]*?```/i.test(String(value || ''));
+    }
+
     assistantMentionsPendingSurvey(content = '') {
         return /\b(inline survey|survey card|questionnaire|popup question|multiple[- ]choice)\b/i.test(
             String(content || ''),
@@ -2885,29 +2889,50 @@ class ChatApp {
         } else {
             const checkpointId = pendingCheckpoint.id;
             const syntheticMessageId = this.buildSyntheticSurveyMessageId(checkpointId);
+            const staleSyntheticIndexes = new Set(
+                nextMessages
+                    .map((message, index) => ({ message, index }))
+                    .filter(({ message }) => (
+                        isSyntheticCheckpointMessage(message)
+                        && String(message?.id || '').trim() !== syntheticMessageId
+                        && message?.surveyState?.status !== 'answered'
+                    ))
+                    .map(({ index }) => index),
+            );
+            if (staleSyntheticIndexes.size > 0) {
+                nextMessages = nextMessages.filter((_message, index) => !staleSyntheticIndexes.has(index));
+                changed = true;
+            }
+
             const matchingEntries = nextMessages
                 .map((message, index) => ({ message, index, match: collectSurveyMatch(message) }))
                 .filter((entry) => entry.match?.survey?.id === checkpointId);
             const realMatch = matchingEntries.find((entry) => entry.match.synthetic !== true) || null;
             const syntheticMatches = matchingEntries.filter((entry) => entry.match.synthetic === true);
 
-            if (realMatch) {
-                const filteredMessages = nextMessages.filter((message, index) => (
-                    !syntheticMatches.some((entry) => entry.index === index)
-                ));
+            if (realMatch && this.isSurveyDisplayContent(realMatch.message?.displayContent || '')) {
+                nextMessages[realMatch.index] = {
+                    ...realMatch.message,
+                    displayContent: '',
+                    metadata: {
+                        ...(realMatch.message?.metadata || {}),
+                        displayContent: '',
+                    },
+                };
+                changed = true;
+            }
 
-                if (filteredMessages.length !== nextMessages.length) {
-                    nextMessages = filteredMessages;
-                    changed = true;
-                }
-            } else if (syntheticMatches.length === 0) {
-                const lastTimestamp = nextMessages[nextMessages.length - 1]?.timestamp || '';
-                const baseTime = Number.isNaN(new Date(lastTimestamp).getTime())
+            if (syntheticMatches.length === 0) {
+                const baseTimeSource = realMatch?.message?.timestamp
+                    || nextMessages[nextMessages.length - 1]?.timestamp
+                    || '';
+                const baseTime = Number.isNaN(new Date(baseTimeSource).getTime())
                     ? Date.now()
-                    : new Date(lastTimestamp).getTime();
+                    : new Date(baseTimeSource).getTime();
 
                 nextMessages.push({
                     id: syntheticMessageId,
+                    parentMessageId: realMatch?.message?.id || '',
                     role: 'assistant',
                     content: pendingCheckpoint.preamble || 'Choose an option below and I will continue from there.',
                     displayContent: this.buildSurveyFenceContent(pendingCheckpoint),
@@ -2921,12 +2946,14 @@ class ChatApp {
                 const [primarySynthetic, ...duplicateSynthetics] = syntheticMatches;
                 const expectedDisplayContent = this.buildSurveyFenceContent(pendingCheckpoint);
                 const currentSynthetic = primarySynthetic.message || {};
-                const needsUpdate = String(currentSynthetic.displayContent || '').trim() !== expectedDisplayContent;
+                const needsUpdate = String(currentSynthetic.displayContent || '').trim() !== expectedDisplayContent
+                    || String(currentSynthetic.parentMessageId || '').trim() !== String(realMatch?.message?.id || '').trim();
 
                 if (needsUpdate) {
                     nextMessages[primarySynthetic.index] = {
                         ...currentSynthetic,
-                        content: currentSynthetic.content || pendingCheckpoint.preamble || 'Choose an option below and I will continue from there.',
+                        parentMessageId: realMatch?.message?.id || currentSynthetic.parentMessageId || '',
+                        content: pendingCheckpoint.preamble || currentSynthetic.content || 'Choose an option below and I will continue from there.',
                         displayContent: expectedDisplayContent,
                         syntheticUserCheckpoint: true,
                     };
