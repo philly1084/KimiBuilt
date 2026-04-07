@@ -12,6 +12,7 @@ const {
     resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    shouldSuppressWebChatImplicitHtmlArtifact,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
     inferOutputFormatFromSession,
@@ -29,6 +30,7 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
+const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -302,6 +304,14 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
     })) {
         effectiveOutputFormat = null;
     }
+    if (shouldSuppressWebChatImplicitHtmlArtifact({
+        clientSurface,
+        text: message,
+        outputFormat: effectiveOutputFormat,
+        outputFormatProvided: Boolean(outputFormat),
+    })) {
+        effectiveOutputFormat = null;
+    }
     const recentMessagesForWorkloadPreflight = effectiveOutputFormat
         ? await sessionStore.getRecentMessages(session.id, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
         : [];
@@ -538,7 +548,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     await sessionStore.update(session.id, { metadata: sshMetadata });
                 }
                 session = await persistSessionModel(session.id, session, event.response?.model || model || null);
-                const artifacts = await maybeGenerateOutputArtifact({
+                const generatedArtifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,
                     session,
                     mode: taskType,
@@ -552,6 +562,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     reasoningEffort,
                     recentMessages: await sessionStore.getRecentMessages(session.id, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
                 });
+                const artifacts = mergeRuntimeArtifacts(
+                    extractArtifactsFromToolEvents(event.response?.metadata?.toolEvents || []),
+                    generatedArtifacts,
+                );
                 if (artifacts.length > 0) {
                     await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
                         artifact,
@@ -713,7 +727,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
                 { role: 'assistant', content: outputText },
             ]);
         }
-        const artifacts = await maybeGenerateOutputArtifact({
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId: session.id,
             session,
             mode: 'canvas',
@@ -728,6 +742,10 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
             reasoningEffort,
             recentMessages: await sessionStore.getRecentMessages(session.id),
         });
+        const artifacts = mergeRuntimeArtifacts(
+            extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
+            generatedArtifacts,
+        );
         if (artifacts.length > 0) {
             await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
                 artifact,
@@ -877,7 +895,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
                 { role: 'assistant', content: outputText },
             ]);
         }
-        const artifacts = await maybeGenerateOutputArtifact({
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId: session.id,
             session,
             mode: 'notation',
@@ -892,6 +910,10 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
             reasoningEffort,
             recentMessages: await sessionStore.getRecentMessages(session.id),
         });
+        const artifacts = mergeRuntimeArtifacts(
+            extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
+            generatedArtifacts,
+        );
         if (artifacts.length > 0) {
             await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(session.id, {
                 artifact,

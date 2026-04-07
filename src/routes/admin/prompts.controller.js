@@ -88,6 +88,8 @@ function buildNotesSurfacePrompt() {
     'Prefer structural edits over append-only edits when organization or layout quality matters.',
     'Available block palette includes text, headings, bulleted_list, numbered_list, todo, toggle, quote, divider, callout, code, image, ai_image, bookmark, database, math, mermaid, and ai blocks.',
     'Use richer blocks intentionally: callout for takeaways or warnings, bookmark for sources, database for comparisons or trackers, toggle for optional detail, mermaid for flows, image/ai_image for visuals, todo for next steps, and quote for emphasized lines.',
+    'Use native note blocks instead of raw markdown punctuation: headings for headings, list blocks for bullets, todo blocks for checkboxes, callouts for highlighted notes, and text formatting instead of literal **bold** markers.',
+    'Do not leave markdown markers like ##, -, --, [ ], or **...** inside block content when the page block system already has a native representation.',
     'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive detail, sources, and next steps.',
     'Treat design quality as part of correctness in notes mode: the page should feel intentionally composed, not like raw Markdown pasted into blocks.',
     'Use the frontend metadata surface when it improves the page: update_page can set title, icon, cover URL, properties, and default model.',

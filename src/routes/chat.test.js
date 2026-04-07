@@ -21,6 +21,8 @@ jest.mock('../session-store', () => ({
 jest.mock('../memory/memory-service', () => ({
     memoryService: {
         rememberResponse: jest.fn(),
+        rememberArtifactResult: jest.fn(),
+        rememberLearnedSkill: jest.fn(),
     },
 }));
 
@@ -53,6 +55,7 @@ jest.mock('../ai-route-utils', () => ({
     shouldDeferArtifactGenerationToWorkload: jest.fn(() => false),
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
+    shouldSuppressWebChatImplicitHtmlArtifact: jest.fn(() => false),
     stripInjectedNotesPageEditDirective: jest.fn((text) => text),
     resolveReasoningEffort: jest.fn(() => null),
     resolveSshRequestContext: jest.fn(),
@@ -680,5 +683,71 @@ describe('/api/chat route', () => {
         expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', expect.arrayContaining([
             expect.objectContaining({ role: 'assistant', content: 'Recovered final answer' }),
         ]));
+    });
+
+    test('surfaces tool-generated documents as chat artifacts when no fallback artifact is created', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Build the mission control dashboard again.',
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-dashboard-1',
+                model: 'gpt-test',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'I created the dashboard.' }],
+                }],
+                metadata: {
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'document-workflow',
+                            },
+                        },
+                        result: {
+                            success: true,
+                            data: {
+                                document: {
+                                    id: 'doc-1',
+                                    filename: 'mission-control.html',
+                                    mimeType: 'text/html',
+                                    downloadUrl: '/api/documents/doc-1/download',
+                                    contentPreview: '<html><body>Mission control</body></html>',
+                                    metadata: { format: 'html' },
+                                },
+                            },
+                        },
+                    }],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Build the mission control dashboard again.',
+                stream: false,
+            });
+
+        expect(response.status).toBe(200);
+        expect(maybeGenerateOutputArtifact).toHaveBeenCalled();
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'doc-1',
+                filename: 'mission-control.html',
+                format: 'html',
+                mimeType: 'text/html',
+                downloadUrl: '/api/documents/doc-1/download',
+            }),
+        ]);
     });
 });

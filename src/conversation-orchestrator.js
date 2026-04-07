@@ -604,6 +604,56 @@ function summarizeObjectData(data = {}) {
     return truncateText(normalizeInlineText(JSON.stringify(data)), 220);
 }
 
+function summarizeAssetSearchResults(data = {}) {
+    const results = Array.isArray(data?.results) ? data.results : [];
+    const count = Number.isFinite(Number(data?.count)) ? Number(data.count) : results.length;
+    if (count <= 0) {
+        return '';
+    }
+
+    const preview = results
+        .slice(0, 3)
+        .map((entry) => {
+            const title = normalizeInlineText(entry?.title || entry?.filename || entry?.relativePath || entry?.absolutePath || entry?.id || '');
+            const kind = normalizeInlineText(entry?.kind || entry?.sourceType || '');
+            return [title, kind ? `(${kind})` : ''].filter(Boolean).join(' ');
+        })
+        .filter(Boolean)
+        .join('; ');
+
+    return [
+        `${count} match${count === 1 ? '' : 'es'}`,
+        preview ? `top results: ${preview}` : '',
+    ].filter(Boolean).join('; ');
+}
+
+function summarizeDocumentWorkflowOutput(data = {}) {
+    const document = data?.document && typeof data.document === 'object'
+        ? data.document
+        : data;
+    if (!document || typeof document !== 'object') {
+        return '';
+    }
+
+    const filename = normalizeInlineText(document?.filename || '');
+    const mimeType = normalizeInlineText(document?.mimeType || '');
+    const downloadUrl = normalizeInlineText(document?.downloadUrl || '');
+    const preview = truncateText(normalizeInlineText(
+        document?.contentPreview
+        || document?.preview?.content
+        || document?.preview?.summary
+        || data?.message
+        || '',
+    ), 220);
+
+    return [
+        filename ? `created ${filename}` : '',
+        mimeType ? `type: ${mimeType}` : '',
+        downloadUrl ? `download: ${downloadUrl}` : '',
+        preview ? `preview: ${preview}` : '',
+    ].filter(Boolean).join('; ');
+}
+
 function deriveResearchSourceLabel(url = '', fallback = '') {
     const normalizedFallback = normalizeInlineText(fallback || '');
     if (normalizedFallback) {
@@ -983,6 +1033,8 @@ function buildNotesSynthesisInstructions() {
         'Do not use legacy ops like `replace-content`, `append-content`, or `prepend-content`. Use `rebuild_page`, `append_to_page`, `prepend_to_page`, `replace_block`, `insert_after`, or `update_block`.',
         'Available block palette includes `text`, `heading_1`, `heading_2`, `heading_3`, `bulleted_list`, `numbered_list`, `todo`, `toggle`, `quote`, `divider`, `callout`, `code`, `image`, `ai_image`, `bookmark`, `database`, `math`, `mermaid`, and `ai`.',
         'Use richer blocks intentionally: `callout` for takeaways or warnings, `bookmark` for sources, `database` for comparisons or trackers, `toggle` for optional detail, `mermaid` for process/structure, `image` or `ai_image` for visuals, `todo` for next steps, and `quote` for emphasized excerpts.',
+        'Use native note blocks instead of raw markdown punctuation: headings for headings, list blocks for bullets, todo blocks for checkboxes, callouts for highlighted notes, and text formatting instead of literal `**bold**` markers.',
+        'Do not leave markdown markers like `##`, `-`, `--`, `[ ]`, or `**...**` inside block content when the page block system already has a native representation.',
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive detail, sources, and next steps.',
         'Treat design quality as part of correctness in notes mode: the page should feel intentionally composed, not like raw Markdown pasted into blocks.',
         'Use the frontend metadata surface when it improves the page: `update_page` can set title, icon, cover URL, properties, and default model.',
@@ -2460,6 +2512,10 @@ function summarizeToolEventForUser(event = {}) {
 
     if (tool === 'web-search') {
         preview = summarizeSearchResults(data?.results || []);
+    } else if (tool === 'asset-search') {
+        preview = summarizeAssetSearchResults(data);
+    } else if (tool === 'document-workflow') {
+        preview = summarizeDocumentWorkflowOutput(data);
     } else if (tool === 'web-fetch') {
         preview = summarizeFetchedContent(data);
     } else if (stdout || stderr || error) {
@@ -4233,6 +4289,7 @@ class ConversationOrchestrator extends EventEmitter {
                 runtimeMode,
                 autonomyApproved,
                 executionTrace,
+                clientSurface,
             });
             traceModelResponse(finalResponse, toolEvents.length > 0 ? 'tool-synthesis' : 'direct-response', finalResponseStartedAt);
 
@@ -4321,6 +4378,7 @@ class ConversationOrchestrator extends EventEmitter {
                         runtimeMode,
                         autonomyApproved,
                         executionTrace,
+                        clientSurface,
                     });
                     traceModelResponse(finalResponse, 'recovery-repair', recoveredResponseStartedAt);
                     output = extractResponseText(finalResponse);
@@ -4357,6 +4415,7 @@ class ConversationOrchestrator extends EventEmitter {
                     runtimeMode,
                     autonomyApproved,
                     executionTrace,
+                    clientSurface,
                 });
                 traceModelResponse(finalResponse, 'repair', repairStartedAt);
                 output = extractResponseText(finalResponse);
@@ -5429,6 +5488,7 @@ class ConversationOrchestrator extends EventEmitter {
         runtimeMode = 'plain',
         autonomyApproved = false,
         executionTrace = [],
+        clientSurface = '',
     }) {
         const runtimeInstructions = this.buildRuntimeInstructions({
             baseInstructions: instructions,
@@ -5436,6 +5496,7 @@ class ConversationOrchestrator extends EventEmitter {
             allowedToolIds: toolPolicy.allowedToolIds,
             toolEvents,
             toolPolicy,
+            clientSurface,
         });
 
         const repairPrompt = [
@@ -5522,6 +5583,7 @@ class ConversationOrchestrator extends EventEmitter {
         runtimeMode = 'plain',
         autonomyApproved = false,
         executionTrace = [],
+        clientSurface = '',
     }) {
         const runtimeInstructions = this.buildRuntimeInstructions({
             baseInstructions: instructions,
@@ -5529,6 +5591,7 @@ class ConversationOrchestrator extends EventEmitter {
             allowedToolIds: toolPolicy.allowedToolIds,
             toolEvents,
             toolPolicy,
+            clientSurface,
         });
 
         if (toolEvents.length === 0) {
@@ -5656,13 +5719,21 @@ class ConversationOrchestrator extends EventEmitter {
         });
     }
 
-    buildRuntimeInstructions({ baseInstructions = '', executionProfile = DEFAULT_EXECUTION_PROFILE, allowedToolIds = [], toolEvents = [], toolPolicy = {} }) {
+    buildRuntimeInstructions({
+        baseInstructions = '',
+        executionProfile = DEFAULT_EXECUTION_PROFILE,
+        allowedToolIds = [],
+        toolEvents = [],
+        toolPolicy = {},
+        clientSurface = '',
+    }) {
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const userCheckpointPolicy = toolPolicy?.userCheckpointPolicy || {};
         const canUseUserCheckpoint = allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
             && userCheckpointPolicy.enabled === true
             && Number(userCheckpointPolicy.remaining || 0) > 0
             && !userCheckpointPolicy.pending;
+        const normalizedClientSurface = String(clientSurface || '').trim().toLowerCase();
         const parts = [
             String(baseInstructions || '').trim(),
             `Execution profile: ${executionProfile}.`,
@@ -5670,6 +5741,11 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (executionProfile === NOTES_EXECUTION_PROFILE) {
             parts.push(buildNotesSynthesisInstructions());
+        }
+
+        if (normalizedClientSurface === 'web-chat') {
+            parts.push('On web-chat, fenced `html` code blocks render as live sandboxed previews inside the message.');
+            parts.push('When the user wants to see a quick page, dashboard, mockup, or prototype here in chat, prefer inline ```html``` output over switching to a downloadable HTML artifact unless they explicitly ask for a file, export, download, link, or attachment.');
         }
 
         if (allowedToolIds.length > 0) {

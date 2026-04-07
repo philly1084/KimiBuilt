@@ -14,6 +14,7 @@ const {
     resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    shouldSuppressWebChatImplicitHtmlArtifact,
     stripInjectedNotesPageEditDirective,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -31,6 +32,7 @@ const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-mem
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
+const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -220,6 +222,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         }
         if (shouldSuppressNotesSurfaceArtifact({
             taskType,
+            text: artifactIntentText,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(outputFormat),
+        })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldSuppressWebChatImplicitHtmlArtifact({
+            clientSurface,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(outputFormat),
@@ -488,10 +498,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
-            effectiveSession = await persistSessionModel(sessionId, effectiveSession, event.response?.model || model || null);
-            const artifacts = await maybeGenerateOutputArtifact({
-                sessionId,
-                session: effectiveSession,
+                    effectiveSession = await persistSessionModel(sessionId, effectiveSession, event.response?.model || model || null);
+                    const generatedArtifacts = await maybeGenerateOutputArtifact({
+                        sessionId,
+                        session: effectiveSession,
                         mode: taskType,
                         outputFormat: effectiveOutputFormat,
                         content: fullText,
@@ -503,6 +513,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         reasoningEffort,
                         recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
                     });
+                    const artifacts = mergeRuntimeArtifacts(
+                        extractArtifactsFromToolEvents(toolEvents),
+                        generatedArtifacts,
+                    );
                     if (artifacts.length > 0) {
                         await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
                             artifact,
@@ -618,7 +632,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
         effectiveSession = await persistSessionModel(sessionId, effectiveSession, response.model || model || null);
-        const artifacts = await maybeGenerateOutputArtifact({
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session: effectiveSession,
             mode: taskType,
@@ -632,6 +646,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             reasoningEffort,
             recentMessages: await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT),
         });
+        const artifacts = mergeRuntimeArtifacts(
+            extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
+            generatedArtifacts,
+        );
         if (artifacts.length > 0) {
             await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
                 artifact,

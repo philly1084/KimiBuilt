@@ -317,6 +317,9 @@ Approved page plan:
         expect(prompt).toContain('Page metadata: Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel`');
         expect(prompt).toContain('Properties: `properties` accepts an array of `{key, value}` pairs');
         expect(prompt).toContain('Nested structure: Blocks can include `children`');
+        expect(prompt).toContain('Use todo blocks for real checkboxes');
+        expect(prompt).toContain('Do not leave markdown markers like `##`, `-`, `--`, `[ ]`, or `**bold**`');
+        expect(prompt).toContain('Use heading blocks for headings, list blocks for bullets, todo blocks for checkboxes');
         expect(prompt).toContain('Recommended metadata: Type: Research');
         expect(prompt).toContain('Required palette: callout + hero image/ai_image + bookmark source cluster + toggle for deep detail');
         expect(prompt).toContain('Executive Brief [brief]');
@@ -518,6 +521,35 @@ Approved page plan:
         ]));
     });
 
+    test('turns markdown task lists into todo blocks during fallback expansion', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [{
+                    type: 'text',
+                    content: '# Penguin Tasks\n\n- [ ] Find habitat sources\n- [x] Add hero image\n- [ ] Verify colony facts',
+                }],
+            },
+        ], 'Build a notes page with penguin research tasks and clean structure.', {
+            blockCount: 0,
+            outline: [],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_1', content: 'Penguin Tasks' }),
+            expect.objectContaining({
+                type: 'todo',
+                content: expect.objectContaining({ text: 'Find habitat sources', checked: false }),
+            }),
+            expect.objectContaining({
+                type: 'todo',
+                content: expect.objectContaining({ text: 'Add hero image', checked: true }),
+            }),
+        ]));
+    });
+
     test('converts quick facts lists into a richer explainer layout cluster', () => {
         const agent = loadAgent();
         const normalizedActions = agent._normalizeStructuredPageActions([
@@ -594,6 +626,38 @@ Approved page plan:
             expect.objectContaining({ type: 'callout', color: 'green' }),
             expect.objectContaining({ type: 'heading_2', textColor: 'green' }),
         ]));
+    });
+
+    test('normalizes markdown-like single-line block definitions into native block types', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'append_to_page',
+                blocks: [
+                    { type: 'text', content: '## Habitat' },
+                    { type: 'text', content: '-- Ice shelves and rocky coasts' },
+                    { type: 'text', content: '[ ] Add conservation section' },
+                    { type: 'text', content: '**Big idea:** Penguins are built for water.' },
+                ],
+            },
+        ], 'Add cleaner native blocks to this penguin page.', {
+            blockCount: 4,
+            outline: [{ id: 'h1', content: 'Penguins' }],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual([
+            expect.objectContaining({ type: 'heading_2', content: 'Habitat' }),
+            expect.objectContaining({ type: 'bulleted_list', content: 'Ice shelves and rocky coasts' }),
+            expect.objectContaining({
+                type: 'todo',
+                content: expect.objectContaining({ text: 'Add conservation section', checked: false }),
+            }),
+            expect.objectContaining({
+                type: 'callout',
+                content: expect.objectContaining({ text: 'Big idea: Penguins are built for water.' }),
+            }),
+        ]);
     });
 
     test('suppresses inferred html artifacts for notes page build requests unless file delivery is explicit', () => {

@@ -15,6 +15,7 @@ const {
     resolveDeferredWorkloadPreflight,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    shouldSuppressWebChatImplicitHtmlArtifact,
     stripInjectedNotesPageEditDirective,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -35,6 +36,7 @@ const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { getSessionControlState } = require('../runtime-control-state');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
     resolveSessionScope,
@@ -653,6 +655,14 @@ router.post('/chat/completions', async (req, res, next) => {
         })) {
             effectiveOutputFormat = null;
         }
+        if (shouldSuppressWebChatImplicitHtmlArtifact({
+            clientSurface,
+            text: artifactIntentText,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(output_format),
+        })) {
+            effectiveOutputFormat = null;
+        }
         const recentMessagesForWorkloadPreflight = effectiveOutputFormat
             ? await sessionStore.getRecentMessages(sessionId, WORKLOAD_PREFLIGHT_RECENT_LIMIT)
             : [];
@@ -950,7 +960,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
                     session = await applyAskedUserCheckpointState(sessionId, session, toolEvents);
-                    const artifacts = await maybeGenerateOutputArtifact({
+                    const generatedArtifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
                         mode: taskType,
@@ -963,6 +973,10 @@ router.post('/chat/completions', async (req, res, next) => {
                         model,
                         reasoningEffort,
                     });
+                    const artifacts = mergeRuntimeArtifacts(
+                        extractArtifactsFromToolEvents(toolEvents),
+                        generatedArtifacts,
+                    );
                     await updateSessionProjectMemory(sessionId, {
                         userText: lastUserText,
                         assistantText: fullText,
@@ -1116,7 +1130,7 @@ router.post('/chat/completions', async (req, res, next) => {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
         session = await applyAskedUserCheckpointState(sessionId, session, response?.metadata?.toolEvents || []);
-        const artifacts = await maybeGenerateOutputArtifact({
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
             mode: taskType,
@@ -1129,6 +1143,10 @@ router.post('/chat/completions', async (req, res, next) => {
             model,
             reasoningEffort,
         });
+        const artifacts = mergeRuntimeArtifacts(
+            extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
+            generatedArtifacts,
+        );
         await updateSessionProjectMemory(sessionId, {
             userText: lastUserText,
             assistantText: outputText,
@@ -1288,6 +1306,14 @@ router.post('/responses', async (req, res, next) => {
         }
         if (shouldSuppressNotesSurfaceArtifact({
             taskType,
+            text: artifactIntentText,
+            outputFormat: effectiveOutputFormat,
+            outputFormatProvided: Boolean(output_format),
+        })) {
+            effectiveOutputFormat = null;
+        }
+        if (shouldSuppressWebChatImplicitHtmlArtifact({
+            clientSurface,
             text: artifactIntentText,
             outputFormat: effectiveOutputFormat,
             outputFormatProvided: Boolean(output_format),
@@ -1552,7 +1578,7 @@ router.post('/responses', async (req, res, next) => {
                     if (sshMetadata) {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
-                    const artifacts = await maybeGenerateOutputArtifact({
+                    const generatedArtifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session,
                         mode: taskType,
@@ -1565,6 +1591,10 @@ router.post('/responses', async (req, res, next) => {
                         model,
                         reasoningEffort,
                     });
+                    const artifacts = mergeRuntimeArtifacts(
+                        extractArtifactsFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents || []),
+                        generatedArtifacts,
+                    );
                     await updateSessionProjectMemory(sessionId, {
                         userText: userInput,
                         assistantText: fullText,
@@ -1709,7 +1739,7 @@ router.post('/responses', async (req, res, next) => {
         if (sshMetadata) {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
-        const artifacts = await maybeGenerateOutputArtifact({
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
             mode: taskType,
@@ -1722,6 +1752,10 @@ router.post('/responses', async (req, res, next) => {
             model,
             reasoningEffort,
         });
+        const artifacts = mergeRuntimeArtifacts(
+            extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
+            generatedArtifacts,
+        );
         await updateSessionProjectMemory(sessionId, {
             userText: userInput,
             assistantText: outputText,

@@ -2505,6 +2505,8 @@ BLOCK DESIGN HEURISTICS:
 - Use image or ai_image blocks when visuals should live on the page, not in chat.
 - Use mermaid blocks for flows, processes, systems, org charts, and diagrams.
 - Use database blocks for comparison tables, trackers, or structured matrices.
+- Use todo blocks for real checkboxes instead of leaving markdown task syntax like \`[ ]\` or \`[x]\` inside plain text.
+- Do not leave markdown markers like \`##\`, \`-\`, \`--\`, \`[ ]\`, or \`**bold**\` inside block content when a native heading, list, todo, callout, or formatting choice exists.
 - If headings, text, and bullets are the only blocks in a substantial page draft, you almost certainly have not used the full page palette yet.
 - Before finalizing notes-actions, do a palette audit and check whether callout, database, bookmark, image/ai_image, mermaid, toggle, quote, todo, divider, code, or math would improve the page.
 - For a polished Notion-like page, treat visual hierarchy as required work, not optional polish: use a focal block near the top, style section labels with textColor where helpful, and give secondary notes a quieter tone.
@@ -2552,6 +2554,7 @@ GUIDELINES:
 - In notes, Mermaid usually belongs as a mermaid block inside the page. Do not switch to a downloadable Mermaid artifact unless the user explicitly asks for a file, export, download, or shareable artifact.
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
+- Do not write markdown syntax into a block when the block type already expresses the structure. Use heading blocks for headings, list blocks for bullets, todo blocks for checkboxes, callout blocks for highlighted notes, and \`formatting\` instead of raw \`**bold**\` markers.
 - You may include \`formatting\` on text-like blocks using \`{bold, italic, underline, strikethrough, code}\`.
 - You may include \`children\` on blocks when nested content improves the page, especially under toggles.
 - Do not invent block IDs - only use IDs that exist in the page
@@ -2814,7 +2817,8 @@ GUIDELINES:
 
         return /^#{1,3}\s+/.test(normalized) ||
             /^>\s+/.test(normalized) ||
-            /^[-*]\s+/.test(normalized) ||
+            /^(?:[-*]|--+)\s+/.test(normalized) ||
+            /^(?:[-*]\s+)?\[(?: |x|X)\]\s+/.test(normalized) ||
             /^\d+\.\s+/.test(normalized) ||
             /^\[![a-z_ -]+\]$/i.test(normalized) ||
             /^!\s*\S+/.test(normalized) ||
@@ -3332,8 +3336,196 @@ GUIDELINES:
     }
 
     function countInlineStructuralMarkers(text = '') {
-        const matches = String(text || '').match(/\s(?=(?:> |#{1,3}\s+|[-*]\s+|\d+\.\s+|\[![a-z_ -]+\]|!\[[^\]]*\]\([^)]+\)|---+))/g);
+        const matches = String(text || '').match(/\s(?=(?:> |#{1,3}\s+|(?:[-*]|--+)\s+|(?:[-*]\s+)?\[(?: |x|X)\]\s+|\d+\.\s+|\[![a-z_ -]+\]|!\[[^\]]*\]\([^)]+\)|---+))/g);
         return matches ? matches.length : 0;
+    }
+
+    function stripMarkdownInlineFormatting(text = '') {
+        return String(text || '')
+            .replace(/\*\*(.+?)\*\*/g, '$1')
+            .replace(/__(.+?)__/g, '$1')
+            .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+            .replace(/(?<!_)_([^_]+)_(?!_)/g, '$1')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function normalizeMarkdownTextForBlockType(type = 'text', value = '') {
+        const normalizedType = canonicalizeBlockType(type);
+        const source = String(value || '').trim();
+        if (!source) {
+            return '';
+        }
+
+        let cleaned = source;
+        switch (normalizedType) {
+            case 'heading_1':
+            case 'heading_2':
+            case 'heading_3':
+                cleaned = cleaned.replace(/^#{1,3}\s+/, '');
+                break;
+            case 'bulleted_list':
+                cleaned = cleaned.replace(/^(?:[-*]|--+)\s+/, '');
+                break;
+            case 'numbered_list':
+                cleaned = cleaned.replace(/^\d+\.\s+/, '');
+                break;
+            case 'todo':
+                cleaned = cleaned.replace(/^(?:[-*]\s+)?\[(?: |x|X)\]\s+/, '');
+                break;
+            case 'quote':
+                cleaned = cleaned.replace(/^>\s+/, '');
+                break;
+            case 'callout':
+                cleaned = cleaned
+                    .replace(/^\[![a-z_ -]+\]\s*/i, '')
+                    .replace(/^>\s+/, '');
+                break;
+            default:
+                break;
+        }
+
+        return stripMarkdownInlineFormatting(cleaned);
+    }
+
+    function inferMarkdownLikeSingleLineBlock(value = '', fallbackType = 'text') {
+        const normalized = String(value || '').trim();
+        if (!normalized || /\n/.test(normalized)) {
+            return null;
+        }
+
+        const todoMatch = normalized.match(/^(?:[-*]\s+)?\[( |x|X)\]\s+(.+)$/);
+        if (todoMatch) {
+            return {
+                type: 'todo',
+                content: {
+                    text: normalizeMarkdownTextForBlockType('todo', todoMatch[2]),
+                    checked: /x/i.test(todoMatch[1]),
+                },
+            };
+        }
+
+        const headingMatch = normalized.match(/^(#{1,3})\s+(.+)$/);
+        if (headingMatch) {
+            return {
+                type: `heading_${Math.min(headingMatch[1].length, 3)}`,
+                content: normalizeMarkdownTextForBlockType('text', headingMatch[2]),
+            };
+        }
+
+        const strongHeadingMatch = normalized.match(/^\*\*(.+?)\*\*$/);
+        if (canonicalizeBlockType(fallbackType) === 'text' && strongHeadingMatch) {
+            const headingText = stripMarkdownInlineFormatting(strongHeadingMatch[1]);
+            if (headingText && headingText.split(/\s+/).length <= 8 && !/[.!?]$/.test(headingText)) {
+                return {
+                    type: 'heading_2',
+                    content: headingText,
+                };
+            }
+        }
+
+        const calloutLabelMatch = normalized.match(/^\*\*(.+?)\*\*:?\s+(.+)$/);
+        const calloutLabel = stripMarkdownInlineFormatting(calloutLabelMatch?.[1] || '').replace(/:\s*$/, '');
+        if (canonicalizeBlockType(fallbackType) === 'text' && calloutLabelMatch
+            && /\b(big idea|key takeaway|takeaway|summary|important|warning|note|why it matters|bottom line)\b/i.test(calloutLabel)) {
+            return {
+                type: 'callout',
+                content: {
+                    text: stripMarkdownInlineFormatting(`${calloutLabel}: ${calloutLabelMatch[2]}`),
+                    icon: '!',
+                },
+            };
+        }
+
+        const bulletMatch = normalized.match(/^(?:[-*]|--+)\s+(.+)$/);
+        if (bulletMatch) {
+            return {
+                type: 'bulleted_list',
+                content: normalizeMarkdownTextForBlockType('bulleted_list', bulletMatch[1]),
+            };
+        }
+
+        const numberedMatch = normalized.match(/^\d+\.\s+(.+)$/);
+        if (numberedMatch) {
+            return {
+                type: 'numbered_list',
+                content: normalizeMarkdownTextForBlockType('numbered_list', numberedMatch[1]),
+            };
+        }
+
+        const quoteMatch = normalized.match(/^>\s+(.+)$/);
+        if (quoteMatch) {
+            return {
+                type: 'quote',
+                content: normalizeMarkdownTextForBlockType('quote', quoteMatch[1]),
+            };
+        }
+
+        if (/^---+$/.test(normalized)) {
+            return {
+                type: 'divider',
+                content: '',
+            };
+        }
+
+        return null;
+    }
+
+    function normalizeMarkdownLikeBlockDefinition(blockDefinition, options = {}) {
+        if (!blockDefinition || typeof blockDefinition !== 'object') {
+            return blockDefinition;
+        }
+
+        const defaultType = options.defaultType || 'text';
+        const normalized = {
+            ...blockDefinition,
+        };
+        let type = canonicalizeBlockType(normalized.type || defaultType);
+
+        const hasExplicitContent = Object.prototype.hasOwnProperty.call(normalized, 'content');
+        const hasExplicitText = Object.prototype.hasOwnProperty.call(normalized, 'text');
+        const contentValue = hasExplicitContent
+            ? normalized.content
+            : (hasExplicitText ? normalized.text : '');
+
+        if (typeof contentValue === 'string') {
+            const inferred = inferMarkdownLikeSingleLineBlock(contentValue, type);
+            if (inferred && (type === 'text' || inferred.type === type || ['heading_1', 'heading_2', 'heading_3', 'bulleted_list', 'numbered_list', 'todo', 'quote', 'callout', 'divider'].includes(inferred.type))) {
+                type = inferred.type;
+                normalized.content = inferred.content;
+                delete normalized.text;
+            } else {
+                normalized.content = normalizeMarkdownTextForBlockType(type, contentValue);
+                delete normalized.text;
+            }
+        } else if (type === 'todo' && contentValue && typeof contentValue === 'object') {
+            normalized.content = {
+                ...contentValue,
+                text: normalizeMarkdownTextForBlockType('todo', contentValue.text || ''),
+            };
+        } else if (type === 'callout' && contentValue && typeof contentValue === 'object') {
+            normalized.content = {
+                ...contentValue,
+                text: normalizeMarkdownTextForBlockType('callout', contentValue.text || contentValue.content || contentValue.message || ''),
+            };
+        } else if (['heading_1', 'heading_2', 'heading_3', 'bulleted_list', 'numbered_list', 'quote', 'text'].includes(type) && typeof contentValue === 'string') {
+            normalized.content = normalizeMarkdownTextForBlockType(type, contentValue);
+        }
+
+        normalized.type = type;
+        if (Array.isArray(normalized.children) && normalized.children.length > 0) {
+            normalized.children = normalized.children.map((child) => normalizeMarkdownLikeBlockDefinition(child));
+        }
+        return normalized;
+    }
+
+    function normalizeMarkdownLikeBlockDefinitions(blockDefinitions = []) {
+        if (!Array.isArray(blockDefinitions) || blockDefinitions.length === 0) {
+            return [];
+        }
+
+        return blockDefinitions.map((blockDefinition) => normalizeMarkdownLikeBlockDefinition(blockDefinition));
     }
 
     function looksLikeCollapsedStructuredMarkdown(sourceText = '') {
@@ -3526,14 +3718,14 @@ GUIDELINES:
                 blocks.push({
                     type: headingLevel,
                     content: inlineHeadingSplit
-                        ? inlineHeadingSplit.heading
-                        : line.replace(/^#{1,3}\s+/, '').trim()
+                        ? normalizeMarkdownTextForBlockType('text', inlineHeadingSplit.heading)
+                        : normalizeMarkdownTextForBlockType(headingLevel, line)
                 });
                 usedTitle = true;
                 if (inlineHeadingSplit?.remainder) {
                     blocks.push({
                         type: 'text',
-                        content: inlineHeadingSplit.remainder,
+                        content: normalizeMarkdownTextForBlockType('text', inlineHeadingSplit.remainder),
                     });
                 }
                 index += 1;
@@ -3543,17 +3735,33 @@ GUIDELINES:
             if (/^>\s+/.test(line)) {
                 blocks.push({
                     type: 'quote',
-                    content: line.replace(/^>\s+/, '').trim()
+                    content: normalizeMarkdownTextForBlockType('quote', line)
                 });
                 index += 1;
                 continue;
             }
 
-            if (/^[-*]\s+/.test(line)) {
-                while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+            if (/^(?:[-*]\s+)?\[(?: |x|X)\]\s+/.test(line)) {
+                while (index < lines.length && /^(?:[-*]\s+)?\[(?: |x|X)\]\s+/.test(lines[index].trim())) {
+                    const currentLine = lines[index].trim();
+                    const todoMatch = currentLine.match(/^(?:[-*]\s+)?\[( |x|X)\]\s+(.+)$/);
+                    blocks.push({
+                        type: 'todo',
+                        content: {
+                            text: normalizeMarkdownTextForBlockType('todo', todoMatch?.[2] || ''),
+                            checked: /x/i.test(todoMatch?.[1] || ''),
+                        }
+                    });
+                    index += 1;
+                }
+                continue;
+            }
+
+            if (/^(?:[-*]|--+)\s+/.test(line)) {
+                while (index < lines.length && /^(?:[-*]|--+)\s+/.test(lines[index].trim())) {
                     blocks.push({
                         type: 'bulleted_list',
-                        content: lines[index].trim().replace(/^[-*]\s+/, '')
+                        content: normalizeMarkdownTextForBlockType('bulleted_list', lines[index].trim())
                     });
                     index += 1;
                 }
@@ -3564,7 +3772,7 @@ GUIDELINES:
                 while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
                     blocks.push({
                         type: 'numbered_list',
-                        content: lines[index].trim().replace(/^\d+\.\s+/, '')
+                        content: normalizeMarkdownTextForBlockType('numbered_list', lines[index].trim())
                     });
                     index += 1;
                 }
@@ -3584,7 +3792,7 @@ GUIDELINES:
 
             blocks.push({
                 type: 'text',
-                content: paragraphLines.join(' ').trim()
+                content: normalizeMarkdownTextForBlockType('text', paragraphLines.join(' ').trim())
             });
         }
 
@@ -3822,6 +4030,23 @@ GUIDELINES:
                         blocks: expandedBlocks,
                     };
                 }
+                if (sourceText) {
+                    const normalizedBlock = normalizeMarkdownLikeBlockDefinition({
+                        type: action.type || 'text',
+                        content: sourceText,
+                        formatting: action.formatting,
+                        color: action.color,
+                        textColor: action.textColor,
+                    }, {
+                        defaultType: action.type || 'text',
+                    });
+
+                    return {
+                        ...action,
+                        type: normalizedBlock.type,
+                        content: normalizedBlock.content,
+                    };
+                }
                 return action;
             }
 
@@ -3830,18 +4055,28 @@ GUIDELINES:
             }
 
             if (blockDefinitions.length !== 1) {
-                return action;
+                if (blockDefinitions.length === 0) {
+                    return action;
+                }
+
+                return {
+                    ...action,
+                    blocks: normalizeMarkdownLikeBlockDefinitions(blockDefinitions),
+                };
             }
 
             const sourceText = getSingleTextSource(blockDefinitions[0]);
             const expandedBlocks = expandStructuredPageTextIntoBlocks(sourceText, question, context);
             if (expandedBlocks.length <= 1) {
-                return action;
+                return {
+                    ...action,
+                    blocks: normalizeMarkdownLikeBlockDefinitions(blockDefinitions),
+                };
             }
 
             return {
                 ...action,
-                blocks: expandedBlocks,
+                blocks: normalizeMarkdownLikeBlockDefinitions(expandedBlocks),
             };
         });
 
@@ -4241,9 +4476,10 @@ Build the page in a structured, polished way instead of one-shotting the whole d
 
     function normalizeActionBlock(blockDefinition, options = {}) {
         const defaultType = options.defaultType || 'text';
-        const definition = typeof blockDefinition === 'string'
+        const rawDefinition = typeof blockDefinition === 'string'
             ? { type: defaultType, content: blockDefinition }
             : (blockDefinition || {});
+        const definition = normalizeMarkdownLikeBlockDefinition(rawDefinition, { defaultType });
         const type = canonicalizeBlockType(definition.type || defaultType);
         let contentInput = Object.prototype.hasOwnProperty.call(definition, 'content')
             ? definition.content

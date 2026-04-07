@@ -2992,6 +2992,56 @@ body.layout-minimal #input-meta-row {
     border-bottom: 1px solid #2d2d2d;
 }
 
+.html-preview-wrapper {
+    border-bottom: 1px solid #2d2d2d;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.22), rgba(15, 23, 42, 0.08));
+}
+
+.html-preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem 0;
+}
+
+.html-preview-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #cbd5f5;
+}
+
+.html-preview-surface {
+    padding: 1rem;
+}
+
+.html-preview-surface iframe {
+    display: block;
+    width: 100%;
+    min-height: 320px;
+    border: none;
+    border-radius: var(--radius-lg);
+    background: #ffffff;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+}
+
+.html-preview-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.96);
+    color: #475569;
+    font-size: 0.875rem;
+}
+
+.html-source-block {
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
 .mermaid-visual-wrapper {
     padding: 1rem;
     background: linear-gradient(180deg, rgba(15, 23, 42, 0.22), rgba(15, 23, 42, 0.08));

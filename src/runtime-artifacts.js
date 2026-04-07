@@ -1,0 +1,156 @@
+const { inferFormat, normalizeFormat } = require('./artifacts/constants');
+
+const INTERNAL_DOWNLOAD_PATH_PATTERN = /\/api\/(?:artifacts|documents)\/[^/?#]+\/download\b/i;
+const ARTIFACT_RESULT_KEYS = [
+    'artifact',
+    'artifacts',
+    'document',
+    'documents',
+    'generatedArtifact',
+    'generatedArtifacts',
+];
+
+function normalizeDownloadUrl(value = '') {
+    const trimmed = String(value || '').trim().replace(/[),.;:!?]+$/g, '');
+    if (!trimmed) {
+        return null;
+    }
+
+    if (trimmed.startsWith('/')) {
+        return INTERNAL_DOWNLOAD_PATH_PATTERN.test(trimmed) ? trimmed : null;
+    }
+
+    try {
+        const parsed = new URL(trimmed);
+        return INTERNAL_DOWNLOAD_PATH_PATTERN.test(parsed.pathname) ? parsed.toString() : null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+function normalizeArtifactEntry(value = null) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const id = String(
+        value.id
+        || value.artifactId
+        || value.artifact_id
+        || value.documentId
+        || value.document_id
+        || '',
+    ).trim();
+    const downloadUrl = normalizeDownloadUrl(
+        value.downloadUrl
+        || value.download_url
+        || value.inlinePath
+        || value.inline_path
+        || '',
+    );
+
+    if (!id || !downloadUrl) {
+        return null;
+    }
+
+    const filename = String(value.filename || value.name || '').trim();
+    const mimeType = String(value.mimeType || value.mime_type || '').trim();
+    const format = normalizeFormat(
+        value.format
+        || value.extension
+        || inferFormat(filename, mimeType),
+    );
+    const size = Number.isFinite(Number(value.size))
+        ? Number(value.size)
+        : (Number.isFinite(Number(value.sizeBytes)) ? Number(value.sizeBytes) : 0);
+    const metadata = value.metadata && typeof value.metadata === 'object' && !Array.isArray(value.metadata)
+        ? value.metadata
+        : {};
+
+    return {
+        id,
+        filename,
+        format: format || '',
+        extension: String(value.extension || format || '').trim(),
+        mimeType,
+        size,
+        sizeBytes: size,
+        downloadUrl,
+        metadata,
+        ...(value.preview != null ? { preview: value.preview } : {}),
+        ...(typeof value.contentPreview === 'string' && value.contentPreview.trim()
+            ? { contentPreview: value.contentPreview.trim() }
+            : {}),
+    };
+}
+
+function extractArtifactsFromValue(value, depth = 0) {
+    if (depth > 4 || value == null) {
+        return [];
+    }
+
+    if (Array.isArray(value)) {
+        return value.flatMap((entry) => extractArtifactsFromValue(entry, depth + 1));
+    }
+
+    if (typeof value !== 'object') {
+        return [];
+    }
+
+    const artifact = normalizeArtifactEntry(value);
+    return artifact ? [artifact] : [];
+}
+
+function extractArtifactsFromToolEvents(toolEvents = []) {
+    return mergeRuntimeArtifacts(
+        ...(Array.isArray(toolEvents) ? toolEvents : [])
+            .filter((event) => event?.result?.success !== false)
+            .map((event) => {
+                const data = event?.result?.data;
+                const candidates = [
+                    data,
+                    ...ARTIFACT_RESULT_KEYS.map((key) => data?.[key]),
+                ];
+                return candidates.flatMap((candidate) => extractArtifactsFromValue(candidate));
+            }),
+    );
+}
+
+function mergeRuntimeArtifacts(...artifactSets) {
+    const merged = [];
+    const seen = new Set();
+
+    artifactSets.flat().forEach((artifact) => {
+        if (!artifact || typeof artifact !== 'object') {
+            return;
+        }
+
+        const normalized = normalizeArtifactEntry(artifact) || {
+            ...artifact,
+            id: String(artifact.id || '').trim(),
+            filename: String(artifact.filename || '').trim(),
+            format: normalizeFormat(
+                artifact.format
+                || artifact.extension
+                || inferFormat(artifact.filename, artifact.mimeType),
+            ) || '',
+            extension: String(artifact.extension || '').trim(),
+            mimeType: String(artifact.mimeType || '').trim(),
+            downloadUrl: normalizeDownloadUrl(artifact.downloadUrl || artifact.inlinePath || ''),
+        };
+        const identity = normalized.id || normalized.downloadUrl || '';
+        if (!identity || seen.has(identity)) {
+            return;
+        }
+
+        seen.add(identity);
+        merged.push(normalized);
+    });
+
+    return merged;
+}
+
+module.exports = {
+    extractArtifactsFromToolEvents,
+    mergeRuntimeArtifacts,
+};

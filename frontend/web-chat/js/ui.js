@@ -274,6 +274,26 @@ class UIHelpers {
         return this.generatePleasantFilenameBase();
     }
 
+    createFriendlyFilenameBaseFromHtml(source, fallback = 'preview') {
+        const text = String(source || '').trim();
+        if (!text) {
+            return this.createFriendlyFilenameBase(fallback, fallback);
+        }
+
+        const titleMatch = text.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+        const headingMatch = text.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+        const candidate = (titleMatch?.[1] || headingMatch?.[1] || '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (candidate) {
+            return this.createFriendlyFilenameBase(candidate, fallback);
+        }
+
+        return this.createUniqueFilename(fallback, 'html', fallback).replace(/\.html$/i, '');
+    }
+
     // ============================================
     // Markdown Setup
     // ============================================
@@ -384,6 +404,40 @@ class UIHelpers {
                                 <div class="mermaid-placeholder">Rendering diagram...</div>
                             </div>
                         </div>
+                    </div>
+                `;
+            }
+
+            if (normalizedLang === 'html') {
+                const htmlSource = normalizedCode.trim();
+                const escapedCode = this.escapeHtml(htmlSource);
+                const escapedAttrCode = this.escapeHtmlAttr(htmlSource);
+                const filenameBase = this.createFriendlyFilenameBaseFromHtml(htmlSource, 'preview');
+
+                return `
+                    <div class="code-block html-code-block">
+                        <div class="code-header">
+                            <span class="code-language">html</span>
+                            <div class="code-actions">
+                                <button class="code-copy-btn" onclick="uiHelpers.copyCode(this)" data-code="${escapedAttrCode}" aria-label="Copy HTML code">
+                                    <i data-lucide="copy" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    <span>Copy</span>
+                                </button>
+                                <button class="code-copy-btn" onclick="uiHelpers.downloadInlineHtml(this)" data-code="${escapedAttrCode}" data-filename="${filenameBase}.html" aria-label="Download HTML preview">
+                                    <i data-lucide="download" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    <span>HTML</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="html-preview-wrapper">
+                            <div class="html-preview-toolbar">
+                                <span class="html-preview-label">Live preview</span>
+                            </div>
+                            <div class="html-preview-surface" data-html-preview="${escapedAttrCode}">
+                                <div class="html-preview-placeholder">Rendering preview...</div>
+                            </div>
+                        </div>
+                        <pre class="html-source-block"><code class="language-markup">${escapedCode}</code></pre>
                     </div>
                 `;
             }
@@ -1414,6 +1468,7 @@ class UIHelpers {
                 'class', 'data-code', 'onclick', 'type', 'checked', 'disabled',
                 'aria-label', 'aria-hidden', 'aria-checked',
                 'data-filename', 'data-mermaid-source', 'data-mermaid-filename', 'data-lucide',
+                'data-html-preview',
                 'data-message-id', 'data-survey-id', 'data-allow-multiple', 'data-max-selections',
                 'data-step-id', 'data-step-input-type', 'data-step-required', 'data-step-allow-multiple', 'data-step-max-selections',
                 'data-current-step-index', 'data-option-id', 'data-option-label', 'data-submitted',
@@ -1434,6 +1489,25 @@ class UIHelpers {
                 return this.restoreFlattenedMarkdownBlocks(segment);
             })
             .join('');
+    }
+
+    looksLikeStandaloneHtmlDocument(source = '') {
+        const normalized = String(source || '').trim();
+        if (!normalized || /^```html\b/i.test(normalized)) {
+            return false;
+        }
+
+        return /^(?:<!doctype html\b|<html\b|<head\b|<body\b)/i.test(normalized)
+            && /<\/(?:html|body)>/i.test(normalized);
+    }
+
+    normalizeInlineHtmlAssistantMarkdown(source = '') {
+        const normalized = String(source || '').trim();
+        if (!this.looksLikeStandaloneHtmlDocument(normalized)) {
+            return normalized;
+        }
+
+        return `\`\`\`html\n${normalized}\n\`\`\``;
     }
 
     restoreFlattenedMarkdownBlocks(source = '') {
@@ -1530,7 +1604,9 @@ class UIHelpers {
         }
 
         const surveyRenderPlan = this.buildSurveyRenderPlan(content, message);
-        const normalizedMarkdown = this.normalizeStructuredAssistantMarkdown(surveyRenderPlan.markdown);
+        const normalizedMarkdown = this.normalizeInlineHtmlAssistantMarkdown(
+            this.normalizeStructuredAssistantMarkdown(surveyRenderPlan.markdown),
+        );
 
         if (this.looksLikeAgentBrief(normalizedMarkdown, message)) {
             const sections = this.buildAgentBriefSections(normalizedMarkdown);
@@ -1673,6 +1749,7 @@ class UIHelpers {
 
         if (!isUser) {
             this.highlightCodeBlocks(messageEl);
+            this.renderHtmlPreviews(messageEl);
             this.renderMermaidDiagrams(messageEl);
         }
 
@@ -2359,6 +2436,7 @@ class UIHelpers {
             textEl.classList.toggle('message-text--agent-brief', renderPlan.variant === 'agent-brief');
             textEl.innerHTML = renderPlan.html;
             this.highlightCodeBlocks(textEl);
+            this.renderHtmlPreviews(textEl);
             this.renderMermaidDiagrams(textEl);
             this.reinitializeIcons(textEl);
         }
@@ -2391,6 +2469,7 @@ class UIHelpers {
         textEl.classList.toggle('message-text--agent-brief', renderPlan.variant === 'agent-brief');
         textEl.innerHTML = renderPlan.html;
         this.highlightCodeBlocks(textEl);
+        this.renderHtmlPreviews(textEl);
         this.renderMermaidDiagrams(textEl);
         this.reinitializeIcons(textEl);
 
@@ -3586,6 +3665,43 @@ class UIHelpers {
             console.error('[UI] Mermaid PDF export failed:', error);
             this.showToast(`Failed to export Mermaid PDF: ${error.message}`, 'error');
         }
+    }
+
+    async downloadInlineHtml(button) {
+        const source = String(button?.dataset?.code || '').trim();
+        if (!source) {
+            this.showToast('No HTML source to download', 'error');
+            return;
+        }
+
+        const filename = this.sanitizeDownloadFilename(
+            button?.dataset?.filename || this.createUniqueFilename('preview', 'html', 'preview'),
+            'preview',
+            'html',
+        );
+        const blob = new Blob([source], { type: 'text/html;charset=utf-8' });
+        this.downloadBlob(blob, filename);
+        await this.persistGeneratedFile(blob, filename, 'text/html');
+    }
+
+    renderHtmlPreviews(container = document) {
+        const targets = Array.from(container.querySelectorAll('.html-preview-surface'));
+        targets.forEach((target) => {
+            const source = String(target.dataset.htmlPreview || '');
+            if (!source || target.dataset.htmlRenderedSource === source) {
+                return;
+            }
+
+            const iframe = document.createElement('iframe');
+            iframe.loading = 'lazy';
+            iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+            iframe.referrerPolicy = 'no-referrer';
+            iframe.srcdoc = source;
+
+            target.innerHTML = '';
+            target.appendChild(iframe);
+            target.dataset.htmlRenderedSource = source;
+        });
     }
 
     async renderMermaidDiagrams(container = document) {

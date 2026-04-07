@@ -43,6 +43,7 @@ const {
     shouldDeferArtifactGenerationToWorkload,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    shouldSuppressWebChatImplicitHtmlArtifact,
 } = require('./ai-route-utils');
 
 describe('ai-route-utils', () => {
@@ -381,6 +382,24 @@ describe('ai-route-utils', () => {
         expect(stripInjectedNotesPageEditDirective(
             'Create a page about penguins.\n\nInterpret "page" as the current notes page shown in this editor. This is a direct page edit request, so return notes-actions that apply the content to the current notes page unless the user explicitly says web page, site page, repo file, or server component. Put the result into page blocks. Do not reply with chat prose alone. Do not create standalone HTML, file, export, artifact, or download-link output unless the user explicitly asked for that.',
         )).toBe('Create a page about penguins.');
+    });
+
+    test('suppresses implicit html artifacts on web-chat when delivery is not explicit', () => {
+        expect(shouldSuppressWebChatImplicitHtmlArtifact({
+            clientSurface: 'web-chat',
+            text: 'Make me a fresh HTML sun dashboard in the same mission-control direction.',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(true);
+    });
+
+    test('keeps explicit html delivery requests on web-chat in the artifact path', () => {
+        expect(shouldSuppressWebChatImplicitHtmlArtifact({
+            clientSurface: 'web-chat',
+            text: 'Create a downloadable HTML file for the sun dashboard.',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(false);
     });
 
     test('resolveArtifactContextIds prefers the last generated image artifacts for image follow-ups', () => {

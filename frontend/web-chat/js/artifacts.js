@@ -309,6 +309,14 @@
             || /\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\s+(?:file|artifact|export)\b/i.test(normalized);
     }
 
+    function hasExplicitHtmlArtifactIntent(text = '') {
+        const normalized = String(text || '').trim().toLowerCase();
+        if (!normalized) return false;
+
+        return /\b(standalone html|html file|downloadable html|shareable html|html artifact|html export)\b/.test(normalized)
+            || (/\bhtml\b/.test(normalized) && /\b(export|download|save|artifact|file|link|share|attachment)\b/.test(normalized));
+    }
+
     function inferRequestedOutputFormat(messages = []) {
         const lastUserMessage = [...messages].reverse().find((message) => message?.role === 'user' && message?.content);
         const text = String(lastUserMessage?.content || '').toLowerCase();
@@ -330,7 +338,7 @@
         if (/\b(docx|word document)\b/.test(text) && hasArtifactIntent) return 'docx';
         if (/\bxml\b/.test(text) && hasArtifactIntent) return 'xml';
         if (hasExplicitMermaidIntent(text)) return 'mermaid';
-        if (/\bhtml\b/.test(text) && hasArtifactIntent) return 'html';
+        if (hasExplicitHtmlArtifactIntent(text)) return 'html';
 
         return '';
     }

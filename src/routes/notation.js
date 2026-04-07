@@ -7,6 +7,7 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReas
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
+const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
     resolveClientSurface,
@@ -188,7 +189,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             ]);
         }
         const structured = parseNotationResponse(outputText);
-        const artifacts = await maybeGenerateOutputArtifact({
+        const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session,
             mode: 'notation',
@@ -203,6 +204,10 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             reasoningEffort,
             recentMessages: await sessionStore.getRecentMessages(sessionId),
         });
+        const artifacts = mergeRuntimeArtifacts(
+            extractArtifactsFromToolEvents(response?.metadata?.toolEvents || []),
+            generatedArtifacts,
+        );
         if (artifacts.length > 0) {
             await Promise.all(artifacts.map((artifact) => memoryService.rememberArtifactResult(sessionId, {
                 artifact,

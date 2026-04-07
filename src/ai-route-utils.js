@@ -191,6 +191,10 @@ function isNotesSurfaceTaskType(taskType = '') {
     ].includes(normalized);
 }
 
+function isWebChatSurface(clientSurface = '') {
+    return String(clientSurface || '').trim().toLowerCase() === 'web-chat';
+}
+
 function hasExplicitArtifactDeliveryIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -317,6 +321,23 @@ function shouldSuppressImplicitMermaidArtifact({
     }
 
     return false;
+}
+
+function shouldSuppressWebChatImplicitHtmlArtifact({
+    clientSurface = '',
+    text = '',
+    outputFormat = null,
+    outputFormatProvided = false,
+} = {}) {
+    if (normalizeFormat(outputFormat) !== 'html' || outputFormatProvided || !isWebChatSurface(clientSurface)) {
+        return false;
+    }
+
+    if (hasExplicitStandaloneHtmlIntent(text) || hasExplicitArtifactDeliveryIntent(text)) {
+        return false;
+    }
+
+    return true;
 }
 
 function inferRequestedOutputFormat(text = '') {
@@ -1102,6 +1123,7 @@ module.exports = {
     shouldPreGenerateImagesForArtifactRequest,
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
+    shouldSuppressWebChatImplicitHtmlArtifact,
     normalizeReasoningEffort,
     resolveReasoningEffort,
     resolveSshRequestContext,

@@ -55,6 +55,7 @@ jest.mock('../ai-route-utils', () => ({
     })),
     shouldSuppressNotesSurfaceArtifact: jest.fn(() => false),
     shouldSuppressImplicitMermaidArtifact: jest.fn(() => false),
+    shouldSuppressWebChatImplicitHtmlArtifact: jest.fn(() => false),
     stripInjectedNotesPageEditDirective: jest.fn((text) => text),
     resolveSshRequestContext: jest.fn((text) => ({ effectivePrompt: text })),
     extractSshSessionMetadataFromToolEvents: jest.fn(() => null),
@@ -97,6 +98,7 @@ jest.mock('../runtime-control-state', () => ({
 
 jest.mock('../web-chat-message-state', () => ({
     buildWebChatSessionMessages: jest.fn(() => []),
+    buildFrontendAssistantMetadata: jest.fn(() => ({})),
 }));
 
 jest.mock('../session-scope', () => ({
@@ -124,6 +126,7 @@ const { sessionStore } = require('../session-store');
 const { executeConversationRuntime } = require('../runtime-execution');
 const {
     buildInstructionsWithArtifacts,
+    maybeGenerateOutputArtifact,
     generateOutputArtifactFromPrompt,
     inferRequestedOutputFormat,
     shouldSuppressNotesSurfaceArtifact,
@@ -150,6 +153,7 @@ describe('/v1/chat/completions notes routing', () => {
         sessionStore.getRecentMessages.mockResolvedValue([]);
         sessionStore.update.mockResolvedValue(session);
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
+        maybeGenerateOutputArtifact.mockResolvedValue([]);
     });
 
     test('keeps inferred html requests in the normal runtime for notes page edits', async () => {
@@ -290,5 +294,66 @@ describe('/v1/chat/completions notes routing', () => {
         expect(inferRequestedOutputFormat).toHaveBeenCalledWith('Create a page about penguins.');
         expect(generateOutputArtifactFromPrompt).not.toHaveBeenCalled();
         expect(executeConversationRuntime).toHaveBeenCalled();
+    });
+
+    test('surfaces document-workflow artifacts in OpenAI-compatible chat responses', async () => {
+        inferRequestedOutputFormat.mockReturnValue(null);
+        shouldSuppressNotesSurfaceArtifact.mockReturnValue(false);
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-notes-compat-4',
+                output_text: 'I recreated the dashboard.',
+                output: [{
+                    type: 'message',
+                    content: [{ type: 'output_text', text: 'I recreated the dashboard.' }],
+                }],
+                metadata: {
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'document-workflow',
+                            },
+                        },
+                        result: {
+                            success: true,
+                            data: {
+                                document: {
+                                    id: 'doc-77',
+                                    filename: 'mission-control.html',
+                                    mimeType: 'text/html',
+                                    downloadUrl: '/api/documents/doc-77/download',
+                                    metadata: { format: 'html' },
+                                },
+                            },
+                        },
+                    }],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1', openAiCompatRouter);
+
+        const response = await request(app)
+            .post('/v1/chat/completions')
+            .send({
+                messages: [
+                    { role: 'user', content: 'Rebuild the mission control dashboard.' },
+                ],
+                session_id: 'page-session-1',
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'doc-77',
+                filename: 'mission-control.html',
+                format: 'html',
+                downloadUrl: '/api/documents/doc-77/download',
+            }),
+        ]);
+        expect(response.body.choices[0].message.artifacts).toEqual(response.body.artifacts);
     });
 });
