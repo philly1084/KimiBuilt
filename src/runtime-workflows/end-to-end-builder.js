@@ -24,6 +24,13 @@ const VALID_STAGES = new Set([
     'completed',
     'blocked',
 ]);
+const VALID_TASK_STATUSES = new Set([
+    'planned',
+    'in_progress',
+    'blocked',
+    'completed',
+    'skipped',
+]);
 
 function normalizeText(value = '') {
     return String(value || '').trim();
@@ -55,6 +62,31 @@ function hasContinuationIntent(text = '') {
         /^(continue|keep going|go ahead|next step|next steps|finish|resume|proceed)\b/,
         /^(do it|do that|ship it|deploy it|verify it|push it)\b/,
         /\b(obvious next step|obvious next steps|from there|from this point)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasStructuredCheckpointResponse(text = '') {
+    const normalized = normalizeText(text);
+    if (!normalized) {
+        return false;
+    }
+
+    return /^Survey response \([^)]+\):\s*[\s\S]+$/i.test(normalized);
+}
+
+function hasLikelyDecisionReplyIntent(text = '') {
+    const normalized = normalizeText(text).toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /^(yes|yeah|yep|no|nope|not yet|skip|continue|resume|go ahead|proceed)\b/,
+        /^\d{4}-\d{2}-\d{2}\b/,
+        /^(today|tomorrow|tonight|later|later today|this (?:morning|afternoon|evening)|next (?:week|month|sunday|monday|tuesday|wednesday|thursday|friday|saturday))\b/,
+        /^(?:in|after)\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)(?:\s+from\s+now)?\b/,
+        /^(?:1[0-2]|0?\d)(?::[0-5]\d)?\s*(?:am|pm)\b/,
+        /^(?:[01]?\d|2[0-3]):[0-5]\d\b/,
     ].some((pattern) => pattern.test(normalized));
 }
 
@@ -180,6 +212,208 @@ function inferWorkflowLane(objective = '') {
     return null;
 }
 
+function buildWorkflowTaskTemplates({ lane = '', deliveryMode = 'gitops', requiresVerification = true } = {}) {
+    switch (lane) {
+    case 'repo-only':
+        return [
+            {
+                id: 'implement-repository',
+                title: 'Implement repository changes',
+            },
+        ];
+    case 'deploy-only':
+        return [
+            {
+                id: 'deploy-release',
+                title: 'Deploy requested release',
+            },
+            ...(requiresVerification
+                ? [{
+                    id: 'verify-release',
+                    title: 'Verify deployed result',
+                }]
+                : []),
+        ];
+    case 'repo-then-deploy':
+        if (deliveryMode === 'remote-workspace') {
+            return [
+                {
+                    id: 'implement-repository',
+                    title: 'Implement repository changes',
+                },
+                {
+                    id: 'build-and-deploy-remote-workspace',
+                    title: 'Build and deploy remote workspace',
+                },
+                ...(requiresVerification
+                    ? [{
+                        id: 'verify-release',
+                        title: 'Verify deployed result',
+                    }]
+                    : []),
+            ];
+        }
+
+        return [
+            {
+                id: 'implement-repository',
+                title: 'Implement repository changes',
+            },
+            {
+                id: 'save-and-push-repository',
+                title: 'Inspect, save, and push repository changes',
+            },
+            {
+                id: 'deploy-release',
+                title: 'Deploy requested release',
+            },
+            ...(requiresVerification
+                ? [{
+                    id: 'verify-release',
+                    title: 'Verify deployed result',
+                }]
+                : []),
+        ];
+    case 'inspect-only':
+        return [
+            {
+                id: 'inspect-remote-state',
+                title: 'Inspect remote state',
+            },
+        ];
+    default:
+        return [];
+    }
+}
+
+function resolveTaskStatus({ completed = false, active = false, blocked = false, skipped = false } = {}) {
+    if (completed) {
+        return 'completed';
+    }
+
+    if (skipped) {
+        return 'skipped';
+    }
+
+    if (blocked) {
+        return 'blocked';
+    }
+
+    return active ? 'in_progress' : 'planned';
+}
+
+function buildWorkflowTaskList(workflow = null) {
+    const currentWorkflow = workflow && typeof workflow === 'object' ? workflow : {};
+    const blocked = currentWorkflow.status === BLOCKED_WORKFLOW_STATUS;
+    const stage = normalizeText(currentWorkflow.stage).toLowerCase();
+    const templates = buildWorkflowTaskTemplates({
+        lane: currentWorkflow.lane,
+        deliveryMode: currentWorkflow.deliveryMode,
+        requiresVerification: currentWorkflow.requiresVerification !== false,
+    });
+    const existingTasks = Array.isArray(currentWorkflow.taskList)
+        ? currentWorkflow.taskList
+        : [];
+
+    return templates.map((template, index) => {
+        const existing = existingTasks.find((entry) => normalizeText(entry?.id) === template.id) || {};
+        let status = 'planned';
+
+        if (template.id === 'implement-repository') {
+            status = resolveTaskStatus({
+                completed: currentWorkflow.progress?.implemented === true,
+                active: ['implementing'].includes(stage),
+                blocked: blocked && currentWorkflow.progress?.implemented !== true,
+            });
+        } else if (template.id === 'save-and-push-repository') {
+            status = resolveTaskStatus({
+                completed: currentWorkflow.progress?.saved === true,
+                active: ['saving', 'deploying', 'verifying', 'completed'].includes(stage)
+                    && currentWorkflow.progress?.implemented === true
+                    && currentWorkflow.progress?.saved !== true,
+                blocked: blocked
+                    && currentWorkflow.progress?.implemented === true
+                    && currentWorkflow.progress?.saved !== true,
+            });
+        } else if (template.id === 'build-and-deploy-remote-workspace') {
+            status = resolveTaskStatus({
+                completed: currentWorkflow.progress?.deployed === true,
+                active: ['saving', 'deploying', 'verifying', 'completed'].includes(stage)
+                    && currentWorkflow.progress?.implemented === true
+                    && currentWorkflow.progress?.deployed !== true,
+                blocked: blocked
+                    && currentWorkflow.progress?.implemented === true
+                    && currentWorkflow.progress?.deployed !== true,
+            });
+        } else if (template.id === 'deploy-release') {
+            status = resolveTaskStatus({
+                completed: currentWorkflow.progress?.deployed === true,
+                active: ['deploying', 'verifying', 'completed'].includes(stage)
+                    && currentWorkflow.progress?.deployed !== true
+                    && (
+                        currentWorkflow.lane === 'deploy-only'
+                        || currentWorkflow.deliveryMode === 'remote-workspace'
+                        || currentWorkflow.progress?.saved === true
+                    ),
+                blocked: blocked
+                    && currentWorkflow.progress?.deployed !== true
+                    && (
+                        currentWorkflow.lane === 'deploy-only'
+                        || currentWorkflow.deliveryMode === 'remote-workspace'
+                        || currentWorkflow.progress?.saved === true
+                    ),
+            });
+        } else if (template.id === 'verify-release') {
+            status = resolveTaskStatus({
+                completed: currentWorkflow.progress?.verified === true,
+                active: ['verifying', 'completed'].includes(stage)
+                    && currentWorkflow.progress?.verified !== true,
+                blocked: blocked
+                    && currentWorkflow.progress?.verified !== true
+                    && currentWorkflow.requiresVerification !== false,
+                skipped: currentWorkflow.requiresVerification === false,
+            });
+        } else if (template.id === 'inspect-remote-state') {
+            status = resolveTaskStatus({
+                completed: currentWorkflow.progress?.verified === true,
+                active: ['verifying', 'completed'].includes(stage)
+                    && currentWorkflow.progress?.verified !== true,
+                blocked: blocked && currentWorkflow.progress?.verified !== true,
+            });
+        }
+
+        return {
+            id: normalizeText(existing.id || template.id) || template.id,
+            title: normalizeText(existing.title || template.title) || template.title,
+            status,
+            notes: normalizeText(existing.notes || ''),
+            order: Number.isFinite(Number(existing.order))
+                ? Number(existing.order)
+                : index + 1,
+        };
+    });
+}
+
+function shouldResumeStoredWorkflow({
+    objective = '',
+    storedWorkflow = null,
+} = {}) {
+    const normalized = normalizeText(objective);
+    if (!storedWorkflow || storedWorkflow.status === COMPLETED_WORKFLOW_STATUS || !normalized) {
+        return false;
+    }
+
+    if (hasContinuationIntent(normalized) || hasStructuredCheckpointResponse(normalized)) {
+        return true;
+    }
+
+    if (hasDiscoveryPlanningIntent(normalized) || hasOpencodeUsageIntent(normalized)) {
+        return false;
+    }
+
+    return hasLikelyDecisionReplyIntent(normalized);
+}
+
 function buildDeployState(seed = {}) {
     return {
         repositoryUrl: normalizeText(seed.repositoryUrl || config.deploy.defaultRepositoryUrl) || null,
@@ -287,7 +521,7 @@ function normalizeWorkflowState(workflow = null) {
             opencodeTarget: workflow.opencodeTarget,
         });
 
-    return {
+    const normalized = {
         kind: END_TO_END_WORKFLOW_KIND,
         version: Number(workflow.version) || 1,
         objective: normalizeText(workflow.objective),
@@ -324,6 +558,9 @@ function normalizeWorkflowState(workflow = null) {
         lastError: normalizeText(workflow.lastError) || null,
         source: normalizeText(workflow.source) || null,
     };
+
+    normalized.taskList = buildWorkflowTaskList(normalized);
+    return normalized;
 }
 
 function inferEndToEndBuilderWorkflow({
@@ -335,7 +572,10 @@ function inferEndToEndBuilderWorkflow({
     remoteTarget = null,
 } = {}) {
     const storedWorkflow = normalizeWorkflowState(getSessionControlState(session).workflow);
-    if (storedWorkflow && storedWorkflow.status !== COMPLETED_WORKFLOW_STATUS && hasContinuationIntent(objective)) {
+    if (storedWorkflow && shouldResumeStoredWorkflow({
+        objective,
+        storedWorkflow,
+    })) {
         return normalizeWorkflowState({
             ...storedWorkflow,
             objective: storedWorkflow.objective || normalizeText(objective),

@@ -4565,6 +4565,9 @@ class ConversationOrchestrator extends EventEmitter {
             : null;
         const workflowNeedsRepoLane = workflowSeed?.lane === 'repo-only' || workflowSeed?.lane === 'repo-then-deploy';
         const workflowNeedsDeployLane = workflowSeed?.lane === 'deploy-only' || workflowSeed?.lane === 'repo-then-deploy';
+        const hasActiveForegroundWorkflow = workflowSeed?.status === 'active';
+        const hasExplicitDeferredWorkloadIntent = hasWorkloadIntent(objective);
+        const allowDeferredWorkloadShortcut = !hasActiveForegroundWorkflow || hasExplicitDeferredWorkloadIntent;
         const shouldConsiderOpencodeTarget = hasOpencodeIntent || workflowNeedsRepoLane;
         const opencodeTarget = shouldConsiderOpencodeTarget ? workflowOpencodeTarget : 'local';
         const opencodeTargetReady = shouldConsiderOpencodeTarget
@@ -4572,7 +4575,10 @@ class ConversationOrchestrator extends EventEmitter {
             : false;
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
-            if (!isDeferredWorkloadRun && hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
+            if (!isDeferredWorkloadRun
+                && allowDeferredWorkloadShortcut
+                && hasWorkloadSetupIntent
+                && allowedToolIds.includes('agent-workload')) {
                 candidates.add('agent-workload');
             }
             [
@@ -4659,7 +4665,10 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('agent-notes-write');
             }
         } else {
-            if (!isDeferredWorkloadRun && hasWorkloadSetupIntent && allowedToolIds.includes('agent-workload')) {
+            if (!isDeferredWorkloadRun
+                && allowDeferredWorkloadShortcut
+                && hasWorkloadSetupIntent
+                && allowedToolIds.includes('agent-workload')) {
                 candidates.add('agent-workload');
             }
             if (remoteToolId && (sshContext.shouldTreatAsSsh || /\b(remote server|remote host|remote machine)\b/.test(prompt))) {
@@ -4795,6 +4804,8 @@ class ConversationOrchestrator extends EventEmitter {
             && documentWorkflowParams.sources.length > 0;
         const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
             && hasMultiWorkloadSchedulingIntent(objective);
+        const hasActiveForegroundWorkflow = toolPolicy?.workflow?.status === 'active';
+        const hasExplicitDeferredWorkloadIntent = hasWorkloadIntent(objective);
         const normalizedCreate = toolPolicy.candidateToolIds.includes('agent-workload')
             ? buildCanonicalWorkloadAction({
                 request: objective,
@@ -4810,10 +4821,16 @@ class ConversationOrchestrator extends EventEmitter {
             : null;
         if (toolPolicy.candidateToolIds.includes('agent-workload')
             && !shouldForcePlannerForMultiWorkload
+            && (!hasActiveForegroundWorkflow || hasExplicitDeferredWorkloadIntent)
             && (
-                hasWorkloadIntent(objective)
-                || normalizedCreate?.trigger?.type === 'cron'
-                || normalizedCreate?.trigger?.type === 'once'
+                hasExplicitDeferredWorkloadIntent
+                || (
+                    !hasActiveForegroundWorkflow
+                    && (
+                        normalizedCreate?.trigger?.type === 'cron'
+                        || normalizedCreate?.trigger?.type === 'once'
+                    )
+                )
             )) {
             if (normalizedCreate) {
                 return {
@@ -5224,6 +5241,12 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
             'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
+            ...(toolPolicy?.workflow?.status === 'active'
+                ? [
+                    'A foreground end-to-end workflow is already active for this session. Treat it as the current project task list and continue that work unless the user explicitly changes scope, asks to defer it, or asks to schedule a separate workload.',
+                    'Do not convert the active foreground project into `agent-workload` just because the user answered with timing, checkpoint feedback, or a short decision reply.',
+                ]
+                : []),
             'Every `user-checkpoint` step must include either a non-empty `params.question` with concise choice `params.options`, or a short `params.steps` questionnaire.',
             'Use `user-checkpoint` when one high-impact user decision would materially change the plan, implementation scope, architecture, or final output before major work.',
             'On web-chat, treat `user-checkpoint` as the primary quick way to involve the user when one concise decision or direction check would help.',
@@ -5765,6 +5788,18 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Do not turn checkpoints into long questionnaires, pages of questions, or more than 6 steps.');
         } else if (userCheckpointPolicy.enabled === true && userCheckpointPolicy.pending) {
             parts.push('A `user-checkpoint` is already pending for this session. Do not ask another survey question until the user answers it.');
+        }
+
+        if (toolPolicy?.workflow?.status === 'active') {
+            parts.push(`Active foreground workflow: ${toolPolicy.workflow.lane || 'unknown'} lane, ${toolPolicy.workflow.stage || 'planned'} stage.`);
+            if (Array.isArray(toolPolicy.workflow.taskList) && toolPolicy.workflow.taskList.length > 0) {
+                parts.push('Current workflow task list:');
+                toolPolicy.workflow.taskList.forEach((task) => {
+                    parts.push(`- [${task.status || 'planned'}] ${task.title}`);
+                });
+            }
+            parts.push('Treat the active workflow as the current project plan. Continue from the next incomplete task unless the user explicitly changes scope, tells you to stop, or asks to defer the work into a later scheduled workload.');
+            parts.push('If the user reply is just feedback, timing, or a checkpoint answer, use it to update your understanding and keep moving through the current workflow instead of switching to a different agent lane.');
         }
 
         if (allowedToolIds.includes('architecture-design')) {

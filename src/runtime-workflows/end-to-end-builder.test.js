@@ -379,6 +379,50 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
+    test('reuses an active stored workflow on structured checkpoint responses', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Survey response (rollout-date): chose "Tomorrow morning" [tomorrow-morning]. Notes: 9:00 AM Atlantic.',
+            session: {
+                metadata: {
+                    controlState: {
+                        workflow: {
+                            kind: END_TO_END_WORKFLOW_KIND,
+                            version: 1,
+                            objective: 'Fix the repo, push it, and deploy it.',
+                            lane: 'repo-then-deploy',
+                            stage: 'saving',
+                            status: 'active',
+                            workspacePath: '/workspace/app',
+                            repositoryPath: '/workspace/app',
+                            opencodeTarget: 'local',
+                            progress: {
+                                implemented: true,
+                            },
+                        },
+                    },
+                },
+            },
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+        });
+
+        expect(workflow).toEqual(expect.objectContaining({
+            lane: 'repo-then-deploy',
+            stage: 'saving',
+            source: 'stored',
+            taskList: expect.arrayContaining([
+                expect.objectContaining({
+                    id: 'implement-repository',
+                    status: 'completed',
+                }),
+                expect.objectContaining({
+                    id: 'save-and-push-repository',
+                    status: 'in_progress',
+                }),
+            ]),
+        }));
+    });
+
     test('does not classify discovery-first server planning prompts as implementation workflows', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'I want to build on the server, let\'s start with a couple questionnaires to figure out what we should work on. Some kind of web app we can run on our VPS server with demoserver2.buzz DNS. Can you do some research on the server and then provide those questions.',

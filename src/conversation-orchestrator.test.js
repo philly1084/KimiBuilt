@@ -3955,6 +3955,109 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('keeps an active workflow in the foreground when checkpoint feedback includes timing', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-workload', 'remote-command', 'opencode-run', 'git-safe', 'k3s-deploy']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Survey response (rollout-date): chose "Tomorrow morning" [tomorrow-morning]. Notes: 9:00 AM Atlantic.';
+        const session = {
+            metadata: {
+                controlState: {
+                    workflow: {
+                        kind: 'end-to-end-builder',
+                        version: 1,
+                        objective: 'Fix the landing page in this repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
+                        lane: 'repo-then-deploy',
+                        stage: 'saving',
+                        status: 'active',
+                        workspacePath: 'C:/Users/phill/KimiBuilt',
+                        repositoryPath: 'C:/Users/phill/KimiBuilt',
+                        opencodeTarget: 'local',
+                        progress: {
+                            implemented: true,
+                        },
+                    },
+                },
+            },
+        };
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            session,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session,
+            toolPolicy,
+            toolContext: {
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+                timezone: 'America/Halifax',
+                now: '2026-04-07T12:00:00.000Z',
+            },
+        });
+
+        expect(toolPolicy.workflow).toEqual(expect.objectContaining({
+            source: 'stored',
+            lane: 'repo-then-deploy',
+            stage: 'saving',
+            taskList: expect.arrayContaining([
+                expect.objectContaining({
+                    id: 'implement-repository',
+                    status: 'completed',
+                }),
+                expect.objectContaining({
+                    id: 'save-and-push-repository',
+                    status: 'in_progress',
+                }),
+            ]),
+        }));
+        expect(toolPolicy.candidateToolIds).not.toContain('agent-workload');
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'git-safe',
+            params: expect.objectContaining({
+                action: 'remote-info',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+            }),
+        }));
+    });
+
     test('prefers remote-command over local file tools for remote website replacement prompts without explicit local artifacts', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
