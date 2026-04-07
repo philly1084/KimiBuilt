@@ -12,6 +12,7 @@ describe('/api/documents route', () => {
     const app = express();
     app.use(express.json());
     app.locals.documentService = documentService;
+    app.locals.templateStore = null;
     app.use('/api/documents', documentsRouter);
     return app;
   }
@@ -139,5 +140,47 @@ describe('/api/documents route', () => {
       inferredType: 'website-slides',
       outlineType: 'slides',
     }));
+  });
+
+  test('injects template store context for ai document generation', async () => {
+    const documentService = {
+      buildDocumentPlan: jest.fn().mockReturnValue({
+        inferredType: 'executive-brief',
+        outlineType: 'document',
+      }),
+      aiGenerate: jest.fn().mockResolvedValue({
+        id: 'doc-1',
+        filename: 'brief.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 1234,
+        metadata: {},
+        preview: [],
+      }),
+    };
+    const app = buildApp(documentService);
+    app.locals.templateStore = {
+      buildPromptContext: jest.fn().mockReturnValue({
+        context: '[Recursive template store]\n- Template 1: Executive Brief [executive-brief]',
+        matches: [{ id: 'executive-brief', name: 'Executive Brief' }],
+      }),
+      noteTemplateUse: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const response = await request(app)
+      .post('/api/documents/ai-generate')
+      .send({
+        prompt: 'Write an executive brief for Q2 priorities',
+      });
+
+    expect(response.status).toBe(200);
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      'Write an executive brief for Q2 priorities',
+      expect.objectContaining({
+        templateContext: expect.stringContaining('[Recursive template store]'),
+      }),
+    );
+    expect(response.body.templateMatches).toEqual([
+      expect.objectContaining({ id: 'executive-brief' }),
+    ]);
   });
 });

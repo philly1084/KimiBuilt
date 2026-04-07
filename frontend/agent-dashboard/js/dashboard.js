@@ -22,6 +22,7 @@ class Dashboard {
             workloads: [],
             runs: [],
             selectedRun: null,
+            editingWorkloadId: null,
             settings: {},
             opencodeRuntime: null,
             tokenAnalysis: null,
@@ -107,6 +108,24 @@ class Dashboard {
 
         document.getElementById('refreshWorkloadsBtn')?.addEventListener('click', () => {
             this.loadWorkloads();
+        });
+        document.getElementById('saveWorkloadChangesBtn')?.addEventListener('click', () => {
+            this.saveAdminWorkload();
+        });
+        document.getElementById('editWorkloadTriggerType')?.addEventListener('change', () => {
+            this.updateAdminWorkloadTriggerFields();
+            this.clearAdminWorkloadError();
+        });
+        [
+            'editWorkloadTitle',
+            'editWorkloadPrompt',
+            'editWorkloadRunAt',
+            'editWorkloadCronExpression',
+            'editWorkloadTimezone',
+        ].forEach((id) => {
+            document.getElementById(id)?.addEventListener('input', () => {
+                this.clearAdminWorkloadError();
+            });
         });
         
         // Log filters
@@ -1131,6 +1150,7 @@ class Dashboard {
                         ${workload.enabled
                             ? `<button class="btn btn-sm btn-secondary" onclick="dashboard.pauseAdminWorkload(event, '${workload.id}')">Pause</button>`
                             : `<button class="btn btn-sm btn-ghost" onclick="dashboard.resumeAdminWorkload(event, '${workload.id}')">Resume</button>`}
+                        <button class="btn btn-sm btn-secondary" onclick="dashboard.openAdminWorkloadModal(event, '${workload.id}')">Edit</button>
                         <button class="btn btn-sm btn-danger" onclick="dashboard.deleteAdminWorkload(event, '${workload.id}')">Delete</button>
                     </div>
                 </td>
@@ -1512,6 +1532,163 @@ class Dashboard {
             this.showToast(error.userMessage || error.message || 'Failed to delete workload', 'error');
         }
     }
+
+    openAdminWorkloadModal(event, id) {
+        event?.stopPropagation?.();
+        const workload = this.state.workloads.find((entry) => entry.id === id);
+        const modal = document.getElementById('editWorkloadModal');
+        if (!workload || !modal) {
+            this.showToast('Workload not found', 'error');
+            return;
+        }
+
+        this.state.editingWorkloadId = workload.id;
+        this.clearAdminWorkloadError();
+        this.setInputValue('editWorkloadTitle', workload.title || '');
+        this.setInputValue('editWorkloadPrompt', workload.prompt || '');
+        this.setInputValue('editWorkloadTriggerType', workload.trigger?.type || 'manual');
+        this.setInputValue(
+            'editWorkloadRunAt',
+            workload.trigger?.type === 'once' ? this.toDatetimeLocal(workload.trigger?.runAt) : '',
+        );
+        this.setInputValue(
+            'editWorkloadCronExpression',
+            workload.trigger?.type === 'cron' ? (workload.trigger?.expression || '') : '',
+        );
+        this.setInputValue(
+            'editWorkloadTimezone',
+            workload.trigger?.type === 'cron'
+                ? (workload.trigger?.timezone || 'UTC')
+                : (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+        );
+
+        const enabledInput = document.getElementById('editWorkloadEnabled');
+        if (enabledInput) {
+            enabledInput.checked = workload.enabled !== false;
+        }
+
+        this.updateAdminWorkloadTriggerFields();
+        modal.classList.add('active');
+    }
+
+    resetAdminWorkloadModal() {
+        this.state.editingWorkloadId = null;
+        this.clearAdminWorkloadError();
+        this.setInputValue('editWorkloadTitle', '');
+        this.setInputValue('editWorkloadPrompt', '');
+        this.setInputValue('editWorkloadTriggerType', 'manual');
+        this.setInputValue('editWorkloadRunAt', '');
+        this.setInputValue('editWorkloadCronExpression', '');
+        this.setInputValue('editWorkloadTimezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+        const enabledInput = document.getElementById('editWorkloadEnabled');
+        if (enabledInput) {
+            enabledInput.checked = true;
+        }
+        const saveButton = document.getElementById('saveWorkloadChangesBtn');
+        if (saveButton) {
+            saveButton.disabled = false;
+            saveButton.textContent = 'Save Changes';
+        }
+        this.updateAdminWorkloadTriggerFields();
+    }
+
+    updateAdminWorkloadTriggerFields() {
+        const triggerType = document.getElementById('editWorkloadTriggerType')?.value || 'manual';
+        const onceFields = document.getElementById('editWorkloadOnceFields');
+        const cronFields = document.getElementById('editWorkloadCronFields');
+        if (onceFields) {
+            onceFields.hidden = triggerType !== 'once';
+        }
+        if (cronFields) {
+            cronFields.hidden = triggerType !== 'cron';
+        }
+    }
+
+    showAdminWorkloadError(message) {
+        const errorEl = document.getElementById('editWorkloadError');
+        if (!errorEl) {
+            return;
+        }
+
+        errorEl.textContent = message;
+        errorEl.hidden = !message;
+    }
+
+    clearAdminWorkloadError() {
+        this.showAdminWorkloadError('');
+    }
+
+    readAdminWorkloadForm() {
+        const title = String(document.getElementById('editWorkloadTitle')?.value || '').trim();
+        const prompt = String(document.getElementById('editWorkloadPrompt')?.value || '').trim();
+        const triggerType = String(document.getElementById('editWorkloadTriggerType')?.value || 'manual').trim();
+        const enabled = document.getElementById('editWorkloadEnabled')?.checked !== false;
+
+        if (!title) {
+            throw new Error('Title is required');
+        }
+        if (!prompt) {
+            throw new Error('Prompt is required');
+        }
+
+        const payload = {
+            title,
+            prompt,
+            enabled,
+            trigger: { type: triggerType },
+        };
+
+        if (triggerType === 'once') {
+            const runAt = String(document.getElementById('editWorkloadRunAt')?.value || '').trim();
+            if (!runAt) {
+                throw new Error('Run time is required for one-time workloads');
+            }
+            payload.trigger.runAt = new Date(runAt).toISOString();
+        } else if (triggerType === 'cron') {
+            const expression = String(document.getElementById('editWorkloadCronExpression')?.value || '').trim();
+            const timezone = String(document.getElementById('editWorkloadTimezone')?.value || '').trim()
+                || Intl.DateTimeFormat().resolvedOptions().timeZone
+                || 'UTC';
+            if (!expression) {
+                throw new Error('Cron expression is required for recurring workloads');
+            }
+            payload.trigger.expression = expression;
+            payload.trigger.timezone = timezone;
+        }
+
+        return payload;
+    }
+
+    async saveAdminWorkload() {
+        const id = this.state.editingWorkloadId;
+        const saveButton = document.getElementById('saveWorkloadChangesBtn');
+        if (!id) {
+            this.showToast('Select a workload before saving', 'warning');
+            return;
+        }
+
+        try {
+            this.clearAdminWorkloadError();
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = 'Saving...';
+            }
+
+            const payload = this.readAdminWorkloadForm();
+            await apiClient.updateAdminWorkload(id, payload);
+            this.closeModal('editWorkloadModal');
+            this.showToast('Workload updated', 'success');
+            await this.loadWorkloads();
+        } catch (error) {
+            console.error('Failed to update workload:', error);
+            this.showAdminWorkloadError(error.userMessage || error.message || 'Failed to update workload');
+            this.showToast(error.userMessage || error.message || 'Failed to update workload', 'error');
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = 'Save Changes';
+            }
+        }
+    }
     
     updatePromptEditor(content) {
         const charCount = document.getElementById('charCount');
@@ -1654,6 +1831,9 @@ class Dashboard {
         const modal = document.getElementById(modalId);
         if (modal) {
             modal.classList.remove('active');
+        }
+        if (modalId === 'editWorkloadModal') {
+            this.resetAdminWorkloadModal();
         }
     }
     
@@ -2026,6 +2206,13 @@ class Dashboard {
             return response.data ?? fallback;
         }
         return response;
+    }
+
+    setInputValue(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.value = value;
+        }
     }
 
     getApiPagination(response) {
@@ -2705,6 +2892,16 @@ class Dashboard {
         if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
         
         return d.toLocaleDateString();
+    }
+
+    toDatetimeLocal(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return '';
+        }
+
+        const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+        return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
     }
     
     formatTime(date) {

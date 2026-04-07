@@ -53,7 +53,63 @@ const canvasSchema = {
     useAgentExecutor: { required: false, type: 'boolean' },
     executionProfile: { required: false, type: 'string' },
     memoryKeywords: { required: false, type: 'array' },
+    templateId: { required: false, type: 'string' },
+    templateIds: { required: false, type: 'array' },
+    templateVariables: { required: false, type: 'object' },
 };
+
+function normalizeTemplateIds(value) {
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean);
+    }
+
+    if (typeof value === 'string') {
+        return String(value || '').trim() ? [String(value).trim()] : [];
+    }
+
+    return [];
+}
+
+async function buildCanvasTemplateSelection(templateStore, {
+    canvasType = 'document',
+    message = '',
+    existingContent = '',
+    templateId = null,
+    templateIds = [],
+    templateVariables = {},
+} = {}) {
+    if (!templateStore) {
+        return { matches: [], context: '' };
+    }
+
+    const explicitTemplateIds = [
+        ...normalizeTemplateIds(templateId),
+        ...normalizeTemplateIds(templateIds),
+    ];
+    const kind = canvasType === 'frontend'
+        ? (isDashboardRequest(message, existingContent) ? 'dashboard' : 'page')
+        : (canvasType === 'document' ? 'document' : '');
+    const surface = canvasType === 'frontend'
+        ? 'frontend'
+        : (canvasType === 'document' ? 'document' : '');
+    const selection = templateStore.buildPromptContext({
+        explicitTemplateIds,
+        query: message,
+        existingContent,
+        surface,
+        kind,
+        limit: explicitTemplateIds.length > 0 ? 4 : 3,
+        variables: templateVariables,
+    });
+
+    if (selection.matches.length > 0) {
+        await templateStore.noteTemplateUse(selection.matches.map((template) => template.id));
+    }
+
+    return selection;
+}
 
 function inferFrontendTitle(content = '') {
     const source = String(content || '').trim();
@@ -214,6 +270,9 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             artifactIds = [],
             outputFormat = null,
             executionProfile = null,
+            templateId = null,
+            templateIds = [],
+            templateVariables = {},
         } = req.body;
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
@@ -265,6 +324,14 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             ...requestedSessionMetadata,
             clientSurface,
         }, session);
+        const templateSelection = await buildCanvasTemplateSelection(req.app.locals.templateStore, {
+            canvasType,
+            message,
+            existingContent,
+            templateId,
+            templateIds,
+            templateVariables,
+        });
 
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -276,7 +343,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
         });
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            buildCanvasInstructions(canvasType, existingContent, message),
+            buildCanvasInstructions(canvasType, existingContent, message, templateSelection.context),
             artifactIds,
         );
 
@@ -389,6 +456,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             responseId: response.id,
             canvasType,
             artifacts,
+            templateMatches: templateSelection.matches,
             ...structured,
         });
     } catch (err) {
@@ -402,7 +470,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
     }
 });
 
-function buildCanvasInstructions(canvasType, existingContent, requestPrompt = '') {
+function buildCanvasInstructions(canvasType, existingContent, requestPrompt = '', templateContext = '') {
     const base = `You are an AI assistant working in canvas mode. You generate structured content that can be displayed in an editable canvas interface.
 
 Always respond with valid JSON in this format:
@@ -427,6 +495,10 @@ Always respond with valid JSON in this format:
     };
 
     let instructions = base + (typeInstructions[canvasType] || typeInstructions.document);
+
+    if (templateContext) {
+        instructions += `\n\n${templateContext}`;
+    }
 
     if (dashboardPromptContext) {
         instructions += `\n\n${dashboardPromptContext}`;

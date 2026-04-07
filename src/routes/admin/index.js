@@ -97,6 +97,24 @@ router.get('/workloads', async (req, res, next) => {
   }
 });
 
+router.patch('/workloads/:id', async (req, res, next) => {
+  try {
+    const service = req.app.locals.agentWorkloadService;
+    if (!service?.isAvailable()) {
+      return res.status(503).json({ success: false, error: 'Deferred workloads require Postgres persistence' });
+    }
+
+    const workload = await service.updateAdminWorkload(req.params.id, req.body || {});
+    if (!workload) {
+      return res.status(404).json({ success: false, error: 'Workload not found' });
+    }
+
+    res.json({ success: true, data: workload });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/workloads/:id/pause', async (req, res, next) => {
   try {
     const service = req.app.locals.agentWorkloadService;

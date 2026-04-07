@@ -319,6 +319,15 @@ class AgentWorkloadService {
         return this.store.getAdminWorkloadById(id);
     }
 
+    async updateAdminWorkload(id, payload = {}) {
+        const workload = await this.getAdminWorkload(id);
+        if (!workload) {
+            return null;
+        }
+
+        return this.updateWorkload(id, workload.ownerId, payload);
+    }
+
     async pauseAdminWorkload(id) {
         const workload = await this.getAdminWorkload(id);
         if (!workload) {

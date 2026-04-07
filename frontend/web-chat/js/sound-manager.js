@@ -1,4 +1,4 @@
-const SOUND_CUES = {
+const BASE_SOUND_CUES = {
     ack: {
         id: 'ack',
         group: 'assistant',
@@ -285,15 +285,170 @@ const SOUND_CUES = {
     },
 };
 
+const SOUND_THEMES = {
+    orbit: {
+        id: 'orbit',
+        label: 'Orbit',
+        description: 'Clean synth pulses with a crisp sci-fi edge.',
+        assistantSemitones: 0,
+        menuSemitones: 0,
+        assistantPrimaryType: 'triangle',
+        menuPrimaryType: 'triangle',
+        assistantAccentType: 'sine',
+        menuAccentType: 'sine',
+        shimmerType: 'sine',
+        noteGain: 1,
+        outputGain: 1,
+        previewGainMultiplier: 1,
+        durationMultiplier: 1,
+        menuDurationMultiplier: 0.98,
+        attackMultiplier: 1,
+        decayMultiplier: 1,
+        sustainMultiplier: 1,
+        cutoffMultiplier: 1,
+        vibratoMultiplier: 1,
+        panMultiplier: 1,
+        detuneJitter: 0,
+        brightness: -4,
+        brightnessFrequency: 2400,
+        compressorThreshold: -28,
+        compressorRatio: 3,
+        compressorRelease: 0.16,
+    },
+    bloom: {
+        id: 'bloom',
+        label: 'Bloom',
+        description: 'Softer rounded chimes that feel calmer and warmer.',
+        assistantSemitones: -3,
+        menuSemitones: -2,
+        assistantPrimaryType: 'sine',
+        menuPrimaryType: 'sine',
+        assistantAccentType: 'triangle',
+        menuAccentType: 'triangle',
+        shimmerType: 'triangle',
+        noteGain: 0.92,
+        outputGain: 0.94,
+        previewGainMultiplier: 1.03,
+        durationMultiplier: 1.12,
+        menuDurationMultiplier: 1.08,
+        attackMultiplier: 1.2,
+        decayMultiplier: 1.14,
+        sustainMultiplier: 1.08,
+        cutoffMultiplier: 0.84,
+        vibratoMultiplier: 0.55,
+        panMultiplier: 0.78,
+        detuneJitter: 1,
+        brightness: -6,
+        brightnessFrequency: 2200,
+        compressorThreshold: -30,
+        compressorRatio: 2.6,
+        compressorRelease: 0.2,
+    },
+    quartz: {
+        id: 'quartz',
+        label: 'Quartz',
+        description: 'Brighter glass-like taps with sharper articulation.',
+        assistantSemitones: 2,
+        menuSemitones: 4,
+        assistantPrimaryType: 'triangle',
+        menuPrimaryType: 'sine',
+        assistantAccentType: 'sine',
+        menuAccentType: 'sine',
+        shimmerType: 'sine',
+        noteGain: 0.94,
+        outputGain: 1,
+        previewGainMultiplier: 1.06,
+        durationMultiplier: 0.94,
+        menuDurationMultiplier: 0.92,
+        attackMultiplier: 0.86,
+        decayMultiplier: 0.9,
+        sustainMultiplier: 0.9,
+        cutoffMultiplier: 1.24,
+        vibratoMultiplier: 0.72,
+        panMultiplier: 1.08,
+        detuneJitter: 2,
+        brightness: -1.5,
+        brightnessFrequency: 2600,
+        compressorThreshold: -27,
+        compressorRatio: 2.8,
+        compressorRelease: 0.14,
+    },
+    arcade: {
+        id: 'arcade',
+        label: 'Arcade',
+        description: 'Punchier retro bleeps with a more playful chip feel.',
+        assistantSemitones: 5,
+        menuSemitones: 7,
+        assistantPrimaryType: 'square',
+        menuPrimaryType: 'square',
+        assistantAccentType: 'triangle',
+        menuAccentType: 'triangle',
+        shimmerType: 'triangle',
+        noteGain: 0.74,
+        outputGain: 0.9,
+        previewGainMultiplier: 0.98,
+        durationMultiplier: 0.82,
+        menuDurationMultiplier: 0.8,
+        attackMultiplier: 0.66,
+        decayMultiplier: 0.76,
+        sustainMultiplier: 0.82,
+        cutoffMultiplier: 0.8,
+        vibratoMultiplier: 0.35,
+        panMultiplier: 0.72,
+        detuneJitter: 4,
+        brightness: -5,
+        brightnessFrequency: 2100,
+        compressorThreshold: -31,
+        compressorRatio: 4.1,
+        compressorRelease: 0.12,
+    },
+    sonar: {
+        id: 'sonar',
+        label: 'Sonar',
+        description: 'Deeper tactical pings with a steadier low-end body.',
+        assistantSemitones: -5,
+        menuSemitones: -7,
+        assistantPrimaryType: 'triangle',
+        menuPrimaryType: 'triangle',
+        assistantAccentType: 'sine',
+        menuAccentType: 'sine',
+        shimmerType: 'sine',
+        noteGain: 1.02,
+        outputGain: 1.04,
+        previewGainMultiplier: 1,
+        durationMultiplier: 1.08,
+        menuDurationMultiplier: 1.02,
+        attackMultiplier: 1.06,
+        decayMultiplier: 1.08,
+        sustainMultiplier: 1.04,
+        cutoffMultiplier: 0.78,
+        vibratoMultiplier: 0.42,
+        panMultiplier: 0.66,
+        detuneJitter: 1,
+        brightness: -7,
+        brightnessFrequency: 2000,
+        compressorThreshold: -29,
+        compressorRatio: 3.5,
+        compressorRelease: 0.18,
+    },
+};
+
+const DEFAULT_SOUND_PROFILE_ID = 'orbit';
+const DEFAULT_SOUND_VOLUME = 0.68;
+
 class WebChatSoundManager {
     constructor() {
         this.storageKeys = {
             enabled: 'kimibuilt_sound_cues_enabled',
             menuEnabled: 'kimibuilt_menu_sounds_enabled',
+            profile: 'kimibuilt_sound_profile',
+            volume: 'kimibuilt_sound_volume',
         };
         this.audioContext = null;
         this.masterInput = null;
         this.masterGain = null;
+        this.masterToneFilter = null;
+        this.masterCompressor = null;
         this.lastPlayedAt = new Map();
         this.activeVoices = new Map();
         this.unlockListenersInstalled = false;
@@ -303,6 +458,14 @@ class WebChatSoundManager {
         };
         this.enabled = this.parseBoolean(this.storageGet(this.storageKeys.enabled), false);
         this.menuEnabled = this.parseBoolean(this.storageGet(this.storageKeys.menuEnabled), false);
+        this.soundProfileId = this.normalizeSoundProfileId(
+            this.storageGet(this.storageKeys.profile),
+            DEFAULT_SOUND_PROFILE_ID,
+        );
+        this.volume = this.normalizeVolume(
+            this.storageGet(this.storageKeys.volume),
+            DEFAULT_SOUND_VOLUME,
+        );
 
         this.syncUnlockListeners();
     }
@@ -353,8 +516,66 @@ class WebChatSoundManager {
         return Math.min(max, Math.max(min, Number(value || 0)));
     }
 
+    normalizeSoundProfileId(value, fallback = DEFAULT_SOUND_PROFILE_ID) {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (normalized && SOUND_THEMES[normalized]) {
+            return normalized;
+        }
+
+        return fallback;
+    }
+
+    normalizeVolume(value, fallback = DEFAULT_SOUND_VOLUME) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+            return fallback;
+        }
+
+        if (parsed > 1) {
+            return this.clamp(parsed / 100, 0, 1);
+        }
+
+        return this.clamp(parsed, 0, 1);
+    }
+
+    transposeFrequency(frequency, semitones = 0) {
+        return Number(frequency || 440) * Math.pow(2, Number(semitones || 0) / 12);
+    }
+
     hasActivePreferences() {
         return this.enabled === true || this.menuEnabled === true;
+    }
+
+    getSoundProfiles() {
+        return Object.values(SOUND_THEMES).map((profile) => ({
+            id: profile.id,
+            label: profile.label,
+            description: profile.description,
+        }));
+    }
+
+    getSoundProfileId() {
+        return this.soundProfileId;
+    }
+
+    getSoundProfile() {
+        return SOUND_THEMES[this.soundProfileId] || SOUND_THEMES[DEFAULT_SOUND_PROFILE_ID];
+    }
+
+    setSoundProfile(value) {
+        this.soundProfileId = this.normalizeSoundProfileId(value);
+        this.storageSet(this.storageKeys.profile, this.soundProfileId);
+        this.applyMasteringProfile();
+    }
+
+    getVolume() {
+        return this.volume;
+    }
+
+    setVolume(value) {
+        this.volume = this.normalizeVolume(value, this.volume);
+        this.storageSet(this.storageKeys.volume, this.volume.toFixed(2));
+        this.applyMasteringProfile();
     }
 
     syncUnlockListeners() {
@@ -388,6 +609,29 @@ class WebChatSoundManager {
         });
     }
 
+    applyMasteringProfile() {
+        if (!this.masterGain || !this.masterToneFilter || !this.masterCompressor) {
+            return;
+        }
+
+        const profile = this.getSoundProfile();
+        this.masterToneFilter.type = 'highshelf';
+        this.masterToneFilter.frequency.value = Number(profile.brightnessFrequency || 2400);
+        this.masterToneFilter.gain.value = Number(profile.brightness || -4);
+
+        this.masterCompressor.threshold.value = Number(profile.compressorThreshold || -28);
+        this.masterCompressor.knee.value = 18;
+        this.masterCompressor.ratio.value = Number(profile.compressorRatio || 3);
+        this.masterCompressor.attack.value = 0.004;
+        this.masterCompressor.release.value = Number(profile.compressorRelease || 0.16);
+
+        this.masterGain.gain.value = this.clamp(
+            Number(profile.outputGain || 1) * this.volume * 0.28,
+            0,
+            0.34,
+        );
+    }
+
     ensureAudioContext() {
         if (this.audioContext) {
             return this.audioContext;
@@ -406,19 +650,6 @@ class WebChatSoundManager {
             const masterGain = context.createGain();
 
             masterInput.gain.value = 1;
-
-            toneFilter.type = 'highshelf';
-            toneFilter.frequency.value = 2400;
-            toneFilter.gain.value = -4;
-
-            compressor.threshold.value = -28;
-            compressor.knee.value = 18;
-            compressor.ratio.value = 3;
-            compressor.attack.value = 0.004;
-            compressor.release.value = 0.16;
-
-            masterGain.gain.value = 0.2;
-
             masterInput.connect(toneFilter);
             toneFilter.connect(compressor);
             compressor.connect(masterGain);
@@ -427,6 +658,9 @@ class WebChatSoundManager {
             this.audioContext = context;
             this.masterInput = masterInput;
             this.masterGain = masterGain;
+            this.masterToneFilter = toneFilter;
+            this.masterCompressor = compressor;
+            this.applyMasteringProfile();
             return context;
         } catch (_error) {
             return null;
@@ -537,9 +771,76 @@ class WebChatSoundManager {
         this.queueIdleSuspend();
     }
 
+    getThemedWaveType(note, group, theme) {
+        const noteType = String(note?.type || 'triangle');
+        const sourceFrequency = Number(note?.frequency || 0);
+        const isAccent = noteType === 'sine' && sourceFrequency >= 480;
+
+        if (group === 'menu') {
+            if (isAccent && theme.menuAccentType) {
+                return theme.menuAccentType;
+            }
+
+            if (noteType === 'triangle' && theme.menuPrimaryType) {
+                return theme.menuPrimaryType;
+            }
+
+            return noteType;
+        }
+
+        if (isAccent && theme.assistantAccentType) {
+            return theme.assistantAccentType;
+        }
+
+        if (noteType === 'triangle' && theme.assistantPrimaryType) {
+            return theme.assistantPrimaryType;
+        }
+
+        return noteType;
+    }
+
+    buildThemedNote(note, group, theme) {
+        const semitones = group === 'menu'
+            ? Number(theme.menuSemitones || 0)
+            : Number(theme.assistantSemitones || 0);
+        const durationMultiplier = group === 'menu'
+            ? Number(theme.menuDurationMultiplier || theme.durationMultiplier || 1)
+            : Number(theme.durationMultiplier || 1);
+
+        return {
+            ...note,
+            type: this.getThemedWaveType(note, group, theme),
+            shimmerType: theme.shimmerType || 'sine',
+            shimmerGainMultiplier: Number(theme.shimmerGainMultiplier || 1),
+            frequency: this.transposeFrequency(note.frequency || 440, semitones),
+            slideTo: this.transposeFrequency(note.slideTo || note.frequency || 440, semitones),
+            volume: Number(note.volume || 0.05) * Number(theme.noteGain || 1),
+            duration: Number(note.duration || 0.06) * durationMultiplier,
+            attack: Number(note.attack || 0.014) * Number(theme.attackMultiplier || 1),
+            decay: Number(note.decay || 0.04) * Number(theme.decayMultiplier || 1),
+            sustain: this.clamp(
+                Number(note.sustain || 0.56) * Number(theme.sustainMultiplier || 1),
+                0.2,
+                0.95,
+            ),
+            cutoff: Number(note.cutoff || 1700) * Number(theme.cutoffMultiplier || 1),
+            cutoffTo: Number(note.cutoffTo || note.cutoff || 1400) * Number(theme.cutoffMultiplier || 1),
+            vibratoDepth: Number(note.vibratoDepth || 0) * Number(theme.vibratoMultiplier || 1),
+            pan: Number(note.pan || 0) * Number(theme.panMultiplier || 1),
+            detuneJitter: Number(note.detuneJitter || 0) + Number(theme.detuneJitter || 0),
+        };
+    }
+
     getCueConfig(kind = '') {
         const key = String(kind || '').trim().toLowerCase();
-        return SOUND_CUES[key] || SOUND_CUES['menu-select'];
+        const baseCue = BASE_SOUND_CUES[key] || BASE_SOUND_CUES['menu-select'];
+        const theme = this.getSoundProfile();
+
+        return {
+            ...baseCue,
+            previewGain: Number(baseCue.previewGain || 1) * Number(theme.previewGainMultiplier || 1),
+            notes: baseCue.notes.map((note) => this.buildThemedNote(note, baseCue.group, theme)),
+        };
     }
 
     isCueAllowed(cue, preview = false) {
@@ -693,10 +994,13 @@ class WebChatSoundManager {
 
         if (note.shimmer) {
             this.scheduleVoice(context, startAt + 0.004, endAt, {
-                type: 'sine',
+                type: note.shimmerType || 'sine',
                 frequency: Number(note.frequency || 440) * 2,
                 slideTo: Number(note.slideTo || note.frequency || 440) * 2.01,
-                volume: Number(note.volume || 0.05) * Number(options.gainScale || 1) * 0.26,
+                volume: Number(note.volume || 0.05)
+                    * Number(options.gainScale || 1)
+                    * 0.26
+                    * Number(note.shimmerGainMultiplier || 1),
                 pan: Number(note.pan || 0) * -0.5,
                 cutoff: Number(note.cutoff || 1700) + 920,
                 cutoffTo: Number(note.cutoffTo || note.cutoff || 1400) + 620,
@@ -722,7 +1026,10 @@ class WebChatSoundManager {
         const peakVolume = Math.max(0.0001, Number(voice.volume || 0.04));
         const targetFrequency = Math.max(40, Number(voice.frequency || 440));
         const slideTarget = Math.max(40, Number(voice.slideTo || targetFrequency));
-        const attackEnd = Math.min(safeEnd - 0.012, safeStart + Math.min(duration * 0.34, Number(voice.attack || 0.014)));
+        const attackEnd = Math.min(
+            safeEnd - 0.012,
+            safeStart + Math.min(duration * 0.34, Number(voice.attack || 0.014)),
+        );
         const decayEnd = Math.min(
             safeEnd - 0.01,
             attackEnd + Math.min(duration * 0.38, Number(voice.decay || 0.04)),

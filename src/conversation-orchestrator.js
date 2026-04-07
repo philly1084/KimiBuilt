@@ -993,6 +993,8 @@ function buildNotesSynthesisInstructions() {
         'Research pages should read like compact knowledge hubs: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of burying them in prose.',
         'Topic and educational pages should usually follow an editorial-explainer pattern: big-idea callout, hero visual, quick-facts cluster, then themed sections and sources.',
         'For polished or Notion-like pages, make the design visible in the blocks: page icon, focal callout, hero image or ai_image when the topic supports it, colored section labels, and muted supporting notes.',
+        'Choose one dominant design scheme and keep it coherent across headers, callouts, visuals, and supporting notes instead of mixing unrelated accents.',
+        'When editing an existing page, preserve the strongest current icon, cover, focal block, and accent-color language unless the user explicitly asks for a new look.',
         'If a substantial notes page only uses headings, plain text, and list blocks, do a palette audit before finalizing and check whether a richer block type would improve readability or interaction.',
         'Do not ship research, dashboard, documentation, or polished briefing pages as only plain headings and paragraphs unless the user explicitly asked for a minimal layout.',
         'Do not mention `/app`, local command execution, file-write, sandbox limits, or workspace access unless a verified tool result is directly about that and the user explicitly asked about it.',

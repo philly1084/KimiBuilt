@@ -25,6 +25,7 @@ describe('AgentWorkloadService', () => {
             updateWorkload: jest.fn(),
             deleteWorkload: jest.fn(),
             cancelQueuedRunsForWorkload: jest.fn(),
+            cancelPendingQueuedRunsForWorkload: jest.fn(),
             completeRun: jest.fn(),
             failRun: jest.fn(),
             listSessionWorkloads: jest.fn(),
@@ -402,6 +403,51 @@ describe('AgentWorkloadService', () => {
         expect(store.updateWorkload).toHaveBeenCalledWith('workload-admin-1', 'ops-admin', { enabled: false });
         expect(store.cancelQueuedRunsForWorkload).toHaveBeenCalledWith('workload-admin-1');
         expect(paused.enabled).toBe(false);
+    });
+
+    test('updates an admin workload using the stored owner id', async () => {
+        const current = {
+            id: 'workload-admin-edit-1',
+            ownerId: 'ops-admin',
+            sessionId: 'session-1',
+            title: 'Nightly review',
+            prompt: 'Review the queue.',
+            enabled: true,
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: [],
+                maxRounds: 3,
+                maxToolCalls: 10,
+                maxDurationMs: 120000,
+                allowSideEffects: false,
+            },
+            stages: [],
+            metadata: {},
+        };
+
+        store.getAdminWorkloadById.mockResolvedValue(current);
+        store.getWorkloadById.mockResolvedValue(current);
+        store.updateWorkload.mockResolvedValue({
+            ...current,
+            prompt: 'Review the queue and flag failures.',
+        });
+
+        const updated = await service.updateAdminWorkload('workload-admin-edit-1', {
+            prompt: 'Review the queue and flag failures.',
+        });
+
+        expect(store.getAdminWorkloadById).toHaveBeenCalledWith('workload-admin-edit-1');
+        expect(store.getWorkloadById).toHaveBeenCalledWith('workload-admin-edit-1', 'ops-admin');
+        expect(store.updateWorkload).toHaveBeenCalledWith(
+            'workload-admin-edit-1',
+            'ops-admin',
+            expect.objectContaining({
+                prompt: 'Review the queue and flag failures.',
+            }),
+        );
+        expect(store.cancelPendingQueuedRunsForWorkload).toHaveBeenCalledWith('workload-admin-edit-1');
+        expect(updated.prompt).toBe('Review the queue and flag failures.');
     });
 
     test('deletes an admin workload using the stored owner id', async () => {

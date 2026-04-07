@@ -3482,6 +3482,8 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('hero image or ai_image');
         expect(instructions).toContain('designed opening cluster');
         expect(instructions).toContain('editorial-explainer pattern');
+        expect(instructions).toContain('dominant design scheme');
+        expect(instructions).toContain('preserve the strongest current icon, cover, focal block');
         expect(instructions).toContain('If a substantial notes page only uses headings');
     });
 

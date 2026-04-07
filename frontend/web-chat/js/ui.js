@@ -38,6 +38,9 @@ class UIHelpers {
         this.updateRemoteBuildAutonomyUI();
         this.updateSoundCuesUI();
         this.updateMenuSoundsUI();
+        this.populateSoundProfileOptions();
+        this.updateSoundProfileUI();
+        this.updateSoundVolumeUI();
         
         // Track last focused element for focus management
         this.lastFocusedElement = null;
@@ -3158,6 +3161,66 @@ class UIHelpers {
         return this.soundManager?.isMenuEnabled?.() === true;
     }
 
+    getAvailableSoundProfiles() {
+        return this.soundManager?.getSoundProfiles?.() || [];
+    }
+
+    getCurrentSoundProfileId() {
+        return this.soundManager?.getSoundProfileId?.() || 'orbit';
+    }
+
+    getCurrentSoundVolume() {
+        return this.soundManager?.getVolume?.() ?? 0.68;
+    }
+
+    populateSoundProfileOptions() {
+        const select = document.getElementById('sound-profile-select');
+        if (!select) {
+            return;
+        }
+
+        const profiles = this.getAvailableSoundProfiles();
+        if (!profiles.length) {
+            return;
+        }
+
+        select.innerHTML = profiles
+            .map((profile) => `<option value="${profile.id}">${profile.label}</option>`)
+            .join('');
+    }
+
+    updateSoundProfileUI() {
+        this.populateSoundProfileOptions();
+
+        const select = document.getElementById('sound-profile-select');
+        const hint = document.getElementById('sound-profile-hint');
+        const currentProfileId = this.getCurrentSoundProfileId();
+        const profile = this.getAvailableSoundProfiles()
+            .find((entry) => entry.id === currentProfileId);
+
+        if (select) {
+            select.value = currentProfileId;
+        }
+
+        if (hint && profile) {
+            hint.textContent = `${profile.description} Includes Ack, Reply, and Checkpoint variations.`;
+        }
+    }
+
+    updateSoundVolumeUI() {
+        const range = document.getElementById('sound-volume-range');
+        const value = document.getElementById('sound-volume-value');
+        const percent = Math.round(this.getCurrentSoundVolume() * 100);
+
+        if (range) {
+            range.value = String(percent);
+        }
+
+        if (value) {
+            value.textContent = `${percent}%`;
+        }
+    }
+
     updateSoundCuesUI() {
         const button = document.getElementById('sound-cues-btn');
         const label = document.getElementById('sound-cues-label');
@@ -3208,6 +3271,37 @@ class UIHelpers {
     setMenuSoundsEnabled(value) {
         this.soundManager?.setMenuEnabled?.(value === true);
         this.updateMenuSoundsUI();
+    }
+
+    setSoundProfile(value) {
+        this.soundManager?.setSoundProfile?.(value);
+        this.updateSoundProfileUI();
+
+        const profiles = this.getAvailableSoundProfiles();
+        const profile = profiles.find((entry) => entry.id === this.getCurrentSoundProfileId());
+        if (profile) {
+            this.showToast(
+                `${profile.label} sound theme selected`,
+                'success',
+                'Sound theme',
+            );
+        }
+
+        this.previewSoundCue('response');
+    }
+
+    setSoundVolume(value, options = {}) {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+            return;
+        }
+
+        this.soundManager?.setVolume?.(numericValue / 100);
+        this.updateSoundVolumeUI();
+
+        if (options.preview === true) {
+            this.previewSoundCue('menu-select');
+        }
     }
 
     toggleSoundCues() {
@@ -5171,6 +5265,24 @@ class UIHelpers {
         if (soundCuesBtn) {
             soundCuesBtn.addEventListener('click', () => {
                 this.toggleSoundCues();
+            });
+        }
+
+        const soundProfileSelect = document.getElementById('sound-profile-select');
+        if (soundProfileSelect) {
+            soundProfileSelect.addEventListener('change', () => {
+                this.setSoundProfile(soundProfileSelect.value);
+            });
+        }
+
+        const soundVolumeRange = document.getElementById('sound-volume-range');
+        if (soundVolumeRange) {
+            soundVolumeRange.addEventListener('input', () => {
+                this.setSoundVolume(soundVolumeRange.value);
+            });
+
+            soundVolumeRange.addEventListener('change', () => {
+                this.setSoundVolume(soundVolumeRange.value, { preview: true });
             });
         }
 

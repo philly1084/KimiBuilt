@@ -395,6 +395,58 @@ const Agent = (function() {
             styling: 'Keep the tone light and readable with muted support copy and only a few accent blocks.',
         }),
     ]);
+    const NOTES_DESIGN_SCHEMES = Object.freeze([
+        Object.freeze({
+            id: 'warm-editorial',
+            name: 'Warm Editorial',
+            appliesTo: ['brief', 'explainer'],
+            keywords: ['story', 'history', 'travel', 'culture', 'city', 'guide', 'feature'],
+            palette: 'Orange or yellow focal callout, blue section labels, gray supporting notes.',
+            headerTreatment: 'Let the title and top callout feel punchy and magazine-like, then settle into clean section labels.',
+            visualDirection: 'Use one strong hero image or ai_image with an editorial caption near the top.',
+            editingRule: 'If the page already has a strong lead block, preserve it and tighten the rhythm around it instead of restyling everything.',
+        }),
+        Object.freeze({
+            id: 'field-guide',
+            name: 'Field Guide',
+            appliesTo: ['explainer', 'research'],
+            keywords: ['animal', 'wildlife', 'species', 'habitat', 'nature', 'science', 'planet', 'ocean', 'bird'],
+            palette: 'Green or blue section labels, warm summary callout, gray support notes, and natural photography.',
+            headerTreatment: 'Open with a big-idea heading, then use compact labels for traits, habitat, behavior, or quick facts.',
+            visualDirection: 'Prefer Unsplash or reference-photo style hero imagery and quick-facts clusters.',
+            editingRule: 'Turn repeated facts into lists or databases and keep supporting notes secondary to the main themes.',
+        }),
+        Object.freeze({
+            id: 'cool-knowledge',
+            name: 'Cool Knowledge',
+            appliesTo: ['research', 'documentation'],
+            keywords: ['research', 'analysis', 'compare', 'evidence', 'reference', 'sources', 'documentation'],
+            palette: 'Blue accents, gray support copy, restrained callout color, and crisp source blocks.',
+            headerTreatment: 'Keep headings neat and information-dense, with one clear summary block above the evidence sections.',
+            visualDirection: 'Use bookmarks, diagrams, and reference visuals more than decorative imagery.',
+            editingRule: 'Preserve the strongest evidence and source clusters, and avoid adding noisy color or extra ornament.',
+        }),
+        Object.freeze({
+            id: 'signal-board',
+            name: 'Signal Board',
+            appliesTo: ['project', 'dashboard'],
+            keywords: ['project', 'plan', 'status', 'tracker', 'dashboard', 'roadmap', 'launch'],
+            palette: 'Green accents for status, gray support copy, and tight metadata near the title.',
+            headerTreatment: 'Make the opening cluster status-first with icon, properties, and a callout or tracker immediately visible.',
+            visualDirection: 'Structured data should do most of the work; use visuals sparingly and only when they clarify the state of work.',
+            editingRule: 'Keep the page operational and avoid turning tracker content into long prose.',
+        }),
+        Object.freeze({
+            id: 'calm-session',
+            name: 'Calm Session',
+            appliesTo: ['meeting', 'journal'],
+            keywords: ['meeting', 'reflection', 'journal', 'retro', 'check-in', 'notes'],
+            palette: 'Brown or purple section labels, gray secondary notes, and one soft focal block.',
+            headerTreatment: 'Use a quiet title area followed by a summary callout before the detailed notes.',
+            visualDirection: 'Use minimal visuals; let the page feel calm, legible, and easy to revisit.',
+            editingRule: 'Preserve chronology or session structure while separating highlights, decisions, and next moves.',
+        }),
+    ]);
     const NOTES_PAGE_DESIGN_MANUAL = Object.freeze([
         'Design quality is part of correctness in notes mode. If the result feels like raw Markdown pasted into a page, it is not finished.',
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive details, sources, and next steps.',
@@ -801,6 +853,9 @@ const Agent = (function() {
         if (styledBlocks.length === 0 && blocks.length >= 4) {
             criteria.push('- Nothing on the page is styled yet. Use textColor and background color intentionally so the hierarchy feels designed.');
         }
+        if ((styledBlocks.length > 0 || visualBlocks.length > 0) && blocks.length > 0) {
+            criteria.push('- The page already has visual anchors. Preserve and extend the strongest existing icon, image, bookmark, or color language unless the user asks for a redesign.');
+        }
 
         if (dividers.length === 0 && blocks.length >= 6) {
             criteria.push('- Use dividers sparingly to separate major sections if the page starts to feel visually dense.');
@@ -957,6 +1012,76 @@ const Agent = (function() {
             `- Lead cluster target: ${leadRecipe.topCluster}`,
             `- Rhythm target: ${leadRecipe.bodyRhythm}`,
             `- Support cluster target: ${leadRecipe.supportCluster}`,
+        ].join('\n');
+    }
+
+    function scoreNotesDesignScheme(scheme, question = '', pageContext = null, templateMatches = []) {
+        const signalText = buildTemplateSignalText(question, pageContext);
+        const templateIds = new Set((templateMatches || []).map((template) => template.id));
+        let score = 0;
+
+        if (Array.isArray(scheme.appliesTo)) {
+            scheme.appliesTo.forEach((templateId) => {
+                if (templateIds.has(templateId)) {
+                    score += 4;
+                }
+            });
+        }
+
+        if (Array.isArray(scheme.keywords)) {
+            scheme.keywords.forEach((keyword) => {
+                const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                if (new RegExp(`\\b${escaped}\\b`, 'i').test(signalText)) {
+                    score += 2;
+                }
+            });
+        }
+
+        return score;
+    }
+
+    function selectNotesDesignSchemes(question = '', pageContext = null, templateMatches = []) {
+        const matches = Array.isArray(templateMatches) && templateMatches.length > 0
+            ? templateMatches
+            : selectNotesPageTemplates(question, pageContext, { limit: 2 });
+
+        const ranked = NOTES_DESIGN_SCHEMES
+            .map((scheme) => ({
+                ...scheme,
+                score: scoreNotesDesignScheme(scheme, question, pageContext, matches),
+            }))
+            .sort((left, right) => right.score - left.score);
+
+        const selected = ranked.filter((scheme) => scheme.score > 0).slice(0, 2);
+        if (selected.length > 0) {
+            return selected;
+        }
+
+        return NOTES_DESIGN_SCHEMES.slice(0, 2);
+    }
+
+    function buildDesignSchemeGuidance(question = '', pageContext = null, templateMatches = []) {
+        const schemes = selectNotesDesignSchemes(question, pageContext, templateMatches);
+        return schemes.map((scheme, index) => [
+            `${index + 1}. ${scheme.name} [${scheme.id}]`,
+            `   Palette: ${scheme.palette}`,
+            `   Header treatment: ${scheme.headerTreatment}`,
+            `   Visual direction: ${scheme.visualDirection}`,
+            `   Editing rule: ${scheme.editingRule}`,
+        ].join('\n')).join('\n\n');
+    }
+
+    function buildDesignSchemeChecklist(question = '', pageContext = null, templateMatches = []) {
+        const leadScheme = selectNotesDesignSchemes(question, pageContext, templateMatches)[0] || null;
+        if (!leadScheme) {
+            return '- Choose one dominant visual scheme and keep it consistent across headers, callouts, visuals, and support notes.';
+        }
+
+        return [
+            `- Dominant scheme: ${leadScheme.name}.`,
+            `- Palette target: ${leadScheme.palette}`,
+            `- Header rule: ${leadScheme.headerTreatment}`,
+            `- Editing rule: ${leadScheme.editingRule}`,
         ].join('\n');
     }
 
@@ -1184,6 +1309,79 @@ const Agent = (function() {
 
     function getTemplateDesignPreset(templateId = 'brief') {
         return NOTES_TEMPLATE_DESIGN_PRESETS[templateId] || NOTES_TEMPLATE_DESIGN_PRESETS.brief;
+    }
+
+    function buildVisualAnchorSnapshot(pageContext = null) {
+        if (!pageContext) {
+            return '- No page loaded yet, so choose a scheme and establish the visual anchors from scratch.';
+        }
+
+        const blocks = Array.isArray(pageContext.blocks) ? pageContext.blocks : [];
+        const stats = analyzeStructuredBlocks(blocks);
+        const colorCounts = {};
+        blocks.forEach((block) => {
+            ['color', 'textColor'].forEach((key) => {
+                const value = String(block?.[key] || '').trim().toLowerCase();
+                if (!value || value === 'default') {
+                    return;
+                }
+                colorCounts[value] = (colorCounts[value] || 0) + 1;
+            });
+        });
+
+        const colorSummary = Object.entries(colorCounts)
+            .sort((left, right) => right[1] - left[1])
+            .slice(0, 4)
+            .map(([color, count]) => `${color} x${count}`)
+            .join(', ');
+
+        const focalTypes = ['callout', 'image', 'ai_image', 'bookmark', 'database', 'quote'];
+        const leadFocalBlocks = blocks
+            .filter((block) => focalTypes.includes(canonicalizeBlockType(block?.type || '')))
+            .slice(0, 4)
+            .map((block) => `${canonicalizeBlockType(block?.type || '')}: ${truncateStructuredSummary(extractBlockDefinitionText(block), 90) || '(empty)'}`);
+
+        return [
+            `- Existing icon: ${pageContext.icon || '(none)'}`,
+            `- Existing cover: ${pageContext.hasCover ? 'present' : 'none'}`,
+            `- Visual/source blocks already on page: ${stats.visualSupportCount}`,
+            `- Styled blocks already on page: ${stats.styledBlockCount}`,
+            `- Existing accent colors: ${colorSummary || 'none yet'}`,
+            `- Lead focal blocks: ${leadFocalBlocks.length ? leadFocalBlocks.join(' | ') : 'none yet'}`,
+            '- Editing rule: preserve and extend the strongest current visual anchors unless the user explicitly asks for a different look.',
+        ].join('\n');
+    }
+
+    function resolveTemplateDesignPreset(templateId = 'brief', context = null) {
+        const basePreset = getTemplateDesignPreset(templateId);
+        const blocks = Array.isArray(context?.blocks) ? context.blocks : [];
+        if (!blocks.length) {
+            return basePreset;
+        }
+
+        const colorCounts = {};
+        blocks.forEach((block) => {
+            ['color', 'textColor'].forEach((key) => {
+                const value = String(block?.[key] || '').trim().toLowerCase();
+                if (!value || value === 'default' || value === 'gray') {
+                    return;
+                }
+                colorCounts[value] = (colorCounts[value] || 0) + 1;
+            });
+        });
+
+        const dominantAccent = Object.entries(colorCounts)
+            .sort((left, right) => right[1] - left[1])[0]?.[0] || '';
+
+        if (!dominantAccent) {
+            return basePreset;
+        }
+
+        return {
+            ...basePreset,
+            sectionTextColor: dominantAccent,
+            calloutColor: dominantAccent,
+        };
     }
 
     function extractBlockDefinitionText(block) {
@@ -2058,7 +2256,7 @@ const Agent = (function() {
                 return action;
             }
 
-            const preset = getTemplateDesignPreset(template?.id);
+            const preset = resolveTemplateDesignPreset(template?.id, context);
             let nextBlocks = action.blocks.map((block) => cloneStructuredValue(block));
             nextBlocks = ensureTemplateCalloutBlock(nextBlocks, { template, preset, action, context, question });
             nextBlocks = ensureHeroVisualBlock(nextBlocks, { template, preset, action, context, question });
@@ -2175,6 +2373,7 @@ const Agent = (function() {
         const blockMap = buildPageContentSnapshot(pageContext);
         const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
+        const visualAnchors = buildVisualAnchorSnapshot(pageContext);
         const blockPlaybook = buildBlockCapabilityPlaybook();
         const frontendFeatureGuide = buildFrontendFeatureGuide();
         const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
@@ -2182,6 +2381,8 @@ const Agent = (function() {
         const templateChecklist = buildTemplateExecutionChecklist(templateMatches);
         const visualRecipeGuidance = buildVisualRecipeGuidance(question, pageContext, templateMatches);
         const visualRecipeChecklist = buildVisualRecipeChecklist(question, pageContext, templateMatches);
+        const designSchemeGuidance = buildDesignSchemeGuidance(question, pageContext, templateMatches);
+        const designSchemeChecklist = buildDesignSchemeChecklist(question, pageContext, templateMatches);
         const designCriteria = [
             buildPageDesignCriteria(pageContext),
             ...templateMatches.flatMap((template) => template.designRules.map((rule) => `- Template cue (${template.name}): ${rule}`)),
@@ -2214,11 +2415,17 @@ ${pageContent || '(page is empty)'}
 PAGE STATS:
 ${pageSetup}
 
+CURRENT VISUAL ANCHORS:
+${visualAnchors}
+
 BEST-FIT PAGE TEMPLATES:
 ${templateGuidance}
 
 VISUAL PAGE RECIPES:
 ${visualRecipeGuidance}
+
+DESIGN SCHEMES:
+${designSchemeGuidance}
 
 BLOCK CAPABILITY PLAYBOOK:
 ${blockPlaybook}
@@ -2237,6 +2444,9 @@ ${templateChecklist}
 
 VISUAL DESIGN CHECKLIST:
 ${visualRecipeChecklist}
+
+DESIGN SCHEME CHECKLIST:
+${designSchemeChecklist}
 
 PAGE DESIGN CRITERIA:
 ${designCriteria}
@@ -2302,6 +2512,8 @@ BLOCK DESIGN HEURISTICS:
 - Prefer a designed first screenful: title/icon, a focal callout, and a hero visual or source cue should usually appear before the deeper body sections.
 - On substantial pages, avoid more than two plain text blocks in a row without breaking the cadence with a richer block.
 - If the page has a "Quick Facts", "At a Glance", or "Key Facts" section, consider a database block instead of leaving it as a plain bullet pile.
+- Choose one dominant design scheme and keep it consistent across headers, callouts, visuals, and support notes instead of mixing unrelated accents.
+- When editing an existing page, preserve the strongest current icon, cover, focal block, and accent colors unless the user explicitly asks for a new look.
 
 GUIDELINES:
 - Always reference blocks by their exact ID in [brackets]
@@ -2328,6 +2540,7 @@ GUIDELINES:
 - For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
 - Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
 - Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
+- Also choose a dominant design scheme from the scheme guidance above so the page has a coherent palette and header treatment.
 - When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
 - For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
 - If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
@@ -7910,6 +8123,7 @@ Build the page in a structured, polished way instead of one-shotting the whole d
         _simulateStreaming: simulateStreaming,
         _buildSystemPrompt: buildSystemPrompt,
         _selectNotesPageTemplates: selectNotesPageTemplates,
+        _selectNotesDesignSchemes: selectNotesDesignSchemes,
         _applyNotesActions: applyNotesActions,
         _extractNotesActionPlan: extractNotesActionPlan,
         _normalizeStructuredPageActions: normalizeStructuredPageActions,

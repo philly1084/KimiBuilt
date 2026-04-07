@@ -57,6 +57,18 @@ describe('/api/canvas helpers', () => {
         expect(instructions).toContain('data-dashboard-template');
     });
 
+    test('buildCanvasInstructions includes recursive template store guidance when provided', () => {
+        const instructions = buildCanvasInstructions(
+            'document',
+            '',
+            'Create an executive brief',
+            '[Recursive template store]\n- Template 1: Executive Brief [executive-brief]',
+        );
+
+        expect(instructions).toContain('[Recursive template store]');
+        expect(instructions).toContain('Executive Brief [executive-brief]');
+    });
+
     test('parseCanvasResponse normalizes frontend metadata from structured JSON', () => {
         const parsed = parseCanvasResponse(JSON.stringify({
             content: '<!DOCTYPE html><html><head><title>Nova Demo</title></head><body><section id="hero"></section></body></html>',

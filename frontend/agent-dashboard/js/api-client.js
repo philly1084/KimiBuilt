@@ -475,6 +475,13 @@ class ApiClient {
     }
 
     /**
+     * Update a deferred workload from the admin dashboard
+     */
+    async updateAdminWorkload(id, payload = {}) {
+        return this.patch(`/api/admin/workloads/${id}`, payload);
+    }
+
+    /**
      * Pause a deferred workload from the admin dashboard
      */
     async pauseAdminWorkload(id) {

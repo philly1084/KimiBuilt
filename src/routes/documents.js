@@ -23,7 +23,10 @@ const aiGenerateSchema = {
   length: { required: false, type: 'string' },
   format: { required: false, type: 'string' },
   options: { required: false, type: 'object' },
-  model: { required: false, type: 'string' }
+  model: { required: false, type: 'string' },
+  templateId: { required: false, type: 'string' },
+  templateIds: { required: false, type: 'array' },
+  templateVariables: { required: false, type: 'object' }
 };
 
 const recommendSchema = {
@@ -74,6 +77,51 @@ const exportNotesPagePdfSchema = {
   page: { required: true, type: 'object' },
   options: { required: false, type: 'object' }
 };
+
+function normalizeTemplateIds(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return String(value || '').trim() ? [String(value).trim()] : [];
+  }
+
+  return [];
+}
+
+async function buildDocumentTemplateSelection(templateStore, {
+  prompt = '',
+  documentType = '',
+  templateId = null,
+  templateIds = [],
+  templateVariables = {},
+} = {}) {
+  if (!templateStore) {
+    return { matches: [], context: '' };
+  }
+
+  const explicitTemplateIds = [
+    ...normalizeTemplateIds(templateId),
+    ...normalizeTemplateIds(templateIds),
+  ];
+  const selection = templateStore.buildPromptContext({
+    explicitTemplateIds,
+    query: [prompt, documentType].filter(Boolean).join('\n'),
+    surface: 'document',
+    kind: 'document',
+    limit: explicitTemplateIds.length > 0 ? 4 : 3,
+    variables: templateVariables,
+  });
+
+  if (selection.matches.length > 0) {
+    await templateStore.noteTemplateUse(selection.matches.map((template) => template.id));
+  }
+
+  return selection;
+}
 
 /**
  * GET /api/documents/templates
@@ -274,17 +322,27 @@ router.post('/generate', validate(generateSchema), async (req, res, next) => {
  */
 router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) => {
   try {
-    const { 
-      prompt, 
-      documentType, 
-      tone = 'professional', 
+    const {
+      prompt,
+      documentType,
+      tone = 'professional',
       length = 'medium',
       format = 'docx',
       options = {},
-      model
+      model,
+      templateId = null,
+      templateIds = [],
+      templateVariables = {},
     } = req.body;
-    
+
     const documentService = req.app.locals.documentService;
+    const templateSelection = await buildDocumentTemplateSelection(req.app.locals.templateStore, {
+      prompt,
+      documentType,
+      templateId,
+      templateIds,
+      templateVariables,
+    });
     const productionPlan = documentService.buildDocumentPlan({
       prompt,
       documentType,
@@ -292,7 +350,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       tone,
       length,
     });
-    
+
     const document = await documentService.aiGenerate(prompt, {
       documentType,
       tone,
@@ -300,9 +358,10 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       format,
       model,
       designPlan: productionPlan,
-      ...options
+      templateContext: templateSelection.context,
+      ...options,
     });
-    
+
     res.json({
       success: true,
       document: {
@@ -311,10 +370,11 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
         mimeType: document.mimeType,
         size: document.size,
         metadata: document.metadata,
-        preview: document.preview
+        preview: document.preview,
       },
       productionPlan,
-      downloadUrl: `/api/documents/${document.id}/download`
+      templateMatches: templateSelection.matches,
+      downloadUrl: `/api/documents/${document.id}/download`,
     });
   } catch (err) {
     next(err);
@@ -447,9 +507,12 @@ router.post('/presentation', async (req, res, next) => {
       style,
       generateImages = true,
       theme = 'default',
-      model
+      model,
+      templateId = null,
+      templateIds = [],
+      templateVariables = {},
     } = req.body;
-    
+
     const documentService = req.app.locals.documentService;
     
     // Use outline or content
@@ -457,10 +520,17 @@ router.post('/presentation', async (req, res, next) => {
     
     if (!presentationContent) {
       return res.status(400).json({
-        error: { message: 'Either content or outline is required' }
+        error: { message: 'Either content or outline is required' },
       });
     }
-    
+    const templateSelection = await buildDocumentTemplateSelection(req.app.locals.templateStore, {
+      prompt: typeof presentationContent === 'string' ? presentationContent : title,
+      documentType: 'presentation',
+      templateId,
+      templateIds,
+      templateVariables,
+    });
+
     const document = await documentService.generatePresentation(presentationContent, {
       title,
       subtitle,
@@ -470,9 +540,10 @@ router.post('/presentation', async (req, res, next) => {
       style,
       generateImages,
       theme,
-      model
+      model,
+      templateContext: templateSelection.context,
     });
-    
+
     res.setHeader('Content-Type', document.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${document.filename}"`);
     res.setHeader('X-Document-Id', document.id);

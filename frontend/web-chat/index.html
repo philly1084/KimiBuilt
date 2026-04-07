@@ -63,7 +63,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260406a">
+    <link rel="stylesheet" href="css/styles.css?v=20260406e">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
@@ -407,6 +407,29 @@
                             <button type="button" class="assistant-preview-btn" data-sound-preview="survey">Checkpoint</button>
                         </div>
                         <p class="model-selector-setting__hint">Reply and checkpoint cues stay distinct so you can tell whether the agent is done or needs a decision.</p>
+                    </div>
+                </div>
+                <div class="model-selector-setting">
+                    <label for="sound-profile-select" class="model-selector-setting__label">Sound theme</label>
+                    <div class="assistant-sound-stack">
+                        <select id="sound-profile-select" class="reasoning-select reasoning-select--panel" title="Sound theme" aria-label="Sound theme">
+                            <option value="orbit">Orbit</option>
+                            <option value="bloom">Bloom</option>
+                            <option value="quartz">Quartz</option>
+                            <option value="arcade">Arcade</option>
+                            <option value="sonar">Sonar</option>
+                        </select>
+                        <p id="sound-profile-hint" class="model-selector-setting__hint">Five sound themes, each with Ack, Reply, and Checkpoint cue variants.</p>
+                    </div>
+                </div>
+                <div class="model-selector-setting">
+                    <div class="assistant-sound-volume-header">
+                        <label for="sound-volume-range" class="model-selector-setting__label">Sound volume</label>
+                        <span id="sound-volume-value" class="assistant-sound-volume-value">68%</span>
+                    </div>
+                    <div class="assistant-sound-stack">
+                        <input id="sound-volume-range" class="assistant-sound-volume-range" type="range" min="0" max="100" step="5" value="68" aria-label="Sound volume">
+                        <p class="model-selector-setting__hint">Applies to assistant cues and menu sounds.</p>
                     </div>
                 </div>
                 <div class="model-selector-setting">
@@ -954,11 +977,11 @@
     <!-- Scripts -->
     <script src="js/api.js?v=20260406d"></script>
     <script src="js/session.js?v=20260406a"></script>
-    <script src="js/sound-manager.js?v=20260406a"></script>
+    <script src="js/sound-manager.js?v=20260406e"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260406d"></script>
+    <script src="js/ui.js?v=20260406e"></script>
     <script src="js/app.js?v=20260406d"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>

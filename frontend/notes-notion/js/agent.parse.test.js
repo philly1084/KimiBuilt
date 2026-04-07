@@ -293,21 +293,27 @@ Approved page plan:
 
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
+        expect(prompt).toContain('CURRENT VISUAL ANCHORS:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('VISUAL PAGE RECIPES:');
+        expect(prompt).toContain('DESIGN SCHEMES:');
         expect(prompt).toContain('BLOCK CAPABILITY PLAYBOOK:');
         expect(prompt).toContain('FRONTEND FEATURES YOU CAN USE:');
         expect(prompt).toContain('PAGE DESIGN MANUAL:');
         expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
         expect(prompt).toContain('TEMPLATE EXECUTION CHECKLIST:');
         expect(prompt).toContain('VISUAL DESIGN CHECKLIST:');
+        expect(prompt).toContain('DESIGN SCHEME CHECKLIST:');
         expect(prompt).toContain('Top-level flow');
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Think in page roles, not just paragraphs');
         expect(prompt).toContain('Treat style as part of the page system');
         expect(prompt).toContain('visual hierarchy as required work');
         expect(prompt).toContain('Editorial Explainer [editorial-explainer]');
+        expect(prompt).toContain('Cool Knowledge [cool-knowledge]');
         expect(prompt).toContain('Avoid more than two plain text blocks in a row');
+        expect(prompt).toContain('Choose one dominant design scheme');
+        expect(prompt).toContain('Lead focal blocks');
         expect(prompt).toContain('Page metadata: Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel`');
         expect(prompt).toContain('Properties: `properties` accepts an array of `{key, value}` pairs');
         expect(prompt).toContain('Nested structure: Blocks can include `children`');
@@ -349,6 +355,23 @@ Approved page plan:
 
         expect(Array.isArray(templates)).toBe(true);
         expect(templates[0].id).toBe('explainer');
+    });
+
+    test('selects a field-guide design scheme for educational nature pages', () => {
+        const agent = loadAgent();
+        const schemes = agent._selectNotesDesignSchemes(
+            'Create a polished page about penguins with science facts, habitat notes, and quick facts.',
+            {
+                title: 'Penguins',
+                blockCount: 0,
+                blocks: [],
+                outline: [],
+            },
+            [{ id: 'explainer' }]
+        );
+
+        expect(Array.isArray(schemes)).toBe(true);
+        expect(schemes[0].id).toBe('field-guide');
     });
 
     test('expands oversized single-block rebuild actions into multiple page blocks', () => {
@@ -537,6 +560,39 @@ Approved page plan:
                 color: 'orange',
             }),
             expect.objectContaining({ type: 'divider' }),
+        ]));
+    });
+
+    test('preserves existing accent colors when upgrading a page redesign', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [
+                    { type: 'heading_1', content: 'Penguins' },
+                    { type: 'text', content: 'Penguins are flightless seabirds adapted for life in the ocean.' },
+                    { type: 'heading_2', content: 'Habitat' },
+                    { type: 'text', content: 'They live across the Southern Hemisphere and depend on productive marine ecosystems.' },
+                    { type: 'heading_2', content: 'Quick Facts' },
+                    { type: 'bulleted_list', content: 'They are expert swimmers.' },
+                    { type: 'bulleted_list', content: 'Many species live in colonies.' },
+                    { type: 'bulleted_list', content: 'Not all penguins live in Antarctica.' },
+                ],
+            },
+        ], 'Refresh this page about penguins but keep the current green accent and make it feel more polished.', {
+            title: 'Penguins',
+            blockCount: 6,
+            outline: [{ id: 'h1', content: 'Penguins' }],
+            blocks: [
+                { id: 'b1', type: 'callout', content: { text: 'Existing lead' }, color: 'green' },
+                { id: 'b2', type: 'heading_2', content: 'Habitat', textColor: 'green' },
+            ],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'callout', color: 'green' }),
+            expect.objectContaining({ type: 'heading_2', textColor: 'green' }),
         ]));
     });
 

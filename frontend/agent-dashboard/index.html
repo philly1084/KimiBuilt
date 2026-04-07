@@ -1469,6 +1469,67 @@
         </div>
     </div>
 
+    <div class="modal" id="editWorkloadModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Edit Workload</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="workload-edit-error" id="editWorkloadError" hidden></div>
+                <div class="form-group">
+                    <label for="editWorkloadTitle">Title</label>
+                    <input type="text" class="form-control" id="editWorkloadTitle" placeholder="Nightly review">
+                </div>
+                <div class="form-group">
+                    <label for="editWorkloadPrompt">Prompt</label>
+                    <textarea class="form-control" id="editWorkloadPrompt" rows="7" placeholder="Review the queue and flag failures."></textarea>
+                    <p class="workload-edit-help">Edit the exact task text the agent should execute for future runs.</p>
+                </div>
+                <div class="workload-edit-grid">
+                    <div class="form-group">
+                        <label for="editWorkloadTriggerType">Trigger</label>
+                        <select class="form-control" id="editWorkloadTriggerType">
+                            <option value="manual">Manual</option>
+                            <option value="once">Run once later</option>
+                            <option value="cron">Recurring cron</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="workload-edit-toggle" for="editWorkloadEnabled">
+                            <input type="checkbox" id="editWorkloadEnabled">
+                            <span>Enabled</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="workload-edit-grid" id="editWorkloadOnceFields" hidden>
+                    <div class="form-group">
+                        <label for="editWorkloadRunAt">Run at</label>
+                        <input type="datetime-local" class="form-control" id="editWorkloadRunAt">
+                    </div>
+                </div>
+                <div id="editWorkloadCronFields" hidden>
+                    <div class="workload-edit-grid">
+                        <div class="form-group">
+                            <label for="editWorkloadCronExpression">Cron expression</label>
+                            <input type="text" class="form-control" id="editWorkloadCronExpression" placeholder="0 2 * * *">
+                        </div>
+                        <div class="form-group">
+                            <label for="editWorkloadTimezone">Timezone</label>
+                            <input type="text" class="form-control" id="editWorkloadTimezone" placeholder="America/Halifax">
+                        </div>
+                    </div>
+                    <p class="workload-edit-help">Existing policy, stages, and callable settings stay unchanged.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost modal-close">Cancel</button>
+                <button class="btn btn-primary" id="saveWorkloadChangesBtn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Prompt History -->
     <div class="modal" id="historyModal">
         <div class="modal-overlay"></div>

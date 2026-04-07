@@ -98,6 +98,8 @@ function buildNotesSurfacePrompt() {
     'Research pages should read like compact knowledge hubs: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of burying them in prose.',
     'Topic and educational pages should usually follow an editorial-explainer pattern: big-idea callout, hero visual, quick-facts cluster, then themed sections and sources.',
     'For polished or Notion-like pages, make the design visible in the blocks: page icon, focal callout, hero image or ai_image when the topic supports it, colored section labels, and muted supporting notes.',
+    'Choose one dominant design scheme and keep it coherent across headers, callouts, visuals, and supporting notes instead of mixing unrelated accents.',
+    'When editing an existing page, preserve the strongest current icon, cover, focal block, and accent-color language unless the user explicitly asks for a new look.',
     'If a substantial page only uses headings, text, and list blocks, do a palette audit before finalizing and check whether a richer block type should be added.',
     'Only switch to HTML/file/artifact output when the user explicitly asks for an export, download, link, attachment, or standalone file.',
     'In notes, Mermaid usually belongs as a page block, not a downloadable artifact, unless the user explicitly asks for a file, export, or download.',

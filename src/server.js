@@ -22,6 +22,7 @@ const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
 const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
+const templatesRouter = require('./routes/templates');
 const unsplashRouter = require('./routes/unsplash');
 const adminRouter = require('./routes/admin');
 const authRouter = require('./routes/auth');
@@ -37,6 +38,7 @@ const { ConversationRunService } = require('./conversation-run-service');
 const { AgentWorkloadService } = require('./workloads/service');
 const { AgentWorkloadRunner } = require('./workloads/runner');
 const { OpenCodeService } = require('./opencode/service');
+const { TemplateStore } = require('./template-store');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -211,6 +213,7 @@ app.use('/api/models', modelsRouter);
 app.use('/api/images', imagesRouter);
 app.use('/api/artifacts', artifactsRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api/templates', templatesRouter);
 app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
 app.use('/api/admin', adminRouter);
@@ -246,6 +249,12 @@ async function start() {
         app.locals.toolManager = toolManager;
         console.log(`[Boot] Tool platform ready (${toolManager.registry.getAllTools().length} tools)`);
         
+        console.log('[Boot] Initializing template store...');
+        const templateStore = new TemplateStore();
+        await templateStore.initialize();
+        app.locals.templateStore = templateStore;
+        console.log('[Boot] Template store ready');
+
         console.log('[Boot] Initializing document service...');
         // Create OpenAI-compatible client for document generation
         const openaiClient = {

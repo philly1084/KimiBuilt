@@ -39,6 +39,31 @@ describe('/api/admin workload routes', () => {
         expect(response.body.data.enabled).toBe(false);
     });
 
+    test('updates a workload from the admin dashboard', async () => {
+        const service = {
+            isAvailable: jest.fn(() => true),
+            updateAdminWorkload: jest.fn(async () => ({
+                id: 'workload-1',
+                title: 'Nightly review',
+                prompt: 'Review the queue and flag failures.',
+            })),
+        };
+        const app = buildApp(service);
+
+        const response = await request(app)
+            .patch('/api/admin/workloads/workload-1')
+            .send({
+                prompt: 'Review the queue and flag failures.',
+            });
+
+        expect(response.status).toBe(200);
+        expect(service.updateAdminWorkload).toHaveBeenCalledWith('workload-1', {
+            prompt: 'Review the queue and flag failures.',
+        });
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.prompt).toBe('Review the queue and flag failures.');
+    });
+
     test('resumes a workload from the admin dashboard', async () => {
         const service = {
             isAvailable: jest.fn(() => true),
