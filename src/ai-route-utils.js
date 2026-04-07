@@ -333,11 +333,7 @@ function shouldSuppressWebChatImplicitHtmlArtifact({
         return false;
     }
 
-    if (hasExplicitStandaloneHtmlIntent(text) || hasExplicitArtifactDeliveryIntent(text)) {
-        return false;
-    }
-
-    return true;
+    return hasPlanningConversationIntent(text);
 }
 
 function inferRequestedOutputFormat(text = '') {

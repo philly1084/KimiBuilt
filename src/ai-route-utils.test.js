@@ -384,13 +384,13 @@ describe('ai-route-utils', () => {
         )).toBe('Create a page about penguins.');
     });
 
-    test('suppresses implicit html artifacts on web-chat when delivery is not explicit', () => {
+    test('keeps inferred html artifacts on web-chat so html requests generate downloadable files', () => {
         expect(shouldSuppressWebChatImplicitHtmlArtifact({
             clientSurface: 'web-chat',
             text: 'Make me a fresh HTML sun dashboard in the same mission-control direction.',
             outputFormat: 'html',
             outputFormatProvided: false,
-        })).toBe(true);
+        })).toBe(false);
     });
 
     test('keeps explicit html delivery requests on web-chat in the artifact path', () => {
@@ -400,6 +400,15 @@ describe('ai-route-utils', () => {
             outputFormat: 'html',
             outputFormatProvided: false,
         })).toBe(false);
+    });
+
+    test('still suppresses inferred html artifacts on web-chat for planning-only requests', () => {
+        expect(shouldSuppressWebChatImplicitHtmlArtifact({
+            clientSurface: 'web-chat',
+            text: 'Help me plan the structure for an HTML page before you write it.',
+            outputFormat: 'html',
+            outputFormatProvided: false,
+        })).toBe(true);
     });
 
     test('resolveArtifactContextIds prefers the last generated image artifacts for image follow-ups', () => {

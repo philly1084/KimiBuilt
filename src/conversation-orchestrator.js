@@ -5746,7 +5746,9 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (normalizedClientSurface === 'web-chat') {
             parts.push('On web-chat, fenced `html` code blocks render as live sandboxed previews inside the message.');
-            parts.push('When the user wants to see a quick page, dashboard, mockup, or prototype here in chat, prefer inline ```html``` output over switching to a downloadable HTML artifact unless they explicitly ask for a file, export, download, link, or attachment.');
+            parts.push('On web-chat, generated HTML artifacts render inline and remain downloadable.');
+            parts.push('When the user asks to create, build, generate, or produce HTML, prefer an HTML artifact instead of pasting the full page into chat prose.');
+            parts.push('Use inline ```html``` only for short snippets, examples, or when the user explicitly wants the markup directly in the conversation.');
         }
 
         if (allowedToolIds.length > 0) {

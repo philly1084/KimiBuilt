@@ -20,6 +20,7 @@ jest.mock('../session-store', () => ({
 
 jest.mock('../memory/memory-service', () => ({
     memoryService: {
+        process: jest.fn(),
         rememberResponse: jest.fn(),
         rememberArtifactResult: jest.fn(),
         rememberLearnedSkill: jest.fn(),
@@ -80,6 +81,7 @@ jest.mock('../runtime-prompts', () => ({
 }));
 
 const { sessionStore } = require('../session-store');
+const { memoryService } = require('../memory/memory-service');
 const { ensureRuntimeToolManager } = require('../runtime-tool-manager');
 const { executeConversationRuntime } = require('../runtime-execution');
 const {
@@ -113,6 +115,7 @@ describe('/api/chat route', () => {
         sessionStore.update.mockResolvedValue(session);
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
         maybeGenerateOutputArtifact.mockResolvedValue([]);
+        memoryService.process.mockResolvedValue({ contextMessages: [] });
         resolveDeferredWorkloadPreflight.mockReturnValue({
             timing: 'now',
             shouldSchedule: false,
@@ -369,6 +372,58 @@ describe('/api/chat route', () => {
         expect(response.body.message).toBe('Created the PDF artifact (page-export.pdf).');
         expect(response.body.artifacts).toEqual([
             expect.objectContaining({ id: 'pdf-artifact-1', filename: 'page-export.pdf' }),
+        ]);
+    });
+
+    test('creates an HTML artifact on web-chat for explicit html build requests', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Build me a simple HTML questionnaire page.',
+        });
+        require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('html');
+        generateOutputArtifactFromPrompt.mockResolvedValue({
+            responseId: 'resp-html-export-1',
+            artifact: {
+                id: 'html-artifact-1',
+                filename: 'questionnaire.html',
+                downloadUrl: '/api/artifacts/html-artifact-1/download',
+            },
+            artifacts: [{
+                id: 'html-artifact-1',
+                filename: 'questionnaire.html',
+                downloadUrl: '/api/artifacts/html-artifact-1/download',
+            }],
+            assistantMessage: 'Created the HTML artifact (questionnaire.html).',
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Build me a simple HTML questionnaire page.',
+                stream: false,
+                metadata: { clientSurface: 'web-chat' },
+            });
+
+        expect(response.status).toBe(200);
+        expect(generateOutputArtifactFromPrompt).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            mode: 'web-chat',
+            outputFormat: 'html',
+        }));
+        expect(executeConversationRuntime).not.toHaveBeenCalled();
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'html-artifact-1',
+                filename: 'questionnaire.html',
+                downloadUrl: '/api/artifacts/html-artifact-1/download',
+            }),
         ]);
     });
 
