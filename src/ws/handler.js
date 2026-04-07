@@ -390,13 +390,10 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     : (artifactMemory.contextMessages || []),
                 recentMessages: artifactRecentMessages,
             });
-            const responseArtifacts = [
-                ...preparedImages.artifacts,
-                ...generation.artifacts,
-            ].filter((artifact, index, array) => {
-                const artifactId = artifact?.id || '';
-                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
-            });
+            const responseArtifacts = mergeRuntimeArtifacts(
+                preparedImages.artifacts,
+                generation.artifacts,
+            );
 
             await sessionStore.recordResponse(session.id, generation.responseId);
             await sessionStore.update(session.id, {
@@ -464,13 +461,15 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             });
 
             ws.send(JSON.stringify({ type: 'delta', content: generation.assistantMessage }));
-            ws.send(JSON.stringify({
-                type: 'done',
-                sessionId: session.id,
-                responseId: generation.responseId,
-                artifacts: responseArtifacts,
-                toolEvents: preparedImages.toolEvents,
-            }));
+                ws.send(JSON.stringify({
+                    type: 'done',
+                    sessionId: session.id,
+                    responseId: generation.responseId,
+                    artifacts: responseArtifacts,
+                    toolEvents: preparedImages.toolEvents,
+                    assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                    assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                }));
             return;
         }
 
@@ -615,8 +614,14 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     sessionId: session.id,
                     responseId: event.response.id,
                     artifacts,
-                    assistant_metadata: buildFrontendAssistantMetadata(event.response?.metadata),
-                    assistantMetadata: buildFrontendAssistantMetadata(event.response?.metadata),
+                    assistant_metadata: buildFrontendAssistantMetadata({
+                        ...(event.response?.metadata || {}),
+                        artifacts,
+                    }),
+                    assistantMetadata: buildFrontendAssistantMetadata({
+                        ...(event.response?.metadata || {}),
+                        artifacts,
+                    }),
                 }));
             }
         }

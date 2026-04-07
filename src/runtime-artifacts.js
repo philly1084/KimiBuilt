@@ -28,6 +28,11 @@ function normalizeDownloadUrl(value = '') {
     }
 }
 
+function buildFallbackDownloadUrl(id = '') {
+    const normalizedId = String(id || '').trim();
+    return normalizedId ? `/api/artifacts/${encodeURIComponent(normalizedId)}/download` : null;
+}
+
 function normalizeArtifactEntry(value = null) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return null;
@@ -47,7 +52,7 @@ function normalizeArtifactEntry(value = null) {
         || value.inlinePath
         || value.inline_path
         || '',
-    );
+    ) || buildFallbackDownloadUrl(id);
 
     if (!id || !downloadUrl) {
         return null;
@@ -136,7 +141,8 @@ function mergeRuntimeArtifacts(...artifactSets) {
             ) || '',
             extension: String(artifact.extension || '').trim(),
             mimeType: String(artifact.mimeType || '').trim(),
-            downloadUrl: normalizeDownloadUrl(artifact.downloadUrl || artifact.inlinePath || ''),
+            downloadUrl: normalizeDownloadUrl(artifact.downloadUrl || artifact.inlinePath || '')
+                || buildFallbackDownloadUrl(artifact.id),
         };
         const identity = normalized.id || normalized.downloadUrl || '';
         if (!identity || seen.has(identity)) {

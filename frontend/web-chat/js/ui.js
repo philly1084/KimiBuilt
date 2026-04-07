@@ -1830,6 +1830,25 @@ class UIHelpers {
             message.content :
             (message.displayContent ?? message.content);
 
+        const inlineArtifacts = !isUser && message.type !== 'artifact-gallery' && Array.isArray(message.artifacts)
+            ? message.artifacts.filter((artifact) => artifact?.id && artifact?.downloadUrl)
+            : [];
+        const inlineArtifactMarkup = !isUser && inlineArtifacts.length > 0
+            ? `
+                <div class="message-generated-artifacts">
+                    <div class="message-selection-panel">
+                        <div class="selection-panel-info">
+                            <div class="icon" aria-hidden="true">
+                                <i data-lucide="files" class="w-3.5 h-3.5"></i>
+                            </div>
+                            <span class="text">Files ready</span>
+                            <span class="meta">${inlineArtifacts.length} item${inlineArtifacts.length === 1 ? '' : 's'}</span>
+                        </div>
+                        ${window.artifactManager?.buildGalleryMarkup?.(inlineArtifacts) || ''}
+                    </div>
+                </div>
+            `
+            : '';
         const assistantRenderPlan = isUser
             ? null
             : this.buildAssistantRenderPlan(message, isStreaming);
@@ -1867,6 +1886,7 @@ class UIHelpers {
                 <div class="message-text ${messageTextClass}">
                     ${content}
                 </div>
+                ${inlineArtifactMarkup}
             </div>
             ${isUser ? avatar : ''}
         `;

@@ -4,7 +4,7 @@ const {
 } = require('./web-chat-message-state');
 
 describe('buildWebChatSessionMessages', () => {
-    test('assigns strictly increasing timestamps within one exchange', () => {
+    test('stores artifacts inline on the assistant message without a separate gallery message', () => {
         const messages = buildWebChatSessionMessages({
             userText: 'Question first',
             assistantText: 'Answer second',
@@ -12,20 +12,26 @@ describe('buildWebChatSessionMessages', () => {
                 id: 'artifact-1',
                 filename: 'report.pdf',
                 format: 'pdf',
+                downloadUrl: '/api/artifacts/artifact-1/download',
             }],
             timestamp: '2026-04-04T15:00:00.000Z',
         });
 
-        expect(messages).toHaveLength(3);
+        expect(messages).toHaveLength(2);
         expect(messages.map((message) => message.role)).toEqual([
             'user',
-            'assistant',
             'assistant',
         ]);
 
         const timestamps = messages.map((message) => new Date(message.timestamp).getTime());
         expect(timestamps[0]).toBeLessThan(timestamps[1]);
-        expect(timestamps[1]).toBeLessThan(timestamps[2]);
+        expect(messages[1].metadata.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-1',
+                filename: 'report.pdf',
+                downloadUrl: '/api/artifacts/artifact-1/download',
+            }),
+        ]);
     });
 
     test('stores checkpoint fallback display content as a bare survey fence without duplicated prose', () => {
@@ -145,5 +151,28 @@ describe('buildWebChatSessionMessages', () => {
 
         expect(metadata.displayContent).toContain('```survey');
         expect(metadata.displayContent).toContain('"checkpoint-mnnicelx"');
+    });
+
+    test('keeps assistant artifact metadata when HTML output is created', () => {
+        const metadata = buildFrontendAssistantMetadata({
+            taskType: 'chat',
+            artifacts: [{
+                id: 'artifact-html-1',
+                filename: 'dashboard.html',
+                format: 'html',
+                downloadUrl: '/api/artifacts/artifact-html-1/download',
+            }],
+        });
+
+        expect(metadata).toEqual(expect.objectContaining({
+            taskType: 'chat',
+            artifacts: [
+                expect.objectContaining({
+                    id: 'artifact-html-1',
+                    filename: 'dashboard.html',
+                    downloadUrl: '/api/artifacts/artifact-html-1/download',
+                }),
+            ],
+        }));
     });
 });

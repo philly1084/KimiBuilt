@@ -744,13 +744,10 @@ router.post('/chat/completions', async (req, res, next) => {
                 model,
                 reasoningEffort,
             });
-            const responseArtifacts = [
-                ...preparedImages.artifacts,
-                ...generation.artifacts,
-            ].filter((artifact, index, array) => {
-                const artifactId = artifact?.id || '';
-                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
-            });
+            const responseArtifacts = mergeRuntimeArtifacts(
+                preparedImages.artifacts,
+                generation.artifacts,
+            );
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
             await sessionStore.update(sessionId, {
@@ -810,6 +807,8 @@ router.post('/chat/completions', async (req, res, next) => {
                     artifacts: responseArtifacts,
                     tool_events: preparedImages.toolEvents,
                     toolEvents: preparedImages.toolEvents,
+                    assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                    assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                 })}\n\n`);
                 res.write('data: [DONE]\n\n');
                 res.end();
@@ -1009,8 +1008,14 @@ router.post('/chat/completions', async (req, res, next) => {
                         artifacts,
                         tool_events: toolEvents,
                         toolEvents,
-                        assistant_metadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
-                        assistantMetadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
+                        assistant_metadata: buildFrontendAssistantMetadata({
+                            ...(resolvedCompletion.response?.metadata || {}),
+                            artifacts,
+                        }),
+                        assistantMetadata: buildFrontendAssistantMetadata({
+                            ...(resolvedCompletion.response?.metadata || {}),
+                            artifacts,
+                        }),
                     })}\n\n`);
                     res.write('data: [DONE]\n\n');
                 }
@@ -1193,8 +1198,14 @@ router.post('/chat/completions', async (req, res, next) => {
             artifacts,
             tool_events: response?.metadata?.toolEvents || [],
             toolEvents: response?.metadata?.toolEvents || [],
-            assistant_metadata: buildFrontendAssistantMetadata(response?.metadata),
-            assistantMetadata: buildFrontendAssistantMetadata(response?.metadata),
+            assistant_metadata: buildFrontendAssistantMetadata({
+                ...(response?.metadata || {}),
+                artifacts,
+            }),
+            assistantMetadata: buildFrontendAssistantMetadata({
+                ...(response?.metadata || {}),
+                artifacts,
+            }),
         });
     } catch (err) {
         failRuntimeTask(runtimeTask?.id, {
@@ -1388,13 +1399,10 @@ router.post('/responses', async (req, res, next) => {
                 model,
                 reasoningEffort,
             });
-            const responseArtifacts = [
-                ...preparedImages.artifacts,
-                ...generation.artifacts,
-            ].filter((artifact, index, array) => {
-                const artifactId = artifact?.id || '';
-                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
-            });
+            const responseArtifacts = mergeRuntimeArtifacts(
+                preparedImages.artifacts,
+                generation.artifacts,
+            );
 
             await sessionStore.recordResponse(sessionId, generation.responseId);
             await sessionStore.update(sessionId, {
@@ -1622,8 +1630,14 @@ router.post('/responses', async (req, res, next) => {
                         response: resolvedCompletion.response,
                         session_id: sessionId,
                         artifacts,
-                        assistant_metadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
-                        assistantMetadata: buildFrontendAssistantMetadata(resolvedCompletion.response?.metadata),
+                        assistant_metadata: buildFrontendAssistantMetadata({
+                            ...(resolvedCompletion.response?.metadata || {}),
+                            artifacts,
+                        }),
+                        assistantMetadata: buildFrontendAssistantMetadata({
+                            ...(resolvedCompletion.response?.metadata || {}),
+                            artifacts,
+                        }),
                     })}\n\n`);
                 }
             }
@@ -1783,8 +1797,14 @@ router.post('/responses', async (req, res, next) => {
             ...response,
             session_id: sessionId,
             artifacts,
-            assistant_metadata: buildFrontendAssistantMetadata(response?.metadata),
-            assistantMetadata: buildFrontendAssistantMetadata(response?.metadata),
+            assistant_metadata: buildFrontendAssistantMetadata({
+                ...(response?.metadata || {}),
+                artifacts,
+            }),
+            assistantMetadata: buildFrontendAssistantMetadata({
+                ...(response?.metadata || {}),
+                artifacts,
+            }),
         });
     } catch (err) {
         failRuntimeTask(runtimeTask?.id, {

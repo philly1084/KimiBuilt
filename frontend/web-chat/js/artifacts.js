@@ -487,11 +487,18 @@
             return '';
         }
 
+        const hasHtml = files.some((artifact) => {
+            const format = String(artifact?.format || '').toLowerCase();
+            const filename = String(artifact?.filename || '').toLowerCase();
+            return format === 'html' || filename.endsWith('.html') || filename.endsWith('.htm');
+        });
+        const actionLabel = hasHtml ? 'Preview and Download below.' : 'Use Download below.';
+
         if (files.length === 1) {
-            return `Created ${files[0].filename}. Use Download below.`;
+            return `Created ${files[0].filename}. ${actionLabel}`;
         }
 
-        return `Created ${files.length} files. Use Download below.`;
+        return `Created ${files.length} files. ${actionLabel}`;
     }
 
     function isHtmlArtifact(artifact) {
@@ -881,18 +888,16 @@
                         if (artifactSummary && !hasSurveyDisplay) {
                             lastMessage.displayContent = artifactSummary;
                         }
+                        lastMessage.artifacts = state.lastDone.artifacts
+                            .filter((artifact) => artifact?.id && artifact?.downloadUrl);
+                        lastMessage.metadata = {
+                            ...(lastMessage.metadata && typeof lastMessage.metadata === 'object' ? lastMessage.metadata : {}),
+                            ...(lastMessage.artifacts.length > 0 ? { artifacts: lastMessage.artifacts } : {}),
+                            ...(artifactSummary && !hasSurveyDisplay ? { displayContent: artifactSummary } : {}),
+                        };
                         window.sessionManager.saveToStorage?.();
-                        if (lastMessage.id && window.uiHelpers?.updateMessageContent) {
-                            window.uiHelpers.updateMessageContent(lastMessage.id, lastMessage.displayContent || lastMessage.content || '', false);
-                        }
-
-                        const galleryMessage = buildArtifactGalleryMessage(state.lastDone.artifacts, lastMessage.id || '');
-                        if (galleryMessage) {
-                            const savedGalleryMessage = window.sessionManager.upsertMessage?.(sessionId, galleryMessage)
-                                || window.sessionManager.addMessage?.(sessionId, galleryMessage);
-                            if (savedGalleryMessage) {
-                                window.chatApp.renderOrReplaceMessage?.(savedGalleryMessage);
-                            }
+                        if (lastMessage.id && window.chatApp?.renderOrReplaceMessage) {
+                            window.chatApp.renderOrReplaceMessage(lastMessage);
                         }
                     }
                 }

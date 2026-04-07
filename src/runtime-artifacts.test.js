@@ -59,4 +59,21 @@ describe('runtime artifact helpers', () => {
             expect.objectContaining({ id: 'artifact-2', format: 'pdf' }),
         ]);
     });
+
+    test('backfills a default download URL for generated artifacts that omit one', () => {
+        const merged = mergeRuntimeArtifacts([{
+            id: 'artifact-3',
+            filename: 'dashboard.html',
+            mimeType: 'text/html',
+        }]);
+
+        expect(merged).toEqual([
+            expect.objectContaining({
+                id: 'artifact-3',
+                filename: 'dashboard.html',
+                format: 'html',
+                downloadUrl: '/api/artifacts/artifact-3/download',
+            }),
+        ]);
+    });
 });

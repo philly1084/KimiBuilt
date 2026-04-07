@@ -312,13 +312,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     : (artifactMemory.contextMessages || []),
                 recentMessages: artifactRecentMessages,
             });
-            const responseArtifacts = [
-                ...preparedImages.artifacts,
-                ...generationArtifacts.artifacts,
-            ].filter((artifact, index, array) => {
-                const artifactId = artifact?.id || '';
-                return artifactId && array.findIndex((entry) => entry?.id === artifactId) === index;
-            });
+            const responseArtifacts = mergeRuntimeArtifacts(
+                preparedImages.artifacts,
+                generationArtifacts.artifacts,
+            );
 
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
@@ -400,6 +397,8 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     responseId: generationArtifacts.responseId,
                     artifacts: responseArtifacts,
                     toolEvents: preparedImages.toolEvents,
+                    assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                    assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                 })}\n\n`);
                 res.end();
                 return;
@@ -567,8 +566,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         responseId: event.response.id,
                         artifacts,
                         toolEvents,
-                        assistant_metadata: buildFrontendAssistantMetadata(event.response?.metadata),
-                        assistantMetadata: buildFrontendAssistantMetadata(event.response?.metadata),
+                        assistant_metadata: buildFrontendAssistantMetadata({
+                            ...(event.response?.metadata || {}),
+                            artifacts,
+                        }),
+                        assistantMetadata: buildFrontendAssistantMetadata({
+                            ...(event.response?.metadata || {}),
+                            artifacts,
+                        }),
                     })}\n\n`);
                 }
             }

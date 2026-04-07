@@ -99,17 +99,36 @@ function shouldCollapseArtifactTranscript(artifact) {
         || COLLAPSIBLE_ARTIFACT_EXTENSIONS.some((ext) => filename.endsWith(ext));
 }
 
+function normalizeAssistantArtifacts(artifacts = []) {
+    return (Array.isArray(artifacts) ? artifacts : [])
+        .filter((artifact) => artifact && typeof artifact === 'object' && artifact.id && artifact.downloadUrl)
+        .map((artifact) => ({
+            ...artifact,
+            id: String(artifact.id).trim(),
+            filename: String(artifact.filename || '').trim(),
+            format: String(artifact.format || '').trim(),
+            downloadUrl: String(artifact.downloadUrl || '').trim(),
+        }));
+}
+
 function buildArtifactSummary(artifacts = []) {
-    const files = (Array.isArray(artifacts) ? artifacts : []).filter(shouldCollapseArtifactTranscript);
+    const files = normalizeAssistantArtifacts(artifacts).filter(shouldCollapseArtifactTranscript);
     if (files.length === 0) {
         return '';
     }
 
+    const hasHtml = files.some((artifact) => {
+        const format = String(artifact?.format || '').toLowerCase();
+        const filename = String(artifact?.filename || '').toLowerCase();
+        return format === 'html' || filename.endsWith('.html') || filename.endsWith('.htm');
+    });
+    const actionLabel = hasHtml ? 'Preview and Download below.' : 'Use Download below.';
+
     if (files.length === 1) {
-        return `Created ${files[0].filename}. Use Download below.`;
+        return `Created ${files[0].filename}. ${actionLabel}`;
     }
 
-    return `Created ${files.length} files. Use Download below.`;
+    return `Created ${files.length} files. ${actionLabel}`;
 }
 
 function buildFrontendAssistantMetadata(metadata = null) {
@@ -125,6 +144,11 @@ function buildFrontendAssistantMetadata(metadata = null) {
 
     if (typeof metadata.taskType === 'string' && metadata.taskType.trim()) {
         nextMetadata.taskType = metadata.taskType.trim();
+    }
+
+    const artifacts = normalizeAssistantArtifacts(metadata.artifacts || []);
+    if (artifacts.length > 0) {
+        nextMetadata.artifacts = artifacts;
     }
 
     const explicitDisplayContent = typeof metadata.displayContent === 'string' && metadata.displayContent.trim()
@@ -476,13 +500,18 @@ function buildWebChatAssistantEnvelope({
 } = {}) {
     const normalizedTimestamp = timestamp || new Date().toISOString();
     const surveyDisplayContent = buildSurveyDisplayContentFromToolEvents(toolEvents);
-    const artifactSummary = buildArtifactSummary(artifacts);
+    const normalizedArtifacts = normalizeAssistantArtifacts(artifacts);
+    const artifactSummary = buildArtifactSummary(normalizedArtifacts);
     const assistantMetadata = {};
 
     if (surveyDisplayContent) {
         assistantMetadata.displayContent = surveyDisplayContent;
     } else if (artifactSummary) {
         assistantMetadata.displayContent = artifactSummary;
+    }
+
+    if (normalizedArtifacts.length > 0) {
+        assistantMetadata.artifacts = normalizedArtifacts;
     }
 
     const auxiliaryMessages = [
@@ -492,15 +521,6 @@ function buildWebChatAssistantEnvelope({
             timestamp: normalizedTimestamp,
         }),
     ];
-
-    const artifactGalleryMessage = buildArtifactGalleryMessage({
-        parentMessageId,
-        artifacts,
-        timestamp: normalizedTimestamp,
-    });
-    if (artifactGalleryMessage) {
-        auxiliaryMessages.push(artifactGalleryMessage);
-    }
 
     return {
         assistantMetadata,
