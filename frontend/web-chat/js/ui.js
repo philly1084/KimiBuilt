@@ -1501,13 +1501,61 @@ class UIHelpers {
             && /<\/(?:html|body)>/i.test(normalized);
     }
 
+    extractEmbeddedStandaloneHtmlDocument(source = '') {
+        const raw = String(source || '');
+        if (!raw.trim() || /^```html\b/i.test(raw.trim())) {
+            return null;
+        }
+
+        const starts = [
+            /<!doctype html\b/i,
+            /<html\b/i,
+            /<head\b/i,
+            /<body\b/i,
+        ]
+            .map((pattern) => {
+                const match = pattern.exec(raw);
+                return Number.isInteger(match?.index) ? match.index : -1;
+            })
+            .filter((index) => index >= 0);
+
+        if (starts.length === 0) {
+            return null;
+        }
+
+        const startIndex = Math.min(...starts);
+        const prefix = raw.slice(0, startIndex);
+        const tail = raw.slice(startIndex).trim();
+        if (!this.looksLikeStandaloneHtmlDocument(tail)) {
+            return null;
+        }
+
+        const normalizedPrefix = prefix
+            .replace(/```html\s*$/i, '')
+            .replace(/\bchat\.html\s*$/i, 'chat.')
+            .trim();
+
+        return {
+            prefix: normalizedPrefix,
+            html: tail,
+        };
+    }
+
     normalizeInlineHtmlAssistantMarkdown(source = '') {
         const normalized = String(source || '').trim();
-        if (!this.looksLikeStandaloneHtmlDocument(normalized)) {
+        if (this.looksLikeStandaloneHtmlDocument(normalized)) {
+            return `\`\`\`html\n${normalized}\n\`\`\``;
+        }
+
+        const embedded = this.extractEmbeddedStandaloneHtmlDocument(normalized);
+        if (!embedded?.html) {
             return normalized;
         }
 
-        return `\`\`\`html\n${normalized}\n\`\`\``;
+        return [
+            embedded.prefix,
+            `\`\`\`html\n${embedded.html}\n\`\`\``,
+        ].filter(Boolean).join('\n\n');
     }
 
     restoreFlattenedMarkdownBlocks(source = '') {
