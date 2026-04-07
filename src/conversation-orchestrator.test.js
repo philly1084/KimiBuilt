@@ -3485,6 +3485,7 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('dominant design scheme');
         expect(instructions).toContain('preserve the strongest current icon, cover, focal block');
         expect(instructions).toContain('If a substantial notes page only uses headings');
+        expect(instructions).toContain('Use `heading_3` for compact section labels or mini-subheads');
     });
 
     test('notes tool policy is restricted to web research tools for page-edit requests', () => {

@@ -1501,6 +1501,34 @@ class UIHelpers {
             && /<\/(?:html|body)>/i.test(normalized);
     }
 
+    looksLikePreviewableHtmlFragment(source = '') {
+        const normalized = String(source || '').trim();
+        if (!normalized || /^```html\b/i.test(normalized) || this.looksLikeStandaloneHtmlDocument(normalized)) {
+            return false;
+        }
+
+        const totalTagCount = (normalized.match(/<[^>]+>/g) || []).length;
+        const layoutTagCount = (normalized.match(/<\/?(?:div|main|section|article|header|footer|nav|aside|table|form|button|canvas)\b/gi) || []).length;
+        const hasClosedLayout = /<\/(?:div|main|section|article|header|footer|nav|aside|table|form|button|canvas)>/i.test(normalized);
+        const hasStyle = /<style\b[^>]*>[\s\S]*<\/style>/i.test(normalized);
+        const hasScript = /<script\b[^>]*>[\s\S]*<\/script>/i.test(normalized);
+
+        return normalized.length >= 280
+            && totalTagCount >= 8
+            && hasClosedLayout
+            && (hasStyle || hasScript || layoutTagCount >= 6);
+    }
+
+    stripHtmlLeadIn(prefix = '') {
+        return String(prefix || '')
+            .replace(/```html\s*$/i, '')
+            .replace(/\b(?:here(?:'s| is)?|below is|this is)\s+the\s+(?:full\s+)?html\s+(?:source|code)\s*(?:for|of)?\s*$/i, '')
+            .replace(/\b(?:full\s+)?html\s+(?:source|code|document|preview)\s*:?\s*$/i, '')
+            .replace(/\b(?:inline\s+html|raw\s+html|html)\s*:?\s*$/i, '')
+            .replace(/\b[a-z0-9._-]+\.html\s*$/i, '')
+            .trim();
+    }
+
     extractEmbeddedStandaloneHtmlDocument(source = '') {
         const raw = String(source || '');
         if (!raw.trim() || /^```html\b/i.test(raw.trim())) {
@@ -1530,10 +1558,46 @@ class UIHelpers {
             return null;
         }
 
-        const normalizedPrefix = prefix
-            .replace(/```html\s*$/i, '')
-            .replace(/\bchat\.html\s*$/i, 'chat.')
-            .trim();
+        const normalizedPrefix = this.stripHtmlLeadIn(prefix);
+
+        return {
+            prefix: normalizedPrefix,
+            html: tail,
+        };
+    }
+
+    extractEmbeddedHtmlPreviewFragment(source = '') {
+        const raw = String(source || '');
+        if (!raw.trim() || /^```html\b/i.test(raw.trim())) {
+            return null;
+        }
+
+        const starts = [
+            /<!doctype html\b/i,
+            /<html\b/i,
+            /<head\b/i,
+            /<body\b/i,
+            /<style\b/i,
+            /<(?:main|section|div|article|header|nav|aside|table|form|canvas)\b/i,
+        ]
+            .map((pattern) => {
+                const match = pattern.exec(raw);
+                return Number.isInteger(match?.index) ? match.index : -1;
+            })
+            .filter((index) => index >= 0);
+
+        if (starts.length === 0) {
+            return null;
+        }
+
+        const startIndex = Math.min(...starts);
+        const prefix = raw.slice(0, startIndex);
+        const tail = raw.slice(startIndex).trim();
+        if (!this.looksLikeStandaloneHtmlDocument(tail) && !this.looksLikePreviewableHtmlFragment(tail)) {
+            return null;
+        }
+
+        const normalizedPrefix = this.stripHtmlLeadIn(prefix);
 
         return {
             prefix: normalizedPrefix,
@@ -1547,14 +1611,26 @@ class UIHelpers {
             return `\`\`\`html\n${normalized}\n\`\`\``;
         }
 
+        if (this.looksLikePreviewableHtmlFragment(normalized)) {
+            return `\`\`\`html\n${normalized}\n\`\`\``;
+        }
+
         const embedded = this.extractEmbeddedStandaloneHtmlDocument(normalized);
-        if (!embedded?.html) {
+        if (embedded?.html) {
+            return [
+                embedded.prefix,
+                `\`\`\`html\n${embedded.html}\n\`\`\``,
+            ].filter(Boolean).join('\n\n');
+        }
+
+        const fragment = this.extractEmbeddedHtmlPreviewFragment(normalized);
+        if (!fragment?.html) {
             return normalized;
         }
 
         return [
-            embedded.prefix,
-            `\`\`\`html\n${embedded.html}\n\`\`\``,
+            fragment.prefix,
+            `\`\`\`html\n${fragment.html}\n\`\`\``,
         ].filter(Boolean).join('\n\n');
     }
 

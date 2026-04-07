@@ -1035,6 +1035,7 @@ function buildNotesSynthesisInstructions() {
         'Use richer blocks intentionally: `callout` for takeaways or warnings, `bookmark` for sources, `database` for comparisons or trackers, `toggle` for optional detail, `mermaid` for process/structure, `image` or `ai_image` for visuals, `todo` for next steps, and `quote` for emphasized excerpts.',
         'Use native note blocks instead of raw markdown punctuation: headings for headings, list blocks for bullets, todo blocks for checkboxes, callouts for highlighted notes, and text formatting instead of literal `**bold**` markers.',
         'Do not leave markdown markers like `##`, `-`, `--`, `[ ]`, or `**...**` inside block content when the page block system already has a native representation.',
+        'Use `heading_3` for compact section labels or mini-subheads when a phrase deserves its own line but should not become a major section heading.',
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive detail, sources, and next steps.',
         'Treat design quality as part of correctness in notes mode: the page should feel intentionally composed, not like raw Markdown pasted into blocks.',
         'Use the frontend metadata surface when it improves the page: `update_page` can set title, icon, cover URL, properties, and default model.',

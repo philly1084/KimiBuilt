@@ -320,6 +320,8 @@ Approved page plan:
         expect(prompt).toContain('Use todo blocks for real checkboxes');
         expect(prompt).toContain('Do not leave markdown markers like `##`, `-`, `--`, `[ ]`, or `**bold**`');
         expect(prompt).toContain('Use heading blocks for headings, list blocks for bullets, todo blocks for checkboxes');
+        expect(prompt).toContain('Use `heading_3` for compact section labels, mini-subheads');
+        expect(prompt).toContain('heading_2 / heading_3: Major sections, compact section labels');
         expect(prompt).toContain('Recommended metadata: Type: Research');
         expect(prompt).toContain('Required palette: callout + hero image/ai_image + bookmark source cluster + toggle for deep detail');
         expect(prompt).toContain('Executive Brief [brief]');
@@ -625,6 +627,37 @@ Approved page plan:
         expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
             expect.objectContaining({ type: 'callout', color: 'green' }),
             expect.objectContaining({ type: 'heading_2', textColor: 'green' }),
+        ]));
+    });
+
+    test('promotes compact inline section labels into heading_3 blocks for stronger page rhythm', () => {
+        const agent = loadAgent();
+        const normalizedActions = agent._normalizeStructuredPageActions([
+            {
+                op: 'rebuild_page',
+                blocks: [
+                    { type: 'heading_1', content: 'Penguins' },
+                    { type: 'text', content: 'Penguins are flightless seabirds adapted for life in the ocean.' },
+                    { type: 'text', content: 'Why It Matters' },
+                    { type: 'text', content: 'Penguins help show how evolution shapes animals for a specific environment.' },
+                    { type: 'text', content: 'Habitat Snapshot: Southern Hemisphere coasts, islands, and cold ocean ecosystems.' },
+                ],
+            },
+        ], 'Make this penguin page feel more designed and notion-like.', {
+            title: 'Penguins',
+            blockCount: 5,
+            outline: [{ id: 'h1', content: 'Penguins' }],
+            blocks: [],
+        });
+
+        expect(normalizedActions).toHaveLength(1);
+        expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'heading_3', content: 'Why It Matters' }),
+            expect.objectContaining({ type: 'heading_3', content: 'Habitat Snapshot' }),
+            expect.objectContaining({
+                type: 'text',
+                content: 'Southern Hemisphere coasts, islands, and cold ocean ecosystems.',
+            }),
         ]));
     });
 

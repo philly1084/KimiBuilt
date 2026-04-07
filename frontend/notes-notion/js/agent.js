@@ -174,6 +174,11 @@ const Agent = (function() {
             guidance: 'Use near the top or at turning points so the page has an obvious focal point.',
         }),
         Object.freeze({
+            type: 'heading_2 / heading_3',
+            whenToUse: 'Major sections, compact section labels, mini themes, question-led subsections, and in-flow structure markers.',
+            guidance: 'Use `heading_2` for major sections and `heading_3` for smaller Notion-style labels. Give short labels their own block instead of leaving them bolded or buried at the start of a paragraph.',
+        }),
+        Object.freeze({
             type: 'database',
             whenToUse: 'Comparisons, trackers, status boards, matrices, owners, metrics, timelines, repeated fields.',
             guidance: 'Prefer this over long repeated bullet lists when content is tabular or operational.',
@@ -452,6 +457,7 @@ const Agent = (function() {
         'Think in page roles, not just paragraphs: title/icon, focal summary, themed sections, supporting evidence, interactive details, sources, and next steps.',
         'Aim for a true Notion feel: one obvious focal block near the top, clear section rhythm, muted supporting notes, and at least one visual or source cluster when the page is substantial.',
         'Treat style as part of the page system, not decoration after the fact: use page icon, colored section labels, muted secondary copy, and accent callouts to create hierarchy.',
+        'Use `heading_3` for compact section labels or mini-subsections. If a phrase should sit on its own line as a label, give it its own heading block instead of leaving it inline inside a paragraph.',
         'Avoid a long ladder of heading followed by paragraph repeated all the way down the page. Break the rhythm with callouts, visuals, bookmarks, databases, toggles, quotes, and dividers where they add clarity.',
         'Treat the first screenful like a designed landing zone for the note: title, summary, and visual support should appear early instead of making the page start as a wall of text.',
         'Research pages should usually feel like a small knowledge hub: lead with a summary callout, group findings by theme, and surface real sources as bookmarks instead of hiding them in prose.',
@@ -1979,6 +1985,101 @@ const Agent = (function() {
         return /\b(source note|research note|background|appendix|deep dive|extra context|verification note|references?|sources?|follow[- ]?up|next steps?|faq)\b/i.test(String(text || ''));
     }
 
+    function looksLikeCompactSectionLabel(text = '') {
+        const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!normalized || normalized.length > 72) {
+            return false;
+        }
+
+        if (/^[-*•\d]/.test(normalized) || /^https?:\/\//i.test(normalized)) {
+            return false;
+        }
+
+        const withoutColon = normalized.replace(/:\s*$/, '').trim();
+        const words = withoutColon.split(/\s+/).filter(Boolean);
+        if (words.length === 0 || words.length > 7) {
+            return false;
+        }
+
+        if (/[.!?]$/.test(withoutColon)) {
+            return false;
+        }
+
+        if (words.length === 1) {
+            return /^[A-Z0-9][A-Za-z0-9'’/&-]+$/.test(words[0]);
+        }
+
+        return /^[A-Z0-9][A-Za-z0-9'’/&-]*(?:\s+(?:[A-Z0-9][A-Za-z0-9'’/&-]*|and|or|of|the|for|to|in|on|with|vs\.?)){1,6}$/.test(withoutColon);
+    }
+
+    function shouldSplitInlineSectionLabel(label = '', body = '') {
+        const normalizedLabel = String(label || '').trim();
+        const normalizedBody = String(body || '').trim();
+        if (!looksLikeCompactSectionLabel(normalizedLabel) || normalizedBody.length < 24) {
+            return false;
+        }
+
+        if (/\b(big idea|key takeaway|takeaway|summary|important|warning|note|why it matters|bottom line)\b/i.test(normalizedLabel)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    function maybePromoteCompactSectionLabels(blocks = [], { preset = null } = {}) {
+        if (!Array.isArray(blocks) || blocks.length < 3) {
+            return blocks;
+        }
+
+        const nextBlocks = blocks.map((block) => cloneStructuredValue(block));
+        let changed = false;
+
+        for (let index = 0; index < nextBlocks.length; index++) {
+            const block = nextBlocks[index];
+            const type = canonicalizeBlockType(block?.type || '');
+            if (type !== 'text') {
+                continue;
+            }
+
+            const text = extractBlockDefinitionText(block).replace(/\s+/g, ' ').trim();
+            if (!text) {
+                continue;
+            }
+
+            const labelBodyMatch = text.match(/^([^:]{2,48}):\s+(.+)$/);
+            if (labelBodyMatch && shouldSplitInlineSectionLabel(labelBodyMatch[1], labelBodyMatch[2])) {
+                nextBlocks.splice(index, 1,
+                    {
+                        type: 'heading_3',
+                        content: labelBodyMatch[1].trim(),
+                        textColor: preset?.sectionTextColor || null,
+                    },
+                    {
+                        type: 'text',
+                        content: labelBodyMatch[2].trim(),
+                    });
+                changed = true;
+                index += 1;
+                continue;
+            }
+
+            const nextType = canonicalizeBlockType(nextBlocks[index + 1]?.type || '');
+            if (looksLikeCompactSectionLabel(text)
+                && ['text', 'quote', 'bulleted_list', 'numbered_list', 'todo', 'toggle', 'database', 'bookmark'].includes(nextType)
+                && !/^heading_/.test(canonicalizeBlockType(nextBlocks[index - 1]?.type || ''))) {
+                nextBlocks[index] = {
+                    ...nextBlocks[index],
+                    type: 'heading_3',
+                    content: text.replace(/:\s*$/, ''),
+                    textColor: nextBlocks[index].textColor || preset?.sectionTextColor || null,
+                };
+                changed = true;
+            }
+        }
+
+        return changed ? nextBlocks : blocks;
+    }
+
     function applyTemplateDesignDecorations(blocks = [], { preset = null } = {}) {
         if (!Array.isArray(blocks) || blocks.length === 0) {
             return blocks;
@@ -2260,6 +2361,7 @@ const Agent = (function() {
             let nextBlocks = action.blocks.map((block) => cloneStructuredValue(block));
             nextBlocks = ensureTemplateCalloutBlock(nextBlocks, { template, preset, action, context, question });
             nextBlocks = ensureHeroVisualBlock(nextBlocks, { template, preset, action, context, question });
+            nextBlocks = maybePromoteCompactSectionLabels(nextBlocks, { preset });
             nextBlocks = maybeConvertQuickFactsToDatabase(nextBlocks, { template });
             nextBlocks = maybeConvertWarningTextToCallout(nextBlocks, { template });
             nextBlocks = maybeConvertSupportNoteToToggle(nextBlocks, { template });
@@ -2507,6 +2609,7 @@ BLOCK DESIGN HEURISTICS:
 - Use database blocks for comparison tables, trackers, or structured matrices.
 - Use todo blocks for real checkboxes instead of leaving markdown task syntax like \`[ ]\` or \`[x]\` inside plain text.
 - Do not leave markdown markers like \`##\`, \`-\`, \`--\`, \`[ ]\`, or \`**bold**\` inside block content when a native heading, list, todo, callout, or formatting choice exists.
+- Use \`heading_3\` for compact section labels, mini-subheads, and small Notion-style separators when a phrase deserves its own line but should not become a major section heading.
 - If headings, text, and bullets are the only blocks in a substantial page draft, you almost certainly have not used the full page palette yet.
 - Before finalizing notes-actions, do a palette audit and check whether callout, database, bookmark, image/ai_image, mermaid, toggle, quote, todo, divider, code, or math would improve the page.
 - For a polished Notion-like page, treat visual hierarchy as required work, not optional polish: use a focal block near the top, style section labels with textColor where helpful, and give secondary notes a quieter tone.
@@ -2555,6 +2658,7 @@ GUIDELINES:
 - For text-like blocks, use plain strings for content
 - For special blocks (todo, code, mermaid, image, bookmark), use structured objects
 - Do not write markdown syntax into a block when the block type already expresses the structure. Use heading blocks for headings, list blocks for bullets, todo blocks for checkboxes, callout blocks for highlighted notes, and \`formatting\` instead of raw \`**bold**\` markers.
+- Use \`heading_3\` when a short label or mini-section should sit on its own line. Do not bury those labels inline at the start of paragraph text.
 - You may include \`formatting\` on text-like blocks using \`{bold, italic, underline, strikethrough, code}\`.
 - You may include \`children\` on blocks when nested content improves the page, especially under toggles.
 - Do not invent block IDs - only use IDs that exist in the page
