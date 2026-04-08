@@ -80,6 +80,10 @@ function normalizeRuntimeControlState(state = {}) {
         normalized.projectPlan = null;
     }
 
+    if ('foregroundContinuationGate' in normalized && !isPlainObject(normalized.foregroundContinuationGate)) {
+        normalized.foregroundContinuationGate = null;
+    }
+
     if ('autonomyApproved' in normalized) {
         normalized.autonomyApproved = Boolean(normalized.autonomyApproved);
     }

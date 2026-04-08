@@ -9,6 +9,7 @@ const Agent = (function() {
     const LEGACY_MESSAGES_STORAGE_KEY = 'notes_agent_messages';
     const PAGE_MESSAGES_STORAGE_PREFIX = 'notes_agent_messages:';
     const NOTES_COLOR_OPTIONS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
+    const NOTES_TEMPLATE_METADATA_BLOCKLIST = new Set(['type', 'mode', 'audience']);
     const NOTES_PAGE_TEMPLATES = Object.freeze([
         Object.freeze({
             id: 'brief',
@@ -1126,56 +1127,63 @@ const Agent = (function() {
     }
 
     function buildTemplateMetadataSuggestions(templateId = 'brief') {
-        switch (templateId) {
-            case 'explainer':
-                return [
-                    { key: 'Type', value: 'Explainer' },
-                    { key: 'Mode', value: 'Visual knowledge page' },
-                    { key: 'Audience', value: 'General reader' },
-                ];
-            case 'research':
-                return [
-                    { key: 'Type', value: 'Research' },
-                    { key: 'Mode', value: 'Knowledge hub' },
-                    { key: 'Evidence', value: 'Source-linked' },
-                ];
-            case 'project':
-                return [
-                    { key: 'Type', value: 'Project' },
-                    { key: 'Status', value: 'Active draft' },
-                    { key: 'Mode', value: 'Working plan' },
-                ];
-            case 'meeting':
-                return [
-                    { key: 'Type', value: 'Meeting' },
-                    { key: 'Mode', value: 'Action log' },
-                    { key: 'Status', value: 'Open' },
-                ];
-            case 'documentation':
-                return [
-                    { key: 'Type', value: 'Documentation' },
-                    { key: 'Audience', value: 'Reader guide' },
-                    { key: 'Status', value: 'Draft' },
-                ];
-            case 'dashboard':
-                return [
-                    { key: 'Type', value: 'Dashboard' },
-                    { key: 'Cadence', value: 'Snapshot' },
-                    { key: 'Mode', value: 'Operational' },
-                ];
-            case 'journal':
-                return [
-                    { key: 'Type', value: 'Journal' },
-                    { key: 'Mode', value: 'Reflection' },
-                    { key: 'Status', value: 'Personal note' },
-                ];
-            default:
-                return [
-                    { key: 'Type', value: 'Brief' },
-                    { key: 'Layout', value: 'Scan-first' },
-                    { key: 'Status', value: 'Draft' },
-                ];
-        }
+        const suggestions = (() => {
+            switch (templateId) {
+                case 'explainer':
+                    return [
+                        { key: 'Type', value: 'Explainer' },
+                        { key: 'Mode', value: 'Visual knowledge page' },
+                        { key: 'Audience', value: 'General reader' },
+                    ];
+                case 'research':
+                    return [
+                        { key: 'Type', value: 'Research' },
+                        { key: 'Mode', value: 'Knowledge hub' },
+                        { key: 'Evidence', value: 'Source-linked' },
+                    ];
+                case 'project':
+                    return [
+                        { key: 'Type', value: 'Project' },
+                        { key: 'Status', value: 'Active draft' },
+                        { key: 'Mode', value: 'Working plan' },
+                    ];
+                case 'meeting':
+                    return [
+                        { key: 'Type', value: 'Meeting' },
+                        { key: 'Mode', value: 'Action log' },
+                        { key: 'Status', value: 'Open' },
+                    ];
+                case 'documentation':
+                    return [
+                        { key: 'Type', value: 'Documentation' },
+                        { key: 'Audience', value: 'Reader guide' },
+                        { key: 'Status', value: 'Draft' },
+                    ];
+                case 'dashboard':
+                    return [
+                        { key: 'Type', value: 'Dashboard' },
+                        { key: 'Cadence', value: 'Snapshot' },
+                        { key: 'Mode', value: 'Operational' },
+                    ];
+                case 'journal':
+                    return [
+                        { key: 'Type', value: 'Journal' },
+                        { key: 'Mode', value: 'Reflection' },
+                        { key: 'Status', value: 'Personal note' },
+                    ];
+                default:
+                    return [
+                        { key: 'Type', value: 'Brief' },
+                        { key: 'Layout', value: 'Scan-first' },
+                        { key: 'Status', value: 'Draft' },
+                    ];
+            }
+        })();
+
+        return suggestions.filter((entry) => {
+            const key = String(entry?.key || '').trim().toLowerCase();
+            return key && !NOTES_TEMPLATE_METADATA_BLOCKLIST.has(key);
+        });
     }
 
     function buildTemplateMetadataSummary(templateId = 'brief') {
@@ -1206,13 +1214,13 @@ const Agent = (function() {
                 ];
             case 'meeting':
                 return [
-                    'Use properties for the meeting type or status when useful.',
+                    'Use properties for the meeting date, owner, or status when useful.',
                     'Separate discussion from decisions and follow-up blocks.',
                     'Use toggles for raw notes or appendix material.',
                 ];
             case 'documentation':
                 return [
-                    'Use properties to clarify document type or audience.',
+                    'Use properties to clarify scope, status, or prerequisites.',
                     'Keep setup or process sections procedural, not essay-like.',
                     'Use bookmarks for linked references and toggles for FAQ depth.',
                 ];
@@ -2126,14 +2134,16 @@ const Agent = (function() {
         };
         const wantsDesignedPage = /\b(design|designed|polished|beautiful|styled|visual|notion|notion-like|dashboard|brief|report)\b/i.test(String(question || ''));
         const existingProperties = Array.isArray(context?.properties) ? context.properties : [];
+        const suggestedProperties = buildTemplateMetadataSuggestions(template?.id || 'brief');
 
         if (!nextAction.icon && (!hasMeaningfulPageIcon(context) || wantsDesignedPage) && preset?.pageIcon) {
             nextAction.icon = preset.pageIcon;
         }
 
         if ((!Array.isArray(nextAction.properties) || nextAction.properties.length === 0)
+            && suggestedProperties.length > 0
             && (existingProperties.length === 0 || wantsDesignedPage)) {
-            nextAction.properties = buildTemplateMetadataSuggestions(template?.id || 'brief');
+            nextAction.properties = suggestedProperties;
         }
 
         if (!nextAction.cover && !context?.hasCover) {

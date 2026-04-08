@@ -322,7 +322,10 @@ Approved page plan:
         expect(prompt).toContain('Use heading blocks for headings, list blocks for bullets, todo blocks for checkboxes');
         expect(prompt).toContain('Use `heading_3` for compact section labels, mini-subheads');
         expect(prompt).toContain('heading_2 / heading_3: Major sections, compact section labels');
-        expect(prompt).toContain('Recommended metadata: Type: Research');
+        expect(prompt).toContain('Recommended metadata: Evidence: Source-linked');
+        expect(prompt).not.toContain('Recommended metadata: Type: Research');
+        expect(prompt).not.toContain('Audience: General reader');
+        expect(prompt).not.toContain('Mode: Knowledge hub');
         expect(prompt).toContain('Required palette: callout + hero image/ai_image + bookmark source cluster + toggle for deep detail');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
@@ -481,8 +484,6 @@ Approved page plan:
         expect(normalizedActions[0].icon).toBe('🔎');
         expect(normalizedActions[0].title).toBe('Penguins: Built for Water, Pressed by Change');
         expect(normalizedActions[0].properties).toEqual(expect.arrayContaining([
-            expect.objectContaining({ key: 'Type', value: 'Research' }),
-            expect.objectContaining({ key: 'Mode', value: 'Knowledge hub' }),
             expect.objectContaining({ key: 'Evidence', value: 'Source-linked' }),
         ]));
         expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
@@ -577,10 +578,7 @@ Approved page plan:
 
         expect(normalizedActions).toHaveLength(1);
         expect(normalizedActions[0].icon).toBe('💡');
-        expect(normalizedActions[0].properties).toEqual(expect.arrayContaining([
-            expect.objectContaining({ key: 'Type', value: 'Explainer' }),
-            expect.objectContaining({ key: 'Mode', value: 'Visual knowledge page' }),
-        ]));
+        expect(normalizedActions[0].properties).toBeUndefined();
         expect(normalizedActions[0].blocks).toEqual(expect.arrayContaining([
             expect.objectContaining({ type: 'ai_image' }),
             expect.objectContaining({

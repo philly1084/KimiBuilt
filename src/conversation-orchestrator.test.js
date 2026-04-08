@@ -2217,6 +2217,148 @@ describe('ConversationOrchestrator', () => {
         }
     });
 
+    test('adds a yes-no user checkpoint when the autonomous time budget is exhausted on web chat', async () => {
+        const originalMaxMs = config.runtime.remoteBuildMaxAutonomousMs;
+        const nowSpy = jest.spyOn(Date, 'now');
+        let currentNow = 1760001000000;
+        nowSpy.mockImplementation(() => currentNow);
+        config.runtime.remoteBuildMaxAutonomousMs = 1000;
+
+        try {
+            settingsController.getEffectiveSshConfig.mockReturnValue({
+                enabled: true,
+                host: '10.0.0.5',
+                port: 22,
+                username: 'ubuntu',
+                password: 'secret',
+                privateKeyPath: '',
+            });
+
+            const llmClient = {
+                createResponse: jest.fn(),
+                complete: jest.fn().mockImplementation(async () => {
+                    currentNow += 100;
+                    return JSON.stringify({
+                        steps: [
+                            {
+                                tool: 'remote-command',
+                                reason: 'Inspect the ingress first',
+                                params: {
+                                    command: 'kubectl get ingress -A',
+                                },
+                            },
+                            {
+                                tool: 'remote-command',
+                                reason: 'Reload nginx after the ingress check',
+                                params: {
+                                    command: 'sudo nginx -s reload',
+                                },
+                            },
+                        ],
+                    });
+                }),
+            };
+
+            const toolManager = {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'docker-exec', 'web-search', 'web-fetch', 'file-read', 'file-search', 'tool-doc-read', 'code-sandbox', 'user-checkpoint']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+                executeTool: jest.fn().mockImplementation(async () => {
+                    currentNow += 1200;
+                    return {
+                        success: true,
+                        toolId: 'remote-command',
+                        duration: 1200,
+                        data: {
+                            stdout: 'ok',
+                            stderr: '',
+                            host: '10.0.0.5:22',
+                        },
+                    };
+                }),
+            };
+            const sessionStore = {
+                get: jest.fn().mockResolvedValue({ id: 'session-budget-checkpoint', metadata: {} }),
+                getOrCreate: jest.fn().mockResolvedValue({ id: 'session-budget-checkpoint', metadata: {} }),
+                getRecentMessages: jest.fn().mockResolvedValue([]),
+                recordResponse: jest.fn().mockResolvedValue(undefined),
+                appendMessages: jest.fn().mockResolvedValue(undefined),
+                update: jest.fn().mockResolvedValue(undefined),
+            };
+            const memoryService = {
+                process: jest.fn().mockResolvedValue([]),
+                rememberResponse: jest.fn(),
+            };
+
+            const orchestrator = new ConversationOrchestrator({
+                llmClient,
+                toolManager,
+                sessionStore,
+                memoryService,
+            });
+
+            const result = await orchestrator.executeConversation({
+                input: 'Use remote-build to keep going through the routine server checks.',
+                sessionId: 'session-budget-checkpoint',
+                executionProfile: 'remote-build',
+                stream: false,
+                metadata: {
+                    remoteBuildAutonomyApproved: true,
+                    clientSurface: 'web-chat',
+                },
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 1,
+                        pending: null,
+                    },
+                },
+            });
+
+            const checkpointEvent = result.response.metadata.toolEvents.find((event) => (
+                (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'user-checkpoint'
+            ));
+
+            expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
+            expect(llmClient.createResponse).not.toHaveBeenCalled();
+            expect(result.output).toContain('Paused');
+            expect(checkpointEvent).toEqual(expect.objectContaining({
+                result: expect.objectContaining({
+                    success: true,
+                    toolId: 'user-checkpoint',
+                    data: expect.objectContaining({
+                        checkpoint: expect.objectContaining({
+                            title: 'Continue now?',
+                            question: 'Do you want me to continue now?',
+                            options: expect.arrayContaining([
+                                expect.objectContaining({
+                                    id: 'continue-now',
+                                    label: 'Yes, continue',
+                                }),
+                                expect.objectContaining({
+                                    id: 'stop-here',
+                                    label: 'No, stop here',
+                                }),
+                            ]),
+                        }),
+                    }),
+                }),
+            }));
+            expect(result.response.metadata.executionTrace.find((entry) => entry.name === 'Autonomous execution time budget reached')).toMatchObject({
+                details: expect.objectContaining({
+                    phase: 'during-round',
+                }),
+            });
+        } finally {
+            config.runtime.remoteBuildMaxAutonomousMs = originalMaxMs;
+            nowSpy.mockRestore();
+        }
+    });
+
     test('extends the autonomous round budget when remote-build work is still productive', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
@@ -4130,6 +4272,94 @@ describe('ConversationOrchestrator', () => {
                 action: 'remote-info',
                 repositoryPath: 'C:/Users/phill/KimiBuilt',
             }),
+        }));
+    });
+
+    test('holds a paused foreground workflow until the user explicitly resumes it', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-workload', 'remote-command', 'opencode-run', 'git-safe', 'k3s-deploy']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const session = {
+            metadata: {
+                controlState: {
+                    foregroundContinuationGate: {
+                        paused: true,
+                        source: 'autonomy-time-budget',
+                    },
+                    workflow: {
+                        kind: 'end-to-end-builder',
+                        version: 1,
+                        objective: 'Fix the landing page in this repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
+                        lane: 'repo-then-deploy',
+                        stage: 'saving',
+                        status: 'active',
+                        workspacePath: 'C:/Users/phill/KimiBuilt',
+                        repositoryPath: 'C:/Users/phill/KimiBuilt',
+                        opencodeTarget: 'local',
+                        progress: {
+                            implemented: true,
+                        },
+                    },
+                },
+            },
+        };
+
+        const pausedToolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Can you summarize where we paused?',
+            session,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+        const resumedToolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Continue.',
+            session,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+
+        expect(pausedToolPolicy.workflow).toBeNull();
+        expect(resumedToolPolicy.workflow).toEqual(expect.objectContaining({
+            lane: 'repo-then-deploy',
+            status: 'active',
         }));
     });
 

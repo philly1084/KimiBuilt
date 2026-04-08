@@ -32,7 +32,9 @@ const {
 } = require('./session-scope');
 const {
     USER_CHECKPOINT_TOOL_ID,
+    buildUserCheckpointMessage,
     normalizeCheckpointRequest,
+    parseUserCheckpointResponseMessage,
 } = require('./user-checkpoints');
 const { parseLenientJson } = require('./utils/lenient-json');
 const { stripNullCharacters } = require('./utils/text');
@@ -61,6 +63,7 @@ const MAX_TOOL_RESULT_CHARS = config.memory.toolResultCharLimit;
 const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const MAX_STEP_SIGNATURE_REPEATS = 3;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
+const AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX = 'checkpoint-autonomy-continue';
 const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /no ssh host configured/i,
     /no ssh username configured/i,
@@ -77,6 +80,174 @@ const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /operation timed out/i,
     /connection closed by remote host/i,
 ];
+
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExplicitForegroundResumeIntent(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /^(continue|keep going|go ahead|next step|next steps|finish|resume|proceed)\b/,
+        /^(do it|do that|ship it|deploy it|verify it|push it)\b/,
+        /\b(obvious next step|obvious next steps|from there|from this point)\b/,
+        /\bcontinue now\b/,
+        /\bkeep working\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function normalizeForegroundContinuationGate(value = null) {
+    if (!isPlainObject(value) || value.paused !== true) {
+        return null;
+    }
+
+    return {
+        paused: true,
+        source: String(value.source || '').trim() || null,
+        updatedAt: String(value.updatedAt || value.updated_at || '').trim() || null,
+    };
+}
+
+function parseAutonomyContinuationDecision(text = '') {
+    const response = parseUserCheckpointResponseMessage(text);
+    if (!response?.checkpointId || !response.summary) {
+        return null;
+    }
+
+    if (!response.checkpointId.startsWith(AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX)) {
+        return null;
+    }
+
+    const summary = String(response.summary || '').trim().toLowerCase();
+    if (!summary) {
+        return null;
+    }
+
+    if (
+        /\[(?:continue|continue-now|yes)\]/.test(summary)
+        || /\b(?:yes|continue|resume|keep going|go ahead|continue now)\b/.test(summary)
+    ) {
+        return 'continue';
+    }
+
+    if (
+        /\[(?:stop|stop-here|no)\]/.test(summary)
+        || /\b(?:no|stop here|pause here|not now|later|stop)\b/.test(summary)
+    ) {
+        return 'stop';
+    }
+
+    return null;
+}
+
+function findLatestExecutionTraceEntry(executionTrace = [], name = '') {
+    const entries = Array.isArray(executionTrace) ? executionTrace : [];
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+        if (entries[index]?.name === name) {
+            return entries[index];
+        }
+    }
+
+    return null;
+}
+
+function getActiveProjectMilestoneTitle(projectPlan = null) {
+    if (!projectPlan || !Array.isArray(projectPlan.milestones)) {
+        return '';
+    }
+
+    const activeMilestone = projectPlan.milestones.find((entry) => entry.id === projectPlan.activeMilestoneId)
+        || projectPlan.milestones.find((entry) => !['completed', 'skipped'].includes(entry.status))
+        || null;
+
+    return normalizeInlineText(activeMilestone?.title || '');
+}
+
+function getNextWorkflowTaskTitle(workflow = null) {
+    const taskList = Array.isArray(workflow?.taskList) ? workflow.taskList : [];
+    const nextTask = taskList.find((entry) => !['completed', 'skipped'].includes(String(entry?.status || '').trim().toLowerCase()));
+    return normalizeInlineText(nextTask?.title || '');
+}
+
+function buildAutonomyBudgetPauseUpdate({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
+    const completedEvents = (Array.isArray(toolEvents) ? toolEvents : [])
+        .filter((event) => (event?.result?.success !== false) && ((event?.toolCall?.function?.name || event?.result?.toolId || '') !== USER_CHECKPOINT_TOOL_ID));
+    const latestCompleted = completedEvents[completedEvents.length - 1] || null;
+    const latestReason = normalizeInlineText(latestCompleted?.reason || '');
+    const nextFocus = getActiveProjectMilestoneTitle(projectPlan) || getNextWorkflowTaskTitle(workflow);
+
+    if (latestReason && nextFocus) {
+        return truncateText(`Completed: ${latestReason}. Paused before: ${nextFocus}.`, 220);
+    }
+
+    if (latestReason) {
+        return truncateText(`Completed: ${latestReason}. Paused here before the next step.`, 220);
+    }
+
+    if (completedEvents.length > 1 && nextFocus) {
+        return truncateText(`Completed ${completedEvents.length} steps. Paused before: ${nextFocus}.`, 220);
+    }
+
+    if (completedEvents.length > 1) {
+        return truncateText(`Completed ${completedEvents.length} steps. Paused here before the next step.`, 220);
+    }
+
+    if (nextFocus) {
+        return truncateText(`Paused before: ${nextFocus}.`, 220);
+    }
+
+    return 'I made progress and paused here before the next step.';
+}
+
+function buildAutonomyContinuationCheckpoint({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
+    const update = buildAutonomyBudgetPauseUpdate({
+        toolEvents,
+        workflow,
+        projectPlan,
+    });
+    const checkpoint = normalizeCheckpointRequest({
+        id: `${AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX}-${Date.now().toString(36)}`,
+        title: 'Continue now?',
+        preamble: update,
+        whyThisMatters: 'I can continue from the current state if you want me to keep going.',
+        question: 'Do you want me to continue now?',
+        options: [{
+            id: 'continue-now',
+            label: 'Yes, continue',
+            description: 'Keep working from the current state now.',
+        }, {
+            id: 'stop-here',
+            label: 'No, stop here',
+            description: 'Pause here and leave the current progress as-is.',
+        }],
+    });
+
+    return {
+        checkpoint,
+        output: `${update} Use the quick prompt below if you want me to keep going now.`,
+        toolEvent: {
+            toolCall: {
+                function: {
+                    name: USER_CHECKPOINT_TOOL_ID,
+                    arguments: JSON.stringify(checkpoint),
+                },
+            },
+            reason: 'Pause for a quick continue-or-stop decision after the current autonomous run.',
+            result: {
+                success: true,
+                toolId: USER_CHECKPOINT_TOOL_ID,
+                data: {
+                    checkpoint,
+                    message: buildUserCheckpointMessage(checkpoint),
+                },
+            },
+        },
+    };
+}
 
 function isAgentNotesAutoWriteEnabled() {
     return settingsController.settings?.agentNotes?.enabled !== false;
@@ -3387,6 +3558,23 @@ class ConversationOrchestrator extends EventEmitter {
                 'The current user turn may be abbreviated or cut off. Use the recent transcript to resolve the intended task and continue without asking the user to restate prior context unless the transcript is genuinely insufficient.',
             ].filter(Boolean).join('\n\n')
             : instructions;
+        const storedForegroundContinuationGate = normalizeForegroundContinuationGate(
+            getSessionControlState(session).foregroundContinuationGate,
+        );
+        const autonomyContinuationDecision = parseAutonomyContinuationDecision(objective);
+        const shouldClearForegroundContinuationGate = autonomyContinuationDecision === 'continue'
+            || (storedForegroundContinuationGate?.paused && hasExplicitForegroundResumeIntent(objective));
+        const foregroundContinuationGatePatch = autonomyContinuationDecision === 'stop'
+            ? {
+                foregroundContinuationGate: {
+                    paused: true,
+                    source: 'autonomy-time-budget',
+                    updatedAt: new Date().toISOString(),
+                },
+            }
+            : (shouldClearForegroundContinuationGate
+                ? { foregroundContinuationGate: null }
+                : {});
 
         const toolPolicy = this.buildToolPolicy({
             objective,
@@ -3575,12 +3763,13 @@ class ConversationOrchestrator extends EventEmitter {
                     autonomyApproved,
                     executionTrace,
                     stream,
-                    controlStatePatch: {
-                        workflow: endToEndWorkflow,
-                        ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
-                    },
-                });
-            }
+                controlStatePatch: {
+                    workflow: endToEndWorkflow,
+                    ...foregroundContinuationGatePatch,
+                    ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
+                },
+            });
+        }
 
             const deterministicWorkflow = buildDeterministicRemoteWorkflow({
                 objective,
@@ -3675,7 +3864,10 @@ class ConversationOrchestrator extends EventEmitter {
                     stream,
                     controlStatePatch: mergeControlState(
                         buildDeterministicWorkflowControlState(deterministicWorkflow, toolEvents),
-                        activeProjectPlan ? { projectPlan: activeProjectPlan } : {},
+                        mergeControlState(
+                            foregroundContinuationGatePatch,
+                            activeProjectPlan ? { projectPlan: activeProjectPlan } : {},
+                        ),
                     ),
                 });
             }
@@ -4200,7 +4392,10 @@ class ConversationOrchestrator extends EventEmitter {
                         autonomyApproved,
                         executionTrace,
                         stream,
-                        controlStatePatch: activeProjectPlan ? { projectPlan: activeProjectPlan } : {},
+                        controlStatePatch: {
+                            ...foregroundContinuationGatePatch,
+                            ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
+                        },
                     });
                 }
 
@@ -4304,6 +4499,129 @@ class ConversationOrchestrator extends EventEmitter {
                     stream,
                     controlStatePatch: {
                         workflow: endToEndWorkflow,
+                        ...foregroundContinuationGatePatch,
+                        ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
+                    },
+                });
+            }
+
+            if (autonomyContinuationDecision === 'stop') {
+                runtimeMode = 'checkpoint-stop';
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'checkpoint',
+                    name: 'Autonomy continuation declined',
+                    details: {
+                        source: 'user-checkpoint',
+                    },
+                }));
+                finalResponse = this.withResponseMetadata(buildSyntheticResponse({
+                    output: 'Paused here. Say continue when you want me to keep going.',
+                    responseId: `resp_pause_${Date.now()}`,
+                    model: model || null,
+                    metadata: {
+                        autonomyContinuationDeclined: true,
+                        toolEvents,
+                    },
+                }), {
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolEvents,
+                    toolPolicy,
+                    autonomyApproved,
+                    executionTrace,
+                });
+                output = extractResponseText(finalResponse);
+
+                return this.completeConversationRun({
+                    sessionId,
+                    ownerId,
+                    userText: rawObjective,
+                    objective,
+                    taskType,
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolPolicy,
+                    toolEvents,
+                    output,
+                    finalResponse,
+                    startedAt,
+                    metadata,
+                    clientSurface,
+                    memoryKeywords,
+                    memoryTrace,
+                    autonomyApproved,
+                    executionTrace,
+                    stream,
+                    controlStatePatch: foregroundContinuationGatePatch,
+                });
+            }
+
+            const canOfferAutonomyContinuationCheckpoint = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
+                && findLatestExecutionTraceEntry(executionTrace, 'Autonomous execution time budget reached')
+                && toolPolicy.allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
+                && toolPolicy.userCheckpointPolicy?.enabled === true
+                && Number(toolPolicy.userCheckpointPolicy?.remaining || 0) > 0
+                && !toolPolicy.userCheckpointPolicy?.pending;
+
+            if (canOfferAutonomyContinuationCheckpoint) {
+                runtimeMode = 'budget-checkpoint';
+                const continuationCheckpoint = buildAutonomyContinuationCheckpoint({
+                    toolEvents,
+                    workflow: endToEndWorkflow,
+                    projectPlan: activeProjectPlan,
+                });
+                const responseToolEvents = [
+                    ...toolEvents,
+                    continuationCheckpoint.toolEvent,
+                ];
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'checkpoint',
+                    name: 'Autonomy continuation checkpoint created',
+                    details: {
+                        checkpointId: continuationCheckpoint.checkpoint.id,
+                    },
+                }));
+                finalResponse = this.withResponseMetadata(buildSyntheticResponse({
+                    output: continuationCheckpoint.output,
+                    responseId: `resp_budget_checkpoint_${Date.now()}`,
+                    model: model || null,
+                    metadata: {
+                        autonomyContinuationCheckpoint: true,
+                        toolEvents: responseToolEvents,
+                    },
+                }), {
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolEvents: responseToolEvents,
+                    toolPolicy,
+                    autonomyApproved,
+                    executionTrace,
+                });
+                output = extractResponseText(finalResponse);
+
+                return this.completeConversationRun({
+                    sessionId,
+                    ownerId,
+                    userText: rawObjective,
+                    objective,
+                    taskType,
+                    executionProfile: resolvedProfile,
+                    runtimeMode,
+                    toolPolicy,
+                    toolEvents: responseToolEvents,
+                    output,
+                    finalResponse,
+                    startedAt,
+                    metadata,
+                    clientSurface,
+                    memoryKeywords,
+                    memoryTrace,
+                    autonomyApproved,
+                    executionTrace,
+                    stream,
+                    controlStatePatch: {
+                        ...(endToEndWorkflow ? { workflow: endToEndWorkflow } : {}),
+                        ...foregroundContinuationGatePatch,
                         ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
                     },
                 });
@@ -4489,6 +4807,7 @@ class ConversationOrchestrator extends EventEmitter {
                 stream,
                 controlStatePatch: {
                     ...(endToEndWorkflow ? { workflow: endToEndWorkflow } : {}),
+                    ...foregroundContinuationGatePatch,
                     ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
                 },
             });
@@ -4606,10 +4925,18 @@ class ConversationOrchestrator extends EventEmitter {
             session,
             workflow: workflowSeed,
         });
-        const workflowNeedsRepoLane = workflowSeed?.lane === 'repo-only' || workflowSeed?.lane === 'repo-then-deploy';
-        const workflowNeedsDeployLane = workflowSeed?.lane === 'deploy-only' || workflowSeed?.lane === 'repo-then-deploy';
-        const hasActiveForegroundWorkflow = workflowSeed?.status === 'active';
-        const hasActiveForegroundProjectPlan = projectPlanSeed?.status === 'active';
+        const continuationGate = normalizeForegroundContinuationGate(getSessionControlState(session).foregroundContinuationGate);
+        const autonomyContinuationDecision = parseAutonomyContinuationDecision(objective);
+        const shouldClearContinuationPause = autonomyContinuationDecision === 'continue'
+            || (continuationGate?.paused && hasExplicitForegroundResumeIntent(objective));
+        const shouldHoldForegroundWork = autonomyContinuationDecision === 'stop'
+            || (continuationGate?.paused && !shouldClearContinuationPause);
+        const effectiveWorkflowSeed = shouldHoldForegroundWork ? null : workflowSeed;
+        const effectiveProjectPlanSeed = shouldHoldForegroundWork ? null : projectPlanSeed;
+        const workflowNeedsRepoLane = effectiveWorkflowSeed?.lane === 'repo-only' || effectiveWorkflowSeed?.lane === 'repo-then-deploy';
+        const workflowNeedsDeployLane = effectiveWorkflowSeed?.lane === 'deploy-only' || effectiveWorkflowSeed?.lane === 'repo-then-deploy';
+        const hasActiveForegroundWorkflow = effectiveWorkflowSeed?.status === 'active';
+        const hasActiveForegroundProjectPlan = effectiveProjectPlanSeed?.status === 'active';
         const hasExplicitDeferredWorkloadIntent = hasWorkloadIntent(objective);
         const allowDeferredWorkloadShortcut = (
             !hasActiveForegroundWorkflow
@@ -4825,8 +5152,8 @@ class ConversationOrchestrator extends EventEmitter {
                 ready: opencodeTargetReady,
             },
             preferredRemoteToolId: remoteToolId,
-            workflow: workflowSeed,
-            projectPlan: projectPlanSeed,
+            workflow: effectiveWorkflowSeed,
+            projectPlan: effectiveProjectPlanSeed,
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
