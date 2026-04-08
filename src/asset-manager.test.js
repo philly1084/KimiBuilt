@@ -118,6 +118,59 @@ describe('AssetManager', () => {
         expect(removedResults.count).toBe(0);
     });
 
+    test('restricts artifact search results to the active session when isolation is enabled', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-assets-isolated-'));
+        const manager = new AssetManager({
+            projectRoot: tempDir,
+            stateDir: path.join(tempDir, '.state'),
+            indexFilePath: path.join(tempDir, 'asset-index.json'),
+            workspaceRoots: [tempDir],
+            artifactStore: {
+                listAllWithSessions: jest.fn(async () => []),
+            },
+            postgres: {
+                enabled: true,
+            },
+        });
+
+        await manager.upsertArtifact({
+            id: 'artifact-1',
+            sessionId: 'session-1',
+            filename: 'same-name.pdf',
+            extension: 'pdf',
+            mimeType: 'application/pdf',
+            extractedText: 'Session one pricing notes.',
+        }, {
+            ownerId: 'phill',
+        });
+        await manager.upsertArtifact({
+            id: 'artifact-2',
+            sessionId: 'session-2',
+            filename: 'same-name.pdf',
+            extension: 'pdf',
+            mimeType: 'application/pdf',
+            extractedText: 'Session two pricing notes.',
+        }, {
+            ownerId: 'phill',
+        });
+
+        const results = await manager.searchAssets({
+            query: 'pricing notes',
+            kind: 'document',
+        }, {
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            sessionIsolation: true,
+        });
+
+        expect(results.count).toBe(1);
+        expect(results.restrictToSession).toBe(true);
+        expect(results.results[0]).toEqual(expect.objectContaining({
+            artifactId: 'artifact-1',
+            sessionId: 'session-1',
+        }));
+    });
+
     test('recognizes prompts that should trigger the indexed asset catalog', () => {
         expect(hasAssetReferenceIntent('Use the PDF we worked on earlier and the same image from before.')).toBe(true);
         expect(hasAssetReferenceIntent('Build a brand new landing page from scratch.')).toBe(false);

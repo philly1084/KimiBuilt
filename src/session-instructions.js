@@ -5,6 +5,7 @@ const { buildAgentNotesInstructions } = require('./agent-notes');
 const { buildProjectMemoryInstructions } = require('./project-memory');
 const settingsController = require('./routes/admin/settings.controller');
 const { getSessionControlState } = require('./runtime-control-state');
+const { isSessionIsolationEnabled } = require('./session-scope');
 
 function formatRemoteTarget(target = {}) {
     if (!target?.host) {
@@ -71,6 +72,7 @@ function buildRemoteWorkingStateInstructions(session = null) {
 
 function buildSessionInstructions(session, baseInstructions = '') {
     const parts = [];
+    const sessionIsolation = isSessionIsolationEnabled(session?.metadata || {}, session);
 
     if (baseInstructions) {
         parts.push(baseInstructions.trim());
@@ -81,14 +83,23 @@ function buildSessionInstructions(session, baseInstructions = '') {
         parts.push(soulInstructions);
     }
 
-    const agentNotesInstructions = buildAgentNotesInstructions(settingsController.settings?.agentNotes || {});
-    if (agentNotesInstructions) {
-        parts.push(agentNotesInstructions);
-    }
+    if (sessionIsolation) {
+        parts.push([
+            '[Session isolation]',
+            'Treat this chat as isolated from other chats by default.',
+            'Use only this session transcript, this session memory, and this session artifacts unless the user explicitly asks to reuse material from another session.',
+            'Do not rely on durable carryover notes or cross-session asset lookup in this session.',
+        ].join('\n'));
+    } else {
+        const agentNotesInstructions = buildAgentNotesInstructions(settingsController.settings?.agentNotes || {});
+        if (agentNotesInstructions) {
+            parts.push(agentNotesInstructions);
+        }
 
-    const assetManagerInstructions = buildAssetManagerInstructions();
-    if (assetManagerInstructions) {
-        parts.push(assetManagerInstructions);
+        const assetManagerInstructions = buildAssetManagerInstructions();
+        if (assetManagerInstructions) {
+            parts.push(assetManagerInstructions);
+        }
     }
 
     const agent = session?.metadata?.agent;

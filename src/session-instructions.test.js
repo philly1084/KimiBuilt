@@ -92,4 +92,18 @@ describe('buildSessionInstructions', () => {
 
     expect(result).toBe('Base instructions');
   });
+
+  test('replaces cross-session carryover blocks with an isolation notice for isolated sessions', () => {
+    const result = buildSessionInstructions({
+      metadata: {
+        sessionIsolation: true,
+      },
+    }, 'Base instructions');
+
+    expect(result).toContain('Base instructions');
+    expect(result).toContain('[Session isolation]');
+    expect(result).toContain('Treat this chat as isolated from other chats by default.');
+    expect(result).not.toContain('[Carryover notes memory]');
+    expect(result).not.toContain('[Indexed asset manager]');
+  });
 });

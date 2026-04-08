@@ -712,7 +712,7 @@ class ToolManager {
         category: 'system',
         description: 'Write a full content string to a local runtime file. Requires both path and content in the same call.',
         backend: {
-          handler: async (params) => {
+          handler: async (params, context = {}) => {
             const path = require('path');
             const fs = require('fs').promises;
             const normalized = normalizeFileWriteParams(params);
@@ -734,7 +734,10 @@ class ToolManager {
             await fs.writeFile(targetPath, normalized.content, normalized.encoding || 'utf8');
             let indexedAsset = null;
             try {
-              indexedAsset = await assetManager.upsertWorkspacePath(targetPath);
+              indexedAsset = await assetManager.upsertWorkspacePath(targetPath, {
+                sessionId: context.sessionId || null,
+                ownerId: context.ownerId || context.userId || null,
+              });
             } catch (error) {
               console.warn('[ToolManager] Failed to index written asset:', error.message);
             }
@@ -775,6 +778,7 @@ class ToolManager {
           handler: async (params = {}, context = {}) => assetManager.searchAssets(params, {
             ownerId: context.ownerId || context.userId || null,
             sessionId: context.sessionId || null,
+            sessionIsolation: context.sessionIsolation === true,
           }),
           sideEffects: ['read'],
           timeout: 30000

@@ -39,6 +39,7 @@ const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require(
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
+    isSessionIsolationEnabled,
     resolveSessionScope,
 } = require('../session-scope');
 const {
@@ -605,10 +606,12 @@ router.post('/chat/completions', async (req, res, next) => {
             taskType: requestedTaskType,
             clientSurface,
         }, session);
+        const sessionIsolation = isSessionIsolationEnabled(requestedSessionMetadata, session);
         effectiveRequestMetadata = {
             ...effectiveRequestMetadata,
             clientSurface,
             memoryScope,
+            ...(sessionIsolation ? { sessionIsolation: true } : {}),
         };
         const lastUserMessage = messages.filter((message) => message.role === 'user').pop();
         const lastUserText = normalizeMessageText(lastUserMessage?.content || '');
@@ -752,6 +755,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     ownerId,
                     clientSurface,
                     memoryScope,
+                    sessionIsolation,
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
@@ -904,6 +908,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     memoryScope,
+                    sessionIsolation,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1063,6 +1068,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 memoryService,
                 ownerId,
                 memoryScope,
+                sessionIsolation,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -1122,6 +1128,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     memoryScope,
+                    sessionIsolation,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1314,10 +1321,12 @@ router.post('/responses', async (req, res, next) => {
             taskType,
             clientSurface,
         }, session);
+        const sessionIsolation = isSessionIsolationEnabled(requestedSessionMetadata, session);
         effectiveRequestMetadata = {
             ...effectiveRequestMetadata,
             clientSurface,
             memoryScope,
+            ...(sessionIsolation ? { sessionIsolation: true } : {}),
         };
         let effectiveOutputFormat = output_format
             || inferRequestedOutputFormat(artifactIntentText)
@@ -1422,6 +1431,7 @@ router.post('/responses', async (req, res, next) => {
                     ownerId,
                     clientSurface,
                     memoryScope,
+                    sessionIsolation,
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
@@ -1565,6 +1575,7 @@ router.post('/responses', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     memoryScope,
+                    sessionIsolation,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1699,6 +1710,7 @@ router.post('/responses', async (req, res, next) => {
                 memoryService,
                 ownerId,
                 memoryScope,
+                sessionIsolation,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -1757,6 +1769,7 @@ router.post('/responses', async (req, res, next) => {
                     memoryService,
                     ownerId,
                     memoryScope,
+                    sessionIsolation,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,

@@ -6,6 +6,7 @@ const { AGENT_NOTES_CHAR_LIMIT } = require('./agent-notes');
 const settingsController = require('./routes/admin/settings.controller');
 const { normalizeReasoningEffort } = require('./ai-route-utils');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
+const { isSessionIsolationEnabled } = require('./session-scope');
 const {
     hasWorkloadIntent,
     summarizeTrigger,
@@ -1885,6 +1886,9 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         return [];
     }
 
+    const sessionIsolation = isSessionIsolationEnabled({
+        sessionIsolation: options?.toolContext?.sessionIsolation,
+    });
     const availableToolIds = new Set(automaticTools.map((entry) => entry.id));
     const selectedIds = new Set();
     const normalizedPrompt = String(prompt || '').toLowerCase();
@@ -2003,7 +2007,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('file-search');
     }
 
-    if (availableToolIds.has('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
+    if (!sessionIsolation && availableToolIds.has('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
         selectedIds.add('agent-notes-write');
     }
 
@@ -2195,11 +2199,18 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         return null;
     }
 
+    const sessionIsolation = isSessionIsolationEnabled({
+        sessionIsolation: options?.toolContext?.sessionIsolation,
+    });
     const guidance = [
         'You can use the provided tools whenever they will improve accuracy or gather missing data.',
         'Treat the tool definitions attached to this request as the source of truth for tool availability.',
         'Do not claim tools are unavailable because of absent meta variables or guessed config names when the tool definitions are attached to the request.',
     ];
+
+    if (sessionIsolation) {
+        guidance.push('- This session is isolated. Prefer the current session transcript, memories, and artifacts, and do not cross into other chats unless the user explicitly asks.');
+    }
 
     if (automaticTools.some((entry) => entry.skill?.requiresConfirmation === true)) {
         guidance.push('For tools that change remote state, local files, deployments, or other persistent state, confirm the action first unless the user already requested that exact change.');
@@ -2238,7 +2249,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'asset-search')) {
-        guidance.push('- Use `asset-search` to find earlier images, PDFs, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
+        guidance.push(sessionIsolation
+            ? '- Use `asset-search` only for current-session assets unless the user explicitly asks to search across sessions.'
+            : '- Use `asset-search` to find earlier images, PDFs, documents, uploaded artifacts, and workspace files before asking the user to resend them.');
         guidance.push('- Prefer `asset-search kind:"image"` for prior visuals and `asset-search kind:"document"` for PDFs, docs, HTML, markdown, and similar files.');
         guidance.push('- Set `includeContent: true` when you need the stored text preview from a document match, and use `refresh: true` when a very recent local file is missing from the index.');
     }
@@ -2257,7 +2270,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead of `file-write`.');
     }
 
-    if (automaticTools.some((entry) => entry.id === 'agent-notes-write')) {
+    if (!sessionIsolation && automaticTools.some((entry) => entry.id === 'agent-notes-write')) {
         guidance.push(`- Use \`agent-notes-write\` to maintain the durable carryover notes file for stable project context, Phil-specific collaboration facts, and future-useful ideas. Keep it under ${AGENT_NOTES_CHAR_LIMIT} characters.`);
         guidance.push('- Rewrite the full notes file in each `agent-notes-write` call, keeping only concise, durable notes rather than temporary task state or long prose.');
         guidance.push('- Do not store secrets, credentials, logs, or code snippets in the carryover notes.');

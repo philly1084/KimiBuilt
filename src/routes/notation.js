@@ -10,6 +10,7 @@ const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
+    isSessionIsolationEnabled,
     resolveClientSurface,
     resolveSessionScope,
 } = require('../session-scope');
@@ -119,6 +120,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
             ...requestedSessionMetadata,
             clientSurface,
         }, session);
+        const sessionIsolation = isSessionIsolationEnabled(requestedSessionMetadata, session);
 
         runtimeTask = startRuntimeTask({
             sessionId,
@@ -152,6 +154,7 @@ router.post('/', validate(notationSchema), async (req, res, next) => {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,

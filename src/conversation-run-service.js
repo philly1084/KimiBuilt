@@ -16,7 +16,7 @@ const {
 const { extractResponseText } = require('./artifacts/artifact-service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('./project-memory');
 const { buildContinuityInstructions } = require('./runtime-prompts');
-const { resolveSessionScope } = require('./session-scope');
+const { isSessionIsolationEnabled, resolveSessionScope } = require('./session-scope');
 
 class ConversationRunService {
     constructor({
@@ -69,6 +69,7 @@ class ConversationRunService {
         }
 
         const runtimeToolManager = await ensureRuntimeToolManager(this.app);
+        const sessionIsolation = isSessionIsolationEnabled(metadata, resolvedSession);
         const instructions = await buildInstructionsWithArtifacts(
             resolvedSession,
             buildContinuityInstructions(),
@@ -94,6 +95,7 @@ class ConversationRunService {
                 ownerId,
                 workloadService: this.app?.locals?.agentWorkloadService,
                 opencodeService: this.app?.locals?.opencodeService || null,
+                sessionIsolation,
                 subAgentDepth: Number(metadata?.subAgentDepth || 0),
                 subAgentOrchestrationId: metadata?.subAgentOrchestrationId || null,
             },
@@ -252,12 +254,14 @@ class ConversationRunService {
             params.model = String(metadata.requestedModel).trim();
         }
         const runtimeToolManager = await ensureRuntimeToolManager(this.app);
+        const sessionIsolation = isSessionIsolationEnabled(metadata, resolvedSession);
         const result = await runtimeToolManager.executeTool(toolId, params, {
             sessionId,
             route: '/api/workloads',
             transport: 'worker',
             memoryService: this.memoryService,
             ownerId,
+            sessionIsolation,
             workloadService: this.app?.locals?.agentWorkloadService,
             opencodeService: this.app?.locals?.opencodeService || null,
             executionProfile: metadata.executionProfile || null,

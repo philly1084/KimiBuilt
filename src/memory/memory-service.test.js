@@ -52,6 +52,28 @@ describe('MemoryService recall profiles', () => {
         }));
     });
 
+    test('process keeps recall locked to the current session when session isolation is enabled', async () => {
+        const service = new MemoryService();
+        const recallSpy = jest.spyOn(service, 'recall').mockResolvedValue(['ctx']);
+        jest.spyOn(service, 'remember').mockResolvedValue('point-1');
+
+        const context = await service.process('session-1', 'hello world', {
+            ownerId: 'phill',
+            memoryScope: 'web-chat',
+            sessionIsolation: true,
+            profile: DEFAULT_RECALL_PROFILE,
+        });
+
+        expect(context).toEqual(['ctx']);
+        expect(recallSpy).toHaveBeenCalledWith('hello world', expect.objectContaining({
+            sessionId: 'session-1',
+            ownerId: null,
+            memoryScope: 'web-chat',
+            sessionIsolation: true,
+            profile: DEFAULT_RECALL_PROFILE,
+        }));
+    });
+
     test('recall keeps keyword matches isolated to the current frontend scope', async () => {
         const service = new MemoryService();
         jest.spyOn(service.store, 'search').mockResolvedValue([]);

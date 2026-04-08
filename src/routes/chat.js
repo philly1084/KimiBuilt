@@ -35,6 +35,7 @@ const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
+    isSessionIsolationEnabled,
     resolveClientSurface,
     resolveSessionScope,
 } = require('../session-scope');
@@ -203,11 +204,13 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             taskType,
             clientSurface,
         }, session);
+        const sessionIsolation = isSessionIsolationEnabled(requestedSessionMetadata, session);
         const artifactIntentText = stripInjectedNotesPageEditDirective(message);
         effectiveRequestMetadata = {
             ...effectiveRequestMetadata,
             clientSurface,
             memoryScope,
+            ...(sessionIsolation ? { sessionIsolation: true } : {}),
         };
         let effectiveOutputFormat = outputFormat
             || inferRequestedOutputFormat(artifactIntentText)
@@ -276,6 +279,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             const artifactMemory = await memoryService.process(sessionId, message, {
                 ownerId,
                 memoryScope,
+                sessionIsolation,
                 sourceSurface: clientSurface || taskType,
                 memoryKeywords,
                 profile: 'default',
@@ -320,6 +324,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     ownerId,
                     clientSurface,
                     memoryScope,
+                    sessionIsolation,
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
@@ -462,6 +467,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     ownerId,
                     clientSurface,
                     memoryScope,
+                    sessionIsolation,
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
@@ -617,6 +623,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,

@@ -3,7 +3,7 @@ const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
 const { getSessionControlState } = require('./runtime-control-state');
 const { config } = require('./config');
-const { resolveSessionScope } = require('./session-scope');
+const { isSessionIsolationEnabled, resolveSessionScope } = require('./session-scope');
 
 const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const DEFAULT_EXECUTION_PROFILE = 'default';
@@ -242,10 +242,15 @@ async function executeConversationRuntime(app, params = {}) {
             || '',
         metadata: params.metadata,
     }, params.session || null);
+    const sessionIsolation = isSessionIsolationEnabled({
+        sessionIsolation: params.toolContext?.sessionIsolation,
+        metadata: params.metadata,
+    }, params.session || null);
     const scopedToolContext = {
         ...effectiveToolContext,
         ...(clientSurface ? { clientSurface } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...(sessionIsolation ? { sessionIsolation: true } : {}),
     };
     const orchestrator = app?.locals?.conversationOrchestrator
         || app?.locals?.agentOrchestrator
@@ -273,6 +278,7 @@ async function executeConversationRuntime(app, params = {}) {
                 profile: inferRecallProfile(recallInput),
                 ownerId: params.ownerId || null,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords: params.metadata?.memoryKeywords || params.toolContext?.memoryKeywords || [],
                 sourceSurface: clientSurface || memoryScope || null,
             })

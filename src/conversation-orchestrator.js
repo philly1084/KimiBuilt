@@ -27,6 +27,7 @@ const {
 } = require('./web-chat-message-state');
 const {
     buildScopedSessionMetadata,
+    isSessionIsolationEnabled,
     resolveClientSurface,
     resolveSessionScope,
 } = require('./session-scope');
@@ -3665,10 +3666,15 @@ class ConversationOrchestrator extends EventEmitter {
             ...scopedSessionMetadata,
             memoryScope: toolContext?.memoryScope || metadata?.memoryScope || metadata?.memory_scope || '',
         }, session || null);
+        const sessionIsolation = isSessionIsolationEnabled({
+            sessionIsolation: toolContext?.sessionIsolation,
+            metadata,
+        }, session || null);
         toolContext = {
             ...toolContext,
             ...(clientSurface ? { clientSurface } : {}),
             ...(memoryScope ? { memoryScope } : {}),
+            ...(sessionIsolation ? { sessionIsolation: true } : {}),
             ...(Array.isArray(toolContext?.memoryKeywords) ? { memoryKeywords: toolContext.memoryKeywords } : {}),
         };
         const resolvedRecentMessages = recentMessages.length > 0
@@ -3686,6 +3692,7 @@ class ConversationOrchestrator extends EventEmitter {
                     profile: inferRecallProfileFromText(memoryInput || rawObjective),
                     ownerId,
                     memoryScope,
+                    sessionIsolation,
                     memoryKeywords,
                     sourceSurface: clientSurface || memoryScope || null,
                     returnDetails: true,
@@ -4999,6 +5006,10 @@ class ConversationOrchestrator extends EventEmitter {
         const prompt = `${objective || ''}\n${instructions || ''}`.toLowerCase();
         const candidates = new Set();
         const remoteToolId = getPreferredRemoteToolId({ allowedToolIds });
+        const sessionIsolation = isSessionIsolationEnabled({
+            sessionIsolation: toolContext?.sessionIsolation,
+            metadata,
+        }, session || null);
         const userCheckpointPolicy = toolContext?.userCheckpointPolicy && typeof toolContext.userCheckpointPolicy === 'object'
             ? toolContext.userCheckpointPolicy
             : {};
@@ -5191,7 +5202,7 @@ class ConversationOrchestrator extends EventEmitter {
                 && /\b(create|make|mkdir)\b/.test(prompt)) {
                 candidates.add('file-mkdir');
             }
-            if (allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
+            if (!sessionIsolation && allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
                 candidates.add('agent-notes-write');
             }
         } else {
@@ -5250,7 +5261,7 @@ class ConversationOrchestrator extends EventEmitter {
             if (/\b(create|make|mkdir)\b[\s\S]{0,40}\b(folder|directory)\b/.test(prompt) && allowedToolIds.includes('file-mkdir')) {
                 candidates.add('file-mkdir');
             }
-            if (allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
+            if (!sessionIsolation && allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
                 candidates.add('agent-notes-write');
             }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
@@ -5311,6 +5322,7 @@ class ConversationOrchestrator extends EventEmitter {
                 ready: opencodeTargetReady,
             },
             preferredRemoteToolId: remoteToolId,
+            sessionIsolation,
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
             toolDescriptions: Object.fromEntries(
@@ -5840,14 +5852,25 @@ class ConversationOrchestrator extends EventEmitter {
             'Every `file-write` step must include both `params.path` and the full file body as `params.content` in the same step.',
             '`file-write` is for local runtime files only. For remote hosts, deployed servers, or container-only paths, use `remote-command` or `docker-exec` instead.',
             'Do not return a `file-write` step that only points at a previous artifact or earlier file. If the full content is not already available in the prompt or recent transcript, choose a different tool or return no `file-write` step.',
-            'Use `asset-search` when the user refers to a previous, earlier, uploaded, attached, generated, or saved image, document, PDF, or artifact.',
-            'Prefer `asset-search` before asking the user to resend a file that should already exist in prior artifacts or the local workspace.',
+            ...(toolPolicy.sessionIsolation
+                ? [
+                    'This session is isolated. Use `asset-search` only for assets from the current session unless the user explicitly asks to cross session boundaries.',
+                    'Do not rely on durable carryover notes or earlier-session artifact lookup in this isolated session.',
+                ]
+                : [
+                    'Use `asset-search` when the user refers to a previous, earlier, uploaded, attached, generated, or saved image, document, PDF, or artifact.',
+                    'Prefer `asset-search` before asking the user to resend a file that should already exist in prior artifacts or the local workspace.',
+                ]),
             'Use `asset-search.params.kind = "image"` for visuals and `asset-search.params.kind = "document"` for PDFs, docs, HTML, markdown, and similar files.',
             'Set `asset-search.params.includeContent = true` when the stored text preview would help choose the right document.',
-            'Use `agent-notes-write` only for concise, durable carryover notes that should help future sessions.',
-            'Good `agent-notes-write` candidates include stable project facts, Phil-specific collaboration preferences, and future-useful ideas or decisions.',
-            'Every `agent-notes-write` step must include the full replacement notes file as `params.content`.',
-            'Do not store secrets, code dumps, verbose logs, or temporary scratch notes in `agent-notes-write`.',
+            ...(toolPolicy.sessionIsolation
+                ? ['Do not use `agent-notes-write` in this isolated session.']
+                : [
+                    'Use `agent-notes-write` only for concise, durable carryover notes that should help future sessions.',
+                    'Good `agent-notes-write` candidates include stable project facts, Phil-specific collaboration preferences, and future-useful ideas or decisions.',
+                    'Every `agent-notes-write` step must include the full replacement notes file as `params.content`.',
+                    'Do not store secrets, code dumps, verbose logs, or temporary scratch notes in `agent-notes-write`.',
+                ]),
             ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasRemoteWebsiteUpdateIntent(planningPrompt)
                 ? [
                     'For remote website/page/HTML updates on a server or cluster, do not require a local artifact or local file read unless the user explicitly named one.',

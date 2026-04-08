@@ -721,6 +721,23 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).not.toContain('agent-notes-write');
     });
 
+    test('does not select the carryover notes tool inside an isolated session', () => {
+        settingsController.settings.agentNotes = {
+            enabled: true,
+            displayName: 'Carryover Notes',
+        };
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions([
+            { id: 'agent-notes-write' },
+        ], 'Summarize the latest product direction.', {
+            toolContext: {
+                sessionIsolation: true,
+            },
+        });
+
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('agent-notes-write');
+    });
+
     test('selects asset-search when the prompt refers to earlier documents or images', () => {
         const selectedTools = __testUtils.selectAutomaticToolDefinitions([
             { id: 'asset-search' },

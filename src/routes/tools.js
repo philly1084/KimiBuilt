@@ -19,6 +19,7 @@ const { canonicalizeRemoteToolId, isRemoteCommandToolId, isSuspiciousSshTargetHo
 const { getSessionControlState } = require('../runtime-control-state');
 const {
   buildScopedSessionMetadata,
+  isSessionIsolationEnabled,
   resolveClientSurface,
 } = require('../session-scope');
 const {
@@ -324,6 +325,10 @@ function buildToolExecutionContext(toolManager, req, sessionId = null) {
     : null;
   return {
     sessionId,
+    sessionIsolation: isSessionIsolationEnabled({
+      sessionIsolation: body.sessionIsolation || body.session_isolation,
+      metadata,
+    }),
     userId: req.user?.id || req.user?.username,
     timestamp: new Date().toISOString(),
     route: req.originalUrl || req.path || '/api/tools/invoke',

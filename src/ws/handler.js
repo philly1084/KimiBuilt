@@ -33,6 +33,7 @@ const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
+    isSessionIsolationEnabled,
     resolveClientSurface,
     resolveSessionScope,
 } = require('../session-scope');
@@ -280,10 +281,12 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         taskType,
         clientSurface,
     }, session);
+    const sessionIsolation = isSessionIsolationEnabled(effectiveRequestMetadata, session);
     effectiveRequestMetadata = {
         ...effectiveRequestMetadata,
         clientSurface,
         memoryScope,
+        ...(sessionIsolation ? { sessionIsolation: true } : {}),
     };
     let effectiveOutputFormat = outputFormat
         || inferRequestedOutputFormat(message)
@@ -354,6 +357,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             const artifactMemory = await memoryService.process(session.id, message, {
                 ownerId,
                 memoryScope,
+                sessionIsolation,
                 sourceSurface: clientSurface || taskType,
                 memoryKeywords,
                 profile: 'default',
@@ -398,6 +402,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     ownerId,
                     clientSurface,
                     memoryScope,
+                    sessionIsolation,
                     memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
@@ -512,6 +517,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 ownerId,
                 clientSurface,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
@@ -674,6 +680,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
         taskType: 'canvas',
         clientSurface,
     }, session);
+    const sessionIsolation = isSessionIsolationEnabled(payload?.metadata || {}, session);
 
     if (!message) {
         ws.send(JSON.stringify({ type: 'error', message: "'message' is required" }));
@@ -724,6 +731,7 @@ async function handleCanvas(ws, session, payload = {}, ownerId = null) {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords,
             },
         });
@@ -842,6 +850,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
         taskType: 'notation',
         clientSurface,
     }, session);
+    const sessionIsolation = isSessionIsolationEnabled(payload?.metadata || {}, session);
 
     if (!notation) {
         ws.send(JSON.stringify({ type: 'error', message: "'notation' is required" }));
@@ -892,6 +901,7 @@ async function handleNotation(ws, session, payload = {}, ownerId = null) {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords,
             },
         });

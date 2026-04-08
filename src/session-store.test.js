@@ -13,6 +13,15 @@ describe('SessionStore recent message continuity', () => {
         expect(session.metadata.agent).toBeUndefined();
     });
 
+    test('defaults newly created sessions to session isolation', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+        const session = await store.create({ mode: 'chat' });
+
+        expect(session.metadata.sessionIsolation).toBe(true);
+    });
+
     test('appends and trims recent session messages', async () => {
         const store = new SessionStore();
         store.initialized = true;

@@ -15,6 +15,7 @@ const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
+    isSessionIsolationEnabled,
     resolveClientSurface,
     resolveSessionScope,
 } = require('../session-scope');
@@ -183,6 +184,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
             ...requestedSessionMetadata,
             clientSurface,
         }, session);
+        const sessionIsolation = isSessionIsolationEnabled(requestedSessionMetadata, session);
         const templateSelection = await buildCanvasTemplateSelection(req.app.locals.templateStore, {
             canvasType,
             message,
@@ -224,6 +226,7 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
                 ownerId,
                 clientSurface,
                 memoryScope,
+                sessionIsolation,
                 memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,

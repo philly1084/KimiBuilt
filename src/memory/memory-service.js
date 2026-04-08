@@ -3,6 +3,7 @@ const { vectorStore } = require('./vector-store');
 const { stripNullCharacters, chunkText } = require('../utils/text');
 const { mergeMemoryKeywords, normalizeMemoryKeywords } = require('./memory-keywords');
 const { runtimeDiagnostics } = require('../runtime-diagnostics');
+const { isSessionIsolationEnabled } = require('../session-scope');
 
 const DEFAULT_RECALL_PROFILE = 'default';
 const RESEARCH_RECALL_PROFILE = 'research';
@@ -568,6 +569,7 @@ class MemoryService {
         const ownerId = String(options?.ownerId || '').trim() || null;
         const memoryScope = String(options?.memoryScope || '').trim() || null;
         const memoryKeywords = normalizeMemoryKeywords(options?.memoryKeywords || []);
+        const sessionIsolation = isSessionIsolationEnabled(options);
         this.remember(sessionId, message, 'user', {
             ...(ownerId ? { ownerId } : {}),
             ...(memoryScope ? { memoryScope } : {}),
@@ -579,11 +581,11 @@ class MemoryService {
 
         try {
             return await this.recall(message, {
-                sessionId: ownerId ? null : sessionId,
-                ownerId,
+                ...options,
+                sessionId: sessionIsolation || !ownerId ? sessionId : null,
+                ownerId: sessionIsolation ? null : ownerId,
                 memoryScope,
                 memoryKeywords,
-                ...options,
             });
         } catch (err) {
             console.error('[Memory] Failed to recall context:', err.message);

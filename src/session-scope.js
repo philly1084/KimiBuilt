@@ -1,3 +1,5 @@
+const { config } = require('./config');
+
 const DEFAULT_SESSION_SCOPE = 'global';
 
 function normalizeScopeValue(value = '') {
@@ -21,10 +23,59 @@ function firstNormalizedValue(candidates = []) {
   return null;
 }
 
+function normalizeBooleanValue(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (['true', '1', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['false', '0', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+}
+
 function getPlainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value
     : {};
+}
+
+function resolveSessionIsolation(value = {}, session = null, fallback = null) {
+  const source = getPlainObject(value);
+  const nested = getPlainObject(source.metadata);
+  const sessionMetadata = getPlainObject(session?.metadata);
+
+  const candidates = [
+    source.sessionIsolation,
+    source.session_isolation,
+    nested.sessionIsolation,
+    nested.session_isolation,
+    sessionMetadata.sessionIsolation,
+    sessionMetadata.session_isolation,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeBooleanValue(candidate);
+    if (normalized != null) {
+      return normalized;
+    }
+  }
+
+  const normalizedFallback = normalizeBooleanValue(fallback);
+  return normalizedFallback != null ? normalizedFallback : null;
+}
+
+function isSessionIsolationEnabled(value = {}, session = null) {
+  return resolveSessionIsolation(value, session, false) === true;
 }
 
 function hasSessionScopeHints(value = {}) {
@@ -149,11 +200,17 @@ function buildScopedSessionMetadata(metadata = {}, session = null) {
   const source = getPlainObject(metadata);
   const clientSurface = resolveClientSurface(source, session);
   const memoryScope = resolveSessionScope(source, session);
+  const sessionIsolation = resolveSessionIsolation(
+    source,
+    session,
+    config.memory.sessionIsolationDefault,
+  );
 
   return {
     ...source,
     ...(clientSurface ? { clientSurface } : {}),
     memoryScope,
+    ...(sessionIsolation != null ? { sessionIsolation } : {}),
   };
 }
 
@@ -173,8 +230,10 @@ module.exports = {
   DEFAULT_SESSION_SCOPE,
   buildScopedSessionMetadata,
   hasSessionScopeHints,
+  isSessionIsolationEnabled,
   normalizeSessionScopeKey,
   resolveClientSurface,
+  resolveSessionIsolation,
   resolveSessionScope,
   sessionMatchesScope,
 };

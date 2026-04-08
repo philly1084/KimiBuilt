@@ -87,6 +87,7 @@ const config = {
     },
 
     memory: {
+        sessionIsolationDefault: process.env.SESSION_ISOLATION_DEFAULT !== 'false',
         recentMessageWindow: Math.max(
             1,
             parseInt(process.env.MEMORY_RECENT_MESSAGE_WINDOW, 10) || 40,

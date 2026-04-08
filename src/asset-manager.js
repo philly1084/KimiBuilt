@@ -377,7 +377,7 @@ class AssetManager {
         return payload;
     }
 
-    async buildWorkspaceEntry(absolutePath, workspaceRoot) {
+    async buildWorkspaceEntry(absolutePath, workspaceRoot, options = {}) {
         if (normalizePathKey(absolutePath) === normalizePathKey(this.indexFilePath)
             || normalizePathKey(absolutePath) === normalizePathKey(`${this.indexFilePath}.tmp`)) {
             return null;
@@ -423,6 +423,8 @@ class AssetManager {
             filename,
             absolutePath,
             relativePath,
+            sessionId: String(options.sessionId || '').trim() || null,
+            ownerId: String(options.ownerId || '').trim() || null,
             mimeType: inferMimeType(filename, extension),
             extension,
             sizeBytes: stats.size,
@@ -539,7 +541,7 @@ class AssetManager {
         return removed;
     }
 
-    async upsertWorkspacePath(targetPath = '') {
+    async upsertWorkspacePath(targetPath = '', options = {}) {
         const absolutePath = path.resolve(String(targetPath || '').trim());
         const extension = inferExtension(absolutePath);
         if (!IMAGE_EXTENSIONS.has(extension) && !DOCUMENT_EXTENSIONS.has(extension)) {
@@ -550,7 +552,7 @@ class AssetManager {
             const relative = path.relative(root, absolutePath);
             return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
         }) || this.projectRoot;
-        const entry = await this.buildWorkspaceEntry(absolutePath, workspaceRoot);
+        const entry = await this.buildWorkspaceEntry(absolutePath, workspaceRoot, options);
         const index = await this.readIndex();
         const entryId = `workspace:${normalizePathKey(absolutePath)}`;
         const nextEntries = index.entries.filter((candidate) => candidate.id !== entryId);
@@ -729,6 +731,7 @@ class AssetManager {
             : 'any';
         const sessionId = String(params.sessionId || context.sessionId || '').trim() || null;
         const ownerId = String(context.ownerId || '').trim() || null;
+        const restrictToSession = context.sessionIsolation === true && Boolean(sessionId);
         const includeContent = params.includeContent === true;
         const limit = clampLimit(params.limit);
         const { index, refreshed } = await this.ensureIndex({ refresh: params.refresh === true });
@@ -738,6 +741,17 @@ class AssetManager {
             .filter((entry) => sourceType === 'any' || entry.sourceType === sourceType)
             .filter((entry) => kind === 'any' || entry.kind === kind)
             .filter((entry) => !ownerId || entry.sourceType !== 'artifact' || !entry.ownerId || entry.ownerId === ownerId)
+            .filter((entry) => {
+                if (!restrictToSession) {
+                    return true;
+                }
+
+                if (entry.sourceType === 'artifact') {
+                    return entry.sessionId === sessionId;
+                }
+
+                return !entry.sessionId || entry.sessionId === sessionId;
+            })
             .map((entry) => ({
                 entry,
                 score: this.scoreEntry(entry, query, tokens, { sessionId }),
@@ -760,6 +774,7 @@ class AssetManager {
             kind,
             sourceType,
             sessionId,
+            restrictToSession,
             count: results.length,
             refreshed,
             results,
