@@ -57,6 +57,41 @@ const config = {
         pdfTimeoutMs: parseInt(process.env.ARTIFACT_PDF_TIMEOUT_MS, 10) || 15000,
     },
 
+    tts: {
+        piper: {
+            enabled: process.env.PIPER_TTS_ENABLED !== 'false',
+            binaryPath: process.env.PIPER_TTS_BINARY_PATH || 'piper',
+            modelPath: process.env.PIPER_TTS_MODEL_PATH || '',
+            configPath: process.env.PIPER_TTS_CONFIG_PATH || '',
+            voiceId: process.env.PIPER_TTS_VOICE_ID || 'piper-female-natural',
+            voiceLabel: process.env.PIPER_TTS_VOICE_LABEL || 'Female natural',
+            voiceDescription: process.env.PIPER_TTS_VOICE_DESCRIPTION || 'A Piper voice tuned for clear, natural female speech.',
+            speakerId: Number.isFinite(parseInt(process.env.PIPER_TTS_SPEAKER_ID, 10))
+                ? parseInt(process.env.PIPER_TTS_SPEAKER_ID, 10)
+                : null,
+            lengthScale: Number.isFinite(parseFloat(process.env.PIPER_TTS_LENGTH_SCALE))
+                ? parseFloat(process.env.PIPER_TTS_LENGTH_SCALE)
+                : 1.02,
+            noiseScale: Number.isFinite(parseFloat(process.env.PIPER_TTS_NOISE_SCALE))
+                ? parseFloat(process.env.PIPER_TTS_NOISE_SCALE)
+                : 0.55,
+            noiseW: Number.isFinite(parseFloat(process.env.PIPER_TTS_NOISE_W))
+                ? parseFloat(process.env.PIPER_TTS_NOISE_W)
+                : 0.8,
+            sentenceSilence: Number.isFinite(parseFloat(process.env.PIPER_TTS_SENTENCE_SILENCE))
+                ? parseFloat(process.env.PIPER_TTS_SENTENCE_SILENCE)
+                : 0.24,
+            maxTextChars: Math.max(
+                200,
+                parseInt(process.env.PIPER_TTS_MAX_TEXT_CHARS, 10) || 2400,
+            ),
+            timeoutMs: Math.max(
+                1000,
+                parseInt(process.env.PIPER_TTS_TIMEOUT_MS, 10) || 45000,
+            ),
+        },
+    },
+
     auth: {
         username: process.env.LILLYBUILT_AUTH_USERNAME || process.env.KIMIBUILT_AUTH_USERNAME || '',
         password: process.env.LILLYBUILT_AUTH_PASSWORD || process.env.KIMIBUILT_AUTH_PASSWORD || '',

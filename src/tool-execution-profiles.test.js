@@ -15,6 +15,7 @@ describe('tool execution profiles', () => {
             'git-safe',
             'agent-workload',
             'asset-search',
+            'speech-generate',
             'security-scan',
             'architecture-design',
             'uml-generate',

@@ -10,6 +10,7 @@ const { getToolManager } = require('../agent-sdk/tools');
 const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
+const { piperTtsService } = require('../tts/piper-tts-service');
 const {
   resolveOpenCodeGatewayBaseURL,
 } = require('../opencode/gateway');
@@ -207,6 +208,10 @@ function buildToolRuntime(toolId, options = {}) {
       configured: true,
       provider: 'direct-url',
     };
+  }
+
+  if (toolId === 'speech-generate') {
+    return piperTtsService.getPublicConfig();
   }
 
   if ([

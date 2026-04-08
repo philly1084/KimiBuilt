@@ -9,8 +9,10 @@ const { readToolDoc, getToolDocMetadata } = require('../tool-docs');
 const { generateImage } = require('../../openai-client');
 const { searchImages, isConfigured: isUnsplashConfigured } = require('../../unsplash-client');
 const { persistGeneratedImages } = require('../../generated-image-artifacts');
+const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
+const { piperTtsService } = require('../../tts/piper-tts-service');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const {
   AGENT_NOTES_CHAR_LIMIT,
@@ -1369,6 +1371,79 @@ class ToolManager {
         frontend: {
           exposeToFrontend: true,
           icon: 'image-plus',
+        },
+      },
+      {
+        id: 'speech-generate',
+        name: 'Speech Generator',
+        category: 'system',
+        description: 'Synthesize speech with Piper, save the audio into the active session, and return reusable artifact URLs for downstream agent work.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const sessionId = String(context?.sessionId || '').trim();
+            if (!sessionId) {
+              throw new Error('speech-generate requires an active session so the audio can be saved.');
+            }
+
+            const requestedText = String(params.text || params.prompt || '').trim();
+            if (!requestedText) {
+              throw new Error('speech-generate requires a `text` string.');
+            }
+
+            const synthesis = await piperTtsService.synthesize({
+              text: requestedText,
+              voiceId: params.voiceId || '',
+            });
+
+            const persistedAudio = await persistGeneratedAudio({
+              sessionId,
+              sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',
+              text: synthesis.text,
+              title: params.title || '',
+              filename: params.filename || '',
+              provider: synthesis.voice?.provider || 'piper',
+              voice: synthesis.voice || null,
+              audioBuffer: synthesis.audioBuffer,
+              mimeType: synthesis.contentType || 'audio/wav',
+              metadata: {
+                requestedText,
+                createdByAgentTool: true,
+              },
+            });
+
+            return {
+              provider: synthesis.voice?.provider || 'piper',
+              voice: synthesis.voice || null,
+              text: synthesis.text,
+              contentType: synthesis.contentType || 'audio/wav',
+              artifact: persistedAudio.artifact || null,
+              artifacts: persistedAudio.artifact ? [persistedAudio.artifact] : [],
+              artifactIds: persistedAudio.artifactIds || [],
+              audio: persistedAudio.audio || null,
+            };
+          },
+          sideEffects: ['write', 'execute'],
+          timeout: 60000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['text'],
+          properties: {
+            text: { type: 'string' },
+            prompt: { type: 'string' },
+            title: { type: 'string' },
+            filename: { type: 'string' },
+            voiceId: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: ['text to speech', 'tts', 'narration', 'voiceover', 'read aloud', 'save audio', 'piper'],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'volume-2',
         },
       },
       {

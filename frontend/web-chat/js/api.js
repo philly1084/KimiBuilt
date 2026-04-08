@@ -1222,6 +1222,57 @@ class OpenAIAPIClient extends EventTarget {
         return response.data.map((model) => model.metadata || { id: model.id, name: model.id || 'Gateway Default' });
     }
 
+    async getTtsVoices() {
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tts/voices`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store',
+        });
+
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            error.status = response.status;
+            error.response = await this.parseErrorPayload(response);
+            throw error;
+        }
+
+        return response.json();
+    }
+
+    async synthesizeSpeech(text, options = {}) {
+        const payload = {
+            text: String(text || ''),
+        };
+
+        if (options.voiceId) {
+            payload.voiceId = options.voiceId;
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tts/synthesize`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'audio/wav, application/json',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            error.status = response.status;
+            error.response = await this.parseErrorPayload(response);
+            throw new Error(this.parseErrorMessage(error, error.response));
+        }
+
+        return {
+            blob: await response.blob(),
+            contentType: response.headers.get('content-type') || 'audio/wav',
+            voiceId: response.headers.get('x-tts-voice-id') || '',
+            voiceLabel: response.headers.get('x-tts-voice-label') || '',
+            provider: response.headers.get('x-tts-provider') || 'piper',
+        };
+    }
+
     async getAvailableTools(category = null) {
         const params = new URLSearchParams();
         if (category) {

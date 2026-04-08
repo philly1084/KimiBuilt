@@ -11,9 +11,32 @@ jest.mock('../../asset-manager', () => ({
   },
 }));
 
+jest.mock('../../tts/piper-tts-service', () => ({
+  piperTtsService: {
+    synthesize: jest.fn(),
+    getPublicConfig: jest.fn(() => ({
+      configured: true,
+      provider: 'piper',
+      maxTextChars: 2400,
+      defaultVoiceId: 'piper-female-natural',
+      voices: [{
+        id: 'piper-female-natural',
+        label: 'Female natural',
+        provider: 'piper',
+      }],
+    })),
+  },
+}));
+
+jest.mock('../../generated-audio-artifacts', () => ({
+  persistGeneratedAudio: jest.fn(),
+}));
+
 const { ToolManager } = require('./index');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
+const { piperTtsService } = require('../../tts/piper-tts-service');
+const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -26,6 +49,8 @@ describe('ToolManager image tools', () => {
     artifactService.generateArtifact.mockReset();
     assetManager.searchAssets.mockReset();
     assetManager.upsertWorkspacePath.mockClear();
+    piperTtsService.synthesize.mockReset();
+    persistGeneratedAudio.mockReset();
   });
 
   afterEach(() => {
@@ -214,6 +239,70 @@ describe('ToolManager image tools', () => {
       }),
     );
     expect(result.data.results[0].filename).toBe('pricing-report.pdf');
+  });
+
+  test('synthesizes speech with Piper and persists the audio into the active session', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    piperTtsService.synthesize.mockResolvedValue({
+      audioBuffer: Buffer.from('RIFF-test-audio'),
+      contentType: 'audio/wav',
+      text: 'Read this status update aloud.',
+      voice: {
+        id: 'piper-female-natural',
+        label: 'Female natural',
+        provider: 'piper',
+      },
+    });
+    persistGeneratedAudio.mockResolvedValue({
+      artifact: {
+        id: 'artifact-audio-1',
+        filename: 'status-update.wav',
+        mimeType: 'audio/wav',
+        downloadUrl: '/api/artifacts/artifact-audio-1/download',
+      },
+      audio: {
+        artifactId: 'artifact-audio-1',
+        downloadUrl: '/api/artifacts/artifact-audio-1/download',
+        inlinePath: '/api/artifacts/artifact-audio-1/download?inline=1',
+      },
+      artifactIds: ['artifact-audio-1'],
+    });
+
+    const result = await toolManager.executeTool('speech-generate', {
+      text: 'Read this status update aloud.',
+      title: 'Status update',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(piperTtsService.synthesize).toHaveBeenCalledWith({
+      text: 'Read this status update aloud.',
+      voiceId: '',
+    });
+    expect(persistGeneratedAudio).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      sourceMode: 'chat',
+      text: 'Read this status update aloud.',
+      title: 'Status update',
+      provider: 'piper',
+      mimeType: 'audio/wav',
+      metadata: expect.objectContaining({
+        requestedText: 'Read this status update aloud.',
+        createdByAgentTool: true,
+      }),
+    }));
+    expect(result.data).toEqual(expect.objectContaining({
+      provider: 'piper',
+      contentType: 'audio/wav',
+      artifactIds: ['artifact-audio-1'],
+      audio: expect.objectContaining({
+        inlinePath: '/api/artifacts/artifact-audio-1/download?inline=1',
+      }),
+    }));
   });
 
   test('writes durable carryover notes through agent-notes-write and enforces the character limit', async () => {

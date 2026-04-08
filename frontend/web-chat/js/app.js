@@ -520,6 +520,7 @@ class ChatApp {
 
     async createNewSession() {
         try {
+            uiHelpers.stopSpeechPlayback();
             await sessionManager.createSession('chat');
             uiHelpers.hideWelcomeMessage();
             uiHelpers.clearMessages();
@@ -532,6 +533,7 @@ class ChatApp {
     }
 
     async loadSessionMessages(sessionId, options = {}) {
+        uiHelpers.stopSpeechPlayback();
         await sessionManager.loadSessionMessagesFromBackend(sessionId);
         const messages = this.syncAnnotatedSurveyStates(sessionId);
         this.renderMessages(messages);
@@ -622,6 +624,7 @@ class ChatApp {
                 requestAnimationFrame(() => renderBatch(end));
             } else {
                 uiHelpers.reinitializeIcons(this.messagesContainer);
+                uiHelpers.updateMessageSpeechButtons(this.messagesContainer);
                 uiHelpers.highlightCodeBlocks(this.messagesContainer);
                 uiHelpers.scrollToBottom(false);
             }
@@ -634,6 +637,7 @@ class ChatApp {
         if (!sessionManager.currentSessionId) return;
         
         if (confirm('Clear all messages in this conversation? This cannot be undone.')) {
+            uiHelpers.stopSpeechPlayback();
             sessionManager.clearSessionMessages(sessionManager.currentSessionId);
             uiHelpers.showToast('Messages cleared', 'success');
         }
@@ -1634,6 +1638,8 @@ class ChatApp {
         if (!normalizedContent || this.isProcessing) {
             return false;
         }
+
+        uiHelpers.stopSpeechPlayback();
 
         // Check if we need to create a session
         if (!sessionManager.currentSessionId) {
@@ -3111,7 +3117,7 @@ class ChatApp {
             }
 
             this.renderMessages(messages);
-            this.playCueForAssistantMessage(surveyMessage, []);
+            this.presentAssistantMessage(surveyMessage, []);
             this.updateSessionInfo();
             uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
         } catch (error) {
@@ -3143,6 +3149,33 @@ class ChatApp {
         uiHelpers.playAgentCue(this.getAssistantCueType(message, toolEvents));
     }
 
+    async maybeSpeakAssistantMessage(message = null) {
+        if (!message || message.role !== 'assistant' || message.isLoading || !uiHelpers.isTtsAutoPlayEnabled()) {
+            return false;
+        }
+
+        const speakableText = uiHelpers.buildSpeakableMessageText(message);
+        if (!speakableText) {
+            return false;
+        }
+
+        try {
+            await uiHelpers.ttsManager?.speakMessage?.({
+                messageId: message.id || '',
+                text: speakableText,
+            });
+            return true;
+        } catch (error) {
+            console.warn('Piper voice autoplay failed:', error);
+            return false;
+        }
+    }
+
+    presentAssistantMessage(message = null, toolEvents = []) {
+        this.playCueForAssistantMessage(message, toolEvents);
+        void this.maybeSpeakAssistantMessage(message);
+    }
+
     playCueForNewAssistantMessages(previousMessages = [], nextMessages = []) {
         const previousCount = Array.isArray(previousMessages) ? previousMessages.length : 0;
         const addedMessages = (Array.isArray(nextMessages) ? nextMessages : []).slice(previousCount);
@@ -3151,7 +3184,7 @@ class ChatApp {
             .find((message) => message?.role === 'assistant' && message?.isLoading !== true);
 
         if (lastAssistantMessage) {
-            this.playCueForAssistantMessage(lastAssistantMessage);
+            this.presentAssistantMessage(lastAssistantMessage);
         }
     }
 
@@ -3690,10 +3723,10 @@ class ChatApp {
 
         if (insertedSurveyMessage) {
             this.renderMessages(messages);
-            this.playCueForAssistantMessage(insertedSurveyMessage, chunk.toolEvents);
+            this.presentAssistantMessage(insertedSurveyMessage, chunk.toolEvents);
         } else if (lastMessage) {
             this.renderOrReplaceMessage(lastMessage);
-            this.playCueForAssistantMessage(lastMessage, chunk.toolEvents);
+            this.presentAssistantMessage(lastMessage, chunk.toolEvents);
         }
         
         this.isProcessing = false;

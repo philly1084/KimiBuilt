@@ -410,6 +410,16 @@
                     </div>
                 </div>
                 <div class="model-selector-setting">
+                    <span class="model-selector-setting__label">Piper voice replies</span>
+                    <div class="assistant-sound-stack">
+                        <button id="tts-autoplay-btn" class="btn-icon remote-autonomy-btn remote-autonomy-btn--panel" title="Read new assistant replies aloud" aria-label="Read new assistant replies aloud" aria-pressed="false" disabled>
+                            <i data-lucide="audio-lines" class="w-5 h-5" aria-hidden="true"></i>
+                            <span id="tts-autoplay-label">Read replies aloud: Off</span>
+                        </button>
+                        <p id="tts-voice-hint" class="model-selector-setting__hint">Checking Piper voice availability...</p>
+                    </div>
+                </div>
+                <div class="model-selector-setting">
                     <label for="sound-profile-select" class="model-selector-setting__label">Sound theme</label>
                     <div class="assistant-sound-stack">
                         <select id="sound-profile-select" class="reasoning-select reasoning-select--panel" title="Sound theme" aria-label="Sound theme">
@@ -978,11 +988,12 @@
     <script src="js/api.js?v=20260406d"></script>
     <script src="js/session.js?v=20260406a"></script>
     <script src="js/sound-manager.js?v=20260406e"></script>
+    <script src="js/tts-manager.js?v=20260408a"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260406e"></script>
-    <script src="js/app.js?v=20260406d"></script>
+    <script src="js/ui.js?v=20260408a"></script>
+    <script src="js/app.js?v=20260408a"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>
 </html>

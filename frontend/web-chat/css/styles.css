@@ -1074,6 +1074,11 @@ body.mobile-chat-menu-open {
     color: var(--success);
 }
 
+.remote-autonomy-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .remote-autonomy-btn--panel {
     width: 100%;
     justify-content: space-between;
@@ -2028,6 +2033,20 @@ body.layout-minimal #input-meta-row {
 .message-action-btn:hover {
     color: var(--text-primary);
     background-color: var(--bg-hover);
+}
+
+.message-action-btn.is-active {
+    color: var(--accent);
+    background-color: rgba(88, 166, 255, 0.14);
+}
+
+.message-action-btn.is-loading {
+    color: var(--accent);
+}
+
+.message-action-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .message-action-btn:focus-visible {

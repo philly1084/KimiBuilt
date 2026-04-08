@@ -33,6 +33,9 @@ class UIHelpers {
         this.soundManager = window.WebChatSoundManager
             ? new window.WebChatSoundManager()
             : null;
+        this.ttsManager = window.WebChatTtsManager
+            ? new window.WebChatTtsManager()
+            : null;
         this.updateModelUI();
         this.updateReasoningUI();
         this.updateRemoteBuildAutonomyUI();
@@ -41,6 +44,16 @@ class UIHelpers {
         this.populateSoundProfileOptions();
         this.updateSoundProfileUI();
         this.updateSoundVolumeUI();
+        this.updateTtsUI();
+        this.ttsManager?.addEventListener('configchange', () => {
+            this.updateTtsUI();
+            this.updateMessageSpeechButtons();
+        });
+        this.ttsManager?.addEventListener('statechange', () => {
+            this.updateTtsUI();
+            this.updateMessageSpeechButtons();
+        });
+        void this.initializeTts();
         
         // Track last focused element for focus management
         this.lastFocusedElement = null;
@@ -1877,6 +1890,7 @@ class UIHelpers {
                             <i data-lucide="copy" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
                         ${!isUser ? `
+                        ${this.buildMessageSpeechButtonMarkup(messageId, message)}
                         <button class="message-action-btn" onclick="uiHelpers.regenerateMessage('${messageId}')" title="Regenerate response" aria-label="Regenerate response">
                             <i data-lucide="refresh-cw" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
@@ -3569,6 +3583,230 @@ class UIHelpers {
 
     playAcknowledgementCue() {
         this.soundManager?.play?.('ack');
+    }
+
+    async initializeTts() {
+        if (!this.ttsManager) {
+            return;
+        }
+
+        try {
+            await this.ttsManager.ensureConfigLoaded({ quiet: true });
+        } catch (_error) {
+            // The UI should stay usable even when TTS is unavailable.
+        }
+
+        this.updateTtsUI();
+        this.updateMessageSpeechButtons();
+    }
+
+    isTtsAvailable() {
+        return this.ttsManager?.isAvailable?.() === true;
+    }
+
+    isTtsAutoPlayEnabled() {
+        return this.ttsManager?.isAutoPlayEnabled?.() === true;
+    }
+
+    getTtsVoiceLabel() {
+        return this.ttsManager?.getVoiceLabel?.() || 'Piper voice';
+    }
+
+    updateTtsUI() {
+        const button = document.getElementById('tts-autoplay-btn');
+        const label = document.getElementById('tts-autoplay-label');
+        const hint = document.getElementById('tts-voice-hint');
+        const available = this.isTtsAvailable();
+        const autoPlayEnabled = this.isTtsAutoPlayEnabled();
+
+        if (button) {
+            button.disabled = !available;
+            button.classList.toggle('is-active', available && autoPlayEnabled);
+            button.setAttribute('aria-pressed', available && autoPlayEnabled ? 'true' : 'false');
+            button.title = available
+                ? (autoPlayEnabled ? 'Read replies aloud: On' : 'Read replies aloud: Off')
+                : 'Piper voice unavailable';
+        }
+
+        if (label) {
+            label.textContent = available
+                ? `Read replies aloud: ${autoPlayEnabled ? 'On' : 'Off'}`
+                : 'Read replies aloud: Unavailable';
+        }
+
+        if (hint) {
+            hint.textContent = available
+                ? `${this.getTtsVoiceLabel()} is ready through Piper. Use the speaker button on any assistant reply, or enable autoplay here.`
+                : 'Piper voice is unavailable until the server has a configured Piper binary and voice model.';
+        }
+    }
+
+    setTtsAutoPlayEnabled(value) {
+        this.ttsManager?.setAutoPlayEnabled?.(value === true);
+        this.updateTtsUI();
+    }
+
+    toggleTtsAutoPlay() {
+        if (!this.isTtsAvailable()) {
+            this.showToast('Piper voice playback is not configured on the server.', 'warning', 'Piper voice');
+            return;
+        }
+
+        const nextValue = !this.isTtsAutoPlayEnabled();
+        this.setTtsAutoPlayEnabled(nextValue);
+        this.showToast(
+            nextValue ? 'Assistant replies will play aloud' : 'Assistant reply autoplay stopped',
+            'success',
+            'Piper voice',
+        );
+    }
+
+    buildSurveySpeechSummary(survey = {}, message = null) {
+        const surveyState = message?.surveyState && typeof message.surveyState === 'object'
+            ? message.surveyState
+            : {};
+        const steps = Array.isArray(survey?.steps) ? survey.steps : [];
+        const currentStepIndex = this.getSurveyCurrentStepIndex(survey, surveyState);
+        const currentStep = steps[currentStepIndex] || steps[0] || null;
+        const options = currentStep
+            ? this.buildRenderedSurveyOptions(currentStep)
+                .map((option) => String(option?.label || option?.id || '').trim())
+                .filter(Boolean)
+            : [];
+        const answeredSummary = this.buildSurveyAnsweredSummary(surveyState, survey);
+        const parts = [
+            String(survey.title || '').trim(),
+            String(survey.question || '').trim(),
+            String(currentStep?.question || '').trim(),
+            String(currentStep?.description || currentStep?.whyThisMatters || '').trim(),
+            surveyState?.status === 'answered' && answeredSummary
+                ? `Current answer: ${answeredSummary}.`
+                : '',
+            surveyState?.status !== 'answered' && options.length > 0
+                ? `Options: ${options.join(', ')}.`
+                : '',
+        ].filter(Boolean);
+
+        return parts.join('\n\n').trim();
+    }
+
+    buildSpeakableMessageText(message = null) {
+        if (!message || message.role !== 'assistant') {
+            return '';
+        }
+
+        const source = String(message.displayContent ?? message.content ?? '').trim();
+        if (!source) {
+            return '';
+        }
+
+        const survey = this.extractSurveyDefinitionFromContent(source, message.id || '');
+        if (survey) {
+            return this.buildSurveySpeechSummary(survey, message);
+        }
+
+        return source;
+    }
+
+    getMessageSpeechControlState(messageId = '', message = null) {
+        const normalizedMessageId = String(messageId || '').trim();
+        const speakableText = this.buildSpeakableMessageText(message);
+        const available = this.isTtsAvailable();
+        const isLoading = this.ttsManager?.isLoadingMessage?.(normalizedMessageId) === true;
+        const isPlaying = this.ttsManager?.isPlayingMessage?.(normalizedMessageId) === true;
+        const disabled = !available || !speakableText || isLoading;
+        const title = !speakableText
+            ? 'No readable text in this message'
+            : (!available
+                ? 'Piper voice unavailable'
+                : (isPlaying ? 'Stop voice playback' : 'Read aloud with Piper'));
+
+        return {
+            disabled,
+            isLoading,
+            isPlaying,
+            title,
+            icon: isLoading ? 'loader-2' : (isPlaying ? 'square' : 'audio-lines'),
+        };
+    }
+
+    buildMessageSpeechButtonMarkup(messageId = '', message = null) {
+        const state = this.getMessageSpeechControlState(messageId, message);
+        return `
+            <button
+                class="message-action-btn${state.isPlaying ? ' is-active' : ''}${state.isLoading ? ' is-loading' : ''}"
+                data-tts-message-id="${this.escapeHtmlAttr(messageId)}"
+                onclick="uiHelpers.toggleMessageSpeech('${this.escapeHtmlAttr(messageId)}')"
+                title="${this.escapeHtmlAttr(state.title)}"
+                aria-label="${this.escapeHtmlAttr(state.title)}"
+                ${state.disabled ? 'disabled' : ''}
+            >
+                <i data-lucide="${state.icon}" class="w-4 h-4${state.isLoading ? ' animate-spin' : ''}" aria-hidden="true"></i>
+            </button>
+        `;
+    }
+
+    updateMessageSpeechButton(button, message = null) {
+        const messageId = String(button?.dataset?.ttsMessageId || '').trim();
+        if (!button || !messageId) {
+            return;
+        }
+
+        const state = this.getMessageSpeechControlState(messageId, message);
+        button.disabled = state.disabled;
+        button.title = state.title;
+        button.setAttribute('aria-label', state.title);
+        button.classList.toggle('is-active', state.isPlaying);
+        button.classList.toggle('is-loading', state.isLoading);
+        button.innerHTML = `
+            <i data-lucide="${state.icon}" class="w-4 h-4${state.isLoading ? ' animate-spin' : ''}" aria-hidden="true"></i>
+        `;
+        this.reinitializeIcons(button);
+    }
+
+    updateMessageSpeechButtons(container = document) {
+        const sessionId = window.sessionManager?.currentSessionId || null;
+        if (!sessionId || !container?.querySelectorAll) {
+            return;
+        }
+
+        container.querySelectorAll('[data-tts-message-id]').forEach((button) => {
+            const messageId = String(button.dataset.ttsMessageId || '').trim();
+            const message = typeof window.sessionManager?.getMessage === 'function'
+                ? window.sessionManager.getMessage(sessionId, messageId)
+                : window.sessionManager?.getMessages?.(sessionId)?.find((entry) => entry.id === messageId);
+            this.updateMessageSpeechButton(button, message || null);
+        });
+    }
+
+    async toggleMessageSpeech(messageId = '') {
+        const sessionId = window.sessionManager?.currentSessionId || null;
+        if (!sessionId || !messageId) {
+            return;
+        }
+
+        const message = typeof window.sessionManager?.getMessage === 'function'
+            ? window.sessionManager.getMessage(sessionId, messageId)
+            : window.sessionManager?.getMessages?.(sessionId)?.find((entry) => entry.id === messageId);
+        const speakableText = this.buildSpeakableMessageText(message);
+
+        if (!speakableText) {
+            this.showToast('There is no readable text in this assistant message.', 'info', 'Piper voice');
+            return;
+        }
+
+        try {
+            await this.ttsManager?.toggleMessagePlayback?.({
+                messageId,
+                text: speakableText,
+            });
+        } catch (error) {
+            this.showToast(error.message || 'Failed to generate voice playback.', 'error', 'Piper voice');
+        }
+    }
+
+    stopSpeechPlayback() {
+        this.ttsManager?.stop?.();
     }
 
     getCurrentModel() {
@@ -5525,6 +5763,13 @@ class UIHelpers {
         if (soundCuesBtn) {
             soundCuesBtn.addEventListener('click', () => {
                 this.toggleSoundCues();
+            });
+        }
+
+        const ttsAutoplayBtn = document.getElementById('tts-autoplay-btn');
+        if (ttsAutoplayBtn) {
+            ttsAutoplayBtn.addEventListener('click', () => {
+                this.toggleTtsAutoPlay();
             });
         }
 

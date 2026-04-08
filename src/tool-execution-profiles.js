@@ -23,6 +23,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'image-generate',
     'image-search-unsplash',
     'image-from-url',
+    'speech-generate',
     'asset-search',
     'file-read',
     'file-write',
