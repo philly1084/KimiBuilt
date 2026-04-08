@@ -743,6 +743,21 @@ router.post('/chat/completions', async (req, res, next) => {
                 artifactIds: preparedImages.artifactIds,
                 model,
                 reasoningEffort,
+                toolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/v1/chat/completions',
+                    transport: 'http',
+                    memoryService,
+                    ownerId,
+                    clientSurface,
+                    memoryScope,
+                    memoryKeywords,
+                    timezone: requestTimezone,
+                    now: requestNow,
+                    workloadService: req.app.locals.agentWorkloadService,
+                },
+                executionProfile: effectiveExecutionProfile,
             });
             const responseArtifacts = mergeRuntimeArtifacts(
                 preparedImages.artifacts,
@@ -1398,6 +1413,21 @@ router.post('/responses', async (req, res, next) => {
                 artifactIds: preparedImages.artifactIds,
                 model,
                 reasoningEffort,
+                toolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/v1/responses',
+                    transport: 'http',
+                    memoryService,
+                    ownerId,
+                    clientSurface,
+                    memoryScope,
+                    memoryKeywords,
+                    timezone: requestTimezone,
+                    now: requestNow,
+                    workloadService: req.app.locals.agentWorkloadService,
+                },
+                executionProfile: effectiveExecutionProfile,
             });
             const responseArtifacts = mergeRuntimeArtifacts(
                 preparedImages.artifacts,

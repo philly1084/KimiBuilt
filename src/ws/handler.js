@@ -389,6 +389,21 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     ? artifactMemory
                     : (artifactMemory.contextMessages || []),
                 recentMessages: artifactRecentMessages,
+                toolManager,
+                toolContext: {
+                    sessionId: session.id,
+                    route: '/ws',
+                    transport: 'ws',
+                    memoryService,
+                    ownerId,
+                    clientSurface,
+                    memoryScope,
+                    memoryKeywords,
+                    timezone: requestTimezone,
+                    now: requestNow,
+                    workloadService: ws.app.locals.agentWorkloadService,
+                },
+                executionProfile,
             });
             const responseArtifacts = mergeRuntimeArtifacts(
                 preparedImages.artifacts,

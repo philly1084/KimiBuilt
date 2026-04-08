@@ -76,4 +76,28 @@ describe('runtime artifact helpers', () => {
             }),
         ]);
     });
+
+    test('preserves preview and bundle download urls for previewable site artifacts', () => {
+        const merged = mergeRuntimeArtifacts([{
+            id: 'artifact-site-1',
+            filename: 'newsroom-preview.zip',
+            mimeType: 'application/zip',
+            previewUrl: '/api/artifacts/artifact-site-1/preview',
+            bundleDownloadUrl: '/api/artifacts/artifact-site-1/bundle',
+            metadata: {
+                siteBundle: {
+                    entry: 'index.html',
+                    fileCount: 5,
+                },
+            },
+        }]);
+
+        expect(merged).toEqual([
+            expect.objectContaining({
+                id: 'artifact-site-1',
+                previewUrl: '/api/artifacts/artifact-site-1/preview',
+                bundleDownloadUrl: '/api/artifacts/artifact-site-1/bundle',
+            }),
+        ]);
+    });
 });

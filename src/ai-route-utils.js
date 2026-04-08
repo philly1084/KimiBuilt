@@ -112,10 +112,17 @@ async function maybeGenerateOutputArtifact({
 
 function buildArtifactCompletionMessage(outputFormat, artifact) {
     const normalizedFormat = normalizeFormat(outputFormat) || 'file';
+    const isSiteBundle = artifact?.metadata?.siteBundle
+        || (Array.isArray(artifact?.metadata?.bundle?.files) && artifact.metadata.bundle.files.length > 1)
+        || (
+            typeof artifact?.previewUrl === 'string'
+            && /\/api\/artifacts\/.+\/preview(?:\/|$)/i.test(artifact.previewUrl)
+            && Boolean(artifact?.bundleDownloadUrl)
+        );
     const formatLabel = {
         pdf: 'PDF',
         docx: 'Word document',
-        html: 'HTML document',
+        html: isSiteBundle ? 'HTML site bundle' : 'HTML document',
         xml: 'XML file',
         mermaid: 'Mermaid diagram',
         xlsx: 'Excel workbook',
@@ -1062,6 +1069,9 @@ async function generateOutputArtifactFromPrompt({
     parentArtifactId = null,
     contextMessages = [],
     recentMessages = [],
+    toolManager = null,
+    toolContext = {},
+    executionProfile = 'default',
 }) {
     if (!outputFormat) {
         return null;
@@ -1086,6 +1096,9 @@ async function generateOutputArtifactFromPrompt({
         parentArtifactId,
         contextMessages,
         recentMessages,
+        toolManager,
+        toolContext,
+        executionProfile,
     });
 
     return {

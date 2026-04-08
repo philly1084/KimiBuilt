@@ -521,6 +521,8 @@ function buildArtifactWorkflowResult(result = null, { includeContent = false } =
     metadata: artifact.metadata || {},
     preview: artifact.preview || null,
     downloadUrl: artifact.downloadUrl || null,
+    ...(artifact.previewUrl ? { previewUrl: artifact.previewUrl } : {}),
+    ...(artifact.bundleDownloadUrl ? { bundleDownloadUrl: artifact.bundleDownloadUrl } : {}),
     ...(textualContent
       ? {
         contentPreview: textualContent.slice(0, 4000),

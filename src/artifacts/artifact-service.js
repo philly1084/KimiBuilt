@@ -20,6 +20,14 @@ const {
     inferDocumentTypeFromPrompt,
     renderCreativityPromptContext,
 } = require('../documents/document-creativity');
+const {
+    buildFrontendBundleArtifact,
+    buildFrontendFallbackMetadata,
+    extractRequestedSitePageCount,
+    isComplexFrontendBundleRequest,
+    normalizeFrontendMetadata,
+    sanitizeFrontendArtifactMetadata,
+} = require('../frontend-bundles');
 const { parseLenientJson } = require('../utils/lenient-json');
 const { resolveDocumentTheme } = require('../documents/document-design-engine');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
@@ -256,6 +264,101 @@ function extractResponseText(response) {
     return output
         .filter((item) => item?.type === 'message' || item?.role === 'assistant')
         .map((item) => extractResponseContentText(item?.content ?? item?.text ?? item?.output_text ?? ''))
+        .filter(Boolean)
+        .join('\n')
+        .replace(/\u0000/g, '')
+        .trim();
+}
+
+function extractRawResponseContentText(content, depth = 0) {
+    if (depth > 8) {
+        return '';
+    }
+
+    if (typeof content === 'string') {
+        return stripNullCharacters(content).trim();
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map((item) => extractRawResponseContentText(item, depth + 1))
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+    }
+
+    if (!content || typeof content !== 'object') {
+        return '';
+    }
+
+    const directText = [
+        content.text,
+        content.output_text,
+        content.content,
+        content.message,
+        content.reasoning_content,
+        content.reasoning,
+        content.refusal,
+    ].find((entry) => typeof entry === 'string' && entry.trim());
+    if (directText) {
+        return stripNullCharacters(directText).trim();
+    }
+
+    const nestedSources = [
+        content.content,
+        content.parts,
+        content.items,
+        content.output,
+        content.response,
+        content.result,
+    ];
+    for (const source of nestedSources) {
+        const nested = extractRawResponseContentText(source, depth + 1);
+        if (nested) {
+            return nested;
+        }
+    }
+
+    return '';
+}
+
+function extractRawResponseText(response) {
+    if (typeof response?.output_text === 'string' && response.output_text.trim()) {
+        return stripNullCharacters(response.output_text).trim();
+    }
+
+    const choiceMessage = response?.choices?.[0]?.message || null;
+    if (choiceMessage) {
+        const choiceText = extractRawResponseContentText(
+            choiceMessage.content
+            ?? choiceMessage.parts
+            ?? choiceMessage.items
+            ?? choiceMessage.text
+            ?? choiceMessage.output_text
+            ?? ''
+        ).trim();
+        if (choiceText) {
+            return stripNullCharacters(choiceText).trim();
+        }
+    }
+
+    const candidate = response?.candidates?.[0] || null;
+    if (candidate) {
+        const candidateText = extractRawResponseContentText(
+            candidate.content
+            ?? candidate.parts
+            ?? candidate.text
+            ?? ''
+        ).trim();
+        if (candidateText) {
+            return stripNullCharacters(candidateText).trim();
+        }
+    }
+
+    const output = Array.isArray(response?.output) ? response.output : [];
+    return output
+        .filter((item) => item?.type === 'message' || item?.role === 'assistant')
+        .map((item) => extractRawResponseContentText(item?.content ?? item?.text ?? item?.output_text ?? ''))
         .filter(Boolean)
         .join('\n')
         .replace(/\u0000/g, '')
@@ -912,6 +1015,105 @@ function isFrontendDemoArtifactRequest(prompt = '') {
         || isDashboardRequest(normalized);
 }
 
+function shouldEnableArtifactToolOrchestration(prompt = '', format = '') {
+    const normalizedPrompt = String(prompt || '').trim().toLowerCase();
+    const normalizedFormat = normalizeFormat(format);
+    if (!normalizedPrompt || normalizedFormat !== 'html') {
+        return false;
+    }
+
+    if (!isFrontendDemoArtifactRequest(normalizedPrompt)) {
+        return false;
+    }
+
+    return /\b(research|source|sources|citations?|latest|recent|news|headlines?|sub-?agents?|delegate|parallel)\b/.test(normalizedPrompt);
+}
+
+function buildFrontendArtifactPayload(responseText = '') {
+    const parsed = safeJsonParse(responseText);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const fallbackMetadata = buildFrontendFallbackMetadata(responseText);
+        return {
+            content: responseText,
+            metadata: fallbackMetadata,
+        };
+    }
+
+    const parsedContent = typeof parsed.content === 'string'
+        ? parsed.content
+        : String(parsed.content || '');
+    const rawMetadata = parsed.metadata && typeof parsed.metadata === 'object' && !Array.isArray(parsed.metadata)
+        ? { ...parsed.metadata }
+        : {};
+    if (parsed.bundle && rawMetadata.bundle == null) {
+        rawMetadata.bundle = parsed.bundle;
+    }
+    if (parsed.siteBundle && rawMetadata.bundle == null && rawMetadata.siteBundle == null) {
+        rawMetadata.bundle = parsed.siteBundle;
+    }
+    if (parsed.handoff && rawMetadata.handoff == null) {
+        rawMetadata.handoff = parsed.handoff;
+    }
+    if (parsed.frameworkTarget && rawMetadata.frameworkTarget == null) {
+        rawMetadata.frameworkTarget = parsed.frameworkTarget;
+    }
+    if (parsed.routing && rawMetadata.bundle && typeof rawMetadata.bundle === 'object' && !Array.isArray(rawMetadata.bundle)
+        && rawMetadata.bundle.routing == null) {
+        rawMetadata.bundle = {
+            ...rawMetadata.bundle,
+            routing: parsed.routing,
+        };
+    }
+    if (parsed.title && rawMetadata.title == null) {
+        rawMetadata.title = parsed.title;
+    }
+
+    const metadata = normalizeFrontendMetadata(rawMetadata, parsedContent);
+    const entryFile = Array.isArray(metadata.bundle?.files)
+        ? metadata.bundle.files.find((file) => file?.path === metadata.bundle.entry)
+            || metadata.bundle.files.find((file) => /\.html?$/i.test(String(file?.path || '')))
+        : null;
+    const renderContent = typeof entryFile?.content === 'string' && entryFile.content.trim()
+        ? entryFile.content
+        : parsedContent;
+
+    return {
+        content: renderContent,
+        metadata,
+    };
+}
+
+function buildFrontendBundleGenerationInstructions({
+    promptContext = '',
+    existingContent = '',
+    requestPrompt = '',
+    requestedPageCount = null,
+    dashboardInstructions = '',
+} = {}) {
+    const pageCountNote = requestedPageCount
+        ? `Create ${requestedPageCount} distinct HTML pages unless the request explicitly needs fewer.`
+        : 'Create 5 distinct HTML pages when the request implies a full site but does not specify a count.';
+
+    return [
+        'You are generating a full website preview bundle that will be zipped and sandbox-previewed directly from the server.',
+        'Return valid JSON only. Do not use markdown fences.',
+        'Use exactly this top-level shape: {"content":"...","metadata":{"title":"...","language":"html","frameworkTarget":"static|vite","previewMode":"site","bundle":{"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Home page","content":"..."}]},"handoff":{"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}}}.',
+        'The `content` field must contain the entry HTML file content, and that same entry file must also appear in `metadata.bundle.files`.',
+        pageCountNote,
+        'Create real multi-page navigation with relative URLs only. Never use leading-slash URLs such as `/about` or `/styles.css` because the preview runs from a nested artifact route.',
+        'Every HTML page must feel complete and intentionally designed, not like filler placeholders around a shared shell.',
+        'Include shared assets such as CSS, JSON fixtures, and JavaScript modules in `metadata.bundle.files` when they support the site.',
+        'If you choose `frameworkTarget: "vite"`, keep the preview dependency-free and browser-runnable with native ES modules so it still works without install or build steps. You may include `package.json` and `vite.config.js` as handoff files, but do not depend on npm packages for the sandbox preview.',
+        'Use stable ids or data-component attributes on major sections to support later repo extraction.',
+        'Keep the content grounded, concrete, and production-like.',
+        buildDocumentImageInstructions(),
+        dashboardInstructions,
+        promptContext,
+        existingContent ? `Existing content to revise:\n${existingContent}` : '',
+        `User request:\n${requestPrompt}`,
+    ].filter(Boolean).join('\n\n');
+}
+
 class ArtifactService {
     ensureEnabled() {
         if (!postgres.enabled) {
@@ -948,6 +1150,30 @@ class ArtifactService {
     serializeArtifact(artifact) {
         if (!artifact) return null;
 
+        const metadata = artifact.metadata && typeof artifact.metadata === 'object' && !Array.isArray(artifact.metadata)
+            ? artifact.metadata
+            : {};
+        const frontendMetadata = artifact.extension === 'html' && (metadata.type === 'frontend' || metadata.bundle || metadata.siteBundle)
+            ? normalizeFrontendMetadata(metadata, artifact.previewHtml || artifact.extractedText || '')
+            : null;
+        const siteBundle = metadata.siteBundle || frontendMetadata?.bundle || null;
+        const siteBundleFileCount = Array.isArray(siteBundle?.files)
+            ? siteBundle.files.length
+            : Number(siteBundle?.fileCount || 0);
+        const hasSiteBundle = siteBundleFileCount > 1;
+        const previewUrl = artifact.extension === 'html'
+            ? `/api/artifacts/${artifact.id}/preview`
+            : null;
+        const bundleDownloadUrl = hasSiteBundle
+            ? `/api/artifacts/${artifact.id}/bundle`
+            : null;
+        const serializedMetadata = frontendMetadata
+            ? sanitizeFrontendArtifactMetadata({
+                ...metadata,
+                ...frontendMetadata,
+            }, artifact.previewHtml || artifact.extractedText || '')
+            : metadata;
+
         return {
             id: artifact.id,
             sessionId: artifact.sessionId,
@@ -961,10 +1187,19 @@ class ArtifactService {
             status: 'ready',
             vectorized: Boolean(artifact.vectorizedAt),
             downloadUrl: `/api/artifacts/${artifact.id}/download`,
-            preview: artifact.previewHtml
+            previewUrl,
+            bundleDownloadUrl,
+            preview: hasSiteBundle
+                ? {
+                    type: 'site',
+                    entry: siteBundle.entry,
+                    fileCount: siteBundleFileCount,
+                    url: previewUrl,
+                }
+                : artifact.previewHtml
                 ? { type: 'html', content: artifact.previewHtml }
                 : (artifact.extractedText ? { type: 'text', content: artifact.extractedText.slice(0, 4000) } : null),
-            metadata: artifact.metadata || {},
+            metadata: serializedMetadata,
             createdAt: artifact.createdAt,
         };
     }
@@ -1215,38 +1450,85 @@ class ArtifactService {
         };
     }
 
-    getGenerationInstructions(format, existingContent = '', promptContext = '', creativityPacket = null, requestPrompt = '') {
+    getGenerationInstructions(format, existingContent = '', promptContext = '', creativityPacket = null, requestPrompt = '', allowToolOrchestration = false) {
         const normalizedFormat = normalizeFormat(format);
         const creativityContext = renderCreativityPromptContext(creativityPacket);
         const dashboardInstructions = normalizedFormat === 'html'
             ? buildDashboardHtmlInstructions(requestPrompt, existingContent)
             : '';
-        const base = [
+        const baseContext = [
             'You are the LillyBuilt Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
-            'Do not use external tools, function calls, or tool invocation syntax.',
+            allowToolOrchestration
+                ? 'Use available tools when they materially improve factual grounding, research coverage, or delegated page planning. Do not mention tool invocation syntax or process notes in the final artifact output.'
+                : 'Do not use external tools, function calls, or tool invocation syntax.',
             'Do not mention environment limitations, permissions, API keys, or inability to create files.',
             'The platform will render, store, and deliver the file artifact for the user.',
             promptContext,
             creativityContext,
+        ].filter(Boolean).join('\n\n');
+        const base = [
+            baseContext,
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
         ].filter(Boolean).join('\n\n');
+        const complexFrontendBundleRequest = normalizedFormat === 'html'
+            && isComplexFrontendBundleRequest(requestPrompt, existingContent);
+        const requestedPageCount = complexFrontendBundleRequest
+            ? extractRequestedSitePageCount(requestPrompt)
+            : null;
+
+        if (complexFrontendBundleRequest) {
+            return buildFrontendBundleGenerationInstructions({
+                promptContext: baseContext,
+                existingContent,
+                requestPrompt,
+                requestedPageCount,
+                dashboardInstructions,
+            });
+        }
 
         if (normalizedFormat === 'html' && isFrontendDemoArtifactRequest(requestPrompt || `${promptContext}\n${existingContent}`)) {
             return [
                 base,
                 buildDocumentImageInstructions(),
                 dashboardInstructions,
-                'Return standalone HTML only.',
-                'Start at the first character with <!DOCTYPE html> and include no preface, explanation, or trailing notes.',
+                'Return JSON only. No markdown fences.',
                 'Build a polished frontend demo instead of a plain document.',
-                'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium landing-page or microsite feel.',
+                'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium landing-page, editorial site, or microsite feel.',
                 'Use semantic sections, responsive CSS, and purposeful but restrained interaction.',
                 'Keep the result portable so it can be moved into a real frontend repository later.',
                 'Use stable ids or data-component attributes on major sections to help later component extraction.',
                 'Prefer realistic copy, concrete sections, and clean calls to action over filler cards or placeholder boxes.',
-                'Inline CSS and JavaScript are acceptable when they help keep the demo self-contained.',
-                'Do not output markdown fences, implementation notes, or follow-up instructions.',
+                'When the request asks for a full website, news site, or multi-page experience, return a linked bundle with multiple HTML pages plus shared assets instead of a single-page mockup.',
+                'Support static-server preview first. If you target Vite, React, or Next-style handoff, still make the preview files browser-runnable without a bundler by using relative modules or browser-compatible URLs instead of unresolved bare package imports.',
+                'Mirror the preview entry page in `content`, and place the complete site files in `metadata.bundle`.',
+                'Return exactly this shape:',
+                '{',
+                '  "content": "<!DOCTYPE html>...",',
+                '  "metadata": {',
+                '    "title": "Project title",',
+                '    "language": "html",',
+                '    "frameworkTarget": "static|vite|react|nextjs",',
+                '    "previewMode": "site",',
+                '    "bundle": {',
+                '      "entry": "index.html",',
+                '      "files": [',
+                '        { "path": "index.html", "language": "html", "purpose": "Home page", "content": "<!DOCTYPE html>..." },',
+                '        { "path": "world.html", "language": "html", "purpose": "Secondary page", "content": "<!DOCTYPE html>..." },',
+                '        { "path": "styles.css", "language": "css", "purpose": "Shared site styles", "content": "..." },',
+                '        { "path": "app.js", "language": "javascript", "purpose": "Shared interactions", "content": "..." }',
+                '      ]',
+                '    },',
+                '    "handoff": {',
+                '      "summary": "How to move this into a real repo",',
+                '      "targetFramework": "static|vite|react|nextjs",',
+                '      "componentMap": [{ "name": "Hero", "purpose": "Top-level message", "targetPath": "src/components/Hero.jsx" }],',
+                '      "integrationSteps": ["Step 1", "Step 2"]',
+                '    }',
+                '  }',
+                '}',
+                'Make sure every file in `metadata.bundle.files` uses a unique relative path and valid file contents.',
+                'Do not output implementation notes, markdown fences, or follow-up instructions.',
             ].filter(Boolean).join('\n\n');
         }
 
@@ -1285,6 +1567,10 @@ class ArtifactService {
         previousResponseId = null,
         contextMessages = [],
         recentMessages = [],
+        toolManager = null,
+        toolContext = {},
+        enableAutomaticToolCalls = false,
+        executionProfile = 'default',
     }) {
         const response = await requestModelResponse({
             input,
@@ -1295,11 +1581,16 @@ class ArtifactService {
             stream: false,
             model,
             reasoningEffort,
+            toolManager,
+            toolContext,
+            enableAutomaticToolCalls,
+            executionProfile,
         });
 
         return {
             responseId: response.id,
             outputText: extractResponseText(response),
+            rawOutputText: extractRawResponseText(response),
         };
     }
 
@@ -1498,6 +1789,10 @@ class ArtifactService {
         creativityPacket = null,
         contextMessages = [],
         recentMessages = [],
+        toolManager = null,
+        toolContext = {},
+        enableAutomaticToolCalls = false,
+        executionProfile = 'default',
     }) {
         const resolvedImageReferences = Array.isArray(imageReferences) ? imageReferences : [];
         const resolvedImageReferenceContext = imageReferenceContext || this.formatImageReferenceContext(resolvedImageReferences);
@@ -1514,6 +1809,10 @@ class ArtifactService {
             previousResponseId: session?.previousResponseId || null,
             contextMessages,
             recentMessages,
+            toolManager,
+            toolContext,
+            enableAutomaticToolCalls,
+            executionProfile,
         });
 
         const parsedPlan = safeJsonParse(planPass.outputText) || {};
@@ -1565,6 +1864,10 @@ class ArtifactService {
             previousResponseId: planPass.responseId || null,
             contextMessages,
             recentMessages,
+            toolManager,
+            toolContext,
+            enableAutomaticToolCalls,
+            executionProfile,
         });
 
         const parsedExpanded = safeJsonParse(expansionPass.outputText) || {};
@@ -1601,6 +1904,10 @@ class ArtifactService {
             previousResponseId: expansionPass.responseId || planPass.responseId || null,
             contextMessages,
             recentMessages,
+            toolManager,
+            toolContext,
+            enableAutomaticToolCalls,
+            executionProfile,
         });
 
         const usedCompositionRecovery = shouldRecoverCompositionOutput(compositionPass.outputText, expandedDocument);
@@ -1650,9 +1957,15 @@ class ArtifactService {
         parentArtifactId = null,
         contextMessages = [],
         recentMessages = [],
+        toolManager = null,
+        toolContext = {},
+        executionProfile = 'default',
     }) {
         const normalizedFormat = normalizeFormat(format);
         const frontendDemoRequest = normalizedFormat === 'html' && isFrontendDemoArtifactRequest(prompt);
+        const complexFrontendBundleRequest = normalizedFormat === 'html'
+            && isComplexFrontendBundleRequest(prompt, [template, existingContent].filter(Boolean).join('\n\n'));
+        const enableArtifactToolOrchestration = shouldEnableArtifactToolOrchestration(prompt, normalizedFormat);
         if (!SUPPORTED_GENERATION_FORMATS.has(normalizedFormat)) {
             throw new Error(`Unsupported generation format: ${format}`);
         }
@@ -1697,6 +2010,7 @@ class ArtifactService {
                             [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
                             creativityPacket,
                             prompt,
+                            enableArtifactToolOrchestration,
                         ),
                     ),
                     model,
@@ -1704,10 +2018,15 @@ class ArtifactService {
                     previousResponseId: session?.previousResponseId || null,
                     contextMessages,
                     recentMessages,
+                    toolManager,
+                    toolContext,
+                    enableAutomaticToolCalls: enableArtifactToolOrchestration,
+                    executionProfile,
                 })),
                 title: inferDocumentTitle(prompt, 'Frontend Demo'),
                 metadata: {
                     generationStrategy: 'single-pass-frontend-demo',
+                    toolOrchestrationEnabled: enableArtifactToolOrchestration,
                 },
             }
             : MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
@@ -1724,6 +2043,10 @@ class ArtifactService {
                 creativityPacket,
                 contextMessages,
                 recentMessages,
+                toolManager,
+                toolContext,
+                enableAutomaticToolCalls: enableArtifactToolOrchestration,
+                executionProfile,
             })
             : await this.runGenerationPass({
                 session: instructionSession,
@@ -1736,6 +2059,7 @@ class ArtifactService {
                         [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
                         creativityPacket,
                         prompt,
+                        enableArtifactToolOrchestration,
                     ),
                 ),
                 model,
@@ -1743,23 +2067,47 @@ class ArtifactService {
                 previousResponseId: session?.previousResponseId || null,
                 contextMessages,
                 recentMessages,
+                toolManager,
+                toolContext,
+                enableAutomaticToolCalls: enableArtifactToolOrchestration,
+                executionProfile,
             });
 
-        const outputText = generated.outputText;
-        const unwrapped = unwrapCodeFence(outputText);
-        const title = generated.title || `${normalizedFormat}-${new Date().toISOString().slice(0, 10)}`;
+        const outputText = frontendDemoRequest
+            ? (generated.rawOutputText || generated.outputText)
+            : generated.outputText;
+        const frontendPayload = frontendDemoRequest
+            ? buildFrontendArtifactPayload(outputText)
+            : null;
+        const hasFrontendBundleArchive = Array.isArray(frontendPayload?.metadata?.bundle?.files)
+            && (
+                frontendPayload.metadata.bundle.files.length > 1
+                || String(frontendPayload.metadata?.frameworkTarget || '').trim().toLowerCase() === 'vite'
+                || complexFrontendBundleRequest
+            );
+        const renderSource = frontendPayload
+            ? frontendPayload.content
+            : unwrapCodeFence(outputText);
+        const title = frontendPayload?.metadata?.title
+            || generated.title
+            || `${normalizedFormat}-${new Date().toISOString().slice(0, 10)}`;
 
-        const rendered = normalizedFormat === 'xlsx'
+        const rendered = hasFrontendBundleArchive
+            ? buildFrontendBundleArtifact({
+                ...frontendPayload.metadata.bundle,
+                frameworkTarget: frontendPayload.metadata.frameworkTarget,
+            }, title)
+            : normalizedFormat === 'xlsx'
             ? await renderArtifact({
                 format: normalizedFormat,
                 title,
-                content: unwrapped,
-                workbookSpec: tryParseJson(unwrapped, title),
+                content: renderSource,
+                workbookSpec: tryParseJson(renderSource, title),
             })
             : await renderArtifact({
                 format: normalizedFormat,
                 title,
-                content: unwrapped,
+                content: renderSource,
             });
         const creativeMetadata = creativityPacket
             ? {
@@ -1800,6 +2148,7 @@ class ArtifactService {
                 artifactIds,
                 ...creativeMetadata,
                 ...dashboardMetadata,
+                ...(frontendPayload?.metadata || {}),
                 ...(generated.metadata || {}),
             },
             vectorize: Boolean(rendered.extractedText),

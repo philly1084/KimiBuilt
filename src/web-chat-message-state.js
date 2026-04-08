@@ -93,6 +93,10 @@ function normalizeSurveyDisplayContent(value = '') {
 }
 
 function shouldCollapseArtifactTranscript(artifact) {
+    if (typeof artifact?.previewUrl === 'string' && artifact.previewUrl.trim()) {
+        return true;
+    }
+
     const format = String(artifact?.format || '').toLowerCase();
     const filename = String(artifact?.filename || '').toLowerCase();
     return COLLAPSIBLE_ARTIFACT_FORMATS.has(format)
@@ -108,6 +112,8 @@ function normalizeAssistantArtifacts(artifacts = []) {
             filename: String(artifact.filename || '').trim(),
             format: String(artifact.format || '').trim(),
             downloadUrl: String(artifact.downloadUrl || '').trim(),
+            previewUrl: String(artifact.previewUrl || '').trim(),
+            bundleDownloadUrl: String(artifact.bundleDownloadUrl || '').trim(),
         }));
 }
 
@@ -117,12 +123,16 @@ function buildArtifactSummary(artifacts = []) {
         return '';
     }
 
-    const hasHtml = files.some((artifact) => {
+    const hasPreview = files.some((artifact) => {
+        if (typeof artifact?.previewUrl === 'string' && artifact.previewUrl.trim()) {
+            return true;
+        }
+
         const format = String(artifact?.format || '').toLowerCase();
         const filename = String(artifact?.filename || '').toLowerCase();
         return format === 'html' || filename.endsWith('.html') || filename.endsWith('.htm');
     });
-    const actionLabel = hasHtml ? 'Preview and Download below.' : 'Use Download below.';
+    const actionLabel = hasPreview ? 'Preview and Download below.' : 'Use Download below.';
 
     if (files.length === 1) {
         return `Created ${files[0].filename}. ${actionLabel}`;

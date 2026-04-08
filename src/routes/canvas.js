@@ -7,6 +7,10 @@ const { buildInstructionsWithArtifacts, maybeGenerateOutputArtifact, resolveReas
 const { extractResponseText } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { buildDashboardTemplatePromptContext, isDashboardRequest } = require('../dashboard-template-catalog');
+const {
+    buildFrontendFallbackMetadata,
+    normalizeFrontendMetadata,
+} = require('../frontend-bundles');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
@@ -110,152 +114,6 @@ async function buildCanvasTemplateSelection(templateStore, {
     }
 
     return selection;
-}
-
-function inferFrontendTitle(content = '') {
-    const source = String(content || '').trim();
-    if (!source) {
-        return 'Frontend Demo';
-    }
-
-    const titleMatch = source.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    if (titleMatch?.[1]) {
-        return titleMatch[1].replace(/\s+/g, ' ').trim();
-    }
-
-    const h1Match = source.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-    if (h1Match?.[1]) {
-        return h1Match[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    }
-
-    return 'Frontend Demo';
-}
-
-function normalizeFrontendBundle(bundle = null, content = '') {
-    const files = [];
-    const source = bundle?.files;
-
-    if (Array.isArray(source)) {
-        source.forEach((entry) => {
-            if (!entry || typeof entry !== 'object') {
-                return;
-            }
-
-            const fileContent = typeof entry.content === 'string' ? entry.content : '';
-            const filePath = String(entry.path || entry.name || '').trim();
-            if (!filePath || !fileContent.trim()) {
-                return;
-            }
-
-            files.push({
-                path: filePath,
-                language: String(entry.language || '').trim() || null,
-                purpose: String(entry.purpose || '').trim() || null,
-                content: fileContent,
-            });
-        });
-    } else if (source && typeof source === 'object') {
-        Object.entries(source).forEach(([filePath, fileContent]) => {
-            if (!String(filePath || '').trim() || typeof fileContent !== 'string' || !fileContent.trim()) {
-                return;
-            }
-
-            files.push({
-                path: String(filePath).trim(),
-                language: null,
-                purpose: null,
-                content: fileContent,
-            });
-        });
-    }
-
-    if (!files.find((entry) => entry.path.toLowerCase() === 'index.html') && String(content || '').trim()) {
-        files.unshift({
-            path: 'index.html',
-            language: 'html',
-            purpose: 'Standalone demo entry point for preview and export.',
-            content: String(content || '').trim(),
-        });
-    }
-
-    return {
-        entry: String(bundle?.entry || 'index.html').trim() || 'index.html',
-        files,
-    };
-}
-
-function normalizeFrontendHandoff(handoff = null, metadata = {}, content = '') {
-    const targetFramework = String(
-        handoff?.targetFramework
-        || handoff?.framework
-        || metadata.frameworkTarget
-        || 'static'
-    ).trim() || 'static';
-
-    const componentMap = Array.isArray(handoff?.componentMap)
-        ? handoff.componentMap
-            .map((entry) => ({
-                name: String(entry?.name || '').trim(),
-                purpose: String(entry?.purpose || '').trim(),
-                targetPath: String(entry?.targetPath || '').trim() || null,
-            }))
-            .filter((entry) => entry.name && entry.purpose)
-        : [];
-
-    const integrationSteps = Array.isArray(handoff?.integrationSteps)
-        ? handoff.integrationSteps
-            .map((entry) => String(entry || '').trim())
-            .filter(Boolean)
-        : [];
-
-    return {
-        summary: String(
-            handoff?.summary
-            || metadata.summary
-            || 'Portable frontend demo with a standalone HTML preview and repo-ready file guidance.'
-        ).trim() || 'Portable frontend demo with a standalone HTML preview and repo-ready file guidance.',
-        targetFramework,
-        componentMap,
-        integrationSteps: integrationSteps.length > 0
-            ? integrationSteps
-            : [
-                'Keep the generated demo as a visual reference first, then split it into project components.',
-                'Move shared colors, spacing, and typography into your design system tokens.',
-                'Replace demo copy, mock data, and inline scripts with live project data and components.',
-            ],
-        entryFile: String(handoff?.entryFile || 'index.html').trim() || 'index.html',
-        sourceType: /<html\b/i.test(String(content || '')) ? 'standalone-html' : 'markup-fragment',
-    };
-}
-
-function buildFrontendFallbackMetadata(content = '') {
-    const title = inferFrontendTitle(content);
-    return {
-        type: 'frontend',
-        title,
-        language: 'html',
-        frameworkTarget: 'static',
-        previewMode: 'iframe',
-        bundle: normalizeFrontendBundle(null, content),
-        handoff: normalizeFrontendHandoff({ summary: `Standalone frontend demo for ${title}.` }, {}, content),
-    };
-}
-
-function normalizeFrontendMetadata(metadata = {}, content = '') {
-    const normalized = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-        ? { ...metadata }
-        : {};
-
-    return {
-        ...normalized,
-        type: 'frontend',
-        title: String(normalized.title || '').trim() || inferFrontendTitle(content),
-        language: String(normalized.language || 'html').trim() || 'html',
-        frameworkTarget: String(normalized.frameworkTarget || normalized.framework || 'static').trim() || 'static',
-        previewMode: 'iframe',
-        bundle: normalizeFrontendBundle(normalized.bundle, content),
-        handoff: normalizeFrontendHandoff(normalized.handoff, normalized, content),
-    };
 }
 
 router.post('/', validate(canvasSchema), async (req, res, next) => {
@@ -496,7 +354,7 @@ Always respond with valid JSON in this format:
         code: '\n\nYou are generating CODE. Include the programming language in metadata.language. Provide working, well-commented code. Suggestions should be improvements or alternative approaches.',
         document: '\n\nYou are generating a DOCUMENT. Use markdown formatting. Include a title in metadata.title. Suggestions should be ways to expand or improve the document.',
         diagram: '\n\nYou are generating a DIAGRAM using Mermaid syntax. Include the diagram type in metadata.type (flowchart, sequence, etc). Suggestions should be ways to enhance the diagram.',
-        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML. Favor polished marketing sites, product pages, landing pages, editorial promos, dashboards, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. When the request is dashboard-oriented, choose one dashboard template from the provided catalog, include metadata.dashboardTemplate as {"id":"...","label":"...","rationale":"..."}, include metadata.dashboardTemplateOptions as [{"id":"...","label":"..."}], set <body data-dashboard-template="template-id">, and add data-dashboard-zone attributes on major layout regions. Suggestions should be concrete next frontend iterations.',
+        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML for the entry page. Favor polished marketing sites, product pages, landing pages, editorial promos, dashboards, news sites, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "vite", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"world.html","language":"html","purpose":"Secondary page","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. When the request implies a full website or multiple pages, include a linked multi-page bundle instead of a single screen. If metadata.frameworkTarget is "vite", still keep the preview files browser-runnable from a static server by using relative modules or browser-compatible URLs instead of unresolved bare imports. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. When the request is dashboard-oriented, choose one dashboard template from the provided catalog, include metadata.dashboardTemplate as {"id":"...","label":"...","rationale":"..."}, include metadata.dashboardTemplateOptions as [{"id":"...","label":"..."}], set <body data-dashboard-template="template-id">, and add data-dashboard-zone attributes on major layout regions. Suggestions should be concrete next frontend iterations.',
     };
 
     let instructions = base + (typeInstructions[canvasType] || typeInstructions.document);

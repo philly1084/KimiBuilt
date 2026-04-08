@@ -1,6 +1,8 @@
 const { inferFormat, normalizeFormat } = require('./artifacts/constants');
 
 const INTERNAL_DOWNLOAD_PATH_PATTERN = /\/api\/(?:artifacts|documents)\/[^/?#]+\/download\b/i;
+const INTERNAL_PREVIEW_PATH_PATTERN = /\/api\/artifacts\/[^/?#]+\/preview(?:\b|\/)/i;
+const INTERNAL_BUNDLE_PATH_PATTERN = /\/api\/artifacts\/[^/?#]+\/bundle\b/i;
 const ARTIFACT_RESULT_KEYS = [
     'artifact',
     'artifacts',
@@ -11,18 +13,30 @@ const ARTIFACT_RESULT_KEYS = [
 ];
 
 function normalizeDownloadUrl(value = '') {
+    return normalizeInternalUrl(value, INTERNAL_DOWNLOAD_PATH_PATTERN);
+}
+
+function normalizePreviewUrl(value = '') {
+    return normalizeInternalUrl(value, INTERNAL_PREVIEW_PATH_PATTERN);
+}
+
+function normalizeBundleDownloadUrl(value = '') {
+    return normalizeInternalUrl(value, INTERNAL_BUNDLE_PATH_PATTERN);
+}
+
+function normalizeInternalUrl(value = '', pattern = INTERNAL_DOWNLOAD_PATH_PATTERN) {
     const trimmed = String(value || '').trim().replace(/[),.;:!?]+$/g, '');
     if (!trimmed) {
         return null;
     }
 
     if (trimmed.startsWith('/')) {
-        return INTERNAL_DOWNLOAD_PATH_PATTERN.test(trimmed) ? trimmed : null;
+        return pattern.test(trimmed) ? trimmed : null;
     }
 
     try {
         const parsed = new URL(trimmed);
-        return INTERNAL_DOWNLOAD_PATH_PATTERN.test(parsed.pathname) ? parsed.toString() : null;
+        return pattern.test(parsed.pathname) ? parsed.toString() : null;
     } catch (_error) {
         return null;
     }
@@ -71,6 +85,12 @@ function normalizeArtifactEntry(value = null) {
     const metadata = value.metadata && typeof value.metadata === 'object' && !Array.isArray(value.metadata)
         ? value.metadata
         : {};
+    const previewUrl = normalizePreviewUrl(value.previewUrl || value.preview_url || '');
+    const bundleDownloadUrl = normalizeBundleDownloadUrl(
+        value.bundleDownloadUrl
+        || value.bundle_download_url
+        || '',
+    );
 
     return {
         id,
@@ -82,6 +102,8 @@ function normalizeArtifactEntry(value = null) {
         sizeBytes: size,
         downloadUrl,
         metadata,
+        ...(previewUrl ? { previewUrl } : {}),
+        ...(bundleDownloadUrl ? { bundleDownloadUrl } : {}),
         ...(value.preview != null ? { preview: value.preview } : {}),
         ...(typeof value.contentPreview === 'string' && value.contentPreview.trim()
             ? { contentPreview: value.contentPreview.trim() }
@@ -143,6 +165,12 @@ function mergeRuntimeArtifacts(...artifactSets) {
             mimeType: String(artifact.mimeType || '').trim(),
             downloadUrl: normalizeDownloadUrl(artifact.downloadUrl || artifact.inlinePath || '')
                 || buildFallbackDownloadUrl(artifact.id),
+            ...(normalizePreviewUrl(artifact.previewUrl || artifact.preview_url || '')
+                ? { previewUrl: normalizePreviewUrl(artifact.previewUrl || artifact.preview_url || '') }
+                : {}),
+            ...(normalizeBundleDownloadUrl(artifact.bundleDownloadUrl || artifact.bundle_download_url || '')
+                ? { bundleDownloadUrl: normalizeBundleDownloadUrl(artifact.bundleDownloadUrl || artifact.bundle_download_url || '') }
+                : {}),
         };
         const identity = normalized.id || normalized.downloadUrl || '';
         if (!identity || seen.has(identity)) {

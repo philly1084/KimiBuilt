@@ -368,6 +368,172 @@ describe('ArtifactService', () => {
         expect(result.responseId).toBe('resp-frontend-1');
     });
 
+    test('stores multi-page frontend bundles as previewable zip artifacts', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-frontend-bundle-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: JSON.stringify({
+                        content: '<!DOCTYPE html><html><head><title>Newsroom</title></head><body><nav><a href="world.html">World</a></nav><main><h1>Front Page</h1></main></body></html>',
+                        metadata: {
+                            title: 'Newsroom',
+                            frameworkTarget: 'vite',
+                            bundle: {
+                                entry: 'index.html',
+                                files: [
+                                    {
+                                        path: 'index.html',
+                                        language: 'html',
+                                        purpose: 'Front page',
+                                        content: '<!DOCTYPE html><html><head><title>Newsroom</title></head><body><nav><a href="world.html">World</a></nav><main><h1>Front Page</h1></main></body></html>',
+                                    },
+                                    {
+                                        path: 'world.html',
+                                        language: 'html',
+                                        purpose: 'World desk',
+                                        content: '<!DOCTYPE html><html><head><title>World</title></head><body><main><h1>World Desk</h1></main></body></html>',
+                                    },
+                                    {
+                                        path: 'styles.css',
+                                        language: 'css',
+                                        purpose: 'Shared styles',
+                                        content: 'body { font-family: system-ui; }',
+                                    },
+                                ],
+                            },
+                            handoff: {
+                                summary: 'Move bundle files into a Vite workspace when ready.',
+                                targetFramework: 'vite',
+                            },
+                        },
+                    }),
+                }],
+            }],
+        });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-frontend-bundle', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Build a 5 page news website demo for a city newsroom with Vite-ready files.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Return valid JSON only');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Create 5 distinct HTML pages');
+        expect(renderArtifact).not.toHaveBeenCalled();
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            extension: 'zip',
+            mimeType: 'application/zip',
+            metadata: expect.objectContaining({
+                frameworkTarget: 'vite',
+                generationStrategy: 'single-pass-frontend-demo',
+                siteBundle: expect.objectContaining({
+                    entry: 'index.html',
+                    fileCount: 3,
+                    htmlPageCount: 2,
+                }),
+                bundle: expect.objectContaining({
+                    entry: 'index.html',
+                    files: expect.arrayContaining([
+                        expect.objectContaining({ path: 'index.html' }),
+                        expect.objectContaining({ path: 'world.html' }),
+                        expect.objectContaining({ path: 'styles.css' }),
+                    ]),
+                }),
+            }),
+        }));
+    });
+
+    test('allows tool orchestration for research-backed frontend artifacts', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-frontend-research-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: '<!DOCTYPE html><html><body><h1>Newsroom Research Demo</h1></body></html>',
+                }],
+            }],
+        });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-frontend-research', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Research the latest news layout patterns, delegate section planning to sub-agents, and build a frontend demo for a newsroom homepage.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+            toolManager: { id: 'tool-manager' },
+            toolContext: { sessionId: 'session-1' },
+        });
+
+        expect(createResponse.mock.calls[0][0]).toEqual(expect.objectContaining({
+            enableAutomaticToolCalls: true,
+            toolManager: { id: 'tool-manager' },
+            toolContext: { sessionId: 'session-1' },
+        }));
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Use available tools when they materially improve factual grounding');
+        expect(createResponse.mock.calls[0][0]?.instructions).not.toContain('Do not use external tools, function calls, or tool invocation syntax.');
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                toolOrchestrationEnabled: true,
+            }),
+        }));
+    });
+
+    test('serializeArtifact exposes server preview and bundle download paths for site bundles', () => {
+        const serialized = artifactService.serializeArtifact({
+            id: 'artifact-site-1',
+            sessionId: 'session-1',
+            parentArtifactId: null,
+            direction: 'generated',
+            sourceMode: 'chat',
+            filename: 'newsroom.html',
+            extension: 'html',
+            mimeType: 'text/html',
+            sizeBytes: 1024,
+            vectorizedAt: null,
+            previewHtml: '<!DOCTYPE html><html><body><h1>Newsroom</h1></body></html>',
+            metadata: {
+                type: 'frontend',
+                title: 'Newsroom',
+                bundle: {
+                    entry: 'index.html',
+                    files: [
+                        {
+                            path: 'index.html',
+                            language: 'html',
+                            purpose: 'Home',
+                            content: '<!DOCTYPE html><html><body><h1>Newsroom</h1></body></html>',
+                        },
+                        {
+                            path: 'world.html',
+                            language: 'html',
+                            purpose: 'World',
+                            content: '<!DOCTYPE html><html><body><h1>World</h1></body></html>',
+                        },
+                    ],
+                },
+            },
+            createdAt: '2026-04-08T00:00:00.000Z',
+        });
+
+        expect(serialized.previewUrl).toBe('/api/artifacts/artifact-site-1/preview');
+        expect(serialized.bundleDownloadUrl).toBe('/api/artifacts/artifact-site-1/bundle');
+        expect(serialized.preview).toEqual(expect.objectContaining({
+            type: 'site',
+            entry: 'index.html',
+            fileCount: 2,
+            url: '/api/artifacts/artifact-site-1/preview',
+        }));
+    });
+
     test('injects dashboard template guidance for dashboard html artifacts', async () => {
         createResponse.mockResolvedValueOnce({
             id: 'resp-dashboard-1',

@@ -311,6 +311,21 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     ? artifactMemory
                     : (artifactMemory.contextMessages || []),
                 recentMessages: artifactRecentMessages,
+                toolManager,
+                toolContext: {
+                    sessionId,
+                    route: '/api/chat',
+                    transport: 'http',
+                    memoryService,
+                    ownerId,
+                    clientSurface,
+                    memoryScope,
+                    memoryKeywords,
+                    timezone: requestTimezone,
+                    now: requestNow,
+                    workloadService: req.app.locals.agentWorkloadService,
+                },
+                executionProfile,
             });
             const responseArtifacts = mergeRuntimeArtifacts(
                 preparedImages.artifacts,

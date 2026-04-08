@@ -434,7 +434,11 @@
         return '';
     }
 
-    function getFileIconClass(filename) {
+    function getFileIconClass(filename, artifact = null) {
+        if (artifact?.previewUrl && artifact?.bundleDownloadUrl) {
+            return 'html';
+        }
+
         const ext = filename.split('.').pop()?.toLowerCase();
         const docExts = ['doc', 'docx'];
         const pdfExts = ['pdf'];
@@ -450,7 +454,11 @@
         return 'code';
     }
 
-    function getFileIcon(filename) {
+    function getFileIcon(filename, artifact = null) {
+        if (artifact?.previewUrl && artifact?.bundleDownloadUrl) {
+            return 'globe';
+        }
+
         const ext = filename.split('.').pop()?.toLowerCase();
         const icons = {
             pdf: 'file-text',
@@ -474,6 +482,10 @@
     }
 
     function shouldCollapseArtifactTranscript(artifact) {
+        if (artifact?.previewUrl) {
+            return true;
+        }
+
         const format = String(artifact?.format || '').toLowerCase();
         const filename = String(artifact?.filename || '').toLowerCase();
         const collapsibleFormats = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'power-query']);
@@ -490,7 +502,10 @@
         const hasHtml = files.some((artifact) => {
             const format = String(artifact?.format || '').toLowerCase();
             const filename = String(artifact?.filename || '').toLowerCase();
-            return format === 'html' || filename.endsWith('.html') || filename.endsWith('.htm');
+            return Boolean(artifact?.previewUrl)
+                || format === 'html'
+                || filename.endsWith('.html')
+                || filename.endsWith('.htm');
         });
         const actionLabel = hasHtml ? 'Preview and Download below.' : 'Use Download below.';
 
@@ -501,11 +516,18 @@
         return `Created ${files.length} files. ${actionLabel}`;
     }
 
-    function isHtmlArtifact(artifact) {
-        return String(artifact?.format || '').toLowerCase() === 'html';
-    }
+    function getArtifactPreviewUrl(artifact) {
+        if (artifact?.previewUrl) {
+            return `${API_BASE}${artifact.previewUrl}`;
+        }
 
-    function getHtmlPreviewUrl(artifact) {
+        const format = String(artifact?.format || '').toLowerCase();
+        const filename = String(artifact?.filename || '').toLowerCase();
+        const isHtmlLike = format === 'html' || filename.endsWith('.html') || filename.endsWith('.htm');
+        if (!isHtmlLike) {
+            return '';
+        }
+
         if (!artifact?.downloadUrl) {
             return '';
         }
@@ -514,13 +536,13 @@
     }
 
     function buildArtifactCardMarkup(artifact) {
-        const iconClass = getFileIconClass(artifact.filename);
-        const iconName = getFileIcon(artifact.filename);
+        const iconClass = getFileIconClass(artifact.filename, artifact);
+        const iconName = getFileIcon(artifact.filename, artifact);
         const mermaidSource = String(artifact.format || '').toLowerCase() === 'mermaid'
             ? getMermaidSourceFromArtifact(artifact)
             : '';
         const mermaidBaseName = getArtifactBaseName(artifact.filename);
-        const htmlPreviewUrl = isHtmlArtifact(artifact) ? getHtmlPreviewUrl(artifact) : '';
+        const htmlPreviewUrl = getArtifactPreviewUrl(artifact);
         const mermaidPreview = mermaidSource
             ? `
                 <div class="artifact-mermaid-preview">
@@ -553,10 +575,11 @@
             ? `
                 <button onclick="artifactManager.openArtifactPreview('${artifact.id}')">
                     <i data-lucide="external-link" class="w-4 h-4"></i>
-                    Preview
+                    ${artifact?.bundleDownloadUrl ? 'Open Site' : 'Preview'}
                 </button>
             `
             : '';
+        const downloadLabel = artifact?.bundleDownloadUrl ? 'Bundle Zip' : 'Download';
 
         return `
             <div class="artifact-generated-card">
@@ -572,7 +595,7 @@
                 <div class="file-actions">
                     <button class="primary" onclick="artifactManager.downloadArtifact('${artifact.id}', '${escapeHtml(artifact.filename)}')">
                         <i data-lucide="download" class="w-4 h-4"></i>
-                        Download
+                        ${downloadLabel}
                     </button>
                     ${mermaidActions}
                     ${htmlActions}
@@ -1075,22 +1098,26 @@
         },
         
         downloadArtifact: async (id, filename) => {
+            const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
             // Use file manager if available
-            if (window.fileManager) {
+            if (window.fileManager && !artifact?.bundleDownloadUrl) {
                 await window.fileManager.downloadFile(id);
                 return;
             }
             
             // Fallback download
             try {
-                const response = await fetch(`${API_BASE}/api/artifacts/${id}/download`);
+                const downloadPath = artifact?.bundleDownloadUrl || artifact?.downloadUrl || `/api/artifacts/${id}/download`;
+                const response = await fetch(`${API_BASE}${downloadPath}`);
                 if (!response.ok) throw new Error('Download failed');
                 
                 const blob = await response.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = filename || 'download';
+                a.download = artifact?.bundleDownloadUrl
+                    ? `${getArtifactBaseName(filename || artifact?.filename || 'site')}.zip`
+                    : (filename || 'download');
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -1104,14 +1131,15 @@
 
         openArtifactPreview: (id) => {
             const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
-            if (!artifact?.downloadUrl) {
+            const previewUrl = getArtifactPreviewUrl(artifact);
+            if (!previewUrl) {
                 if (window.uiHelpers?.showToast) {
                     uiHelpers.showToast('Preview is not available for this file yet.', 'warning');
                 }
                 return;
             }
 
-            window.open(`${API_BASE}${artifact.downloadUrl}?inline=1`, '_blank', 'noopener');
+            window.open(previewUrl, '_blank', 'noopener');
         },
         
         addToContext: (id) => {

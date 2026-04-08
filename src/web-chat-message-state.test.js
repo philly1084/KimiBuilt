@@ -161,6 +161,8 @@ describe('buildWebChatSessionMessages', () => {
                 filename: 'dashboard.html',
                 format: 'html',
                 downloadUrl: '/api/artifacts/artifact-html-1/download',
+                previewUrl: '/api/artifacts/artifact-html-1/preview',
+                bundleDownloadUrl: '/api/artifacts/artifact-html-1/bundle',
             }],
         });
 
@@ -171,6 +173,8 @@ describe('buildWebChatSessionMessages', () => {
                     id: 'artifact-html-1',
                     filename: 'dashboard.html',
                     downloadUrl: '/api/artifacts/artifact-html-1/download',
+                    previewUrl: '/api/artifacts/artifact-html-1/preview',
+                    bundleDownloadUrl: '/api/artifacts/artifact-html-1/bundle',
                 }),
             ],
         }));
