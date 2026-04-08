@@ -39,6 +39,7 @@ describe('ToolManager image tools', () => {
     expect(toolManager.getTool('git-safe')).toBeTruthy();
     expect(toolManager.getTool('k3s-deploy')).toBeTruthy();
     expect(toolManager.getTool('opencode-run')).toBeTruthy();
+    expect(toolManager.getTool('agent-delegate')).toBeTruthy();
   });
 
   test('routes opencode-run through the injected OpenCode service', async () => {
@@ -445,6 +446,98 @@ describe('ToolManager image tools', () => {
     expect(result.data.message).toContain('Every day at 11:05 PM');
   });
 
+  test('routes sub-agent spawning through the workload service with the caller model', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const spawnSubAgents = jest.fn(async () => ({
+      orchestrationId: 'subagent-1',
+      taskCount: 2,
+      requestedModel: 'gpt-5.4',
+      tasks: [
+        { workloadId: 'w1', runId: 'r1', title: 'Research facts', status: 'queued' },
+        { workloadId: 'w2', runId: 'r2', title: 'Build html', status: 'queued' },
+      ],
+    }));
+
+    const result = await toolManager.executeTool('agent-delegate', {
+      action: 'spawn',
+      title: 'Parallel batch',
+      tasks: [{
+        title: 'Research facts',
+        prompt: 'Research the topic and save the findings.',
+        writeTargets: ['notes/research.md'],
+      }, {
+        title: 'Build html',
+        prompt: 'Create the html output file.',
+        writeTargets: ['frontend/index.html'],
+      }],
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      model: 'gpt-5.4',
+      workloadService: {
+        isAvailable: () => true,
+        spawnSubAgents,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(spawnSubAgents).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'spawn',
+      title: 'Parallel batch',
+      tasks: expect.arrayContaining([
+        expect.objectContaining({ title: 'Research facts' }),
+        expect.objectContaining({ title: 'Build html' }),
+      ]),
+    }), 'user-1', expect.objectContaining({
+      sessionId: 'session-1',
+      model: 'gpt-5.4',
+      subAgentDepth: 0,
+    }));
+    expect(result.data.message).toContain('Queued 2 sub-agent tasks');
+  });
+
+  test('returns sub-agent orchestration status through the workload service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const getSubAgentOrchestration = jest.fn(async () => ({
+      orchestrationId: 'subagent-1',
+      title: 'Parallel batch',
+      counts: {
+        total: 2,
+        active: 1,
+        queued: 0,
+        running: 1,
+        completed: 1,
+        failed: 0,
+        cancelled: 0,
+        idle: 0,
+      },
+      tasks: [
+        { workloadId: 'w1', title: 'Research facts', status: 'completed' },
+        { workloadId: 'w2', title: 'Build html', status: 'running' },
+      ],
+    }));
+
+    const result = await toolManager.executeTool('agent-delegate', {
+      action: 'status',
+      orchestrationId: 'subagent-1',
+    }, {
+      ownerId: 'user-1',
+      sessionId: 'session-1',
+      workloadService: {
+        isAvailable: () => true,
+        getSubAgentOrchestration,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(getSubAgentOrchestration).toHaveBeenCalledWith('subagent-1', 'user-1', 'session-1');
+    expect(result.data.orchestration.counts.running).toBe(1);
+  });
+
   test('infers a cron trigger for create when the prompt still contains schedule text', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
@@ -471,7 +564,7 @@ describe('ToolManager image tools', () => {
     expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       title: 'Review The Latest Repo Activity',
-      prompt: 'review the latest repo activity and summarize blockers.',
+      prompt: 'Every weekday at 8:30 AM review the latest repo activity and summarize blockers.',
       trigger: {
         type: 'cron',
         expression: '30 8 * * 1-5',
@@ -536,7 +629,6 @@ describe('ToolManager image tools', () => {
         type: 'once',
         runAt: '2026-04-02T09:05:00.000Z',
       }),
-      callableSlug: undefined,
     }), 'user-1');
   });
 
@@ -696,7 +788,7 @@ describe('ToolManager image tools', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('needs a schedule');
+    expect(result.error).toContain('explicit manual request');
     expect(createWorkload).not.toHaveBeenCalled();
   });
 

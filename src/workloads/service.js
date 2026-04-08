@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { getNextCronRun } = require('./cron-utils');
 const {
     applyProjectPlanPatch,
@@ -14,6 +15,154 @@ const {
 } = require('./schema');
 const { RUN_STATUS, workloadStore } = require('./store');
 const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
+
+const SUB_AGENT_MAX_TASKS = 3;
+const SUB_AGENT_MAX_DEPTH = 1;
+const SUB_AGENT_DEFAULT_MAX_RETRIES = 2;
+const SUB_AGENT_MAX_RETRIES = 4;
+const SUB_AGENT_BASE_RETRY_DELAY_MS = 15000;
+
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeText(value = '') {
+    return String(value || '').trim();
+}
+
+function normalizeInteger(value, fallback = 0, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+
+    return Math.max(min, Math.min(Math.trunc(numeric), max));
+}
+
+function normalizeSubAgentDepth(value = 0) {
+    return normalizeInteger(value, 0, {
+        min: 0,
+        max: SUB_AGENT_MAX_DEPTH,
+    });
+}
+
+function normalizeWriteTargets(value = []) {
+    const values = Array.isArray(value) ? value : [value];
+    return Array.from(new Set(values
+        .map((entry) => sanitizeText(entry).replace(/\\/g, '/').replace(/\/+/g, '/').toLowerCase())
+        .filter(Boolean)));
+}
+
+function buildWriteTargetTokens({ writeTargets = [], lockKey = '' } = {}) {
+    return new Set([
+        ...normalizeWriteTargets(writeTargets),
+        ...normalizeWriteTargets(lockKey),
+    ]);
+}
+
+function isSubAgentWorkload(workload = {}) {
+    return workload?.metadata?.subAgent?.enabled === true;
+}
+
+function isQueuedLikeRun(run = null) {
+    if (!run) {
+        return false;
+    }
+
+    return !sanitizeText(run.status) || sanitizeText(run.status).toLowerCase() === RUN_STATUS.QUEUED;
+}
+
+function classifySubAgentFailure(error = {}) {
+    const status = Number(error?.status || error?.statusCode || 0);
+    const code = sanitizeText(error?.code).toLowerCase();
+    const message = sanitizeText(error?.message).toLowerCase();
+
+    const isTerminalModelError = status === 401
+        || status === 402
+        || status === 403
+        || /insufficient_quota|quota|billing|credit balance|payment required|hard limit|invalid api key|incorrect api key|authentication|unauthorized|forbidden/.test(message)
+        || ((status === 404 || code === 'model_not_found') && /model/.test(message))
+        || /model .* not found|does not exist|not available to your account/.test(message);
+
+    if (isTerminalModelError) {
+        return {
+            kind: 'terminal_model_error',
+            retryable: false,
+            terminal: true,
+            retryDelayMs: 0,
+            supervisorInstruction: 'Stop retrying. The previous attempt failed because the caller model or billing/auth state is unavailable.',
+        };
+    }
+
+    const isRateLimited = status === 429
+        || code === 'rate_limit'
+        || /rate limit|too many requests/.test(message);
+    if (isRateLimited) {
+        return {
+            kind: 'rate_limit',
+            retryable: true,
+            terminal: false,
+            retryDelayMs: SUB_AGENT_BASE_RETRY_DELAY_MS * 2,
+            supervisorInstruction: 'Retry the original objective after a short delay. Continue the work instead of describing the prior rate limit.',
+        };
+    }
+
+    const isTransientRuntimeError = status >= 500
+        || ['econnreset', 'etimedout', 'econnaborted', 'enotfound', 'epipe', 'network_error'].includes(code)
+        || /timeout|timed out|network|socket hang up|connection reset|connection aborted|temporary failure|temporarily unavailable|service unavailable|bad gateway|fetch failed|upstream/.test(message);
+    if (isTransientRuntimeError) {
+        return {
+            kind: 'transient_runtime_error',
+            retryable: true,
+            terminal: false,
+            retryDelayMs: SUB_AGENT_BASE_RETRY_DELAY_MS,
+            supervisorInstruction: 'Retry the same objective from the current context. The previous failure appears transient, so continue without re-explaining the error.',
+        };
+    }
+
+    const isRepairableRuntimeError = /tool orchestration failed|response generation failed|invalid json|malformed|parse|empty output|no output|unexpected end of json/.test(message);
+    if (isRepairableRuntimeError) {
+        return {
+            kind: 'repairable_runtime_error',
+            retryable: true,
+            terminal: false,
+            retryDelayMs: SUB_AGENT_BASE_RETRY_DELAY_MS,
+            supervisorInstruction: 'Retry the original objective with a tighter plan. Ignore the failed output, use smaller steps, and produce the concrete deliverable.',
+        };
+    }
+
+    return {
+        kind: 'permanent_error',
+        retryable: false,
+        terminal: false,
+        retryDelayMs: 0,
+        supervisorInstruction: 'Do not retry automatically.',
+    };
+}
+
+function buildSubAgentRetryPrompt({
+    prompt = '',
+    errorMessage = '',
+    classification = null,
+    attempt = 0,
+    maxRetries = 0,
+    writeTargets = [],
+} = {}) {
+    const basePrompt = sanitizeText(prompt);
+    const summary = sanitizeText(errorMessage).slice(0, 600);
+    const targetSummary = normalizeWriteTargets(writeTargets).join(', ');
+
+    return [
+        basePrompt,
+        '',
+        '[Supervisor retry instructions]',
+        `Retry attempt ${attempt} of ${maxRetries}.`,
+        classification?.supervisorInstruction || 'Retry the original objective.',
+        summary ? `Previous failure: ${summary}` : null,
+        targetSummary ? `Assigned write targets: ${targetSummary}` : null,
+        'Do not spawn more sub-agents from this task.',
+    ].filter(Boolean).join('\n');
+}
 
 class AgentWorkloadService {
     constructor({
@@ -37,6 +186,335 @@ class AgentWorkloadService {
             || session?.metadata?.model
             || '',
         ).trim() || null;
+    }
+
+    injectRequestedModelIntoExecution(execution = null, requestedModel = null) {
+        if (!isPlainObject(execution)) {
+            return execution;
+        }
+
+        if (sanitizeText(execution.tool || execution.name).toLowerCase() !== 'opencode-run' || !sanitizeText(requestedModel)) {
+            return execution;
+        }
+
+        const params = isPlainObject(execution.params) ? { ...execution.params } : {};
+        if (!sanitizeText(params.model)) {
+            params.model = requestedModel;
+        }
+
+        return {
+            ...execution,
+            params,
+        };
+    }
+
+    normalizeSubAgentTask(task = {}, index = 0, options = {}) {
+        const requestedModel = sanitizeText(options.requestedModel);
+        const defaultMaxRetries = normalizeInteger(options.defaultMaxRetries, SUB_AGENT_DEFAULT_MAX_RETRIES, {
+            min: 0,
+            max: SUB_AGENT_MAX_RETRIES,
+        });
+        const title = sanitizeText(task.title || task.name || `Sub-agent ${index + 1}`);
+        const prompt = sanitizeText(task.prompt || task.objective || task.request);
+        const execution = this.injectRequestedModelIntoExecution(
+            isPlainObject(task.execution) ? { ...task.execution } : null,
+            requestedModel,
+        );
+
+        if (!title) {
+            throw new Error(`Sub-agent task ${index + 1} requires a title.`);
+        }
+        if (!prompt && !execution) {
+            throw new Error(`Sub-agent task ${index + 1} requires a prompt or structured execution.`);
+        }
+
+        const writeTargets = normalizeWriteTargets([
+            ...(Array.isArray(task.writeTargets) ? task.writeTargets : []),
+            ...(Array.isArray(task.write_targets) ? task.write_targets : []),
+            task.outputPath,
+            task.output_path,
+            task.targetPath,
+            task.target_path,
+            task.path,
+            execution?.params?.workspacePath
+                ? `workspace:${execution.params.workspacePath}`
+                : '',
+        ]);
+        const lockKey = sanitizeText(task.lockKey || task.lock_key) || (writeTargets.length === 1 ? writeTargets[0] : '');
+
+        return {
+            title,
+            prompt,
+            execution,
+            mode: sanitizeText(task.mode || 'chat') || 'chat',
+            policy: {
+                executionProfile: sanitizeText(task.executionProfile || task.execution_profile || 'default') || 'default',
+                toolIds: Array.isArray(task.toolIds)
+                    ? task.toolIds.map((toolId) => sanitizeText(toolId)).filter(Boolean)
+                    : [],
+                maxRounds: normalizeInteger(task.maxRounds, 4, { min: 1, max: 12 }),
+                maxToolCalls: normalizeInteger(task.maxToolCalls, 12, { min: 1, max: 40 }),
+                maxDurationMs: normalizeInteger(task.maxDurationMs, 180000, { min: 1000, max: 30 * 60 * 1000 }),
+                allowSideEffects: task.allowSideEffects === true,
+            },
+            metadata: isPlainObject(task.metadata) ? { ...task.metadata } : {},
+            lockKey,
+            writeTargets,
+            maxRetries: normalizeInteger(task.maxRetries, defaultMaxRetries, {
+                min: 0,
+                max: SUB_AGENT_MAX_RETRIES,
+            }),
+        };
+    }
+
+    async listSessionSubAgentWorkloads(sessionId, ownerId) {
+        const workloads = await this.listSessionWorkloads(sessionId, ownerId);
+        return workloads.filter((workload) => isSubAgentWorkload(workload));
+    }
+
+    async summarizeSubAgentTask(workload, ownerId) {
+        const runs = await this.listRunsForWorkload(workload.id, ownerId, 10);
+        const latestRun = runs[0] || null;
+        const active = latestRun && ['queued', 'running'].includes(String(latestRun.status || '').trim().toLowerCase());
+        const subAgent = workload?.metadata?.subAgent || {};
+
+        return {
+            orchestrationId: subAgent.orchestrationId || null,
+            workloadId: workload.id,
+            title: workload.title,
+            childIndex: normalizeInteger(subAgent.childIndex, 0),
+            status: latestRun?.status || 'idle',
+            latestRunId: latestRun?.id || null,
+            attempt: Number(latestRun?.attempt || 0),
+            maxRetries: normalizeInteger(subAgent.maxRetries, SUB_AGENT_DEFAULT_MAX_RETRIES, {
+                min: 0,
+                max: SUB_AGENT_MAX_RETRIES,
+            }),
+            active,
+            lockKey: sanitizeText(subAgent.lockKey || ''),
+            writeTargets: normalizeWriteTargets(subAgent.writeTargets || []),
+            error: sanitizeText(latestRun?.error?.message || ''),
+            requestedModel: sanitizeText(workload?.metadata?.requestedModel || ''),
+            createdAt: workload.createdAt,
+            updatedAt: workload.updatedAt,
+        };
+    }
+
+    buildSubAgentCounts(tasks = []) {
+        return tasks.reduce((accumulator, task) => {
+            const status = sanitizeText(task.status || 'idle').toLowerCase() || 'idle';
+            accumulator.total += 1;
+            accumulator[status] = Number(accumulator[status] || 0) + 1;
+            if (task.active) {
+                accumulator.active += 1;
+            }
+            return accumulator;
+        }, {
+            total: 0,
+            active: 0,
+            queued: 0,
+            running: 0,
+            completed: 0,
+            failed: 0,
+            cancelled: 0,
+            idle: 0,
+        });
+    }
+
+    async listActiveSubAgentTasks(sessionId, ownerId) {
+        const workloads = await this.listSessionSubAgentWorkloads(sessionId, ownerId);
+        const tasks = await Promise.all(workloads.map((workload) => this.summarizeSubAgentTask(workload, ownerId)));
+        return tasks.filter((task) => task.active);
+    }
+
+    assertSubAgentWriteTargetsAvailable(tasks = [], activeTasks = []) {
+        const seenTokens = new Map();
+
+        for (const task of activeTasks) {
+            for (const token of buildWriteTargetTokens(task)) {
+                seenTokens.set(token, task.title || task.workloadId || 'another active sub-agent');
+            }
+        }
+
+        for (const task of tasks) {
+            const tokens = Array.from(buildWriteTargetTokens(task));
+            for (const token of tokens) {
+                if (seenTokens.has(token)) {
+                    throw new Error(`Sub-agent write target conflict on "${token}". ${task.title} overlaps with ${seenTokens.get(token)}.`);
+                }
+            }
+
+            tokens.forEach((token) => seenTokens.set(token, task.title));
+        }
+    }
+
+    async spawnSubAgents(payload = {}, ownerId = null, context = {}) {
+        if (!this.isAvailable()) {
+            const error = new Error('Sub-agents require an active Postgres-backed session store.');
+            error.statusCode = 503;
+            throw error;
+        }
+
+        const sessionId = sanitizeText(context.sessionId);
+        if (!sessionId || !ownerId) {
+            const error = new Error('Sub-agents require an authenticated session context.');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const currentDepth = normalizeSubAgentDepth(context.subAgentDepth);
+        if (currentDepth >= SUB_AGENT_MAX_DEPTH) {
+            const error = new Error('Sub-agents cannot spawn more sub-agents.');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const tasksInput = Array.isArray(payload.tasks)
+            ? payload.tasks
+            : (isPlainObject(payload.task) ? [payload.task] : []);
+        if (tasksInput.length < 1 || tasksInput.length > SUB_AGENT_MAX_TASKS) {
+            const error = new Error(`Sub-agent orchestration requires between 1 and ${SUB_AGENT_MAX_TASKS} tasks.`);
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const session = await this.sessionStore.getOwned(sessionId, ownerId);
+        if (!session) {
+            const error = new Error('Session not found');
+            error.statusCode = 404;
+            throw error;
+        }
+
+        const activeTasks = await this.listActiveSubAgentTasks(sessionId, ownerId);
+        if ((activeTasks.length + tasksInput.length) > SUB_AGENT_MAX_TASKS) {
+            const error = new Error(`No more than ${SUB_AGENT_MAX_TASKS} sub-agents can run at the same time.`);
+            error.statusCode = 409;
+            throw error;
+        }
+
+        const requestedModel = sanitizeText(context.model || session?.metadata?.model || '');
+        const defaultMaxRetries = normalizeInteger(payload.maxRetries, SUB_AGENT_DEFAULT_MAX_RETRIES, {
+            min: 0,
+            max: SUB_AGENT_MAX_RETRIES,
+        });
+        const orchestrationId = sanitizeText(payload.orchestrationId || payload.orchestration_id)
+            || `subagent-${crypto.randomUUID()}`;
+        const orchestrationTitle = sanitizeText(payload.title || payload.name)
+            || `Sub-agent batch ${new Date().toISOString()}`;
+        const normalizedTasks = tasksInput.map((task, index) => this.normalizeSubAgentTask(task, index, {
+            requestedModel,
+            defaultMaxRetries,
+        }));
+
+        this.assertSubAgentWriteTargetsAvailable(normalizedTasks, activeTasks);
+
+        const createdTasks = [];
+        for (let index = 0; index < normalizedTasks.length; index += 1) {
+            const task = normalizedTasks[index];
+            const subAgentMetadata = {
+                enabled: true,
+                orchestrationId,
+                orchestrationTitle,
+                childIndex: index,
+                taskCount: normalizedTasks.length,
+                parentSessionId: sessionId,
+                parentRunId: sanitizeText(context.parentRunId || ''),
+                depth: currentDepth + 1,
+                maxRetries: task.maxRetries,
+                lockKey: task.lockKey || null,
+                writeTargets: task.writeTargets,
+                callerModel: requestedModel || null,
+            };
+            const workload = await this.createWorkload({
+                sessionId,
+                title: task.title,
+                mode: task.mode,
+                prompt: task.prompt || task.title,
+                execution: task.execution,
+                trigger: {
+                    type: 'manual',
+                },
+                policy: task.policy,
+                metadata: {
+                    ...(task.metadata || {}),
+                    ...(requestedModel ? { requestedModel } : {}),
+                    subAgent: subAgentMetadata,
+                },
+            }, ownerId);
+            const run = await this.runWorkloadNow(workload.id, ownerId, {
+                reason: 'sub-agent',
+                metadata: {
+                    orchestrationId,
+                    childIndex: index,
+                    subAgentDepth: currentDepth + 1,
+                    parentRunId: sanitizeText(context.parentRunId || '') || null,
+                },
+            });
+
+            createdTasks.push({
+                orchestrationId,
+                workloadId: workload.id,
+                runId: run?.id || null,
+                title: workload.title,
+                status: run?.status || 'queued',
+                writeTargets: task.writeTargets,
+                lockKey: task.lockKey || null,
+            });
+        }
+
+        return {
+            orchestrationId,
+            title: orchestrationTitle,
+            requestedModel: requestedModel || null,
+            taskCount: createdTasks.length,
+            tasks: createdTasks,
+        };
+    }
+
+    async getSubAgentOrchestration(orchestrationId, ownerId = null, sessionId = '') {
+        const normalizedId = sanitizeText(orchestrationId);
+        const normalizedSessionId = sanitizeText(sessionId);
+        if (!normalizedId || !normalizedSessionId) {
+            return null;
+        }
+
+        const workloads = await this.listSessionSubAgentWorkloads(normalizedSessionId, ownerId);
+        const matching = workloads.filter((workload) => workload?.metadata?.subAgent?.orchestrationId === normalizedId);
+        if (matching.length === 0) {
+            return null;
+        }
+
+        const tasks = await Promise.all(matching.map((workload) => this.summarizeSubAgentTask(workload, ownerId)));
+        const counts = this.buildSubAgentCounts(tasks);
+
+        return {
+            orchestrationId: normalizedId,
+            title: matching[0]?.metadata?.subAgent?.orchestrationTitle || matching[0]?.title || null,
+            requestedModel: sanitizeText(matching[0]?.metadata?.requestedModel || '') || null,
+            counts,
+            tasks: tasks.sort((left, right) => {
+                const leftIndex = normalizeInteger(left?.childIndex, 0);
+                const rightIndex = normalizeInteger(right?.childIndex, 0);
+                return leftIndex - rightIndex;
+            }),
+        };
+    }
+
+    async listSubAgentOrchestrations(sessionId, ownerId = null) {
+        const workloads = await this.listSessionSubAgentWorkloads(sessionId, ownerId);
+        const orchestrationIds = Array.from(new Set(workloads
+            .map((workload) => sanitizeText(workload?.metadata?.subAgent?.orchestrationId || ''))
+            .filter(Boolean)));
+        const summaries = [];
+
+        for (const orchestrationId of orchestrationIds) {
+            const summary = await this.getSubAgentOrchestration(orchestrationId, ownerId, sessionId);
+            if (summary) {
+                summaries.push(summary);
+            }
+        }
+
+        return summaries.sort((left, right) => String(right?.title || '').localeCompare(String(left?.title || '')));
     }
 
     async createWorkload(payload = {}, ownerId = null) {
@@ -296,7 +774,7 @@ class AgentWorkloadService {
             idempotencyKey: options.idempotencyKey || null,
         });
 
-        if (run?.status === RUN_STATUS.QUEUED) {
+        if (isQueuedLikeRun(run)) {
             await this.onRunQueued(workload, run, options.reason || 'manual');
         }
 
@@ -373,7 +851,9 @@ class AgentWorkloadService {
         const stage = Number(run.stageIndex) >= 0 && Array.isArray(workload.stages)
             ? workload.stages[run.stageIndex] || null
             : null;
-        const prompt = stage?.prompt || run.prompt || workload.prompt;
+        const prompt = stage
+            ? (stage?.prompt || run.prompt || '')
+            : (run.prompt || workload.prompt);
         const execution = stage?.execution || workload.execution || null;
         const stageInputs = await this.resolveStageInputs(run, stage);
         const message = this.buildStageMessage(prompt, stageInputs, stage, workload);
@@ -382,6 +862,11 @@ class AgentWorkloadService {
             ? stage.toolIds
             : (workload.policy?.toolIds || []);
         const artifactOnlyStage = Boolean(stage && stageOutputFormat && !execution && !String(prompt || '').trim());
+        const subAgentDepth = normalizeSubAgentDepth(
+            run?.metadata?.subAgentDepth
+            || workload?.metadata?.subAgent?.depth
+            || 0,
+        );
         const requestedModel = String(
             stage?.metadata?.requestedModel
             || run?.metadata?.requestedModel
@@ -416,6 +901,8 @@ class AgentWorkloadService {
                         workloadId: workload.id,
                         runId: run.id,
                         workloadRun: true,
+                        subAgentDepth,
+                        subAgentOrchestrationId: workload?.metadata?.subAgent?.orchestrationId || null,
                     },
                 })
                 : execution
@@ -429,6 +916,9 @@ class AgentWorkloadService {
                         prompt,
                         workloadId: workload.id,
                         runId: run.id,
+                        requestedModel,
+                        subAgentDepth,
+                        subAgentOrchestrationId: workload?.metadata?.subAgent?.orchestrationId || null,
                     },
                 })
                 : await this.conversationRunService.runChatTurn({
@@ -446,6 +936,8 @@ class AgentWorkloadService {
                         workloadId: workload.id,
                         runId: run.id,
                         workloadRun: true,
+                        subAgentDepth,
+                        subAgentOrchestrationId: workload?.metadata?.subAgent?.orchestrationId || null,
                         outputFormat: stageOutputFormat,
                         remoteBuildAutonomyApproved: workload.policy?.allowSideEffects === true,
                     },
@@ -495,15 +987,22 @@ class AgentWorkloadService {
             });
             return completed;
         } catch (error) {
+            const subAgentFailure = isSubAgentWorkload(workload)
+                ? classifySubAgentFailure(error)
+                : null;
             const failed = await this.store.failRun(run.id, workerId, {
                 error: {
                     message: error.message,
+                    ...(error?.status || error?.statusCode ? { status: Number(error.status || error.statusCode) } : {}),
+                    ...(sanitizeText(error?.code) ? { code: sanitizeText(error.code) } : {}),
+                    ...(subAgentFailure ? { classification: subAgentFailure.kind } : {}),
                 },
                 metadata: {
                     ...(run.metadata || {}),
                     lastError: {
                         message: error.message,
                         failedAt: new Date().toISOString(),
+                        ...(subAgentFailure ? { classification: subAgentFailure.kind } : {}),
                     },
                 },
             });
@@ -516,6 +1015,7 @@ class AgentWorkloadService {
                 outputText: error.message,
                 artifacts: [],
             });
+            const retryRun = await this.maybeRetrySubAgentRun(trackedWorkload, run, error, subAgentFailure);
             await this.scheduleFollowupStage(trackedWorkload, run, false);
             await this.ensureNextScheduledRun(trackedWorkload, run);
             await this.appendSyntheticMessageSafe(
@@ -527,13 +1027,111 @@ class AgentWorkloadService {
                 workloadId: trackedWorkload.id,
                 runId: run.id,
                 error: error.message,
+                retryRunId: retryRun?.id || null,
             });
             return failed;
         }
     }
 
+    async maybeRetrySubAgentRun(workload, run, error, classification = null) {
+        if (!isSubAgentWorkload(workload)) {
+            return null;
+        }
+
+        const resolvedClassification = classification || classifySubAgentFailure(error);
+        const maxRetries = normalizeInteger(
+            workload?.metadata?.subAgent?.maxRetries,
+            SUB_AGENT_DEFAULT_MAX_RETRIES,
+            {
+                min: 0,
+                max: SUB_AGENT_MAX_RETRIES,
+            },
+        );
+        const nextAttempt = normalizeInteger(run?.attempt, 0, {
+            min: 0,
+            max: SUB_AGENT_MAX_RETRIES,
+        }) + 1;
+
+        if (!resolvedClassification.retryable || nextAttempt > maxRetries) {
+            return null;
+        }
+
+        const retryPrompt = workload.execution
+            ? (sanitizeText(run?.prompt) || sanitizeText(workload.prompt))
+            : buildSubAgentRetryPrompt({
+                prompt: sanitizeText(workload.prompt),
+                errorMessage: error?.message || '',
+                classification: resolvedClassification,
+                attempt: nextAttempt,
+                maxRetries,
+                writeTargets: workload?.metadata?.subAgent?.writeTargets || [],
+            });
+        const scheduledFor = new Date(Date.now() + Math.max(
+            SUB_AGENT_BASE_RETRY_DELAY_MS,
+            Number(resolvedClassification.retryDelayMs || 0),
+        ));
+        const retryRun = await this.store.enqueueRun({
+            workloadId: workload.id,
+            ownerId: workload.ownerId,
+            sessionId: workload.sessionId,
+            reason: 'retry',
+            scheduledFor,
+            parentRunId: run.id,
+            stageIndex: run.stageIndex,
+            attempt: nextAttempt,
+            prompt: retryPrompt,
+            idempotencyKey: deriveRunIdempotencyKey({
+                workloadId: workload.id,
+                scheduledFor: scheduledFor.toISOString(),
+                stageIndex: run.stageIndex,
+                reason: `retry-${run.id}-${nextAttempt}`,
+            }),
+            metadata: {
+                ...(run.metadata || {}),
+                parentRunId: run.id,
+                retryOfRunId: run.id,
+                subAgentDepth: normalizeSubAgentDepth(
+                    run?.metadata?.subAgentDepth
+                    || workload?.metadata?.subAgent?.depth
+                    || 0,
+                ),
+                retryPlan: {
+                    classification: resolvedClassification.kind,
+                    attempt: nextAttempt,
+                    maxRetries,
+                    scheduledFor: scheduledFor.toISOString(),
+                    error: sanitizeText(error?.message || ''),
+                },
+            },
+        });
+
+        if (!retryRun) {
+            return null;
+        }
+
+        await this.addRunEventSafe(run.id, 'retry-enqueued', {
+            retryRunId: retryRun.id,
+            classification: resolvedClassification.kind,
+            attempt: nextAttempt,
+            scheduledFor: retryRun.scheduledFor,
+        });
+        await this.appendSyntheticMessageSafe(
+            workload.sessionId,
+            'system',
+            `Deferred workload "${workload.title}" scheduled retry ${nextAttempt} after ${resolvedClassification.kind}.`,
+        );
+        await this.emitWorkloadUpdate('workload_queued', workload.sessionId, {
+            workloadId: workload.id,
+            runId: retryRun.id,
+            scheduledFor: retryRun.scheduledFor,
+            reason: 'retry',
+        });
+
+        return retryRun;
+    }
+
     async ensureNextScheduledRun(workload, completedRun = null) {
-        if (!workload?.enabled) {
+        if (workload?.enabled === false) {
             return null;
         }
 
@@ -558,7 +1156,7 @@ class AgentWorkloadService {
                     reason: 'schedule',
                 }),
             });
-            if (run?.status === RUN_STATUS.QUEUED) {
+            if (isQueuedLikeRun(run)) {
                 await this.onRunQueued(workload, run, 'scheduled');
             }
             return run;
@@ -586,7 +1184,7 @@ class AgentWorkloadService {
                     reason: 'cron',
                 }),
             });
-            if (run?.status === RUN_STATUS.QUEUED) {
+            if (isQueuedLikeRun(run)) {
                 await this.onRunQueued(workload, run, 'cron');
             }
             return run;
@@ -631,7 +1229,7 @@ class AgentWorkloadService {
             },
         });
 
-        if (followupRun?.status === RUN_STATUS.QUEUED) {
+        if (isQueuedLikeRun(followupRun)) {
             await this.addRunEventSafe(run.id, 'followup-enqueued', {
                 followupRunId: followupRun.id,
                 stageIndex: nextIndex,

@@ -1110,4 +1110,223 @@ describe('AgentWorkloadService', () => {
             }),
         }));
     });
+
+    test('spawns sub-agents with inherited caller model and depth guard metadata', async () => {
+        const createWorkload = jest.spyOn(service, 'createWorkload')
+            .mockImplementation(async (payload, ownerId) => ({
+                id: `${payload.title.toLowerCase().replace(/\s+/g, '-')}-workload`,
+                ownerId,
+                sessionId: payload.sessionId,
+                title: payload.title,
+                prompt: payload.prompt,
+                mode: payload.mode,
+                execution: payload.execution || null,
+                enabled: true,
+                trigger: { type: 'manual' },
+                policy: payload.policy,
+                stages: [],
+                metadata: payload.metadata,
+            }));
+        const runWorkloadNow = jest.spyOn(service, 'runWorkloadNow')
+            .mockImplementation(async (idOrSlug) => ({
+                id: `${idOrSlug}-run`,
+                workloadId: idOrSlug,
+                status: 'queued',
+            }));
+        jest.spyOn(service, 'listActiveSubAgentTasks').mockResolvedValue([]);
+
+        const result = await service.spawnSubAgents({
+            title: 'Parallel batch',
+            tasks: [{
+                title: 'Research facts',
+                prompt: 'Research the latest release notes and save a summary.',
+                writeTargets: ['notes/research.md'],
+            }, {
+                title: 'Compute totals',
+                prompt: 'Calculate the totals for the provided figures.',
+            }],
+        }, 'phill', {
+            sessionId: 'session-1',
+            model: 'gpt-5.4',
+        });
+
+        expect(result.taskCount).toBe(2);
+        expect(createWorkload).toHaveBeenCalledWith(expect.objectContaining({
+            title: 'Research facts',
+            metadata: expect.objectContaining({
+                requestedModel: 'gpt-5.4',
+                subAgent: expect.objectContaining({
+                    orchestrationId: result.orchestrationId,
+                    depth: 1,
+                    callerModel: 'gpt-5.4',
+                    writeTargets: ['notes/research.md'],
+                }),
+            }),
+        }), 'phill');
+        expect(runWorkloadNow).toHaveBeenCalledWith(expect.any(String), 'phill', expect.objectContaining({
+            reason: 'sub-agent',
+            metadata: expect.objectContaining({
+                orchestrationId: result.orchestrationId,
+                subAgentDepth: 1,
+            }),
+        }));
+    });
+
+    test('rejects nested sub-agent spawning from a child task', async () => {
+        await expect(service.spawnSubAgents({
+            tasks: [{
+                title: 'Nested attempt',
+                prompt: 'Do another delegated task.',
+            }],
+        }, 'phill', {
+            sessionId: 'session-1',
+            model: 'gpt-5.4',
+            subAgentDepth: 1,
+        })).rejects.toThrow('Sub-agents cannot spawn more sub-agents.');
+    });
+
+    test('rejects overlapping write targets against active sub-agents', async () => {
+        jest.spyOn(service, 'listActiveSubAgentTasks').mockResolvedValue([{
+            title: 'Active child',
+            writeTargets: ['frontend/index.html'],
+            lockKey: '',
+            active: true,
+        }]);
+
+        await expect(service.spawnSubAgents({
+            tasks: [{
+                title: 'HTML writer',
+                prompt: 'Rewrite the current homepage.',
+                writeTargets: ['frontend/index.html'],
+            }],
+        }, 'phill', {
+            sessionId: 'session-1',
+            model: 'gpt-5.4',
+        })).rejects.toThrow('write target conflict');
+    });
+
+    test('retries retryable sub-agent failures with a queued follow-up run', async () => {
+        const workload = {
+            id: 'subagent-workload-1',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Research pass',
+            prompt: 'Research the topic and write the summary.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: ['web-search', 'file-write'],
+                maxRounds: 4,
+                maxToolCalls: 12,
+                maxDurationMs: 180000,
+                allowSideEffects: true,
+            },
+            stages: [],
+            metadata: {
+                requestedModel: 'gpt-5.4',
+                subAgent: {
+                    enabled: true,
+                    orchestrationId: 'subagent-1',
+                    depth: 1,
+                    maxRetries: 2,
+                    writeTargets: ['notes/research.md'],
+                },
+            },
+        };
+        const run = {
+            id: 'run-subagent-1',
+            workload,
+            stageIndex: -1,
+            attempt: 0,
+            scheduledFor: '2026-04-01T09:00:00.000Z',
+            prompt: workload.prompt,
+            metadata: {
+                subAgentDepth: 1,
+            },
+        };
+        const rateLimitError = new Error('Rate limit exceeded.');
+        rateLimitError.status = 429;
+
+        conversationRunService.runChatTurn.mockRejectedValue(rateLimitError);
+        store.failRun.mockResolvedValue({ id: run.id, status: 'failed' });
+        store.enqueueRun.mockResolvedValue({
+            id: 'run-subagent-2',
+            workloadId: workload.id,
+            status: 'queued',
+            scheduledFor: '2026-04-01T09:00:15.000Z',
+        });
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(store.failRun).toHaveBeenCalledWith(run.id, 'worker-1', expect.objectContaining({
+            error: expect.objectContaining({
+                classification: 'rate_limit',
+            }),
+        }));
+        expect(store.enqueueRun).toHaveBeenCalledWith(expect.objectContaining({
+            workloadId: workload.id,
+            reason: 'retry',
+            attempt: 1,
+            parentRunId: run.id,
+        }));
+        expect(store.addRunEvent).toHaveBeenCalledWith(run.id, 'retry-enqueued', expect.objectContaining({
+            retryRunId: 'run-subagent-2',
+            classification: 'rate_limit',
+        }));
+    });
+
+    test('does not retry terminal sub-agent model or billing failures', async () => {
+        const workload = {
+            id: 'subagent-workload-terminal',
+            ownerId: 'phill',
+            sessionId: 'session-1',
+            title: 'Website pass',
+            prompt: 'Build the HTML page.',
+            trigger: { type: 'manual' },
+            policy: {
+                executionProfile: 'default',
+                toolIds: ['file-write'],
+                maxRounds: 4,
+                maxToolCalls: 12,
+                maxDurationMs: 180000,
+                allowSideEffects: true,
+            },
+            stages: [],
+            metadata: {
+                requestedModel: 'gpt-5.4',
+                subAgent: {
+                    enabled: true,
+                    orchestrationId: 'subagent-2',
+                    depth: 1,
+                    maxRetries: 2,
+                },
+            },
+        };
+        const run = {
+            id: 'run-subagent-terminal-1',
+            workload,
+            stageIndex: -1,
+            attempt: 0,
+            scheduledFor: '2026-04-01T09:00:00.000Z',
+            prompt: workload.prompt,
+            metadata: {
+                subAgentDepth: 1,
+            },
+        };
+        const billingError = new Error('insufficient_quota for model run');
+        billingError.status = 402;
+
+        conversationRunService.runChatTurn.mockRejectedValue(billingError);
+        store.failRun.mockResolvedValue({ id: run.id, status: 'failed' });
+        store.enqueueRun.mockResolvedValue(null);
+
+        await service.executeClaimedRun(run, 'worker-1');
+
+        expect(store.failRun).toHaveBeenCalledWith(run.id, 'worker-1', expect.objectContaining({
+            error: expect.objectContaining({
+                classification: 'terminal_model_error',
+            }),
+        }));
+        expect(store.addRunEvent).not.toHaveBeenCalledWith(run.id, 'retry-enqueued', expect.anything());
+    });
 });

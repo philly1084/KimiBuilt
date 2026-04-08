@@ -94,6 +94,8 @@ class ConversationRunService {
                 ownerId,
                 workloadService: this.app?.locals?.agentWorkloadService,
                 opencodeService: this.app?.locals?.opencodeService || null,
+                subAgentDepth: Number(metadata?.subAgentDepth || 0),
+                subAgentOrchestrationId: metadata?.subAgentOrchestrationId || null,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
@@ -246,6 +248,9 @@ class ConversationRunService {
         const params = execution?.params && typeof execution.params === 'object'
             ? { ...execution.params }
             : {};
+        if (toolId === 'opencode-run' && !String(params.model || '').trim() && String(metadata?.requestedModel || '').trim()) {
+            params.model = String(metadata.requestedModel).trim();
+        }
         const runtimeToolManager = await ensureRuntimeToolManager(this.app);
         const result = await runtimeToolManager.executeTool(toolId, params, {
             sessionId,
@@ -256,6 +261,7 @@ class ConversationRunService {
             workloadService: this.app?.locals?.agentWorkloadService,
             opencodeService: this.app?.locals?.opencodeService || null,
             executionProfile: metadata.executionProfile || null,
+            subAgentDepth: Number(metadata?.subAgentDepth || 0),
         });
 
         if (result?.success === false) {

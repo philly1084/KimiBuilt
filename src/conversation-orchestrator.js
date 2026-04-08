@@ -1529,6 +1529,140 @@ function normalizeAgentWorkloadPlanParams(step = {}, { objective = '', session =
     };
 }
 
+function hasExplicitSubAgentIntentText(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bsub[- ]agent(?:s)?\b/i,
+        /\bdelegate\b[\s\S]{0,40}\b(task|tasks|worker|workers|agent|agents|job|jobs)\b/i,
+        /\bparallel\b[\s\S]{0,30}\b(task|tasks|worker|workers|agent|agents)\b/i,
+        /\bspawn\b[\s\S]{0,30}\b(worker|workers|agent|agents|sub[- ]agent)\b/i,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function normalizeAgentDelegateTaskPlan(task = {}, index = 0) {
+    const source = task && typeof task === 'object' && !Array.isArray(task)
+        ? task
+        : {};
+    const prompt = normalizeInlineText(
+        source.prompt
+        || source.objective
+        || source.request
+        || '',
+    );
+    const normalized = {
+        title: normalizeInlineText(source.title || source.name || `Sub-agent ${index + 1}`) || `Sub-agent ${index + 1}`,
+    };
+
+    if (prompt) {
+        normalized.prompt = prompt;
+    }
+    if (source.execution && typeof source.execution === 'object' && !Array.isArray(source.execution)) {
+        normalized.execution = source.execution;
+    }
+    if (normalizeInlineText(source.mode || '')) {
+        normalized.mode = normalizeInlineText(source.mode);
+    }
+    if (Array.isArray(source.toolIds)) {
+        normalized.toolIds = source.toolIds.map((toolId) => normalizeInlineText(toolId)).filter(Boolean);
+    }
+    if (normalizeInlineText(source.executionProfile || source.execution_profile || '')) {
+        normalized.executionProfile = normalizeInlineText(source.executionProfile || source.execution_profile);
+    }
+    if (source.allowSideEffects === true) {
+        normalized.allowSideEffects = true;
+    }
+    ['maxRounds', 'maxToolCalls', 'maxDurationMs', 'maxRetries'].forEach((key) => {
+        if (Number.isFinite(Number(source[key]))) {
+            normalized[key] = Number(source[key]);
+        }
+    });
+    if (normalizeInlineText(source.lockKey || source.lock_key || '')) {
+        normalized.lockKey = normalizeInlineText(source.lockKey || source.lock_key);
+    }
+    if (Array.isArray(source.writeTargets) || Array.isArray(source.write_targets)) {
+        const writeTargets = [
+            ...(Array.isArray(source.writeTargets) ? source.writeTargets : []),
+            ...(Array.isArray(source.write_targets) ? source.write_targets : []),
+        ].map((entry) => normalizeInlineText(entry)).filter(Boolean);
+        if (writeTargets.length > 0) {
+            normalized.writeTargets = writeTargets;
+        }
+    }
+    ['outputPath', 'output_path', 'targetPath', 'target_path', 'path'].forEach((key) => {
+        if (normalizeInlineText(source[key] || '')) {
+            normalized[key] = normalizeInlineText(source[key]);
+        }
+    });
+    if (source.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata)) {
+        normalized.metadata = source.metadata;
+    }
+
+    return normalized;
+}
+
+function normalizeAgentDelegatePlanParams(step = {}, { objective = '' } = {}) {
+    const params = step?.params && typeof step.params === 'object'
+        ? { ...step.params }
+        : {};
+    const action = normalizeInlineText(params.action || 'spawn').toLowerCase() || 'spawn';
+
+    if (action === 'status') {
+        return {
+            action: 'status',
+            orchestrationId: normalizeInlineText(
+                params.orchestrationId
+                || params.orchestration_id
+                || params.id
+                || '',
+            ),
+        };
+    }
+
+    if (action === 'list') {
+        return {
+            action: 'list',
+        };
+    }
+
+    const rawTasks = Array.isArray(params.tasks)
+        ? params.tasks
+        : (params.task && typeof params.task === 'object' && !Array.isArray(params.task) ? [params.task] : []);
+    const normalizedTasks = rawTasks
+        .map((task, index) => normalizeAgentDelegateTaskPlan(task, index))
+        .filter((task) => task.prompt || task.execution);
+
+    if (normalizedTasks.length === 0) {
+        const fallbackPrompt = normalizeInlineText(
+            params.prompt
+            || params.request
+            || objective
+            || step?.reason
+            || '',
+        );
+        if (fallbackPrompt) {
+            normalizedTasks.push({
+                title: normalizeInlineText(params.title || params.name || 'Delegated task') || 'Delegated task',
+                prompt: fallbackPrompt,
+            });
+        }
+    }
+
+    return {
+        action: 'spawn',
+        ...(normalizeInlineText(params.title || params.name || '')
+            ? { title: normalizeInlineText(params.title || params.name) }
+            : {}),
+        ...(Number.isFinite(Number(params.maxRetries))
+            ? { maxRetries: Number(params.maxRetries) }
+            : {}),
+        tasks: normalizedTasks.slice(0, 3),
+    };
+}
+
 function buildUbuntuMasterRemoteCommand() {
     return "hostname && uname -m && (test -f /etc/os-release && sed -n '1,3p' /etc/os-release || true) && uptime";
 }
@@ -4868,6 +5002,8 @@ class ConversationOrchestrator extends EventEmitter {
         const userCheckpointPolicy = toolContext?.userCheckpointPolicy && typeof toolContext.userCheckpointPolicy === 'object'
             ? toolContext.userCheckpointPolicy
             : {};
+        const subAgentDepth = Number(toolContext?.subAgentDepth || metadata?.subAgentDepth || 0);
+        const canUseSubAgents = subAgentDepth < 1;
         const canUseUserCheckpoint = allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
             && userCheckpointPolicy.enabled === true
             && Number(userCheckpointPolicy.remaining || 0) > 0
@@ -4887,6 +5023,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasSecurityIntent = hasSecurityScanIntent(prompt);
         const hasDocumentWorkflowIntent = hasDocumentWorkflowIntentText(prompt);
         const hasAssetCatalogIntent = hasIndexedAssetIntentText(prompt);
+        const hasSubAgentIntent = hasExplicitSubAgentIntentText(prompt);
         const hasOpencodeUsageIntent = hasOpencodeToolUsageIntent(prompt);
         const hasOpencodeIntent = hasOpencodeRepoWorkIntent(prompt);
         const explicitGitIntent = /\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt);
@@ -4965,6 +5102,9 @@ class ConversationOrchestrator extends EventEmitter {
             : false;
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+            if (canUseSubAgents && hasSubAgentIntent && allowedToolIds.includes('agent-delegate')) {
+                candidates.add('agent-delegate');
+            }
             if (!isDeferredWorkloadRun
                 && allowDeferredWorkloadShortcut
                 && hasWorkloadSetupIntent
@@ -5055,6 +5195,9 @@ class ConversationOrchestrator extends EventEmitter {
                 candidates.add('agent-notes-write');
             }
         } else {
+            if (canUseSubAgents && hasSubAgentIntent && allowedToolIds.includes('agent-delegate')) {
+                candidates.add('agent-delegate');
+            }
             if (!isDeferredWorkloadRun
                 && allowDeferredWorkloadShortcut
                 && hasWorkloadSetupIntent
@@ -5389,6 +5532,13 @@ class ConversationOrchestrator extends EventEmitter {
             return normalizedStep;
         }
 
+        if (normalizedStep.tool === 'agent-delegate') {
+            normalizedStep.params = normalizeAgentDelegatePlanParams(step, {
+                objective,
+            });
+            return normalizedStep;
+        }
+
         if (normalizedStep.tool === 'file-write') {
             normalizedStep.params = normalizeFileWritePlanParams(step, {
                 objective,
@@ -5644,6 +5794,11 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not use `command`, `name`, `schedule`, or remote-command style fields inside `agent-workload` params.',
             'If the user asks for a cron job, recurring schedule, reminder, or future run, prefer `agent-workload` instead of `remote-command` even when an SSH target is already available.',
             'If the user asks for multiple jobs or automations, split them into one `agent-workload` step per distinct task instead of combining everything into one workload.',
+            'Every `agent-delegate` step must use `params.action` set to `spawn`, `status`, or `list`.',
+            'For `agent-delegate spawn`, pass `params.tasks` as an array of 1 to 3 task objects. Each task needs a clear `title` and either a `prompt` or structured `execution` object.',
+            'Use `agent-delegate` only when the user explicitly wants sub-agents, delegated workers, or parallel background tasks.',
+            'Do not plan more than 3 sub-agent tasks in one `agent-delegate` step, and do not use `agent-delegate` from inside a sub-agent task.',
+            'When delegated tasks may write files, set distinct `writeTargets` or `lockKey` values so overlapping document edits are rejected.',
             ...(toolPolicy?.workflow?.status === 'active'
                 ? [
                     'A foreground end-to-end workflow is already active for this session. Treat it as the current project task list and continue that work unless the user explicitly changes scope, asks to defer it, or asks to schedule a separate workload.',

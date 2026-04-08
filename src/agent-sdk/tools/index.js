@@ -1477,6 +1477,184 @@ class ToolManager {
 
     const workloadTools = [
       {
+        id: 'agent-delegate',
+        name: 'Sub-Agent Orchestrator',
+        category: 'system',
+        description: 'Spawn and track up to 3 bounded sub-agents for long-running background work in the current conversation. Sub-agents inherit the caller model, cannot spawn more sub-agents, and should use distinct write targets when they modify files.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const { service, ownerId, sessionId } = resolveSessionWorkloadService(context);
+            const action = normalizeWorkloadAction(params.action || 'spawn');
+
+            if (action === 'spawn') {
+              const orchestration = await service.spawnSubAgents(params, ownerId, {
+                sessionId,
+                model: context?.model || null,
+                parentRunId: context?.runId || context?.parentRunId || null,
+                subAgentDepth: context?.subAgentDepth || 0,
+              });
+
+              return {
+                action,
+                sessionId,
+                orchestration,
+                message: `Queued ${orchestration.taskCount} sub-agent task${orchestration.taskCount === 1 ? '' : 's'} in ${orchestration.orchestrationId}.`,
+              };
+            }
+
+            if (action === 'status') {
+              const orchestrationId = String(
+                params.orchestrationId
+                || params.orchestration_id
+                || params.id
+                || '',
+              ).trim();
+              if (!orchestrationId) {
+                throw new Error('agent-delegate status requires an `orchestrationId`.');
+              }
+
+              const orchestration = await service.getSubAgentOrchestration(orchestrationId, ownerId, sessionId);
+              if (!orchestration) {
+                throw new Error('Sub-agent orchestration not found.');
+              }
+
+              return {
+                action,
+                sessionId,
+                orchestration,
+              };
+            }
+
+            if (action === 'list') {
+              const orchestrations = await service.listSubAgentOrchestrations(sessionId, ownerId);
+              return {
+                action,
+                sessionId,
+                count: orchestrations.length,
+                orchestrations,
+              };
+            }
+
+            throw new Error(`Unsupported agent-delegate action: ${action}`);
+          },
+          sideEffects: ['write'],
+          timeout: 15000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['action'],
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['spawn', 'status', 'list'],
+            },
+            title: { type: 'string' },
+            name: { type: 'string' },
+            orchestrationId: { type: 'string' },
+            orchestration_id: { type: 'string' },
+            maxRetries: { type: 'integer' },
+            task: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                name: { type: 'string' },
+                prompt: { type: 'string' },
+                objective: { type: 'string' },
+                request: { type: 'string' },
+                mode: { type: 'string' },
+                toolIds: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                executionProfile: { type: 'string' },
+                execution_profile: { type: 'string' },
+                allowSideEffects: { type: 'boolean' },
+                maxRounds: { type: 'integer' },
+                maxToolCalls: { type: 'integer' },
+                maxDurationMs: { type: 'integer' },
+                maxRetries: { type: 'integer' },
+                lockKey: { type: 'string' },
+                lock_key: { type: 'string' },
+                writeTargets: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                write_targets: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                outputPath: { type: 'string' },
+                output_path: { type: 'string' },
+                targetPath: { type: 'string' },
+                target_path: { type: 'string' },
+                path: { type: 'string' },
+                execution: { type: 'object' },
+                metadata: { type: 'object' },
+              },
+              additionalProperties: false,
+            },
+            tasks: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  name: { type: 'string' },
+                  prompt: { type: 'string' },
+                  objective: { type: 'string' },
+                  request: { type: 'string' },
+                  mode: { type: 'string' },
+                  toolIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                  },
+                  executionProfile: { type: 'string' },
+                  execution_profile: { type: 'string' },
+                  allowSideEffects: { type: 'boolean' },
+                  maxRounds: { type: 'integer' },
+                  maxToolCalls: { type: 'integer' },
+                  maxDurationMs: { type: 'integer' },
+                  maxRetries: { type: 'integer' },
+                  lockKey: { type: 'string' },
+                  lock_key: { type: 'string' },
+                  writeTargets: {
+                    type: 'array',
+                    items: { type: 'string' },
+                  },
+                  write_targets: {
+                    type: 'array',
+                    items: { type: 'string' },
+                  },
+                  outputPath: { type: 'string' },
+                  output_path: { type: 'string' },
+                  targetPath: { type: 'string' },
+                  target_path: { type: 'string' },
+                  path: { type: 'string' },
+                  execution: { type: 'object' },
+                  metadata: { type: 'object' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: [
+            'sub-agent',
+            'sub agent',
+            'delegate task',
+            'parallel task',
+            'spawn worker',
+          ],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'layers',
+        },
+      },
+      {
         id: 'agent-workload',
         name: 'Agent Workload Manager',
         category: 'system',

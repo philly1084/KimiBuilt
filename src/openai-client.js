@@ -172,6 +172,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'file-search',
     'file-mkdir',
     'agent-notes-write',
+    'agent-delegate',
     'agent-workload',
     DOCUMENT_WORKFLOW_TOOL_ID,
     'git-safe',
@@ -903,6 +904,11 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         options?.executionProfile
         || options?.toolContext?.executionProfile,
     );
+    const subAgentDepth = Number(
+        options?.subAgentDepth
+        || options?.toolContext?.subAgentDepth
+        || 0,
+    );
     const workloadService = options?.workloadService || options?.toolContext?.workloadService;
     const isDeferredWorkloadRun = options?.workloadRun === true
         || options?.clientSurface === 'workload'
@@ -951,6 +957,10 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         return isAgentNotesAutoWriteEnabled();
     }
 
+    if (toolId === 'agent-delegate') {
+        return subAgentDepth < 1 && Boolean(workloadService?.isAvailable?.());
+    }
+
     return true;
 }
 
@@ -990,6 +1000,20 @@ function hasExplicitWebResearchIntent(prompt = '') {
         /\bbrowse (?:the )?web\b/i,
         /\bsearch online\b/i,
         /\bbrowse online\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
+function hasExplicitSubAgentIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return [
+        /\bsub[- ]agent(?:s)?\b/i,
+        /\bdelegate\b[\s\S]{0,40}\b(task|tasks|worker|workers|agent|agents|job|jobs)\b/i,
+        /\bparallel\b[\s\S]{0,30}\b(task|tasks|worker|workers|agent|agents)\b/i,
+        /\bspawn\b[\s\S]{0,30}\b(worker|workers|agent|agents|sub[- ]agent)\b/i,
     ].some((pattern) => pattern.test(text));
 }
 
@@ -1885,6 +1909,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/i.test(normalizedPrompt)
         && (hasWebResearchIntent || hasExplicitScrapeIntent || hasUrl)
     );
+    const hasSubAgentIntent = hasExplicitSubAgentIntent(prompt);
     const canonicalWorkload = buildCanonicalWorkloadAction({
         request: prompt,
     }, {
@@ -1912,6 +1937,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
 
     if (hasWorkloadSetupIntent && availableToolIds.has('agent-workload')) {
         selectedIds.add('agent-workload');
+    }
+
+    if (hasSubAgentIntent && availableToolIds.has('agent-delegate')) {
+        selectedIds.add('agent-delegate');
     }
 
     if (hasDocumentWorkflowIntent && availableToolIds.has(DOCUMENT_WORKFLOW_TOOL_ID)) {
@@ -2046,10 +2075,16 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : 'remote-command');
     const explicitK3sDeployIntent = hasExplicitK3sDeployIntent(prompt);
     const explicitGitIntent = hasExplicitGitIntent(prompt);
+    const explicitSubAgentIntent = hasExplicitSubAgentIntent(prompt);
     const isDeferredWorkloadRun = options?.workloadRun === true
         || options?.clientSurface === 'workload'
         || options?.toolContext?.workloadRun === true
         || options?.toolContext?.clientSurface === 'workload';
+    const subAgentDepth = Number(
+        options?.subAgentDepth
+        || options?.toolContext?.subAgentDepth
+        || 0,
+    );
     const canonicalWorkload = buildCanonicalWorkloadAction({
         request: prompt,
     }, {
@@ -2072,6 +2107,12 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
             || hasExplicitUserCheckpointInteractionIntent(prompt)
         )) {
         return USER_CHECKPOINT_TOOL_ID;
+    }
+
+    if (subAgentDepth < 1
+        && availableToolIds.has('agent-delegate')
+        && explicitSubAgentIntent) {
+        return 'agent-delegate';
     }
 
     if (!isDeferredWorkloadRun
@@ -2224,6 +2265,13 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'file-mkdir')) {
         guidance.push('- Use `file-mkdir` to create folders or directories when the user asks for them.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === 'agent-delegate')) {
+        guidance.push('- Use `agent-delegate` when the user explicitly wants sub-agents, delegated workers, or parallel background tasks.');
+        guidance.push('- `agent-delegate` can spawn at most 3 sub-agents at a time. Give each task a clear title and either a prompt or structured execution.');
+        guidance.push('- Sub-agents inherit the caller model automatically and cannot spawn more sub-agents.');
+        guidance.push('- When sub-agents may write files, assign distinct `writeTargets` or a `lockKey` so overlapping document edits are rejected.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'agent-workload')) {
