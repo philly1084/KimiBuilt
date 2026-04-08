@@ -283,5 +283,6 @@ Below are the specifications for each of the four frontend interaction modes. Th
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text:latest` | Embedding model |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant service URL |
 | `QDRANT_COLLECTION` | `conversations` | Vector collection name |
+| `DOCKER_HOST` | *(optional)* | Docker daemon endpoint for `docker-exec` / `code-sandbox` when the backend is containerized or using a remote daemon |
 | `PORT` | `3000` | Backend server port |
 | `NODE_ENV` | `development` | Environment mode |

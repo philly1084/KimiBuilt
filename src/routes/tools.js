@@ -142,6 +142,7 @@ function buildToolRuntime(toolId, options = {}) {
   if (toolId === 'docker-exec') {
     return {
       configured: Boolean(process.env.DOCKER_HOST),
+      provider: 'docker',
       dockerHost: process.env.DOCKER_HOST || '',
     };
   }
@@ -240,6 +241,22 @@ function buildToolRuntime(toolId, options = {}) {
   return null;
 }
 
+function reconcileRuntimeWithSupport(toolId, runtime = null, support = null) {
+  if (!runtime || !support?.runtime) {
+    return runtime;
+  }
+
+  if (['docker-exec', 'code-sandbox'].includes(toolId)) {
+    return {
+      ...runtime,
+      configured: Boolean(runtime.configured || support.runtime.ready),
+      runtimeReady: support.runtime.ready ?? null,
+    };
+  }
+
+  return runtime;
+}
+
 function isToolVisibleByRuntime(toolId, runtime = null, support = null) {
   if (HIDDEN_FRONTEND_TOOL_IDS.includes(toolId)) {
     return false;
@@ -275,8 +292,12 @@ async function buildFrontendToolCatalog({ req, category = null, sessionId = null
     .filter((tool) => tool.id !== 'ssh-execute');
 
   const enrichedTools = await Promise.all(manifestTools.map(async (tool) => {
-    const runtime = buildToolRuntime(tool.id, { opencodeService });
     const docMetadata = await getToolDocMetadata(tool.id);
+    const runtime = reconcileRuntimeWithSupport(
+      tool.id,
+      buildToolRuntime(tool.id, { opencodeService }),
+      docMetadata.support,
+    );
     const availableInExecutionProfile = allowedToolIds.includes(tool.id);
     const runtimeVisible = isToolVisibleByRuntime(tool.id, runtime, docMetadata.support);
 
@@ -612,6 +633,11 @@ router.get('/:id', async (req, res) => {
     }
     
     const docMetadata = await getToolDocMetadata(id);
+    const runtime = reconcileRuntimeWithSupport(
+      id,
+      buildToolRuntime(id, { opencodeService: req.app?.locals?.opencodeService || null }),
+      docMetadata.support,
+    );
 
     res.json({
       success: true,
@@ -622,7 +648,7 @@ router.get('/:id', async (req, res) => {
         category: tool.category,
         version: tool.version,
         manifest,
-        runtime: buildToolRuntime(id, { opencodeService: req.app?.locals?.opencodeService || null }),
+        runtime,
         skill: skill ? {
           enabled: skill.enabled,
           triggerPatterns: skill.triggerPatterns,

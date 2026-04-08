@@ -23,6 +23,12 @@ The server will be available at `http://localhost:3000`. Check health at `/healt
 
 Artifacts, uploads, generated files, and session persistence require Postgres. PDF rendering uses headless Chromium in the production image.
 
+Docker-backed agent tools:
+- `docker-exec` and `code-sandbox` need a reachable Docker daemon.
+- If you run the backend on the host with `npm run dev`, start Docker Desktop first.
+- If you run the backend with `docker compose up`, the stack now includes a `docker-proxy` service so the backend container can reach Docker through `DOCKER_HOST=tcp://docker-proxy:2375`.
+- Public language images work without Docker Hub login. If you hit pull limits or need private images, sign in locally with `docker login`.
+
 ## Deploy to k3s
 
 ```bash
