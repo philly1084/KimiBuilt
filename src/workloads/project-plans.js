@@ -7,6 +7,7 @@ const VALID_MILESTONE_STATUSES = new Set([
     'in_progress',
     'blocked',
     'completed',
+    'skipped',
 ]);
 
 const VALID_CHANGE_REASON_TYPES = new Set([
@@ -117,7 +118,7 @@ function inferActiveMilestoneId(milestones = [], preferredId = '') {
         return preferred;
     }
 
-    const firstIncomplete = milestones.find((entry) => entry.status !== 'completed');
+    const firstIncomplete = milestones.find((entry) => !['completed', 'skipped'].includes(entry.status));
     return firstIncomplete?.id || milestones[0]?.id || null;
 }
 
@@ -278,6 +279,22 @@ function createStructuralSnapshot(project = {}) {
     });
 }
 
+function createChangeTrackingSnapshot(project = {}) {
+    const normalized = normalizeProjectPlan(project);
+    return JSON.stringify({
+        activeMilestoneId: normalized.activeMilestoneId,
+        milestones: normalized.milestones.map((entry) => ({
+            id: entry.id,
+            status: entry.status,
+            notes: entry.notes,
+            lastReviewedAt: entry.lastReviewedAt,
+        })),
+        lastReviewedAt: normalized.lastReviewedAt,
+        lastRunId: normalized.lastRunId,
+        structural: createStructuralSnapshot(normalized),
+    });
+}
+
 function mergeProjectPatch(currentProject = {}, patch = {}) {
     const current = normalizeProjectPlan(currentProject);
     const merged = {
@@ -309,6 +326,7 @@ function applyProjectPlanPatch(currentProject = {}, patch = {}, options = {}) {
     const next = normalizeProjectPlan(merged, options.defaults || {});
     const changeReason = normalizeChangeReason(options.changeReason);
     const structuralChange = createStructuralSnapshot(current) !== createStructuralSnapshot(next);
+    const meaningfulChange = createChangeTrackingSnapshot(current) !== createChangeTrackingSnapshot(next);
 
     if (
         structuralChange
@@ -318,7 +336,7 @@ function applyProjectPlanPatch(currentProject = {}, patch = {}, options = {}) {
         throw new Error('Project plan structure is locked and can only be modified for a technical requirement.');
     }
 
-    if (structuralChange && changeReason) {
+    if (meaningfulChange && changeReason) {
         next.changeLog = [
             ...(current.changeLog || []),
             changeReason,

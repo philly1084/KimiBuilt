@@ -3955,6 +3955,81 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('keeps an active session project plan in the foreground during timing-style follow-ups', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['agent-workload', 'file-read', 'file-write', 'user-checkpoint']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const session = {
+            metadata: {
+                controlState: {
+                    projectPlan: {
+                        kind: 'foreground-project-plan',
+                        status: 'active',
+                        source: 'objective',
+                        title: 'Polish the landing page',
+                        objective: 'Polish the landing page and verify it.',
+                        governance: {
+                            lockedPlan: false,
+                            modificationPolicy: 'flexible',
+                        },
+                        milestones: [{
+                            id: 'inspect-current-state',
+                            title: 'Inspect the current state',
+                            status: 'completed',
+                        }, {
+                            id: 'deliver-requested-work',
+                            title: 'Implement the requested changes',
+                            status: 'in_progress',
+                        }, {
+                            id: 'validate-result',
+                            title: 'Validate and review the result',
+                            status: 'planned',
+                        }],
+                    },
+                },
+            },
+        };
+        const objective = 'Tomorrow morning works.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            session,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                timezone: 'America/Halifax',
+                now: '2026-04-07T12:00:00.000Z',
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session,
+            toolPolicy,
+            toolContext: {
+                timezone: 'America/Halifax',
+                now: '2026-04-07T12:00:00.000Z',
+            },
+        });
+
+        expect(toolPolicy.projectPlan).toEqual(expect.objectContaining({
+            status: 'active',
+            objective: 'Polish the landing page and verify it.',
+        }));
+        expect(toolPolicy.candidateToolIds).not.toContain('agent-workload');
+        expect(directAction).toBeNull();
+    });
+
     test('keeps an active workflow in the foreground when checkpoint feedback includes timing', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

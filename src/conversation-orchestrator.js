@@ -48,6 +48,11 @@ const {
     evaluateEndToEndBuilderWorkflow,
     inferEndToEndBuilderWorkflow,
 } = require('./runtime-workflows/end-to-end-builder');
+const {
+    advanceForegroundProjectPlan,
+    inferForegroundProjectPlan,
+} = require('./runtime-workflows/foreground-project-plan');
+const { formatProjectExecutionContext } = require('./workloads/project-plans');
 const { hasWorkloadIntent } = require('./workloads/natural-language');
 const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
@@ -3397,6 +3402,7 @@ class ConversationOrchestrator extends EventEmitter {
         let endToEndWorkflow = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
             ? toolPolicy.workflow || null
             : null;
+        let activeProjectPlan = toolPolicy.projectPlan || null;
         if (endToEndWorkflow) {
             endToEndWorkflow = evaluateEndToEndBuilderWorkflow({
                 workflow: endToEndWorkflow,
@@ -3404,6 +3410,11 @@ class ConversationOrchestrator extends EventEmitter {
                 remoteToolId: toolPolicy.preferredRemoteToolId,
             });
             toolPolicy.workflow = endToEndWorkflow;
+            activeProjectPlan = advanceForegroundProjectPlan({
+                projectPlan: activeProjectPlan,
+                workflow: endToEndWorkflow,
+            });
+            toolPolicy.projectPlan = activeProjectPlan;
         }
 
         this.emit('task:start', {
@@ -3566,6 +3577,7 @@ class ConversationOrchestrator extends EventEmitter {
                     stream,
                     controlStatePatch: {
                         workflow: endToEndWorkflow,
+                        ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
                     },
                 });
             }
@@ -3661,7 +3673,10 @@ class ConversationOrchestrator extends EventEmitter {
                     autonomyApproved,
                     executionTrace,
                     stream,
-                    controlStatePatch: buildDeterministicWorkflowControlState(deterministicWorkflow, toolEvents),
+                    controlStatePatch: mergeControlState(
+                        buildDeterministicWorkflowControlState(deterministicWorkflow, toolEvents),
+                        activeProjectPlan ? { projectPlan: activeProjectPlan } : {},
+                    ),
                 });
             }
 
@@ -3784,6 +3799,11 @@ class ConversationOrchestrator extends EventEmitter {
                         remoteToolId: toolPolicy.preferredRemoteToolId,
                     });
                     toolPolicy.workflow = endToEndWorkflow;
+                    activeProjectPlan = advanceForegroundProjectPlan({
+                        projectPlan: activeProjectPlan,
+                        workflow: endToEndWorkflow,
+                    });
+                    toolPolicy.projectPlan = activeProjectPlan;
 
                     if (endToEndWorkflow?.status === 'blocked') {
                         executionTrace.push(createExecutionTraceEntry({
@@ -4053,6 +4073,11 @@ class ConversationOrchestrator extends EventEmitter {
                         workflow: endToEndWorkflow,
                         toolEvents: roundToolEvents,
                     });
+                    activeProjectPlan = advanceForegroundProjectPlan({
+                        projectPlan: activeProjectPlan,
+                        workflow: endToEndWorkflow,
+                    });
+                    toolPolicy.projectPlan = activeProjectPlan;
 
                     if (endToEndWorkflow) {
                         executionTrace.push(createExecutionTraceEntry({
@@ -4091,6 +4116,14 @@ class ConversationOrchestrator extends EventEmitter {
                         }));
                         break;
                     }
+                }
+
+                if (!endToEndWorkflow && roundToolEvents.length > 0) {
+                    activeProjectPlan = advanceForegroundProjectPlan({
+                        projectPlan: activeProjectPlan,
+                        toolEvents: roundToolEvents,
+                    });
+                    toolPolicy.projectPlan = activeProjectPlan;
                 }
 
                 if (autonomyApproved && budgetExceeded) {
@@ -4167,6 +4200,7 @@ class ConversationOrchestrator extends EventEmitter {
                         autonomyApproved,
                         executionTrace,
                         stream,
+                        controlStatePatch: activeProjectPlan ? { projectPlan: activeProjectPlan } : {},
                     });
                 }
 
@@ -4270,6 +4304,7 @@ class ConversationOrchestrator extends EventEmitter {
                     stream,
                     controlStatePatch: {
                         workflow: endToEndWorkflow,
+                        ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
                     },
                 });
             }
@@ -4452,7 +4487,10 @@ class ConversationOrchestrator extends EventEmitter {
                 autonomyApproved,
                 executionTrace,
                 stream,
-                controlStatePatch: endToEndWorkflow ? { workflow: endToEndWorkflow } : {},
+                controlStatePatch: {
+                    ...(endToEndWorkflow ? { workflow: endToEndWorkflow } : {}),
+                    ...(activeProjectPlan ? { projectPlan: activeProjectPlan } : {}),
+                },
             });
         } catch (error) {
             this.emit('task:error', {
@@ -4563,11 +4601,20 @@ class ConversationOrchestrator extends EventEmitter {
                 remoteTarget: sshContext.target || null,
             })
             : null;
+        const projectPlanSeed = inferForegroundProjectPlan({
+            objective,
+            session,
+            workflow: workflowSeed,
+        });
         const workflowNeedsRepoLane = workflowSeed?.lane === 'repo-only' || workflowSeed?.lane === 'repo-then-deploy';
         const workflowNeedsDeployLane = workflowSeed?.lane === 'deploy-only' || workflowSeed?.lane === 'repo-then-deploy';
         const hasActiveForegroundWorkflow = workflowSeed?.status === 'active';
+        const hasActiveForegroundProjectPlan = projectPlanSeed?.status === 'active';
         const hasExplicitDeferredWorkloadIntent = hasWorkloadIntent(objective);
-        const allowDeferredWorkloadShortcut = !hasActiveForegroundWorkflow || hasExplicitDeferredWorkloadIntent;
+        const allowDeferredWorkloadShortcut = (
+            !hasActiveForegroundWorkflow
+            && !hasActiveForegroundProjectPlan
+        ) || hasExplicitDeferredWorkloadIntent;
         const shouldConsiderOpencodeTarget = hasOpencodeIntent || workflowNeedsRepoLane;
         const opencodeTarget = shouldConsiderOpencodeTarget ? workflowOpencodeTarget : 'local';
         const opencodeTargetReady = shouldConsiderOpencodeTarget
@@ -4779,6 +4826,7 @@ class ConversationOrchestrator extends EventEmitter {
             },
             preferredRemoteToolId: remoteToolId,
             workflow: workflowSeed,
+            projectPlan: projectPlanSeed,
             toolDescriptions: Object.fromEntries(
                 allowedToolIds.map((toolId) => [
                     toolId,
@@ -4805,6 +4853,7 @@ class ConversationOrchestrator extends EventEmitter {
         const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
             && hasMultiWorkloadSchedulingIntent(objective);
         const hasActiveForegroundWorkflow = toolPolicy?.workflow?.status === 'active';
+        const hasActiveForegroundProjectPlan = toolPolicy?.projectPlan?.status === 'active';
         const hasExplicitDeferredWorkloadIntent = hasWorkloadIntent(objective);
         const normalizedCreate = toolPolicy.candidateToolIds.includes('agent-workload')
             ? buildCanonicalWorkloadAction({
@@ -4821,11 +4870,17 @@ class ConversationOrchestrator extends EventEmitter {
             : null;
         if (toolPolicy.candidateToolIds.includes('agent-workload')
             && !shouldForcePlannerForMultiWorkload
-            && (!hasActiveForegroundWorkflow || hasExplicitDeferredWorkloadIntent)
+            && (
+                (
+                    !hasActiveForegroundWorkflow
+                    && !hasActiveForegroundProjectPlan
+                ) || hasExplicitDeferredWorkloadIntent
+            )
             && (
                 hasExplicitDeferredWorkloadIntent
                 || (
                     !hasActiveForegroundWorkflow
+                    && !hasActiveForegroundProjectPlan
                     && (
                         normalizedCreate?.trigger?.type === 'cron'
                         || normalizedCreate?.trigger?.type === 'once'
@@ -5214,6 +5269,11 @@ class ConversationOrchestrator extends EventEmitter {
             'Runtime instructions:',
             instructions || '(none)',
             '',
+            'Active project plan:',
+            toolPolicy.projectPlan
+                ? formatProjectExecutionContext(toolPolicy.projectPlan)
+                : '(none)',
+            '',
             'Supplemental recalled context:',
             Array.isArray(contextMessages) && contextMessages.length > 0 ? contextMessages.join('\n') : '(none)',
             '',
@@ -5245,6 +5305,12 @@ class ConversationOrchestrator extends EventEmitter {
                 ? [
                     'A foreground end-to-end workflow is already active for this session. Treat it as the current project task list and continue that work unless the user explicitly changes scope, asks to defer it, or asks to schedule a separate workload.',
                     'Do not convert the active foreground project into `agent-workload` just because the user answered with timing, checkpoint feedback, or a short decision reply.',
+                ]
+                : []),
+            ...(toolPolicy?.projectPlan?.status === 'active'
+                ? [
+                    'A foreground session project plan is already active. Advance the active milestone before creating new scope or treating the conversation like a fresh task.',
+                    'When the user gives feedback, a choice, or a brief correction, treat it as an update to the active project plan and continue from the next incomplete milestone.',
                 ]
                 : []),
             'Every `user-checkpoint` step must include either a non-empty `params.question` with concise choice `params.options`, or a short `params.steps` questionnaire.',
@@ -5800,6 +5866,17 @@ class ConversationOrchestrator extends EventEmitter {
             }
             parts.push('Treat the active workflow as the current project plan. Continue from the next incomplete task unless the user explicitly changes scope, tells you to stop, or asks to defer the work into a later scheduled workload.');
             parts.push('If the user reply is just feedback, timing, or a checkpoint answer, use it to update your understanding and keep moving through the current workflow instead of switching to a different agent lane.');
+        }
+
+        if (toolPolicy?.projectPlan) {
+            parts.push(formatProjectExecutionContext(toolPolicy.projectPlan));
+            if (toolPolicy.projectPlan.status === 'active') {
+                parts.push('Use the foreground session project plan as the default task list for this conversation.');
+                parts.push('Advance the active milestone before starting unrelated new scope.');
+                parts.push('If the user changes a detail, skips a step, or answers a checkpoint, update your execution against the same project plan instead of treating the turn like a brand-new project.');
+            } else if (toolPolicy.projectPlan.status === 'blocked') {
+                parts.push('The foreground session project plan is blocked. Focus on resolving the active blocker or asking the user for the one decision that can unblock it.');
+            }
         }
 
         if (allowedToolIds.includes('architecture-design')) {

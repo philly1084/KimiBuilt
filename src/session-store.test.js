@@ -353,6 +353,17 @@ describe('SessionStore recent message continuity', () => {
                 type: 'remote-health-report',
                 status: 'completed',
             },
+            projectPlan: {
+                kind: 'foreground-project-plan',
+                status: 'active',
+                title: 'Polish the app',
+                objective: 'Polish the app',
+                milestones: [{
+                    id: 'm1',
+                    title: 'Inspect the current state',
+                    status: 'in_progress',
+                }],
+            },
             autonomyApproved: true,
         });
 
@@ -373,6 +384,10 @@ describe('SessionStore recent message continuity', () => {
                 type: 'remote-health-report',
                 status: 'completed',
             }),
+            projectPlan: expect.objectContaining({
+                kind: 'foreground-project-plan',
+                status: 'active',
+            }),
             autonomyApproved: true,
         }));
         expect(updated.metadata).toEqual(expect.objectContaining({
@@ -383,11 +398,14 @@ describe('SessionStore recent message continuity', () => {
             remoteWorkingState: expect.objectContaining({
                 lastCommand: 'uptime',
             }),
-            controlState: expect.objectContaining({
-                workflow: expect.objectContaining({
-                    type: 'remote-health-report',
+                controlState: expect.objectContaining({
+                    workflow: expect.objectContaining({
+                        type: 'remote-health-report',
+                    }),
+                    projectPlan: expect.objectContaining({
+                        kind: 'foreground-project-plan',
+                    }),
                 }),
-            }),
-        }));
+            }));
     });
 });

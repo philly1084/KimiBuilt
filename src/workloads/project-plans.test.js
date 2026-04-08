@@ -111,6 +111,54 @@ describe('workload project plans', () => {
         ]));
     });
 
+    test('records status-only project plan updates in the change log', () => {
+        const current = normalizeProjectPlan({
+            title: 'Ship remote build mode',
+            objective: 'Build and deploy the workflow.',
+            governance: {
+                lockedPlan: false,
+                modificationPolicy: 'flexible',
+            },
+            milestones: [{
+                id: 'm1',
+                title: 'Deploy the workflow',
+                status: 'in_progress',
+            }, {
+                id: 'm2',
+                title: 'Validate the rollout',
+                status: 'planned',
+            }],
+        });
+
+        const updated = applyProjectPlanPatch(current, {
+            milestones: [{
+                id: 'm1',
+                title: 'Deploy the workflow',
+                status: 'skipped',
+                notes: 'Skipped per operator instruction.',
+            }, {
+                id: 'm2',
+                title: 'Validate the rollout',
+                status: 'planned',
+            }],
+        }, {
+            changeReason: {
+                type: 'operator_override',
+                summary: 'Skip deployment and validate locally instead.',
+            },
+        });
+
+        expect(updated.milestones[0]).toEqual(expect.objectContaining({
+            status: 'skipped',
+            notes: 'Skipped per operator instruction.',
+        }));
+        expect(updated.changeLog).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'operator_override',
+            }),
+        ]));
+    });
+
     test('records review history without rewriting the milestone plan', () => {
         const current = normalizeProjectPlan({
             title: 'Ship remote build mode',
@@ -137,5 +185,23 @@ describe('workload project plans', () => {
         ]));
         expect(reviewed.milestones[0].title).toBe('Plan the rollout');
         expect(reviewed.milestones[0].lastReviewedAt).toEqual(expect.any(String));
+    });
+
+    test('treats skipped milestones as already resolved when picking the active milestone', () => {
+        const project = normalizeProjectPlan({
+            title: 'Ship remote build mode',
+            objective: 'Build and deploy the workflow.',
+            milestones: [{
+                id: 'm1',
+                title: 'Plan the rollout',
+                status: 'skipped',
+            }, {
+                id: 'm2',
+                title: 'Validate the rollout',
+                status: 'planned',
+            }],
+        });
+
+        expect(project.activeMilestoneId).toBe('m2');
     });
 });

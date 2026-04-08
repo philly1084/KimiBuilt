@@ -76,6 +76,10 @@ function normalizeRuntimeControlState(state = {}) {
         normalized.workflow = null;
     }
 
+    if ('projectPlan' in normalized && !isPlainObject(normalized.projectPlan)) {
+        normalized.projectPlan = null;
+    }
+
     if ('autonomyApproved' in normalized) {
         normalized.autonomyApproved = Boolean(normalized.autonomyApproved);
     }
