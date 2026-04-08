@@ -173,34 +173,50 @@ function getNextWorkflowTaskTitle(workflow = null) {
     return normalizeInlineText(nextTask?.title || '');
 }
 
+function buildForegroundStatusSummary({ workflow = null, projectPlan = null, completedEvents = [] } = {}) {
+    if (projectPlan && Array.isArray(projectPlan.milestones) && projectPlan.milestones.length > 0) {
+        const milestones = projectPlan.milestones;
+        const resolvedCount = milestones.filter((entry) => ['completed', 'skipped'].includes(String(entry?.status || '').trim().toLowerCase())).length;
+        const nextFocus = getActiveProjectMilestoneTitle(projectPlan);
+        return truncateText(
+            `Status: ${resolvedCount}/${milestones.length} milestones complete.${nextFocus ? ` Current: ${nextFocus}.` : ''}`,
+            180,
+        );
+    }
+
+    if (workflow && Array.isArray(workflow.taskList) && workflow.taskList.length > 0) {
+        const taskList = workflow.taskList;
+        const resolvedCount = taskList.filter((entry) => ['completed', 'skipped'].includes(String(entry?.status || '').trim().toLowerCase())).length;
+        const nextFocus = getNextWorkflowTaskTitle(workflow);
+        return truncateText(
+            `Status: ${resolvedCount}/${taskList.length} tasks complete.${nextFocus ? ` Current: ${nextFocus}.` : ''}`,
+            180,
+        );
+    }
+
+    if (completedEvents.length > 0) {
+        return `Status: ${completedEvents.length} step${completedEvents.length === 1 ? '' : 's'} completed in this run.`;
+    }
+
+    return 'Status: Paused before the next step.';
+}
+
 function buildAutonomyBudgetPauseUpdate({ toolEvents = [], workflow = null, projectPlan = null } = {}) {
     const completedEvents = (Array.isArray(toolEvents) ? toolEvents : [])
         .filter((event) => (event?.result?.success !== false) && ((event?.toolCall?.function?.name || event?.result?.toolId || '') !== USER_CHECKPOINT_TOOL_ID));
     const latestCompleted = completedEvents[completedEvents.length - 1] || null;
     const latestReason = normalizeInlineText(latestCompleted?.reason || '');
-    const nextFocus = getActiveProjectMilestoneTitle(projectPlan) || getNextWorkflowTaskTitle(workflow);
-
-    if (latestReason && nextFocus) {
-        return truncateText(`Completed: ${latestReason}. Paused before: ${nextFocus}.`, 220);
-    }
+    const statusSummary = buildForegroundStatusSummary({
+        workflow,
+        projectPlan,
+        completedEvents,
+    });
 
     if (latestReason) {
-        return truncateText(`Completed: ${latestReason}. Paused here before the next step.`, 220);
+        return truncateText(`${statusSummary} Last completed: ${latestReason}. Paused here.`, 220);
     }
 
-    if (completedEvents.length > 1 && nextFocus) {
-        return truncateText(`Completed ${completedEvents.length} steps. Paused before: ${nextFocus}.`, 220);
-    }
-
-    if (completedEvents.length > 1) {
-        return truncateText(`Completed ${completedEvents.length} steps. Paused here before the next step.`, 220);
-    }
-
-    if (nextFocus) {
-        return truncateText(`Paused before: ${nextFocus}.`, 220);
-    }
-
-    return 'I made progress and paused here before the next step.';
+    return `${statusSummary} Paused here.`;
 }
 
 function buildAutonomyContinuationCheckpoint({ toolEvents = [], workflow = null, projectPlan = null } = {}) {

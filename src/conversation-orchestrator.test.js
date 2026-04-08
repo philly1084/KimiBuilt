@@ -2326,6 +2326,7 @@ describe('ConversationOrchestrator', () => {
             expect(toolManager.executeTool).toHaveBeenCalledTimes(1);
             expect(llmClient.createResponse).not.toHaveBeenCalled();
             expect(result.output).toContain('Paused');
+            expect(result.output).toContain('Status:');
             expect(checkpointEvent).toEqual(expect.objectContaining({
                 result: expect.objectContaining({
                     success: true,
@@ -2333,6 +2334,7 @@ describe('ConversationOrchestrator', () => {
                     data: expect.objectContaining({
                         checkpoint: expect.objectContaining({
                             title: 'Continue now?',
+                            preamble: expect.stringContaining('Status:'),
                             question: 'Do you want me to continue now?',
                             options: expect.arrayContaining([
                                 expect.objectContaining({
