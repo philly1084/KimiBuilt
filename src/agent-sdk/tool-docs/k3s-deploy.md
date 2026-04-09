@@ -12,6 +12,7 @@ Allowed actions:
 Notes:
 - This tool uses the configured SSH target from Admin Settings or cluster secrets unless host overrides are provided.
 - `sync-repo` only allows GitHub repository URLs.
+- `sync-repo` and `sync-and-apply` will use `GH_TOKEN` or `GITHUB_TOKEN` for HTTPS clone/fetch when the runtime provides one.
 - `sync-and-apply` is the main GitOps-style path: sync the repo on the server, apply manifests, then optionally check rollout status.
 - Use `set-image` when GitHub Actions has already published a new image tag and you only need the cluster rollout step.
 - For arbitrary remote software installation or debugging outside these actions, use `remote-command`.

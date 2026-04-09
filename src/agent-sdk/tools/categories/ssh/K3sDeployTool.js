@@ -1,6 +1,10 @@
 const path = require('path');
 const { ToolBase } = require('../../ToolBase');
 const { config } = require('../../../../config');
+const {
+  buildGitCredentialEnvironment,
+  normalizeGitHubRepositoryUrlForToken,
+} = require('../../../../git-credentials');
 const { SSHExecuteTool } = require('./SSHExecuteTool');
 
 const ALLOWED_ACTIONS = new Set([
@@ -121,6 +125,7 @@ class K3sDeployTool extends ToolBase {
       port: params.port,
       username: params.username,
       command,
+      environment: this.buildRemoteEnvironment(),
       timeout: Math.max(1000, Number(params.timeoutSeconds || 180) * 1000),
     }, context, tracker);
 
@@ -157,7 +162,10 @@ class K3sDeployTool extends ToolBase {
   }
 
   buildSyncRepoCommand(params = {}) {
-    const repositoryUrl = this.sanitizeRepositoryUrl(params.repositoryUrl || config.deploy.defaultRepositoryUrl);
+    const repositoryUrl = normalizeGitHubRepositoryUrlForToken(
+      this.sanitizeRepositoryUrl(params.repositoryUrl || config.deploy.defaultRepositoryUrl),
+      process.env,
+    );
     const ref = this.sanitizeRef(params.ref || config.deploy.defaultBranch);
     const targetDirectory = this.sanitizeRemotePath(params.targetDirectory || config.deploy.defaultTargetDirectory, 'targetDirectory');
     const parentDirectory = path.posix.dirname(targetDirectory);
@@ -165,6 +173,7 @@ class K3sDeployTool extends ToolBase {
     return [
       'set -e',
       'if ! command -v git >/dev/null 2>&1; then echo "git is required on the remote host" >&2; exit 1; fi',
+      ...this.buildRemoteGitCredentialSetup(),
       `mkdir -p ${this.quoteShellArg(parentDirectory)}`,
       `if [ ! -d ${this.quoteShellArg(`${targetDirectory}/.git`)} ]; then`,
       `  git clone --branch ${this.quoteShellArg(ref)} --single-branch ${this.quoteShellArg(repositoryUrl)} ${this.quoteShellArg(targetDirectory)}`,
@@ -179,6 +188,35 @@ class K3sDeployTool extends ToolBase {
       'fi',
       'git status --short --branch',
     ].join('\n');
+  }
+
+  buildRemoteEnvironment() {
+    return buildGitCredentialEnvironment(process.env);
+  }
+
+  buildRemoteGitCredentialSetup() {
+    return [
+      'if [ -n "${KIMIBUILT_GIT_PASSWORD:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}" ]; then',
+      '  git_askpass_dir=$(mktemp -d)',
+      '  git_askpass_script="$git_askpass_dir/askpass.sh"',
+      '  cat > "$git_askpass_script" <<\'EOF\'',
+      '#!/bin/sh',
+      'case "$1" in',
+      '  *Username*|*username*)',
+      '    printf "%s" "${KIMIBUILT_GIT_USERNAME:-x-access-token}"',
+      '    ;;',
+      '  *)',
+      '    printf "%s" "${KIMIBUILT_GIT_PASSWORD:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"',
+      '    ;;',
+      'esac',
+      'EOF',
+      '  chmod 700 "$git_askpass_script"',
+      '  export GIT_ASKPASS="$git_askpass_script"',
+      '  export GIT_TERMINAL_PROMPT=0',
+      '  export GCM_INTERACTIVE=Never',
+      '  trap \'rm -rf "$git_askpass_dir"\' EXIT',
+      'fi',
+    ];
   }
 
   buildApplyManifestsCommand(params = {}) {

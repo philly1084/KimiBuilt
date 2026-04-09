@@ -4,6 +4,7 @@ metadata:
   name: kimibuilt-config
   namespace: kimibuilt
 data:
+  API_BASE_URL: "https://kimibuilt.secdevsolutions.help"
   # Chat/tool traffic stays on the internal OpenAI-compatible gateway.
   OPENAI_BASE_URL: "http://n8n-openai-cli-gateway.n8n-openai-gateway.svc.cluster.local/v1"
   OPENAI_MODEL: "gpt-4o"
@@ -31,6 +32,11 @@ data:
   KIMIBUILT_DEPLOY_DEPLOYMENT: "backend"
   KIMIBUILT_DEPLOY_CONTAINER: "backend"
   KIMIBUILT_DEPLOY_BRANCH: "master"
+  KIMIBUILT_GIT_COMMIT_NAME: "KimiBuilt Agent"
+  KIMIBUILT_GIT_COMMIT_EMAIL: "kimibuilt-agent@local.invalid"
+  KIMIBUILT_DATA_DIR: "/home/kimibuilt/.kimibuilt"
   KIMIBUILT_STATE_DIR: "/home/kimibuilt/.kimibuilt"
+  OPENCODE_REMOTE_DEFAULT_WORKSPACE: "/opt/kimibuilt"
+  OPENCODE_REMOTE_AUTO_INSTALL: "true"
   PORT: "3000"
   NODE_ENV: "production"

@@ -1,5 +1,17 @@
 require('dotenv').config();
 const path = require('path');
+const { getStateDirectory } = require('./runtime-state-paths');
+const { resolveDefaultRepositoryPath } = require('./repository-paths');
+
+const persistenceDataDir = process.env.KIMIBUILT_DATA_DIR
+    ? path.resolve(process.env.KIMIBUILT_DATA_DIR)
+    : getStateDirectory();
+const defaultRepositoryPath = resolveDefaultRepositoryPath({
+    explicitPath: process.env.DEFAULT_GIT_REPOSITORY_PATH,
+    currentWorkingDirectory: process.cwd(),
+    dataDir: persistenceDataDir,
+    repositoryUrl: process.env.KIMIBUILT_DEPLOY_REPO_URL || '',
+});
 
 const config = {
     // Server
@@ -48,7 +60,7 @@ const config = {
     },
 
     persistence: {
-        dataDir: process.env.KIMIBUILT_DATA_DIR || path.join(process.cwd(), 'data'),
+        dataDir: persistenceDataDir,
     },
 
     artifacts: {
@@ -169,7 +181,7 @@ const config = {
     },
 
     deploy: {
-        defaultRepositoryPath: process.env.DEFAULT_GIT_REPOSITORY_PATH || process.cwd(),
+        defaultRepositoryPath,
         defaultRepositoryUrl: process.env.KIMIBUILT_DEPLOY_REPO_URL || '',
         defaultTargetDirectory: process.env.KIMIBUILT_DEPLOY_TARGET_DIR || '',
         defaultManifestsPath: process.env.KIMIBUILT_DEPLOY_MANIFESTS_PATH || 'k8s',
@@ -185,12 +197,13 @@ const config = {
         defaultAgent: process.env.OPENCODE_DEFAULT_AGENT || 'build',
         defaultModel: process.env.OPENCODE_DEFAULT_MODEL || '',
         gatewayApiKey: process.env.OPENCODE_GATEWAY_API_KEY || '',
-        allowedWorkspaceRoots: String(
-            process.env.OPENCODE_ALLOWED_WORKSPACE_ROOTS || process.env.DEFAULT_GIT_REPOSITORY_PATH || process.cwd(),
-        )
-            .split(',')
-            .map((value) => value.trim())
-            .filter(Boolean),
+        allowedWorkspaceRoots: process.env.OPENCODE_ALLOWED_WORKSPACE_ROOTS
+            ? String(process.env.OPENCODE_ALLOWED_WORKSPACE_ROOTS)
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean)
+                .map((value) => path.resolve(value))
+            : [defaultRepositoryPath],
         remoteDefaultWorkspace: process.env.OPENCODE_REMOTE_DEFAULT_WORKSPACE || '',
         providerEnvAllowlist: String(process.env.OPENCODE_PROVIDER_ENV_ALLOWLIST || [
             'OPENAI_API_KEY',

@@ -24,10 +24,18 @@ function canWrite(targetPath = '') {
 }
 
 function getStateDirectory() {
-    const configured = String(process.env.KIMIBUILT_STATE_DIR || '').trim();
-    return configured
-        ? path.resolve(PROJECT_ROOT, configured)
-        : DEFAULT_STATE_DIR;
+    const configured = String(
+        process.env.KIMIBUILT_STATE_DIR
+        || process.env.KIMIBUILT_DATA_DIR
+        || '',
+    ).trim();
+    if (!configured) {
+        return DEFAULT_STATE_DIR;
+    }
+
+    return path.isAbsolute(configured)
+        ? configured
+        : path.resolve(PROJECT_ROOT, configured);
 }
 
 function resolvePreferredWritableFile(projectFilePath = '', fallbackSegments = []) {

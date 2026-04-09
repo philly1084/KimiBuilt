@@ -429,7 +429,7 @@ describe('OpenCode service helpers', () => {
         try {
             const instanceDir = await service.ensureLocalInstanceDir('local::workspace');
             expect(resolvePreferredWritableFile).toHaveBeenCalledWith(
-                expect.stringContaining(path.join('data', 'opencode')),
+                expect.stringContaining(path.join(config.persistence.dataDir, 'opencode')),
                 expect.any(Array),
             );
             expect(mkdirSpy).toHaveBeenCalledWith(path.dirname(fallbackMarker), { recursive: true });

@@ -7,6 +7,7 @@ const EventEmitter = require('events');
 const { spawn } = require('child_process');
 
 const { config } = require('../config');
+const { ensureRepositoryWorkspace } = require('../repository-workspace');
 const { listModels } = require('../openai-client');
 const settingsController = require('../routes/admin/settings.controller');
 const { broadcastToAdmins, broadcastToSession } = require('../realtime-hub');
@@ -741,7 +742,20 @@ class OpenCodeService {
     }
 
     async startLocalInstance(key, workspacePath, approvalMode = 'manual') {
-        await fs.access(workspacePath);
+        const defaultWorkspacePath = path.resolve(String(config.deploy.defaultRepositoryPath || process.cwd()));
+        let resolvedWorkspacePath = path.resolve(String(workspacePath || defaultWorkspacePath));
+
+        if (resolvedWorkspacePath === defaultWorkspacePath) {
+            const preparedWorkspace = await ensureRepositoryWorkspace({
+                repositoryPath: resolvedWorkspacePath,
+                repositoryUrl: config.deploy.defaultRepositoryUrl,
+                ref: config.deploy.defaultBranch,
+            });
+            resolvedWorkspacePath = preparedWorkspace.repositoryPath;
+        } else {
+            await fs.access(resolvedWorkspacePath);
+        }
+
         const effective = this.getEffectiveConfig();
         const port = derivePort(key, 4100);
         const authPassword = randomToken();
@@ -751,7 +765,7 @@ class OpenCodeService {
         const managedConfig = await this.buildManagedConfig({
             target: 'local',
             approvalMode,
-            workspacePath,
+            workspacePath: resolvedWorkspacePath,
         });
         await fs.writeFile(configPath, JSON.stringify(managedConfig, null, 2));
 
@@ -759,7 +773,7 @@ class OpenCodeService {
             effective.binaryPath || 'opencode',
             ['serve', '--hostname', '127.0.0.1', '--port', String(port)],
             {
-                cwd: workspacePath,
+                cwd: resolvedWorkspacePath,
                 env: {
                     ...process.env,
                     ...pickAllowedEnv(process.env, effective.providerEnvAllowlist || []),
@@ -799,7 +813,7 @@ class OpenCodeService {
         const instance = {
             key,
             target: 'local',
-            workspacePath,
+            workspacePath: resolvedWorkspacePath,
             port,
             authUsername,
             authPassword,

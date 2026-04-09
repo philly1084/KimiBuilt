@@ -1,6 +1,41 @@
+jest.mock('../../../../git-credentials', () => ({
+  createGitCredentialSession: jest.fn(async () => ({
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+    },
+    cleanup: async () => {},
+  })),
+}));
+
+jest.mock('../../../../repository-workspace', () => ({
+  ensureRepositoryWorkspace: jest.fn(async ({ repositoryPath }) => ({
+    repositoryPath,
+    bootstrapped: false,
+  })),
+}));
+
 const { GitLocalTool } = require('./GitLocalTool');
+const { createGitCredentialSession } = require('../../../../git-credentials');
+const { ensureRepositoryWorkspace } = require('../../../../repository-workspace');
+const path = require('path');
 
 describe('GitLocalTool', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = {
+      ...originalEnv,
+      KIMIBUILT_GIT_COMMIT_NAME: 'KimiBuilt Agent',
+      KIMIBUILT_GIT_COMMIT_EMAIL: 'agent@example.com',
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    jest.clearAllMocks();
+  });
+
   test('builds save-and-push flow with staged paths and current branch push', async () => {
     const tool = new GitLocalTool();
     const commands = [];
@@ -27,9 +62,13 @@ describe('GitLocalTool', () => {
     expect(result.success).toBe(true);
     expect(commands).toEqual([
       ['add', '--', 'src/app.js'],
-      ['commit', '-m', 'Update app'],
+      ['-c', 'user.name=KimiBuilt Agent', '-c', 'user.email=agent@example.com', 'commit', '-m', 'Update app'],
       ['push', 'origin', 'master'],
     ]);
+    expect(ensureRepositoryWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      repositoryPath: path.resolve('/repo'),
+    }));
+    expect(createGitCredentialSession).toHaveBeenCalledTimes(1);
   });
 
   test('rejects invalid pathspecs that look like flags', async () => {
@@ -91,5 +130,39 @@ describe('GitLocalTool', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Git CLI is unavailable in the backend runtime');
+  });
+
+  test('bootstraps the managed workspace before resolving the repo root', async () => {
+    const tool = new GitLocalTool();
+    ensureRepositoryWorkspace.mockResolvedValueOnce({
+      repositoryPath: '/managed/repo',
+      bootstrapped: true,
+    });
+    tool.resolveRepoRoot = jest.fn().mockResolvedValue('/managed/repo');
+    tool.getCurrentBranch = jest.fn().mockResolvedValue('main');
+    tool.spawnGit = jest.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: '## main',
+      stderr: '',
+      duration: 5,
+    });
+
+    const result = await tool.execute({
+      action: 'status',
+      repositoryPath: '/managed/repo',
+      repositoryUrl: 'https://github.com/example/app.git',
+    });
+
+    expect(result.success).toBe(true);
+    expect(ensureRepositoryWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      repositoryPath: path.resolve('/managed/repo'),
+      repositoryUrl: 'https://github.com/example/app.git',
+    }));
+    expect(tool.resolveRepoRoot).toHaveBeenCalledWith(
+      '/managed/repo',
+      expect.objectContaining({
+        GIT_TERMINAL_PROMPT: '0',
+      }),
+    );
   });
 });
