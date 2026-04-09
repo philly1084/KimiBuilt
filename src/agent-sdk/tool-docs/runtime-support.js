@@ -172,7 +172,7 @@ async function getRuntimeSnapshot() {
 async function getRuntimeSupport(toolId) {
     const snapshot = await getRuntimeSnapshot();
 
-    if (toolId === 'ssh-execute') {
+    if (toolId === 'ssh-execute' || toolId === 'remote-command') {
         return {
             status: snapshot.ssh.ready ? 'stable' : 'requires_setup',
             notes: snapshot.ssh.notes,

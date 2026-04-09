@@ -10,10 +10,18 @@ const AGENT_NOTES_CHAR_LIMIT = 4000;
 const DEFAULT_AGENT_NOTES_MARKDOWN = `# Carryover Notes
 
 ## Project
-- Capture stable project facts, decisions, and worthwhile ideas here.
+- Primary remote infra target is an Ubuntu Linux ARM64 server running k3s.
+- Default remote workflow is: baseline -> inspect -> fix -> verify. Keep command batches small and purposeful.
+- Use \`k3s-deploy\` for standard deploy actions such as repo sync, manifest apply, image update, and rollout status.
+- Use \`remote-command\` for kubectl inspection, logs, service status, network checks, package installs, one-off repairs, and post-deploy verification.
+- Assume \`kubectl\` should talk to k3s. If context is missing, prefer \`export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\` or \`k3s kubectl\`.
+- Prefer non-interactive commands. Avoid editors, interactive shells, \`watch\`, or anything that needs a TTY.
+- Do not assume \`rg\`, \`docker-compose\`, \`ifconfig\`, or \`netstat\` exist on the server. Prefer \`find\` and \`grep -R\`, \`docker compose\`, \`ip addr\`, and \`ss -tulpn\`.
+- For k3s triage, a common sequence is \`kubectl get pods -A -o wide\`, \`kubectl describe ...\`, \`kubectl logs ... --previous\`, \`kubectl rollout status ...\`, then \`systemctl status k3s\` and \`journalctl -u k3s --no-pager -n 200\` if control-plane health is suspect.
 
 ## Phil
-- Capture durable preferences or collaboration notes that help future sessions work better with Phil.
+- For remote work, prefer concrete command outputs over vague status summaries.
+- Keep server commands safe and minimal; do not mutate live resources until the diagnosis points to a specific fix.
 `;
 
 let cachedAgentNotes = null;

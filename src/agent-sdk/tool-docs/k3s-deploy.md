@@ -16,3 +16,6 @@ Notes:
 - `sync-and-apply` is the main GitOps-style path: sync the repo on the server, apply manifests, then optionally check rollout status.
 - Use `set-image` when GitHub Actions has already published a new image tag and you only need the cluster rollout step.
 - For arbitrary remote software installation or debugging outside these actions, use `remote-command`.
+- The expected remote environment in this project is Ubuntu Linux on ARM64 with k3s.
+- After a failed deploy, switch to `remote-command` for `kubectl describe`, `kubectl logs`, `systemctl status k3s`, or `journalctl -u k3s --no-pager -n 200`.
+- If `kubectl` context looks wrong on the host, try `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` or `k3s kubectl`.

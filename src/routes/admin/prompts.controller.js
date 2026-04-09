@@ -68,6 +68,10 @@ function buildPlannerPromptSurface() {
     'When an SSH runtime target is already available, prefer trying remote-command before asking the user for host details again.',
     'Only ask for SSH connection details after an actual tool failure shows the target is missing or incorrect.',
     'For remote reconnect or baseline checks, assume Ubuntu/Linux and prefer a concrete command such as: hostname && uname -m && (test -f /etc/os-release && sed -n \'1,3p\' /etc/os-release || true) && uptime',
+    'The common remote target in this project is Ubuntu ARM64 with k3s. Verify architecture early and prefer arm64 binaries when installing software.',
+    'On remote Ubuntu hosts, prefer find and grep -R, docker compose, ip addr, and ss -tulpn instead of rg, docker-compose, ifconfig, and netstat.',
+    'If kubectl looks missing on a k3s host, try export KUBECONFIG=/etc/rancher/k3s/k3s.yaml or use k3s kubectl before assuming cluster access is broken.',
+    'For k3s incidents, prefer a sequence of kubectl get pods -A -o wide, kubectl describe, kubectl logs --previous, kubectl rollout status, then systemctl status k3s or journalctl -u k3s --no-pager -n 200 when control-plane health is suspect.',
     'Do not repeat the same remote-command call back-to-back without an intervening fix or new reason. Re-running a verification command after a fix is allowed.',
   ].join('\n');
 }

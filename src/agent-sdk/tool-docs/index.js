@@ -15,6 +15,7 @@ const TOOL_SUPPORT = {
   'uml-generate': { status: 'stable', notes: ['Mermaid/PlantUML output generator.'] },
   'api-design': { status: 'stable', notes: ['API contract/design output generator.'] },
   'ssh-execute': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.'] },
+  'remote-command': { status: 'requires_setup', notes: ['Requires SSH target credentials or cluster secret configuration.', 'Optimized for Ubuntu/Linux host and k3s cluster operations in this project.'] },
   'k3s-deploy': { status: 'requires_setup', notes: ['Requires SSH target credentials and kubectl/git on the remote host.'] },
   'docker-exec': { status: 'requires_setup', notes: ['Requires Docker CLI/socket access in the backend runtime.'] },
   'code-sandbox': { status: 'requires_setup', notes: ['Requires Docker image pull/run capability in the backend runtime.'] },

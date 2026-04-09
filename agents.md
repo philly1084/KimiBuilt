@@ -177,6 +177,33 @@ npx wscat -c ws://localhost:3000/ws
 
 ---
 
+## Remote Server Operating Notes
+
+The common remote operations target for this project is an Ubuntu Linux ARM64 server running k3s.
+
+When agents are using SSH or remote command tools:
+- Prefer `k3s-deploy` for standard deploy operations: repo sync, manifest apply, image update, and rollout checks.
+- Prefer `remote-command` for kubectl inspection, logs, service status, network checks, package installs, one-off fixes, and post-deploy verification.
+- Start with a short baseline command when reconnecting:
+
+```bash
+hostname && whoami && uname -m && (test -f /etc/os-release && sed -n '1,6p' /etc/os-release || true) && uptime
+```
+
+- Assume `kubectl` should point at k3s. If cluster access is unclear, prefer `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` or `k3s kubectl`.
+- On the host, do not assume `rg`, `docker-compose`, `ifconfig`, or `netstat` exist. Prefer `find` and `grep -R`, `docker compose`, `ip addr`, and `ss -tulpn`.
+- For k3s triage, use a get -> describe -> logs -> rollout -> systemd/journal flow:
+  - `kubectl get pods -A -o wide`
+  - `kubectl describe ...`
+  - `kubectl logs ... --previous`
+  - `kubectl rollout status ...`
+  - `systemctl status k3s` / `journalctl -u k3s --no-pager -n 200`
+- Keep remote command batches small and purposeful: baseline -> inspect -> fix -> verify.
+- Avoid interactive commands and editors unless the user explicitly asks for that style of access.
+- See `src/agent-sdk/tool-docs/remote-command.md` for the reusable command catalog.
+
+---
+
 ## Frontend Specifications
 
 Below are the specifications for each of the four frontend interaction modes. These share the same backend but present different UX paradigms.
