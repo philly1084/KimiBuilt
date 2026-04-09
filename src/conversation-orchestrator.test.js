@@ -4804,6 +4804,78 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('offers local opencode-run in the default profile for repo implementation plus github push requests', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+        settingsController.getEffectiveOpencodeConfig.mockReturnValue({
+            enabled: true,
+            binaryPath: 'opencode',
+            defaultAgent: 'build',
+            defaultModel: 'gpt-4o',
+            allowedWorkspaceRoots: ['C:/Users/phill/KimiBuilt'],
+            remoteDefaultWorkspace: '/srv/apps/kimibuilt',
+            providerEnvAllowlist: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
+            remoteAutoInstall: false,
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['opencode-run', 'git-safe', 'tool-doc-read', 'web-search', 'web-fetch', 'file-read', 'file-search']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Fix the auth module in this repo, build it locally with opencode, and push it to GitHub.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session: {
+                metadata: {},
+            },
+            toolPolicy,
+            toolContext: {
+                repositoryPath: 'C:/Users/phill/KimiBuilt',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            },
+        });
+
+        expect(toolPolicy.executionProfile).toBe('default');
+        expect(toolPolicy.candidateToolIds).toContain('opencode-run');
+        expect(toolPolicy.opencode).toEqual({
+            target: 'local',
+            ready: true,
+        });
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'opencode-run',
+            params: expect.objectContaining({
+                target: 'local',
+                workspacePath: 'C:/Users/phill/KimiBuilt',
+            }),
+        }));
+    });
+
     test('keeps opencode local for kimibuilt tls-plus-github requests instead of treating the .help domain like docs help', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

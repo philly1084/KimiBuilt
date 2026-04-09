@@ -5973,6 +5973,9 @@ class ConversationOrchestrator extends EventEmitter {
             if (!sessionIsolation && allowedToolIds.includes('agent-notes-write') && isAgentNotesAutoWriteEnabled()) {
                 candidates.add('agent-notes-write');
             }
+            if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady && allowedToolIds.includes('opencode-run')) {
+                candidates.add('opencode-run');
+            }
             if (/\b(git|github)\b[\s\S]{0,80}\b(status|diff|branch|stage|add|commit|push|save and push|save-and-push)\b/.test(prompt)
                 && allowedToolIds.includes('git-safe')) {
                 candidates.add('git-safe');
