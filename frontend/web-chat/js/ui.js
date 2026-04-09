@@ -2992,7 +2992,7 @@ class UIHelpers {
             // Add loading state
             if (modelBtn) modelBtn.classList.add('loading');
             
-            const response = await apiClient.getModels();
+            const response = await apiClient.getModels(true);
             const models = Array.isArray(response?.data) ? response.data : [];
             this.availableModels = typeof apiClient.filterChatModels === 'function'
                 ? apiClient.filterChatModels(models)

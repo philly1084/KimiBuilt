@@ -984,41 +984,16 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     filterChatModels(models = []) {
+        const seen = new Set();
+
         return models.filter((model) => {
-            const id = String(model.id || '').toLowerCase();
-            if (!id) return false;
+            const id = String(model?.id || '').trim();
+            if (!id || seen.has(id)) {
+                return false;
+            }
 
-            const looksLikeChatModel = [
-                'gpt',
-                'claude',
-                'gemini',
-                'kimi',
-                'llama',
-                'mistral',
-                'qwen',
-                'phi',
-                'ollama',
-                'antigravity',
-                'deepseek',
-                'deepseak',
-            ].some((token) => id.includes(token));
-
-            const looksUnsupportedForWebChat = [
-                'image',
-                'embedding',
-                'tts',
-                'transcribe',
-                'audio',
-                'realtime',
-                'vision-preview',
-                'preview-tools',
-                '-tools',
-                'codex',
-                'computer-use',
-                'computer_use',
-            ].some((token) => id.includes(token));
-
-            return looksLikeChatModel && !looksUnsupportedForWebChat;
+            seen.add(id);
+            return true;
         });
     }
 

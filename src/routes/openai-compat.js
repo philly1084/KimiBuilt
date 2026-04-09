@@ -37,6 +37,7 @@ const { buildContinuityInstructions: buildBaseContinuityInstructions } = require
 const { getSessionControlState } = require('../runtime-control-state');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
+const { toPublicChatModelList } = require('../model-catalog');
 const {
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
@@ -472,20 +473,6 @@ function shouldInjectRecentMessages(inputMessages = []) {
     return transcriptMessages.length <= 1;
 }
 
-function isChatCapableModel(modelId = '') {
-    const normalizedId = String(modelId).toLowerCase();
-    if (!normalizedId) return false;
-
-    const looksLikeChatModel = [
-        'gpt', 'claude', 'gemini', 'kimi', 'llama', 'mistral', 'qwen', 'phi', 'ollama', 'antigravity', 'deepseek', 'deepseak',
-    ].some((token) => normalizedId.includes(token));
-
-    const imageOnly = normalizedId.includes('image') && !normalizedId.includes('vision');
-    const audioOnly = normalizedId.includes('tts') || normalizedId.includes('speech') || normalizedId.includes('transcribe');
-
-    return looksLikeChatModel && !imageOnly && !audioOnly;
-}
-
 async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = null) {
     if (!sessionId) {
         return null;
@@ -515,14 +502,7 @@ router.get('/models', async (_req, res, next) => {
         const models = await listModels();
         res.json({
             object: 'list',
-            data: models
-                .filter((model) => isChatCapableModel(model.id))
-                .map((model) => ({
-                    id: model.id,
-                    object: 'model',
-                    created: model.created || Math.floor(Date.now() / 1000),
-                    owned_by: model.owned_by || 'openai',
-                })),
+            data: toPublicChatModelList(models),
         });
     } catch (err) {
         next(err);
