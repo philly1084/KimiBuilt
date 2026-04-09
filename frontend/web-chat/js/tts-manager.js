@@ -99,6 +99,23 @@ class WebChatTtsManager extends EventTarget {
         this.emitStateChange('configchange');
     }
 
+    setSelectedVoiceId(voiceId = '') {
+        const requestedVoiceId = String(voiceId || '').trim();
+        const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
+        const nextVoiceId = matchingVoice?.id || this.voices[0]?.id || '';
+
+        if (this.selectedVoiceId === nextVoiceId) {
+            return;
+        }
+
+        this.selectedVoiceId = nextVoiceId;
+        if (this.selectedVoiceId) {
+            this.storageSet(this.storageKeys.voiceId, this.selectedVoiceId);
+        }
+        this.stop();
+        this.emitStateChange('configchange');
+    }
+
     getSelectedVoiceId() {
         if (!this.voices.length) {
             return '';

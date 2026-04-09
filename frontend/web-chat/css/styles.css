@@ -1348,6 +1348,22 @@ body.mobile-chat-menu-open {
     transform: translateY(-1px);
 }
 
+.assistant-preview-btn.is-active {
+    border-color: rgba(96, 165, 250, 0.55);
+    background: rgba(96, 165, 250, 0.14);
+    color: var(--text-primary);
+}
+
+.assistant-preview-btn.is-loading {
+    color: var(--accent);
+}
+
+.assistant-preview-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .assistant-preview-btn:focus-visible {
     outline: 2px solid rgba(96, 165, 250, 0.55);
     outline-offset: 2px;

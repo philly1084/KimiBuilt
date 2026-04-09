@@ -1,4 +1,5 @@
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const { getStateDirectory } = require('./runtime-state-paths');
 const { resolveDefaultRepositoryPath } = require('./repository-paths');
@@ -12,6 +13,133 @@ const defaultRepositoryPath = resolveDefaultRepositoryPath({
     dataDir: persistenceDataDir,
     repositoryUrl: process.env.KIMIBUILT_DEPLOY_REPO_URL || '',
 });
+
+function resolveConfigPath(value = '') {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    if (path.isAbsolute(normalized)) {
+        return path.normalize(normalized);
+    }
+
+    if (normalized.includes('/') || normalized.includes('\\') || /\.[a-z0-9]+$/i.test(normalized)) {
+        return path.resolve(process.cwd(), normalized);
+    }
+
+    return normalized;
+}
+
+function parseOptionalInteger(value) {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalFloat(value) {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizePiperVoiceDefinition(value = {}, defaults = {}) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const id = String(value.id || value.voiceId || defaults.id || '').trim();
+    const modelPath = resolveConfigPath(value.modelPath || value.model_path || defaults.modelPath || '');
+    if (!id || !modelPath) {
+        return null;
+    }
+
+    return {
+        id,
+        label: String(value.label || value.voiceLabel || defaults.label || '').trim() || id,
+        description: String(value.description || value.voiceDescription || defaults.description || '').trim(),
+        modelPath,
+        configPath: resolveConfigPath(value.configPath || value.config_path || defaults.configPath || ''),
+        speakerId: parseOptionalInteger(value.speakerId ?? value.speaker_id ?? defaults.speakerId),
+        lengthScale: parseOptionalFloat(value.lengthScale ?? value.length_scale ?? defaults.lengthScale),
+        noiseScale: parseOptionalFloat(value.noiseScale ?? value.noise_scale ?? defaults.noiseScale),
+        noiseW: parseOptionalFloat(value.noiseW ?? value.noise_w ?? defaults.noiseW),
+        sentenceSilence: parseOptionalFloat(value.sentenceSilence ?? value.sentence_silence ?? defaults.sentenceSilence),
+    };
+}
+
+function parsePiperVoicesPayload(rawValue = '', defaults = {}) {
+    const normalized = String(rawValue || '').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(normalized);
+        return (Array.isArray(parsed) ? parsed : [])
+            .map((entry) => normalizePiperVoiceDefinition(entry, defaults))
+            .filter(Boolean);
+    } catch (error) {
+        console.warn(`[Config] Failed to parse Piper voices JSON: ${error.message}`);
+        return [];
+    }
+}
+
+function loadConfiguredPiperVoices(defaults = {}) {
+    const voicesPath = resolveConfigPath(process.env.PIPER_TTS_VOICES_PATH || '');
+    if (voicesPath) {
+        try {
+            const fileContents = fs.readFileSync(voicesPath, 'utf8');
+            const parsedVoices = parsePiperVoicesPayload(fileContents, defaults);
+            if (parsedVoices.length > 0) {
+                return {
+                    voicesPath,
+                    voices: parsedVoices,
+                };
+            }
+        } catch (error) {
+            console.warn(`[Config] Failed to load Piper voices file "${voicesPath}": ${error.message}`);
+        }
+    }
+
+    const parsedVoices = parsePiperVoicesPayload(process.env.PIPER_TTS_VOICES_JSON || '', defaults);
+    if (parsedVoices.length > 0) {
+        return {
+            voicesPath,
+            voices: parsedVoices,
+        };
+    }
+
+    const legacyVoice = normalizePiperVoiceDefinition({
+        id: defaults.id,
+        label: defaults.label,
+        description: defaults.description,
+        modelPath: process.env.PIPER_TTS_MODEL_PATH || '',
+        configPath: process.env.PIPER_TTS_CONFIG_PATH || '',
+        speakerId: process.env.PIPER_TTS_SPEAKER_ID,
+        lengthScale: process.env.PIPER_TTS_LENGTH_SCALE,
+        noiseScale: process.env.PIPER_TTS_NOISE_SCALE,
+        noiseW: process.env.PIPER_TTS_NOISE_W,
+        sentenceSilence: process.env.PIPER_TTS_SENTENCE_SILENCE,
+    }, defaults);
+
+    return {
+        voicesPath,
+        voices: legacyVoice ? [legacyVoice] : [],
+    };
+}
+
+const piperVoiceDefaults = {
+    id: process.env.PIPER_TTS_VOICE_ID || 'piper-female-natural',
+    label: process.env.PIPER_TTS_VOICE_LABEL || 'Female natural',
+    description: process.env.PIPER_TTS_VOICE_DESCRIPTION || 'A Piper voice tuned for clear, natural female speech.',
+    modelPath: process.env.PIPER_TTS_MODEL_PATH || '',
+    configPath: process.env.PIPER_TTS_CONFIG_PATH || '',
+    speakerId: parseOptionalInteger(process.env.PIPER_TTS_SPEAKER_ID),
+    lengthScale: parseOptionalFloat(process.env.PIPER_TTS_LENGTH_SCALE) ?? 1.02,
+    noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.55,
+    noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.8,
+    sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
+};
+const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
 
 const config = {
     // Server
@@ -72,27 +200,20 @@ const config = {
     tts: {
         piper: {
             enabled: process.env.PIPER_TTS_ENABLED !== 'false',
-            binaryPath: process.env.PIPER_TTS_BINARY_PATH || 'piper',
-            modelPath: process.env.PIPER_TTS_MODEL_PATH || '',
-            configPath: process.env.PIPER_TTS_CONFIG_PATH || '',
-            voiceId: process.env.PIPER_TTS_VOICE_ID || 'piper-female-natural',
-            voiceLabel: process.env.PIPER_TTS_VOICE_LABEL || 'Female natural',
-            voiceDescription: process.env.PIPER_TTS_VOICE_DESCRIPTION || 'A Piper voice tuned for clear, natural female speech.',
-            speakerId: Number.isFinite(parseInt(process.env.PIPER_TTS_SPEAKER_ID, 10))
-                ? parseInt(process.env.PIPER_TTS_SPEAKER_ID, 10)
-                : null,
-            lengthScale: Number.isFinite(parseFloat(process.env.PIPER_TTS_LENGTH_SCALE))
-                ? parseFloat(process.env.PIPER_TTS_LENGTH_SCALE)
-                : 1.02,
-            noiseScale: Number.isFinite(parseFloat(process.env.PIPER_TTS_NOISE_SCALE))
-                ? parseFloat(process.env.PIPER_TTS_NOISE_SCALE)
-                : 0.55,
-            noiseW: Number.isFinite(parseFloat(process.env.PIPER_TTS_NOISE_W))
-                ? parseFloat(process.env.PIPER_TTS_NOISE_W)
-                : 0.8,
-            sentenceSilence: Number.isFinite(parseFloat(process.env.PIPER_TTS_SENTENCE_SILENCE))
-                ? parseFloat(process.env.PIPER_TTS_SENTENCE_SILENCE)
-                : 0.24,
+            binaryPath: resolveConfigPath(process.env.PIPER_TTS_BINARY_PATH || 'piper'),
+            voicesPath: configuredPiperVoices.voicesPath,
+            voices: configuredPiperVoices.voices,
+            modelPath: resolveConfigPath(process.env.PIPER_TTS_MODEL_PATH || ''),
+            configPath: resolveConfigPath(process.env.PIPER_TTS_CONFIG_PATH || ''),
+            voiceId: piperVoiceDefaults.id,
+            defaultVoiceId: process.env.PIPER_TTS_DEFAULT_VOICE_ID || piperVoiceDefaults.id,
+            voiceLabel: piperVoiceDefaults.label,
+            voiceDescription: piperVoiceDefaults.description,
+            speakerId: parseOptionalInteger(process.env.PIPER_TTS_SPEAKER_ID),
+            lengthScale: parseOptionalFloat(process.env.PIPER_TTS_LENGTH_SCALE) ?? 1.02,
+            noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.55,
+            noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.8,
+            sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
             maxTextChars: Math.max(
                 200,
                 parseInt(process.env.PIPER_TTS_MAX_TEXT_CHARS, 10) || 2400,

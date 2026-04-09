@@ -47,10 +47,12 @@ class UIHelpers {
         this.updateTtsUI();
         this.ttsManager?.addEventListener('configchange', () => {
             this.updateTtsUI();
+            this.updateTtsPreviewButtons();
             this.updateMessageSpeechButtons();
         });
         this.ttsManager?.addEventListener('statechange', () => {
             this.updateTtsUI();
+            this.updateTtsPreviewButtons();
             this.updateMessageSpeechButtons();
         });
         void this.initializeTts();
@@ -3597,6 +3599,7 @@ class UIHelpers {
         }
 
         this.updateTtsUI();
+        this.updateTtsPreviewButtons();
         this.updateMessageSpeechButtons();
     }
 
@@ -3608,16 +3611,58 @@ class UIHelpers {
         return this.ttsManager?.isAutoPlayEnabled?.() === true;
     }
 
+    getTtsVoices() {
+        return this.ttsManager?.getVoices?.() || [];
+    }
+
     getTtsVoiceLabel() {
         return this.ttsManager?.getVoiceLabel?.() || 'Piper voice';
+    }
+
+    setSelectedTtsVoiceId(voiceId = '') {
+        this.ttsManager?.setSelectedVoiceId?.(voiceId);
+        this.updateTtsUI();
+    }
+
+    getTtsPreviewSamples() {
+        return [
+            {
+                id: 'soft-hello',
+                label: 'Soft hello',
+                text: 'Hi there. I am here, and I will keep things calm, clear, and easy to follow.',
+            },
+            {
+                id: 'calm-guide',
+                label: 'Calm guide',
+                text: 'Here is a gentle summary of the next steps, one clear piece at a time.',
+            },
+            {
+                id: 'gentle-close',
+                label: 'Gentle close',
+                text: 'You are all set. Take your time, and come back whenever you are ready.',
+            },
+        ];
+    }
+
+    getTtsPreviewSample(sampleId = '') {
+        const normalizedSampleId = String(sampleId || '').trim();
+        return this.getTtsPreviewSamples().find((sample) => sample.id === normalizedSampleId) || null;
+    }
+
+    getTtsPreviewMessageId(sampleId = '') {
+        return `tts-preview:${String(sampleId || '').trim()}`;
     }
 
     updateTtsUI() {
         const button = document.getElementById('tts-autoplay-btn');
         const label = document.getElementById('tts-autoplay-label');
         const hint = document.getElementById('tts-voice-hint');
+        const voiceSelectWrap = document.getElementById('tts-voice-select-wrap');
+        const voiceSelect = document.getElementById('tts-voice-select');
         const available = this.isTtsAvailable();
         const autoPlayEnabled = this.isTtsAutoPlayEnabled();
+        const voices = this.getTtsVoices();
+        const selectedVoiceId = this.ttsManager?.getSelectedVoiceId?.() || voices[0]?.id || '';
 
         if (button) {
             button.disabled = !available;
@@ -3634,10 +3679,77 @@ class UIHelpers {
                 : 'Read replies aloud: Unavailable';
         }
 
+        if (voiceSelectWrap) {
+            voiceSelectWrap.hidden = voices.length <= 1;
+        }
+
+        if (voiceSelect) {
+            if (!voices.length) {
+                voiceSelect.innerHTML = '<option value="">Piper unavailable</option>';
+                voiceSelect.disabled = true;
+                voiceSelect.value = '';
+            } else {
+                const optionsMarkup = voices
+                    .map((voice) => `
+                        <option value="${this.escapeHtmlAttr(voice.id)}">${this.escapeHtml(voice.label || voice.id)}</option>
+                    `)
+                    .join('');
+                if (voiceSelect.innerHTML !== optionsMarkup) {
+                    voiceSelect.innerHTML = optionsMarkup;
+                }
+                voiceSelect.disabled = !available || voices.length <= 1;
+                voiceSelect.value = selectedVoiceId || voices[0].id;
+            }
+        }
+
         if (hint) {
             hint.textContent = available
-                ? `${this.getTtsVoiceLabel()} is ready through Piper. Use the speaker button on any assistant reply, or enable autoplay here.`
+                ? `${this.getTtsVoiceLabel()} is ready through Piper. Use the speaker button on any assistant reply, enable autoplay here, or preview the sample lines above.`
                 : 'Piper voice is unavailable until the server has a configured Piper binary and voice model.';
+        }
+    }
+
+    updateTtsPreviewButtons() {
+        const available = this.isTtsAvailable();
+
+        document.querySelectorAll('[data-tts-preview]').forEach((button) => {
+            const sampleId = String(button.dataset.ttsPreview || '').trim();
+            const sample = this.getTtsPreviewSample(sampleId);
+            const previewMessageId = this.getTtsPreviewMessageId(sampleId);
+            const isLoading = Boolean(sample) && this.ttsManager?.isLoadingMessage?.(previewMessageId) === true;
+            const isPlaying = Boolean(sample) && this.ttsManager?.isPlayingMessage?.(previewMessageId) === true;
+            const title = !sample
+                ? 'Preview unavailable'
+                : (!available
+                    ? 'Piper voice unavailable'
+                    : (isPlaying ? `Stop preview: ${sample.label}` : `Preview: ${sample.label}`));
+
+            button.disabled = !available || !sample || isLoading;
+            button.title = title;
+            button.setAttribute('aria-label', title);
+            button.classList.toggle('is-active', isPlaying);
+            button.classList.toggle('is-loading', isLoading);
+        });
+    }
+
+    async playTtsPreview(sampleId = '') {
+        const sample = this.getTtsPreviewSample(sampleId);
+        if (!sample) {
+            return;
+        }
+
+        if (!this.isTtsAvailable()) {
+            this.showToast('Piper voice playback is not configured on the server.', 'warning', 'Piper voice');
+            return;
+        }
+
+        try {
+            await this.ttsManager?.toggleMessagePlayback?.({
+                messageId: this.getTtsPreviewMessageId(sample.id),
+                text: sample.text,
+            });
+        } catch (error) {
+            this.showToast(error.message || 'Failed to preview the Piper voice sample.', 'error', 'Piper voice');
         }
     }
 
@@ -3712,9 +3824,10 @@ class UIHelpers {
         const normalizedMessageId = String(messageId || '').trim();
         const speakableText = this.buildSpeakableMessageText(message);
         const available = this.isTtsAvailable();
+        const visible = available && Boolean(speakableText);
         const isLoading = this.ttsManager?.isLoadingMessage?.(normalizedMessageId) === true;
         const isPlaying = this.ttsManager?.isPlayingMessage?.(normalizedMessageId) === true;
-        const disabled = !available || !speakableText || isLoading;
+        const disabled = !visible || isLoading;
         const title = !speakableText
             ? 'No readable text in this message'
             : (!available
@@ -3722,16 +3835,21 @@ class UIHelpers {
                 : (isPlaying ? 'Stop voice playback' : 'Read aloud with Piper'));
 
         return {
+            visible,
             disabled,
             isLoading,
             isPlaying,
             title,
-            icon: isLoading ? 'loader-2' : (isPlaying ? 'square' : 'audio-lines'),
+            icon: isLoading ? 'loader-2' : (isPlaying ? 'square' : 'volume-2'),
         };
     }
 
     buildMessageSpeechButtonMarkup(messageId = '', message = null) {
         const state = this.getMessageSpeechControlState(messageId, message);
+        if (!state.visible) {
+            return '';
+        }
+
         return `
             <button
                 class="message-action-btn${state.isPlaying ? ' is-active' : ''}${state.isLoading ? ' is-loading' : ''}"
@@ -3753,11 +3871,16 @@ class UIHelpers {
         }
 
         const state = this.getMessageSpeechControlState(messageId, message);
+        button.hidden = !state.visible;
+        button.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
         button.disabled = state.disabled;
         button.title = state.title;
         button.setAttribute('aria-label', state.title);
         button.classList.toggle('is-active', state.isPlaying);
         button.classList.toggle('is-loading', state.isLoading);
+        if (!state.visible) {
+            return;
+        }
         button.innerHTML = `
             <i data-lucide="${state.icon}" class="w-4 h-4${state.isLoading ? ' animate-spin' : ''}" aria-hidden="true"></i>
         `;
@@ -5773,6 +5896,13 @@ class UIHelpers {
             });
         }
 
+        const ttsVoiceSelect = document.getElementById('tts-voice-select');
+        if (ttsVoiceSelect) {
+            ttsVoiceSelect.addEventListener('change', () => {
+                this.setSelectedTtsVoiceId(ttsVoiceSelect.value);
+            });
+        }
+
         const soundProfileSelect = document.getElementById('sound-profile-select');
         if (soundProfileSelect) {
             soundProfileSelect.addEventListener('change', () => {
@@ -5801,6 +5931,12 @@ class UIHelpers {
         document.querySelectorAll('[data-sound-preview]').forEach((button) => {
             button.addEventListener('click', () => {
                 this.previewSoundCue(button.dataset.soundPreview || 'response');
+            });
+        });
+
+        document.querySelectorAll('[data-tts-preview]').forEach((button) => {
+            button.addEventListener('click', () => {
+                this.playTtsPreview(button.dataset.ttsPreview || '');
             });
         });
 

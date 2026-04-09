@@ -1,4 +1,4 @@
-const { normalizeTextForSpeech } = require('./piper-tts-service');
+const { normalizeTextForSpeech, PiperTtsService } = require('./piper-tts-service');
 
 describe('normalizeTextForSpeech', () => {
     test('converts markdown into speech-friendly sentences', () => {
@@ -32,5 +32,39 @@ Read the [docs](https://example.com/docs).
         const normalized = normalizeTextForSpeech('A '.repeat(1000), 320);
         expect(normalized.length).toBeLessThanOrEqual(323);
         expect(normalized.endsWith('...')).toBe(true);
+    });
+});
+
+describe('PiperTtsService voice manifests', () => {
+    test('returns multiple configured voices and honors the default voice id', () => {
+        const service = new PiperTtsService({
+            enabled: true,
+            binaryPath: 'piper',
+            defaultVoiceId: 'amy-soft',
+            voices: [
+                {
+                    id: 'amy-soft',
+                    label: 'Amy soft',
+                    description: 'Balanced female voice.',
+                    modelPath: 'C:\\voices\\amy.onnx',
+                },
+                {
+                    id: 'kathleen-soft',
+                    label: 'Kathleen soft',
+                    description: 'Gentle female voice.',
+                    modelPath: 'C:\\voices\\kathleen.onnx',
+                },
+            ],
+        });
+
+        expect(service.isConfigured()).toBe(true);
+        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
+            configured: true,
+            defaultVoiceId: 'amy-soft',
+            voices: [
+                expect.objectContaining({ id: 'amy-soft', label: 'Amy soft' }),
+                expect.objectContaining({ id: 'kathleen-soft', label: 'Kathleen soft' }),
+            ],
+        }));
     });
 });

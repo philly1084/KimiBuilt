@@ -100,26 +100,56 @@ class PiperTtsService {
     isConfigured() {
         return this.ttsConfig.enabled !== false
             && Boolean(String(this.ttsConfig.binaryPath || '').trim())
-            && Boolean(String(this.ttsConfig.modelPath || '').trim());
+            && this.getVoiceProfiles().length > 0;
     }
 
-    getVoiceProfile() {
+    toPublicVoiceProfile(voice = {}) {
         return {
-            id: String(this.ttsConfig.voiceId || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID,
-            label: String(this.ttsConfig.voiceLabel || DEFAULT_VOICE_LABEL).trim() || DEFAULT_VOICE_LABEL,
-            description: String(this.ttsConfig.voiceDescription || DEFAULT_VOICE_DESCRIPTION).trim() || DEFAULT_VOICE_DESCRIPTION,
+            id: String(voice.id || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID,
+            label: String(voice.label || DEFAULT_VOICE_LABEL).trim() || DEFAULT_VOICE_LABEL,
+            description: String(voice.description || DEFAULT_VOICE_DESCRIPTION).trim() || DEFAULT_VOICE_DESCRIPTION,
             provider: 'piper',
         };
     }
 
+    getVoiceProfiles() {
+        return (Array.isArray(this.ttsConfig.voices) ? this.ttsConfig.voices : [])
+            .filter((voice) => Boolean(String(voice?.modelPath || '').trim()))
+            .map((voice) => ({
+                ...voice,
+                ...this.toPublicVoiceProfile(voice),
+            }));
+    }
+
+    resolveVoiceProfile(voiceId = '') {
+        const voices = this.getVoiceProfiles();
+        if (voices.length === 0) {
+            return null;
+        }
+
+        const requestedVoiceId = String(voiceId || '').trim();
+        if (requestedVoiceId) {
+            return voices.find((voice) => voice.id === requestedVoiceId) || null;
+        }
+
+        const defaultVoiceId = String(this.ttsConfig.defaultVoiceId || this.ttsConfig.voiceId || '').trim();
+        return voices.find((voice) => voice.id === defaultVoiceId) || voices[0];
+    }
+
+    getVoiceProfile() {
+        return this.resolveVoiceProfile() || this.toPublicVoiceProfile({});
+    }
+
     getPublicConfig() {
         const configured = this.isConfigured();
+        const voices = configured ? this.getVoiceProfiles().map((voice) => this.toPublicVoiceProfile(voice)) : [];
+        const defaultVoice = configured ? this.resolveVoiceProfile() : null;
         return {
             configured,
             provider: 'piper',
             maxTextChars: Math.max(200, Number(this.ttsConfig.maxTextChars) || 2400),
-            defaultVoiceId: configured ? this.getVoiceProfile().id : null,
-            voices: configured ? [this.getVoiceProfile()] : [],
+            defaultVoiceId: configured ? (defaultVoice?.id || voices[0]?.id || null) : null,
+            voices,
         };
     }
 
@@ -130,33 +160,35 @@ class PiperTtsService {
 
         throw createServiceError(
             503,
-            'Piper TTS is not configured. Set PIPER_TTS_MODEL_PATH and optionally PIPER_TTS_BINARY_PATH.',
+            'Piper TTS is not configured. Set PIPER_TTS_MODEL_PATH or PIPER_TTS_VOICES_PATH and optionally PIPER_TTS_BINARY_PATH.',
             'tts_unavailable',
         );
     }
 
-    buildArgs(outputFile) {
+    buildArgs(outputFile, voice = {}) {
         const args = [
             '--model',
-            String(this.ttsConfig.modelPath || '').trim(),
+            String(voice.modelPath || this.ttsConfig.modelPath || '').trim(),
             '--output_file',
             outputFile,
             '--length_scale',
-            String(Number(this.ttsConfig.lengthScale) || 1.02),
+            String(Number(voice.lengthScale ?? this.ttsConfig.lengthScale) || 1.02),
             '--noise_scale',
-            String(Number(this.ttsConfig.noiseScale) || 0.55),
+            String(Number(voice.noiseScale ?? this.ttsConfig.noiseScale) || 0.55),
             '--noise_w',
-            String(Number(this.ttsConfig.noiseW) || 0.8),
+            String(Number(voice.noiseW ?? this.ttsConfig.noiseW) || 0.8),
             '--sentence_silence',
-            String(Number(this.ttsConfig.sentenceSilence) || 0.24),
+            String(Number(voice.sentenceSilence ?? this.ttsConfig.sentenceSilence) || 0.24),
         ];
 
-        const configPath = String(this.ttsConfig.configPath || '').trim();
+        const configPath = String(voice.configPath || this.ttsConfig.configPath || '').trim();
         if (configPath) {
             args.push('--config', configPath);
         }
 
-        if (Number.isInteger(this.ttsConfig.speakerId)) {
+        if (Number.isInteger(voice.speakerId)) {
+            args.push('--speaker', String(voice.speakerId));
+        } else if (Number.isInteger(this.ttsConfig.speakerId)) {
             args.push('--speaker', String(this.ttsConfig.speakerId));
         }
 
@@ -166,9 +198,12 @@ class PiperTtsService {
     async synthesize({ text = '', voiceId = '' } = {}) {
         this.assertConfigured();
 
-        const selectedVoice = this.getVoiceProfile();
-        if (voiceId && voiceId !== selectedVoice.id) {
+        const selectedVoice = this.resolveVoiceProfile(voiceId);
+        if (voiceId && !selectedVoice) {
             throw createServiceError(400, `Unknown Piper voice "${voiceId}".`, 'unknown_voice');
+        }
+        if (!selectedVoice) {
+            throw createServiceError(503, 'Piper TTS has no configured voices.', 'tts_unavailable');
         }
 
         const speakableText = normalizeTextForSpeech(
@@ -182,7 +217,7 @@ class PiperTtsService {
         let didTimeout = false;
 
         try {
-            const args = this.buildArgs(outputFile);
+            const args = this.buildArgs(outputFile, selectedVoice);
             const child = spawn(String(this.ttsConfig.binaryPath || 'piper'), args, {
                 windowsHide: true,
                 stdio: ['pipe', 'ignore', 'pipe'],
@@ -238,7 +273,7 @@ class PiperTtsService {
                 audioBuffer,
                 contentType: 'audio/wav',
                 text: speakableText,
-                voice: selectedVoice,
+                voice: this.toPublicVoiceProfile(selectedVoice),
             };
         } catch (error) {
             if (error?.code === 'ENOENT') {

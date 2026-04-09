@@ -416,7 +416,18 @@
                             <i data-lucide="audio-lines" class="w-5 h-5" aria-hidden="true"></i>
                             <span id="tts-autoplay-label">Read replies aloud: Off</span>
                         </button>
-                        <p id="tts-voice-hint" class="model-selector-setting__hint">Checking Piper voice availability...</p>
+                        <div id="tts-voice-select-wrap" class="assistant-sound-stack" hidden>
+                            <label for="tts-voice-select" class="model-selector-setting__label">Piper voice</label>
+                            <select id="tts-voice-select" class="reasoning-select reasoning-select--panel" title="Piper voice" aria-label="Piper voice">
+                                <option value="">Checking Piper voices...</option>
+                            </select>
+                        </div>
+                        <div class="assistant-sound-preview-row" role="group" aria-label="Preview Piper voice samples">
+                            <button type="button" class="assistant-preview-btn" data-tts-preview="soft-hello">Soft hello</button>
+                            <button type="button" class="assistant-preview-btn" data-tts-preview="calm-guide">Calm guide</button>
+                            <button type="button" class="assistant-preview-btn" data-tts-preview="gentle-close">Gentle close</button>
+                        </div>
+                        <p id="tts-voice-hint" class="model-selector-setting__hint">Checking Piper voice availability and sample previews...</p>
                     </div>
                 </div>
                 <div class="model-selector-setting">
@@ -988,11 +999,11 @@
     <script src="js/api.js?v=20260406d"></script>
     <script src="js/session.js?v=20260406a"></script>
     <script src="js/sound-manager.js?v=20260406e"></script>
-    <script src="js/tts-manager.js?v=20260408a"></script>
+    <script src="js/tts-manager.js?v=20260408b"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260408a"></script>
+    <script src="js/ui.js?v=20260408d"></script>
     <script src="js/app.js?v=20260408a"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>
