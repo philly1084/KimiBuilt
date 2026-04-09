@@ -103,6 +103,7 @@ jest.mock('../web-chat-message-state', () => ({
 
 jest.mock('../session-scope', () => ({
     buildScopedSessionMetadata: jest.fn((metadata = {}) => metadata),
+    isSessionIsolationEnabled: jest.fn(() => false),
     resolveSessionScope: jest.fn(() => 'notes'),
 }));
 

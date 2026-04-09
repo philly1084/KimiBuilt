@@ -36,6 +36,7 @@ const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { getSessionControlState } = require('../runtime-control-state');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
+const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const { toPublicChatModelList } = require('../model-catalog');
 const {
@@ -57,10 +58,11 @@ const router = Router();
 const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answer could not be synthesized from the model response.';
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
 
-function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null) {
+function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
     return {
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...extra,
     };
 }
 
@@ -526,6 +528,9 @@ router.post('/chat/completions', async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
+        const memoryKeywords = normalizeMemoryKeywords(
+            req.body.memoryKeywords || req.body?.metadata?.memoryKeywords || [],
+        );
         const requestTimezone = String(
             requestMetadata?.timezone
             || requestMetadata?.timeZone
@@ -542,6 +547,7 @@ router.post('/chat/completions', async (req, res, next) => {
             ...requestMetadata,
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
+            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
         };
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -761,7 +767,10 @@ router.post('/chat/completions', async (req, res, next) => {
             memoryService.rememberResponse(
                 sessionId,
                 generation.assistantMessage,
-                buildOwnerMemoryMetadata(ownerId, memoryScope),
+                buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                }),
             );
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
                 userText: lastUserText,
@@ -889,6 +898,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     ownerId,
                     memoryScope,
                     sessionIsolation,
+                    memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -952,7 +962,10 @@ router.post('/chat/completions', async (req, res, next) => {
                                 ? { promptState: resolvedCompletion.response.metadata.promptState }
                                 : null,
                         );
-                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                        }));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -1049,6 +1062,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 ownerId,
                 memoryScope,
                 sessionIsolation,
+                memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -1109,6 +1123,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     ownerId,
                     memoryScope,
                     sessionIsolation,
+                    memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1130,7 +1145,10 @@ router.post('/chat/completions', async (req, res, next) => {
             outputText = extractResponseText(response);
         }
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || taskType,
+                ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+            }));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
@@ -1238,6 +1256,9 @@ router.post('/responses', async (req, res, next) => {
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
+        const memoryKeywords = normalizeMemoryKeywords(
+            req.body.memoryKeywords || req.body?.metadata?.memoryKeywords || [],
+        );
         const requestTimezone = String(
             requestMetadata?.timezone
             || requestMetadata?.timeZone
@@ -1254,6 +1275,7 @@ router.post('/responses', async (req, res, next) => {
             ...requestMetadata,
             ...(requestTimezone ? { timezone: requestTimezone } : {}),
             ...(requestNow ? { clientNow: requestNow } : {}),
+            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
         };
 
         let sessionId = resolveSessionId(req);
@@ -1437,7 +1459,10 @@ router.post('/responses', async (req, res, next) => {
             memoryService.rememberResponse(
                 sessionId,
                 generation.assistantMessage,
-                buildOwnerMemoryMetadata(ownerId, memoryScope),
+                buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                    sourceSurface: clientSurface || taskType,
+                    ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                }),
             );
             await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
                 userText: userInput,
@@ -1556,6 +1581,7 @@ router.post('/responses', async (req, res, next) => {
                     ownerId,
                     memoryScope,
                     sessionIsolation,
+                    memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1601,7 +1627,10 @@ router.post('/responses', async (req, res, next) => {
                                 ? { promptState: resolvedCompletion.response.metadata.promptState }
                                 : null,
                         );
-                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+                        memoryService.rememberResponse(sessionId, fullText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                            sourceSurface: clientSurface || taskType,
+                            ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+                        }));
                     }
                     const sshMetadata = extractSshSessionMetadataFromToolEvents(resolvedCompletion.response?.metadata?.toolEvents);
                     if (sshMetadata) {
@@ -1691,6 +1720,7 @@ router.post('/responses', async (req, res, next) => {
                 ownerId,
                 memoryScope,
                 sessionIsolation,
+                memoryKeywords,
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
@@ -1750,6 +1780,7 @@ router.post('/responses', async (req, res, next) => {
                     ownerId,
                     memoryScope,
                     sessionIsolation,
+                    memoryKeywords,
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
@@ -1770,7 +1801,10 @@ router.post('/responses', async (req, res, next) => {
             outputText = extractResponseText(response);
         }
         if (!execution.handledPersistence) {
-            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope));
+            memoryService.rememberResponse(sessionId, outputText, buildOwnerMemoryMetadata(ownerId, memoryScope, {
+                sourceSurface: clientSurface || taskType,
+                ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+            }));
         }
         const sshMetadata = extractSshSessionMetadataFromToolEvents(response?.metadata?.toolEvents);
         if (sshMetadata) {
