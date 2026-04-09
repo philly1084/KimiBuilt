@@ -41,7 +41,9 @@ describe('K3sDeployTool', () => {
     const command = request.command;
     expect(command).toContain("git clone --branch 'main' --single-branch 'https://github.com/example/app.git' '/opt/app'");
     expect(command).toContain('export GIT_ASKPASS="$git_askpass_script"');
-    expect(command).toContain("kubectl apply -f '/opt/app/k8s'");
+    expect(command).toContain('if [ -f "$manifest_dir/namespace.yaml" ]; then kubectl apply -f "$manifest_dir/namespace.yaml"; fi');
+    expect(command).toContain('if [ -f "$manifest_dir/cluster-issuer.yaml" ]; then kubectl apply -f "$manifest_dir/cluster-issuer.yaml"; fi');
+    expect(command).toContain('namespace.yaml|cluster-issuer.yaml|secret.yaml|rancher-simple.yaml|rancher-stack-update.yaml');
     expect(command).toContain("kubectl rollout status deployment/backend -n 'kimibuilt' --timeout=180s");
     expect(request.environment).toEqual(expect.objectContaining({
       GITHUB_TOKEN: 'ghp_test_token',

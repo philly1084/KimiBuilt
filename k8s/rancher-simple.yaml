@@ -43,10 +43,19 @@ kind: Deployment
 metadata:
   name: backend
   namespace: kimibuilt
+  labels:
+    app: backend
 spec:
+  replicas: 1
   strategy:
     type: Recreate
+  selector:
+    matchLabels:
+      app: backend
   template:
+    metadata:
+      labels:
+        app: backend
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64

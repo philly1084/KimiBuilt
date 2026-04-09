@@ -225,7 +225,23 @@ class K3sDeployTool extends ToolBase {
     return [
       'set -e',
       'if ! command -v kubectl >/dev/null 2>&1; then echo "kubectl is required on the remote host" >&2; exit 1; fi',
-      `kubectl apply -f ${this.quoteShellArg(manifestsPath)}`,
+      `manifest_target=${this.quoteShellArg(manifestsPath)}`,
+      'if [ -d "$manifest_target" ]; then',
+      '  manifest_dir="$manifest_target"',
+      '  if [ -f "$manifest_dir/namespace.yaml" ]; then kubectl apply -f "$manifest_dir/namespace.yaml"; fi',
+      '  if [ -f "$manifest_dir/cluster-issuer.yaml" ]; then kubectl apply -f "$manifest_dir/cluster-issuer.yaml"; fi',
+      '  for manifest_file in $(find "$manifest_dir" -maxdepth 1 -type f \\( -name "*.yaml" -o -name "*.yml" \\) | sort); do',
+      '    manifest_name=$(basename "$manifest_file")',
+      '    case "$manifest_name" in',
+      '      namespace.yaml|cluster-issuer.yaml|secret.yaml|rancher-simple.yaml|rancher-stack-update.yaml)',
+      '        continue',
+      '        ;;',
+      '    esac',
+      '    kubectl apply -f "$manifest_file"',
+      '  done',
+      'else',
+      '  kubectl apply -f "$manifest_target"',
+      'fi',
     ].join('\n');
   }
 

@@ -74,6 +74,27 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
+    test('classifies make-code-and-deploy requests into a repo-then-deploy lane', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'next.js, I have coffee.demoserver2.buzz and you need to do the tls with traefik, acme, and lets encrypt. We should be able to use opencode to make the code and push to github.',
+            workspacePath: '/workspace/app',
+            repositoryPath: '/workspace/app',
+            opencodeTarget: 'local',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        expect(workflow).toEqual(expect.objectContaining({
+            kind: END_TO_END_WORKFLOW_KIND,
+            lane: 'repo-then-deploy',
+            stage: 'implementing',
+            status: 'active',
+        }));
+    });
+
     test('emits deterministic repo-then-deploy steps in order', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the build in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
