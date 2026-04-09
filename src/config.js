@@ -349,6 +349,13 @@ const config = {
     },
 
     runtime: {
+        judgmentV2Enabled: process.env.RUNTIME_JUDGMENT_V2_ENABLED === 'true',
+        plannerModel: process.env.OPENAI_PLANNER_MODEL || '',
+        synthesisModel: process.env.OPENAI_SYNTHESIS_MODEL || '',
+        repairModel: process.env.OPENAI_REPAIR_MODEL || '',
+        plannerReasoningEffort: process.env.OPENAI_PLANNER_REASONING_EFFORT || '',
+        synthesisReasoningEffort: process.env.OPENAI_SYNTHESIS_REASONING_EFFORT || '',
+        repairReasoningEffort: process.env.OPENAI_REPAIR_REASONING_EFFORT || '',
         remoteBuildAutonomyDefault: process.env.REMOTE_BUILD_AUTONOMY_DEFAULT !== 'false',
         remoteBuildMaxAutonomousRounds: Math.max(
             1,

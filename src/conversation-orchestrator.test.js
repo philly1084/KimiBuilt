@@ -41,6 +41,13 @@ function buildResponseWithPromptState(text, id = 'resp_test_prompt_state', promp
 describe('ConversationOrchestrator', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        config.config.runtime.judgmentV2Enabled = false;
+        config.config.runtime.plannerModel = '';
+        config.config.runtime.synthesisModel = '';
+        config.config.runtime.repairModel = '';
+        config.config.runtime.plannerReasoningEffort = '';
+        config.config.runtime.synthesisReasoningEffort = '';
+        config.config.runtime.repairReasoningEffort = '';
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: false,
             host: '',
@@ -3426,6 +3433,267 @@ describe('ConversationOrchestrator', () => {
                 timeRange: 'day',
             }),
         });
+    });
+
+    test('judgment v2 classifies current-info requests and surfaces scored search-first candidates', () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'web-fetch', 'document-workflow'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'What are the latest GPU prices today?',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            classification: {
+                taskFamily: 'research',
+                groundingRequirement: 'required',
+                surfaceMode: 'chat',
+                preferredExecutionPath: 'direct-tool',
+                checkpointNeed: 'none',
+                confidence: 0.9,
+                ambiguous: false,
+                reasons: ['Current information requires grounding.'],
+            },
+        });
+
+        expect(toolPolicy.classification).toEqual(expect.objectContaining({
+            taskFamily: 'research',
+            groundingRequirement: 'required',
+        }));
+        expect(toolPolicy.candidateToolIds[0]).toBe('web-search');
+        expect(toolPolicy.candidateToolScores['web-search']).toEqual(expect.objectContaining({
+            score: expect.any(Number),
+            reasons: expect.arrayContaining(['Grounding is required, so web search should lead.']),
+        }));
+    });
+
+    test('judgment v2 filters ungrounded planner document steps and falls back to search-first planning', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [{
+                    tool: 'document-workflow',
+                    reason: 'Generate the final report immediately.',
+                    params: { action: 'generate' },
+                }],
+            })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'document-workflow'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Research Halifax housing prices and build a report.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            classification: {
+                taskFamily: 'research-deliverable',
+                groundingRequirement: 'required',
+                surfaceMode: 'chat',
+                preferredExecutionPath: 'plan-first',
+                checkpointNeed: 'none',
+                confidence: 0.82,
+                ambiguous: false,
+                reasons: ['Research-backed deliverables need grounding first.'],
+            },
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective,
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'web-search',
+            }),
+        ]);
+    });
+
+    test('judgment v2 uses planner role model settings for planner calls', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+        config.config.runtime.plannerModel = 'gpt-planner';
+        config.config.runtime.plannerReasoningEffort = 'high';
+
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({ steps: [] })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'document-workflow'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Research managed Postgres providers and draft a comparison report.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            classification: {
+                taskFamily: 'research-deliverable',
+                groundingRequirement: 'required',
+                surfaceMode: 'chat',
+                preferredExecutionPath: 'plan-first',
+                checkpointNeed: 'none',
+                confidence: 0.84,
+                ambiguous: false,
+                reasons: ['Grounded deliverable request.'],
+            },
+        });
+
+        await orchestrator.planToolUse({
+            objective: 'Research managed Postgres providers and draft a comparison report.',
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        expect(llmClient.complete).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({
+                model: 'gpt-planner',
+                reasoningEffort: 'high',
+            }),
+        );
+    });
+
+    test('judgment v2 adds classification and finalization metadata to the trace', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Verified answer', 'resp_trace_v2')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn(() => null),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-trace-v2', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue({
+                contextMessages: [],
+                bundles: { fact: [], artifact: [], skill: [], research: [] },
+                trace: {
+                    query: 'What are the latest GPU prices today?',
+                    matchedKeywords: ['latest', 'gpu', 'prices'],
+                    counts: { fact: 0, artifact: 0, skill: 0, research: 0 },
+                    bundles: { fact: 0, artifact: 0, skill: 0, research: 0 },
+                    selected: [],
+                },
+            }),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'What are the latest GPU prices today?',
+            sessionId: 'session-trace-v2',
+            stream: false,
+        });
+
+        expect(result.trace.classification).toEqual(expect.objectContaining({
+            taskFamily: 'research',
+            groundingRequirement: 'required',
+        }));
+        expect(result.trace.recallSummary).toEqual(expect.objectContaining({
+            query: 'What are the latest GPU prices today?',
+        }));
+        expect(result.trace.finalizationMode).toBe('direct-response');
+    });
+
+    test('judgment v2 records a post-round review entry after grounded search execution', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('The latest GPU prices are grounded in verified search results.', 'resp_review_v2')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                toolId === 'web-search'
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'web-search',
+                data: {
+                    query: 'What are the latest GPU prices today',
+                    results: [
+                        { title: 'GPU price tracker', url: 'https://example.com/gpu', snippet: 'RTX pricing update' },
+                    ],
+                },
+            }),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-review-v2', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue({ contextMessages: [], trace: null }),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'What are the latest GPU prices today?',
+            sessionId: 'session-review-v2',
+            stream: false,
+        });
+
+        expect(result.trace.executionTrace.map((entry) => entry.name)).toContain('Round review 1');
+        expect(result.trace.executionTrace.find((entry) => entry.name === 'Round review 1')).toEqual(expect.objectContaining({
+            details: expect.objectContaining({
+                decision: 'synthesize',
+            }),
+        }));
     });
 
     test('prefers document-workflow once verified research pages exist for a requested slide deck', () => {

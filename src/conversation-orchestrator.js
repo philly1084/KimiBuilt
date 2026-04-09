@@ -419,6 +419,596 @@ function hasSubstantialWorkIntentText(text = '') {
     return /\b(plan|planning|refactor|implement|implementation|build|create|generate|draft|design|deploy|migration|migrate|rewrite|organize|set up|setup|fix|debug|investigate|audit|review)\b/.test(normalized);
 }
 
+function isJudgmentV2Enabled() {
+    return config.runtime?.judgmentV2Enabled === true;
+}
+
+function normalizeConfidence(value = null, fallback = 0.5) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+
+    return Math.max(0, Math.min(1, numeric));
+}
+
+function pushReason(reasons = [], reason = '') {
+    const normalized = String(reason || '').trim();
+    if (!normalized || reasons.includes(normalized)) {
+        return reasons;
+    }
+
+    reasons.push(normalized);
+    return reasons;
+}
+
+function hasNotesPageEditIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
+        /\b(edit|update|rewrite|reformat|reorganize|restyle|clean up|fix)\b[\s\S]{0,40}\b(page|note|document|doc)\b/,
+        /\b(current page|this page|the page|this note|the note)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function classifyRequestIntent({
+    objective = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    taskType = 'chat',
+    clientSurface = '',
+    recentMessages = [],
+    session = null,
+} = {}) {
+    const text = String(objective || '').trim();
+    const normalized = text.toLowerCase();
+    const reasons = [];
+    const normalizedSurface = String(clientSurface || taskType || '').trim().toLowerCase();
+    const activeProjectPlan = session?.controlState?.projectPlan
+        || session?.metadata?.controlState?.projectPlan
+        || null;
+    const hasProjectContinuation = Array.isArray(recentMessages) && recentMessages.length > 0 && (
+        /^(continue|again|same|that|those|from there|next step|next steps|do it|do that)\b/.test(normalized)
+        || Boolean(activeProjectPlan?.status === 'active')
+    );
+
+    let taskFamily = 'general';
+    let groundingRequirement = 'not-needed';
+    let preferredExecutionPath = 'plain-response';
+    let checkpointNeed = 'none';
+    let confidence = 0.48;
+
+    const surfaceMode = executionProfile === NOTES_EXECUTION_PROFILE
+        || ['notes', 'notes-app', 'notes_app', 'notes-editor', 'notes_editor'].includes(normalizedSurface)
+        ? 'notes-page'
+        : (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE
+            ? 'remote-build'
+            : (normalizedSurface.includes('canvas')
+                ? 'canvas'
+                : (normalizedSurface.includes('notation')
+                    ? 'notation'
+                    : (normalizedSurface.includes('web-chat') ? 'web-chat' : 'chat'))));
+
+    if (hasDiscoveryPlanningIntentText(normalized) || hasExplicitCheckpointRequestText(normalized)) {
+        taskFamily = 'planning';
+        preferredExecutionPath = 'checkpoint';
+        checkpointNeed = 'required';
+        confidence = 0.88;
+        pushReason(reasons, 'The request explicitly asks for discovery, options, or a decision gate before major work.');
+    } else if (hasWorkloadIntent(normalized)) {
+        taskFamily = 'scheduling';
+        preferredExecutionPath = 'direct-tool';
+        confidence = 0.9;
+        pushReason(reasons, 'The request is about later or recurring work, so workload creation is the primary path.');
+    } else if (surfaceMode === 'notes-page' && hasNotesPageEditIntentText(normalized)) {
+        taskFamily = 'notes-edit';
+        preferredExecutionPath = 'plan-first';
+        confidence = 0.9;
+        pushReason(reasons, 'The request targets the current notes page rather than a standalone file or website.');
+    } else if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE || /\b(ssh|server|cluster|k3s|k8s|kubernetes|kubectl|deployment|docker|remote)\b/.test(normalized)) {
+        taskFamily = 'remote-ops';
+        preferredExecutionPath = hasProjectContinuation ? 'workflow' : 'plan-first';
+        confidence = hasProjectContinuation ? 0.88 : 0.81;
+        pushReason(reasons, 'The request is about remote infrastructure, deployment, or server operations.');
+    } else if (hasExplicitWebResearchIntentText(normalized) || hasCurrentInfoIntentText(normalized)) {
+        taskFamily = hasDocumentWorkflowIntentText(normalized) ? 'research-deliverable' : 'research';
+        groundingRequirement = 'required';
+        preferredExecutionPath = 'direct-tool';
+        confidence = hasCurrentInfoIntentText(normalized) ? 0.86 : 0.91;
+        pushReason(reasons, 'The request needs current or researched information, so grounded web evidence is required.');
+    } else if (hasDocumentWorkflowIntentText(normalized)) {
+        taskFamily = 'document';
+        groundingRequirement = /\b(research|compare|latest|current|pricing|search|browse)\b/.test(normalized)
+            ? 'preferred'
+            : 'not-needed';
+        preferredExecutionPath = 'plan-first';
+        confidence = 0.74;
+        pushReason(reasons, 'The request is primarily about generating a document or presentation deliverable.');
+    } else if (hasExplicitSubAgentIntentText(normalized)) {
+        taskFamily = 'delegation';
+        preferredExecutionPath = 'plan-first';
+        confidence = 0.82;
+        pushReason(reasons, 'The user explicitly asked for delegated or parallel agent work.');
+    } else if (hasIndexedAssetIntentText(normalized) || /\b(previous|earlier|latest|generated|artifact|attachment|file)\b/.test(normalized)) {
+        taskFamily = 'artifact-followup';
+        preferredExecutionPath = 'plan-first';
+        confidence = 0.72;
+        pushReason(reasons, 'The request refers to prior outputs or stored artifacts.');
+    } else if (hasOpencodeRepoWorkIntent(normalized)) {
+        taskFamily = 'repo-work';
+        preferredExecutionPath = 'direct-tool';
+        confidence = 0.82;
+        pushReason(reasons, 'The request is about repository implementation work rather than plain chat.');
+    }
+
+    if (hasProjectContinuation && preferredExecutionPath === 'plain-response') {
+        preferredExecutionPath = 'plan-first';
+        confidence = Math.max(confidence, 0.62);
+        pushReason(reasons, 'The request appears to continue the active session workflow or project plan.');
+    }
+
+    const ambiguousSignals = [
+        hasDocumentWorkflowIntentText(normalized),
+        hasExplicitWebResearchIntentText(normalized) || hasCurrentInfoIntentText(normalized),
+        hasOpencodeRepoWorkIntent(normalized),
+        hasExplicitSubAgentIntentText(normalized),
+    ].filter(Boolean).length;
+    if (ambiguousSignals >= 2) {
+        confidence = Math.max(0.45, confidence - 0.14);
+        if (checkpointNeed === 'none' && hasSubstantialWorkIntentText(normalized)) {
+            checkpointNeed = 'optional';
+        }
+        pushReason(reasons, 'The request mixes multiple high-impact intents, so tool selection should stay conservative.');
+    }
+
+    return {
+        taskFamily,
+        groundingRequirement,
+        surfaceMode,
+        preferredExecutionPath,
+        checkpointNeed,
+        confidence: normalizeConfidence(confidence),
+        ambiguous: normalizeConfidence(confidence) < 0.72,
+        reasons,
+    };
+}
+
+function adjustCandidateToolScore(scoreMap = {}, toolId = '', delta = 0, reason = '') {
+    if (!toolId || !Object.prototype.hasOwnProperty.call(scoreMap, toolId)) {
+        return;
+    }
+
+    scoreMap[toolId].score = Number(scoreMap[toolId].score || 0) + Number(delta || 0);
+    if (reason) {
+        pushReason(scoreMap[toolId].reasons, reason);
+    }
+}
+
+function hasGroundedResearchToolResult(toolEvents = []) {
+    return (Array.isArray(toolEvents) ? toolEvents : []).some((event) => {
+        const toolId = String(event?.result?.toolId || event?.toolCall?.function?.name || '').trim();
+        return event?.result?.success !== false && ['web-search', 'web-fetch', 'web-scrape'].includes(toolId);
+    });
+}
+
+function buildScoredCandidateToolMap({
+    allowedToolIds = [],
+    classification = null,
+    prompt = '',
+    objective = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    remoteToolId = '',
+    canUseSubAgents = false,
+    canUseUserCheckpoint = false,
+    allowDeferredWorkloadShortcut = false,
+    hasExplicitWebResearchIntent = false,
+    hasExplicitScrapeIntent = false,
+    hasUrl = false,
+    hasImageIntent = false,
+    hasUnsplashIntent = false,
+    hasImageUrlIntent = false,
+    hasDirectImageUrl = false,
+    hasAssetCatalogIntent = false,
+    hasDocumentWorkflowIntent = false,
+    hasSubAgentIntent = false,
+    hasOpencodeUsageIntent = false,
+    hasOpencodeIntent = false,
+    explicitGitIntent = false,
+    explicitK3sDeployIntent = false,
+    hasWorkloadSetupIntent = false,
+    isDeferredWorkloadRun = false,
+    shouldPreferRemoteWebsiteSource = false,
+    workflowNeedsRepoLane = false,
+    workflowNeedsDeployLane = false,
+    opencodeTargetReady = false,
+    sessionIsolation = false,
+    toolEvents = [],
+    hasArchitectureIntent = false,
+    hasUmlIntent = false,
+    hasApiIntent = false,
+    hasSchemaIntent = false,
+    hasMigrationChangeIntent = false,
+    hasSecurityIntent = false,
+} = {}) {
+    const scoreMap = Object.fromEntries(
+        allowedToolIds.map((toolId) => [toolId, { score: 0, reasons: [] }]),
+    );
+    const normalizedPrompt = String(prompt || '').toLowerCase();
+    const groundedResearch = hasGroundedResearchToolResult(toolEvents);
+    const classificationConfidence = Number(classification?.confidence || 0);
+    const failedToolIds = Array.from(new Set((Array.isArray(toolEvents) ? toolEvents : [])
+        .filter((event) => event?.result?.success === false)
+        .map((event) => String(event?.result?.toolId || event?.toolCall?.function?.name || '').trim())
+        .filter(Boolean)));
+
+    if (classification) {
+        adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, classification.checkpointNeed === 'required' && canUseUserCheckpoint ? 1.6 : 0, 'The classifier requires a user decision before major work.');
+        if (classification.checkpointNeed === 'optional' && canUseUserCheckpoint) {
+            adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, 0.45, 'The classifier suggests a checkpoint could clarify an ambiguous high-impact request.');
+        }
+
+        if (classification.groundingRequirement === 'required') {
+            adjustCandidateToolScore(scoreMap, 'web-search', 1.5, 'Grounding is required, so web search should lead.');
+            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 1.05 : 0.65, 'Grounded research may need verified page retrieval.');
+            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent || hasUrl ? 1.15 : 0.55, 'Grounded research may need rendered or structured extraction.');
+            adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, groundedResearch ? 0.95 : 0.2, groundedResearch
+                ? 'Verified research sources are ready for a grounded deliverable.'
+                : 'Document generation should wait for verified sources.');
+        }
+
+        switch (classification.taskFamily) {
+        case 'remote-ops':
+            adjustCandidateToolScore(scoreMap, remoteToolId, 1.25, 'Remote operations should start with the trusted remote tool.');
+            adjustCandidateToolScore(scoreMap, 'opencode-run', workflowNeedsRepoLane && opencodeTargetReady ? 0.95 : 0, 'The active remote workflow includes repository work.');
+            adjustCandidateToolScore(scoreMap, 'k3s-deploy', workflowNeedsDeployLane || explicitK3sDeployIntent ? 0.95 : 0, 'The active remote workflow includes deployment work.');
+            adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent || workflowNeedsDeployLane ? 0.55 : 0, 'Git save/publish flow is relevant to the remote task.');
+            break;
+        case 'repo-work':
+            adjustCandidateToolScore(scoreMap, 'opencode-run', opencodeTargetReady ? 1.3 : 0.8, 'Repository implementation work should prefer the managed code runtime.');
+            adjustCandidateToolScore(scoreMap, 'git-safe', explicitGitIntent ? 0.75 : 0.3, 'Repository work may end with a save/push step.');
+            break;
+        case 'research':
+        case 'research-deliverable':
+            adjustCandidateToolScore(scoreMap, 'web-search', 1.25, 'Research intent favors search-first grounding.');
+            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 0.9 : 0.35, 'Research intent benefits from verified source fetches.');
+            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent ? 1.0 : 0.45, 'Research intent may need structured page extraction.');
+            break;
+        case 'document':
+            adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, 0.95, 'A document deliverable is the primary outcome.');
+            break;
+        case 'artifact-followup':
+            adjustCandidateToolScore(scoreMap, 'asset-search', 1.15, 'Artifact follow-ups should start from prior outputs.');
+            adjustCandidateToolScore(scoreMap, 'file-read', /\bfile\b/.test(normalizedPrompt) ? 0.55 : 0, 'The request may need local file context.');
+            break;
+        case 'scheduling':
+            adjustCandidateToolScore(scoreMap, 'agent-workload', !isDeferredWorkloadRun && allowDeferredWorkloadShortcut ? 1.4 : 0, 'Scheduling requests should use persisted workloads.');
+            break;
+        case 'delegation':
+            adjustCandidateToolScore(scoreMap, 'agent-delegate', canUseSubAgents && hasSubAgentIntent ? 1.3 : 0, 'The user explicitly asked for delegation.');
+            break;
+        case 'notes-edit':
+            adjustCandidateToolScore(scoreMap, 'web-search', hasExplicitWebResearchIntent ? 0.95 : 0.15, 'Notes editing may need supporting research.');
+            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 0.95 : 0.25, 'Notes editing may need verified page content.');
+            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent ? 1.05 : 0.25, 'Notes editing may need structured source extraction.');
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (canUseSubAgents && hasSubAgentIntent) {
+        adjustCandidateToolScore(scoreMap, 'agent-delegate', 1.2, 'The user explicitly requested delegated or parallel agent work.');
+    }
+    if (!isDeferredWorkloadRun && allowDeferredWorkloadShortcut && hasWorkloadSetupIntent) {
+        adjustCandidateToolScore(scoreMap, 'agent-workload', 1.2, 'The request describes future or recurring work.');
+    }
+    if (remoteToolId && executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
+        adjustCandidateToolScore(scoreMap, remoteToolId, 0.55, 'Remote-build profile keeps the remote tool available.');
+    }
+    if (hasExplicitWebResearchIntent) {
+        adjustCandidateToolScore(scoreMap, 'web-search', 1.0, 'Explicit research language favors search.');
+    }
+    if (hasExplicitScrapeIntent) {
+        adjustCandidateToolScore(scoreMap, 'web-scrape', 1.0, 'Explicit scrape language favors web scraping.');
+        adjustCandidateToolScore(scoreMap, 'web-search', 0.4, 'Scrape requests often still need discovery.');
+    }
+    if (hasUrl) {
+        adjustCandidateToolScore(scoreMap, hasExplicitScrapeIntent ? 'web-scrape' : 'web-fetch', 0.9, 'The request includes a direct URL.');
+    }
+    if (hasImageIntent) {
+        adjustCandidateToolScore(scoreMap, 'image-generate', /\b(generate|create|make|design)\b/.test(normalizedPrompt) ? 1.0 : 0.25, 'Image intent is present.');
+        adjustCandidateToolScore(scoreMap, 'image-search-unsplash', hasUnsplashIntent ? 1.0 : 0.35, 'Reference-image search may help.');
+    }
+    if (hasImageUrlIntent || hasDirectImageUrl) {
+        adjustCandidateToolScore(scoreMap, 'image-from-url', 1.0, 'The request points at a direct image URL.');
+    }
+    if (hasAssetCatalogIntent) {
+        adjustCandidateToolScore(scoreMap, 'asset-search', 0.95, 'The request refers to a prior or indexed asset.');
+    }
+    if (hasOpencodeUsageIntent) {
+        adjustCandidateToolScore(scoreMap, 'tool-doc-read', 1.15, 'Tool usage questions should read docs before execution.');
+    }
+    if ((hasOpencodeIntent || workflowNeedsRepoLane) && opencodeTargetReady) {
+        adjustCandidateToolScore(scoreMap, 'opencode-run', 0.95, 'Repository work is relevant and the code runtime is ready.');
+    }
+    if (explicitGitIntent || workflowNeedsDeployLane) {
+        adjustCandidateToolScore(scoreMap, 'git-safe', 0.75, 'Git state or save flow is relevant.');
+    }
+    if (explicitK3sDeployIntent || workflowNeedsDeployLane) {
+        adjustCandidateToolScore(scoreMap, 'k3s-deploy', 0.95, 'Deployment tooling is relevant.');
+    }
+    if (!shouldPreferRemoteWebsiteSource && /\b(write|save|create|update|edit)\b/.test(normalizedPrompt)) {
+        adjustCandidateToolScore(scoreMap, 'file-write', 0.45, 'Local file editing is explicitly requested.');
+    }
+    if (!shouldPreferRemoteWebsiteSource && /\b(create|make|mkdir)\b/.test(normalizedPrompt)) {
+        adjustCandidateToolScore(scoreMap, 'file-mkdir', 0.35, 'Directory creation is explicitly requested.');
+    }
+    if (!sessionIsolation) {
+        adjustCandidateToolScore(scoreMap, 'agent-notes-write', /\b(preference|remember|note for later|carryover|future sessions?)\b/.test(normalizedPrompt) ? 0.7 : 0, 'Durable carryover notes may help later sessions.');
+    }
+    if (hasArchitectureIntent) {
+        adjustCandidateToolScore(scoreMap, 'architecture-design', 1.0, 'Architecture intent is explicit.');
+    }
+    if (hasUmlIntent) {
+        adjustCandidateToolScore(scoreMap, 'uml-generate', 1.0, 'Diagram intent is explicit.');
+    }
+    if (hasApiIntent) {
+        adjustCandidateToolScore(scoreMap, 'api-design', 1.0, 'API design intent is explicit.');
+    }
+    if (hasSchemaIntent) {
+        adjustCandidateToolScore(scoreMap, 'schema-generate', 1.0, 'Schema design intent is explicit.');
+    }
+    if (hasMigrationChangeIntent) {
+        adjustCandidateToolScore(scoreMap, 'migration-create', 1.0, 'Migration intent is explicit.');
+    }
+    if (hasSecurityIntent) {
+        adjustCandidateToolScore(scoreMap, 'security-scan', 1.0, 'Security review intent is explicit.');
+    }
+
+    if (classificationConfidence < 0.72) {
+        adjustCandidateToolScore(scoreMap, USER_CHECKPOINT_TOOL_ID, canUseUserCheckpoint ? 0.4 : 0, 'Lower classifier confidence favors a checkpoint over a brittle direct action.');
+    }
+
+    failedToolIds.forEach((toolId) => {
+        adjustCandidateToolScore(scoreMap, toolId, -0.35, 'Recent tool failures reduce immediate reuse confidence.');
+    });
+
+    return scoreMap;
+}
+
+function selectCandidateToolIdsFromScores(allowedToolIds = [], scoreMap = {}) {
+    const scored = allowedToolIds
+        .map((toolId) => ({
+            toolId,
+            score: Number(scoreMap?.[toolId]?.score || 0),
+        }))
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score);
+
+    const selected = scored
+        .filter((entry, index) => entry.score >= 0.72 || index < 4)
+        .map((entry) => entry.toolId);
+
+    return Array.from(new Set(selected));
+}
+
+function shouldAllowDirectAction(action = null, { toolPolicy = {}, toolEvents = [] } = {}) {
+    if (!action || !isJudgmentV2Enabled()) {
+        return Boolean(action);
+    }
+
+    const classification = toolPolicy?.classification || null;
+    if (!classification) {
+        return true;
+    }
+
+    if (classification.checkpointNeed === 'required') {
+        return false;
+    }
+
+    if (classification.confidence < 0.76) {
+        return false;
+    }
+
+    if (classification.groundingRequirement === 'required') {
+        if (['web-search', 'web-fetch', 'web-scrape'].includes(action.tool)) {
+            return true;
+        }
+
+        if (action.tool === DOCUMENT_WORKFLOW_TOOL_ID) {
+            return hasGroundedResearchToolResult(toolEvents);
+        }
+
+        return false;
+    }
+
+    if (classification.preferredExecutionPath === 'plan-first') {
+        return ['web-search', 'web-fetch', 'web-scrape', 'opencode-run', 'agent-workload'].includes(action.tool);
+    }
+
+    return true;
+}
+
+function reviewExecutionRound({
+    round = 0,
+    nextPlan = [],
+    roundToolEvents = [],
+    roundFailureSummary = null,
+    autonomyApproved = false,
+    budgetExceeded = false,
+    toolPolicy = {},
+    endToEndWorkflow = null,
+} = {}) {
+    if (!isJudgmentV2Enabled()) {
+        return null;
+    }
+
+    const classification = toolPolicy?.classification || {};
+    const progress = summarizeAutonomyProgress(roundToolEvents, roundFailureSummary);
+
+    if (budgetExceeded) {
+        return {
+            decision: 'stop',
+            reason: 'The round exhausted the available execution budget.',
+        };
+    }
+
+    if (endToEndWorkflow?.status === 'completed') {
+        return {
+            decision: 'stop',
+            reason: 'The active workflow completed during this round.',
+        };
+    }
+
+    if (roundFailureSummary?.blockingFailures?.length > 0) {
+        return {
+            decision: 'stop',
+            reason: 'The round hit a blocking failure that requires a different input or external fix.',
+        };
+    }
+
+    if (roundFailureSummary?.recoverableFailures?.length > 0 && progress.productive === false) {
+        return {
+            decision: 'replan',
+            reason: 'The round encountered recoverable failures without enough progress, so a replan is safer than synthesis.',
+        };
+    }
+
+    if (classification.groundingRequirement === 'required'
+        && hasGroundedResearchToolResult(roundToolEvents)
+        && classification.taskFamily !== 'research-deliverable') {
+        return {
+            decision: 'synthesize',
+            reason: 'Grounded evidence was gathered, so the runtime can answer without another speculative round.',
+        };
+    }
+
+    if (!autonomyApproved && progress.productive) {
+        return {
+            decision: 'synthesize',
+            reason: 'The round made useful progress and the runtime is not in multi-round autonomous mode.',
+        };
+    }
+
+    if (autonomyApproved && progress.productive && !planSignalsFurtherAutonomousWork(nextPlan)) {
+        return {
+            decision: 'continue',
+            reason: `Round ${round} made productive progress and the autonomous runtime can continue from the updated state.`,
+        };
+    }
+
+    if (roundToolEvents.length === 0) {
+        return {
+            decision: 'stop',
+            reason: 'The round produced no tool progress.',
+        };
+    }
+
+    return {
+        decision: autonomyApproved ? 'continue' : 'stop',
+        reason: autonomyApproved
+            ? 'Keep iterating while the active autonomous run is still making progress.'
+            : 'No stronger post-round action was identified.',
+    };
+}
+
+function summarizeRecallTrace(memoryTrace = null) {
+    if (!memoryTrace || typeof memoryTrace !== 'object') {
+        return null;
+    }
+
+    return {
+        query: memoryTrace.query || '',
+        matchedKeywords: Array.isArray(memoryTrace.matchedKeywords) ? memoryTrace.matchedKeywords.slice(0, 8) : [],
+        counts: memoryTrace.counts || {},
+        bundles: memoryTrace.bundles || {},
+    };
+}
+
+function inferFinalizationMode({ runtimeMode = '', toolEvents = [], assistantMetadata = null } = {}) {
+    if (assistantMetadata?.finalizationMode) {
+        return assistantMetadata.finalizationMode;
+    }
+
+    if (assistantMetadata?.workflowBlocked) {
+        return 'workflow-blocked';
+    }
+
+    if (assistantMetadata?.terminalWorkloadCreation) {
+        return 'terminal-workload';
+    }
+
+    if (runtimeMode === 'repaired-final') {
+        return 'repair';
+    }
+
+    if (runtimeMode === 'checkpoint-stop' || runtimeMode === 'budget-checkpoint') {
+        return 'checkpoint';
+    }
+
+    return Array.isArray(toolEvents) && toolEvents.length > 0
+        ? 'tool-synthesis'
+        : 'direct-response';
+}
+
+function extractLatestReplanReason(executionTrace = []) {
+    const entries = Array.isArray(executionTrace) ? executionTrace : [];
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        const reason = String(
+            entry?.details?.replanReason
+            || entry?.details?.reason
+            || '',
+        ).trim();
+        if (reason && ['replan', 'review'].includes(String(entry?.type || '').trim().toLowerCase())) {
+            return reason;
+        }
+    }
+
+    return null;
+}
+
+function resolveRoleExecutionOptions({
+    role = 'direct',
+    model = null,
+    reasoningEffort = null,
+    toolPolicy = {},
+    toolEvents = [],
+} = {}) {
+    if (!isJudgmentV2Enabled()) {
+        return {
+            model,
+            reasoningEffort,
+        };
+    }
+
+    const classification = toolPolicy?.classification || {};
+    const explicitReasoning = String(reasoningEffort || '').trim();
+    const roleModelKey = role === 'planner'
+        ? 'plannerModel'
+        : (role === 'repair' ? 'repairModel' : 'synthesisModel');
+    const roleReasoningKey = role === 'planner'
+        ? 'plannerReasoningEffort'
+        : (role === 'repair' ? 'repairReasoningEffort' : 'synthesisReasoningEffort');
+    const configuredModel = String(config.runtime?.[roleModelKey] || '').trim() || model || null;
+    const configuredReasoning = String(config.runtime?.[roleReasoningKey] || '').trim();
+    const ambiguous = classification?.ambiguous === true || Number(classification?.confidence || 0) < 0.72;
+    const toolHeavy = Array.isArray(toolEvents) && toolEvents.length >= 3;
+    const defaultReasoning = role === 'planner'
+        ? 'high'
+        : (role === 'repair'
+            ? (ambiguous || toolHeavy ? 'high' : 'medium')
+            : (ambiguous || toolHeavy ? 'medium' : 'low'));
+
+    return {
+        model: configuredModel,
+        reasoningEffort: explicitReasoning || configuredReasoning || defaultReasoning,
+    };
+}
+
 function normalizeUserCheckpointPlanOption(option = {}) {
     if (typeof option === 'string') {
         const label = option.trim();
@@ -3695,6 +4285,8 @@ class ConversationOrchestrator extends EventEmitter {
                     sessionIsolation,
                     memoryKeywords,
                     sourceSurface: clientSurface || memoryScope || null,
+                    objective: rawObjective,
+                    session,
                     returnDetails: true,
                 })
                 : { contextMessages: [], trace: null };
@@ -3715,6 +4307,16 @@ class ConversationOrchestrator extends EventEmitter {
                 'The current user turn may be abbreviated or cut off. Use the recent transcript to resolve the intended task and continue without asking the user to restate prior context unless the transcript is genuinely insufficient.',
             ].filter(Boolean).join('\n\n')
             : instructions;
+        const requestClassification = isJudgmentV2Enabled()
+            ? classifyRequestIntent({
+                objective,
+                executionProfile: resolvedProfile,
+                taskType,
+                clientSurface,
+                recentMessages: resolvedRecentMessages,
+                session,
+            })
+            : null;
         const storedForegroundContinuationGate = normalizeForegroundContinuationGate(
             getSessionControlState(session).foregroundContinuationGate,
         );
@@ -3743,6 +4345,8 @@ class ConversationOrchestrator extends EventEmitter {
             requestedToolIds,
             recentMessages: resolvedRecentMessages,
             toolContext,
+            classification: requestClassification,
+            toolEvents: [],
         });
         let endToEndWorkflow = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
             ? toolPolicy.workflow || null
@@ -3840,6 +4444,33 @@ class ConversationOrchestrator extends EventEmitter {
                     toolCandidates: toolPolicy.candidateToolIds.length,
                 },
             }));
+
+            if (requestClassification) {
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'classification',
+                    name: 'Request classification',
+                    details: {
+                        taskFamily: requestClassification.taskFamily,
+                        groundingRequirement: requestClassification.groundingRequirement,
+                        surfaceMode: requestClassification.surfaceMode,
+                        preferredExecutionPath: requestClassification.preferredExecutionPath,
+                        checkpointNeed: requestClassification.checkpointNeed,
+                        confidence: requestClassification.confidence,
+                        ambiguous: requestClassification.ambiguous,
+                        reasons: requestClassification.reasons || [],
+                    },
+                }));
+            }
+
+            if (requestClassification && toolPolicy?.candidateToolScores) {
+                executionTrace.push(createExecutionTraceEntry({
+                    type: 'planning',
+                    name: 'Candidate tool scoring',
+                    details: {
+                        scores: toolPolicy.candidateToolScores,
+                    },
+                }));
+            }
 
             if (endToEndWorkflow) {
                 executionTrace.push(createExecutionTraceEntry({
@@ -4556,55 +5187,90 @@ class ConversationOrchestrator extends EventEmitter {
                     });
                 }
 
-                if (autonomyApproved
-                    && planSource === 'guided-remote'
-                    && !roundFailed
-                    && !blockingRoundFailure) {
-                    const pendingGuidedRemotePlan = filterRepeatedPlanSteps(
-                        buildRemoteFollowupPlanFromToolEvents({
-                            objective,
-                            instructions,
-                            executionProfile: resolvedProfile,
-                            toolPolicy,
-                            toolEvents,
-                        }),
-                        executedStepSignatures,
-                        executedStepSignatureCounts,
-                    );
+                const roundReview = reviewExecutionRound({
+                    round,
+                    nextPlan,
+                    roundToolEvents,
+                    roundFailureSummary,
+                    autonomyApproved,
+                    budgetExceeded,
+                    toolPolicy,
+                    endToEndWorkflow,
+                });
+                if (roundReview) {
+                    executionTrace.push(createExecutionTraceEntry({
+                        type: 'review',
+                        name: `Round review ${round}`,
+                        details: {
+                            round,
+                            decision: roundReview.decision,
+                            reason: roundReview.reason,
+                            replanReason: roundReview.decision === 'replan' ? roundReview.reason : null,
+                            productive: lastAutonomyProgress?.productive === true,
+                            toolCalls: roundToolEvents.length,
+                        },
+                    }));
 
-                    if (pendingGuidedRemotePlan.length === 0
-                        && !planSignalsFurtherAutonomousWork(nextPlan)) {
-                        executionTrace.push(createExecutionTraceEntry({
-                            type: 'planning',
-                            name: `Stop after guided remote round ${round}`,
-                            details: {
-                                round,
-                                reason: 'A deterministic remote follow-up succeeded and no further guided remote step remains.',
-                            },
-                        }));
+                    if (roundReview.decision === 'replan') {
+                        continue;
+                    }
+
+                    if (['synthesize', 'stop'].includes(roundReview.decision)) {
                         break;
                     }
                 }
 
-                if (autonomyApproved
-                    && autonomyApprovalSource === 'config'
-                    && !roundFailed
-                    && !blockingRoundFailure
-                    && roundToolEvents.length > 0
-                    && !planSignalsFurtherAutonomousWork(nextPlan)) {
-                    executionTrace.push(createExecutionTraceEntry({
-                        type: 'planning',
-                        name: `Stop after round ${round}`,
-                        details: {
-                            round,
-                            reason: 'Config-default autonomy should not keep looping after a successful round unless the plan itself signals more follow-up work.',
-                        },
-                        }));
-                    break;
-                }
+                if (!isJudgmentV2Enabled()) {
+                    if (autonomyApproved
+                        && planSource === 'guided-remote'
+                        && !roundFailed
+                        && !blockingRoundFailure) {
+                        const pendingGuidedRemotePlan = filterRepeatedPlanSteps(
+                            buildRemoteFollowupPlanFromToolEvents({
+                                objective,
+                                instructions,
+                                executionProfile: resolvedProfile,
+                                toolPolicy,
+                                toolEvents,
+                            }),
+                            executedStepSignatures,
+                            executedStepSignatureCounts,
+                        );
 
-                if (!autonomyApproved || blockingRoundFailure || roundToolEvents.length === 0) {
-                    break;
+                        if (pendingGuidedRemotePlan.length === 0
+                            && !planSignalsFurtherAutonomousWork(nextPlan)) {
+                            executionTrace.push(createExecutionTraceEntry({
+                                type: 'planning',
+                                name: `Stop after guided remote round ${round}`,
+                                details: {
+                                    round,
+                                    reason: 'A deterministic remote follow-up succeeded and no further guided remote step remains.',
+                                },
+                            }));
+                            break;
+                        }
+                    }
+
+                    if (autonomyApproved
+                        && autonomyApprovalSource === 'config'
+                        && !roundFailed
+                        && !blockingRoundFailure
+                        && roundToolEvents.length > 0
+                        && !planSignalsFurtherAutonomousWork(nextPlan)) {
+                        executionTrace.push(createExecutionTraceEntry({
+                            type: 'planning',
+                            name: `Stop after round ${round}`,
+                            details: {
+                                round,
+                                reason: 'Config-default autonomy should not keep looping after a successful round unless the plan itself signals more follow-up work.',
+                            },
+                            }));
+                        break;
+                    }
+
+                    if (!autonomyApproved || blockingRoundFailure || roundToolEvents.length === 0) {
+                        break;
+                    }
                 }
             }
 
@@ -4994,6 +5660,8 @@ class ConversationOrchestrator extends EventEmitter {
         requestedToolIds = [],
         recentMessages = [],
         toolContext = {},
+        classification = null,
+        toolEvents = [],
     }) {
         const baseAllowedToolIds = (PROFILE_TOOL_ALLOWLISTS[executionProfile] || PROFILE_TOOL_ALLOWLISTS[DEFAULT_EXECUTION_PROFILE])
             .filter((toolId) => toolManager?.getTool?.(toolId));
@@ -5111,6 +5779,47 @@ class ConversationOrchestrator extends EventEmitter {
         const opencodeTargetReady = shouldConsiderOpencodeTarget
             ? isOpencodeTargetReady(toolContext, opencodeTarget)
             : false;
+        const scoreMap = isJudgmentV2Enabled()
+            ? buildScoredCandidateToolMap({
+                allowedToolIds,
+                classification,
+                prompt,
+                objective,
+                executionProfile,
+                remoteToolId,
+                canUseSubAgents,
+                canUseUserCheckpoint,
+                allowDeferredWorkloadShortcut,
+                hasExplicitWebResearchIntent,
+                hasExplicitScrapeIntent,
+                hasUrl,
+                hasImageIntent,
+                hasUnsplashIntent,
+                hasImageUrlIntent,
+                hasDirectImageUrl,
+                hasAssetCatalogIntent,
+                hasDocumentWorkflowIntent,
+                hasSubAgentIntent,
+                hasOpencodeUsageIntent,
+                hasOpencodeIntent,
+                explicitGitIntent,
+                explicitK3sDeployIntent,
+                hasWorkloadSetupIntent,
+                isDeferredWorkloadRun,
+                shouldPreferRemoteWebsiteSource,
+                workflowNeedsRepoLane,
+                workflowNeedsDeployLane,
+                opencodeTargetReady,
+                sessionIsolation,
+                toolEvents,
+                hasArchitectureIntent,
+                hasUmlIntent,
+                hasApiIntent,
+                hasSchemaIntent,
+                hasMigrationChangeIntent,
+                hasSecurityIntent,
+            })
+            : null;
 
         if (executionProfile === REMOTE_BUILD_EXECUTION_PROFILE) {
             if (canUseSubAgents && hasSubAgentIntent && allowedToolIds.includes('agent-delegate')) {
@@ -5305,10 +6014,23 @@ class ConversationOrchestrator extends EventEmitter {
             candidates.add(USER_CHECKPOINT_TOOL_ID);
         }
 
+        const candidateToolIds = isJudgmentV2Enabled()
+            ? selectCandidateToolIdsFromScores(allowedToolIds, scoreMap)
+            : allowedToolIds.filter((toolId) => candidates.has(toolId));
+
+        if (isJudgmentV2Enabled()
+            && classification?.checkpointNeed === 'required'
+            && canUseUserCheckpoint
+            && allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
+            && !candidateToolIds.includes(USER_CHECKPOINT_TOOL_ID)) {
+            candidateToolIds.unshift(USER_CHECKPOINT_TOOL_ID);
+        }
+
         return {
             executionProfile,
             allowedToolIds,
-            candidateToolIds: allowedToolIds.filter((toolId) => candidates.has(toolId)),
+            candidateToolIds,
+            candidateToolScores: scoreMap,
             hasSshDefaults,
             hasReachableSshTarget,
             sshRuntimeTarget: formatSshRuntimeTarget(sshContext.target),
@@ -5323,6 +6045,7 @@ class ConversationOrchestrator extends EventEmitter {
             },
             preferredRemoteToolId: remoteToolId,
             sessionIsolation,
+            classification,
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
             toolDescriptions: Object.fromEntries(
@@ -5342,6 +6065,11 @@ class ConversationOrchestrator extends EventEmitter {
         const searchQuery = researchQuery || currentInfoQuery;
         const firstUrl = extractFirstUrl(objective);
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
+        const finalizeAction = (action) => (
+            shouldAllowDirectAction(action, { toolPolicy, toolEvents })
+                ? action
+                : null
+        );
         const documentWorkflowParams = buildDocumentWorkflowGenerateParams({
             objective,
             toolEvents,
@@ -5386,14 +6114,14 @@ class ConversationOrchestrator extends EventEmitter {
                 )
             )) {
             if (normalizedCreate) {
-                return {
+                return finalizeAction({
                     tool: 'agent-workload',
                     reason: 'Explicit later or recurring-agent request should be converted into a persisted workload.',
                     params: normalizedCreate,
-                };
+                });
             }
 
-            return {
+            return finalizeAction({
                 tool: 'agent-workload',
                 reason: 'Explicit later or recurring-agent request should be converted into a persisted workload.',
                 params: {
@@ -5405,27 +6133,27 @@ class ConversationOrchestrator extends EventEmitter {
                         || session?.metadata?.timeZone
                         || getDefaultWorkloadTimezone(),
                 },
-            };
+            });
         }
         if (toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)
             && hasDocumentWorkflowIntentText(objective)
             && hasGroundedDocumentSources) {
-            return {
+            return finalizeAction({
                 tool: DOCUMENT_WORKFLOW_TOOL_ID,
                 reason: 'Verified research results are already available, so the document workflow can generate the requested deliverable now.',
                 params: documentWorkflowParams,
-            };
+            });
         }
 
         if (toolPolicy.candidateToolIds.includes('tool-doc-read')
             && hasOpencodeToolUsageIntent(objective)) {
-            return {
+            return finalizeAction({
                 tool: 'tool-doc-read',
                 reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
                 params: {
                     toolId: 'opencode-run',
                 },
-            };
+            });
         }
 
         if (toolPolicy.workflow) {
@@ -5435,14 +6163,14 @@ class ConversationOrchestrator extends EventEmitter {
                 remoteToolId,
             });
             if (workflowPlan.length === 1) {
-                return workflowPlan[0];
+                return finalizeAction(workflowPlan[0]);
             }
         }
 
         if (toolPolicy.executionProfile !== REMOTE_BUILD_EXECUTION_PROFILE
             && toolPolicy.candidateToolIds.includes('web-search')
             && searchQuery) {
-            return {
+            return finalizeAction({
                 tool: 'web-search',
                 reason: researchQuery
                     ? 'Explicit research request should start with Perplexity-backed web search.'
@@ -5456,38 +6184,38 @@ class ConversationOrchestrator extends EventEmitter {
                     includeSnippets: true,
                     includeUrls: true,
                 },
-            };
+            });
         }
 
         if (firstUrl
             && toolPolicy.candidateToolIds.includes('web-scrape')
             && /\b(scrape|extract|selector|structured|parse)\b/i.test(objective)) {
-            return {
+            return finalizeAction({
                 tool: 'web-scrape',
                 reason: 'Explicit scrape request with a direct URL should start with deterministic web scraping.',
                 params: inferBlindScrapeParams(objective, firstUrl),
-            };
+            });
         }
 
         if (toolPolicy.candidateToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)
             && hasDocumentWorkflowIntentText(objective)
             && !searchQuery
             && !(firstUrl && /\b(scrape|extract|selector|structured|parse)\b/i.test(objective))) {
-            return {
+            return finalizeAction({
                 tool: DOCUMENT_WORKFLOW_TOOL_ID,
                 reason: 'Explicit document or slide deliverable should start with the document workflow.',
                 params: documentWorkflowParams,
-            };
+            });
         }
 
         if (toolPolicy.candidateToolIds.includes('image-generate') && hasExplicitImageGenerationIntent(objective)) {
-            return {
+            return finalizeAction({
                 tool: 'image-generate',
                 reason: 'Explicit image-generation request should start by materializing reusable image artifacts.',
                 params: {
                     prompt: buildImagePromptFromArtifactRequest(objective),
                 },
-            };
+            });
         }
 
         if (toolPolicy.candidateToolIds.includes('opencode-run') && hasOpencodeRepoWorkIntent(objective)) {
@@ -5498,7 +6226,7 @@ class ConversationOrchestrator extends EventEmitter {
                 target,
             });
 
-            return {
+            return finalizeAction({
                 tool: 'opencode-run',
                 reason: target === 'remote-default'
                     ? 'Repo-level code work on the remote workspace should start with the managed OpenCode runtime.'
@@ -5508,7 +6236,7 @@ class ConversationOrchestrator extends EventEmitter {
                     target,
                     ...(workspacePath ? { workspacePath } : {}),
                 },
-            };
+            });
         }
 
         if (!remoteToolId) {
@@ -5520,11 +6248,11 @@ class ConversationOrchestrator extends EventEmitter {
             return null;
         }
 
-        return {
+        return finalizeAction({
             tool: remoteToolId,
             reason: 'Direct SSH command inferred from the user request.',
             params: sshContext.directParams,
-        };
+        });
     }
 
     normalizePlannedStep(step = {}, { objective = '', session = null, executionProfile = DEFAULT_EXECUTION_PROFILE, recentMessages = [], toolContext = {} } = {}) {
@@ -5604,6 +6332,56 @@ class ConversationOrchestrator extends EventEmitter {
                 : 'hostname && uptime && (df -h / || true) && (free -m || true)');
 
         return normalizedStep;
+    }
+
+    isPlannerStepAllowed(step = {}, { toolPolicy = {}, toolEvents = [] } = {}) {
+        if (!step?.tool || !isJudgmentV2Enabled()) {
+            return Boolean(step?.tool);
+        }
+
+        const classification = toolPolicy?.classification || {};
+        if (classification.checkpointNeed === 'required' && step.tool !== USER_CHECKPOINT_TOOL_ID) {
+            return false;
+        }
+
+        if (classification.surfaceMode === 'notes-page'
+            && !['web-search', 'web-fetch', 'web-scrape', USER_CHECKPOINT_TOOL_ID].includes(step.tool)) {
+            return false;
+        }
+
+        if (classification.groundingRequirement === 'required') {
+            if (![USER_CHECKPOINT_TOOL_ID, 'web-search', 'web-fetch', 'web-scrape', DOCUMENT_WORKFLOW_TOOL_ID].includes(step.tool)) {
+                return false;
+            }
+
+            if (step.tool === DOCUMENT_WORKFLOW_TOOL_ID && !hasGroundedResearchToolResult(toolEvents)) {
+                return false;
+            }
+        }
+
+        if (step.tool === 'file-write'
+            && (!String(step?.params?.path || '').trim() || !String(step?.params?.content || '').trim())) {
+            return false;
+        }
+
+        if (toolEvents.length > 0) {
+            const priorSignatures = new Set((Array.isArray(toolEvents) ? toolEvents : [])
+                .map((event) => extractExecutedStepSignature(event))
+                .filter(Boolean));
+            const nextSignature = extractExecutedStepSignature({
+                toolCall: {
+                    function: {
+                        name: step.tool,
+                        arguments: JSON.stringify(step.params || {}),
+                    },
+                },
+            });
+            if (nextSignature && priorSignatures.has(nextSignature)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     buildFallbackPlan({ objective = '', session = null, recentMessages = [], toolContext = {}, executionProfile = DEFAULT_EXECUTION_PROFILE, toolPolicy = {}, toolEvents = [] }) {
@@ -5754,17 +6532,40 @@ class ConversationOrchestrator extends EventEmitter {
             return [];
         }
 
+        const roleOptions = resolveRoleExecutionOptions({
+            role: 'planner',
+            model,
+            reasoningEffort,
+            toolPolicy,
+            toolEvents,
+        });
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const toolCatalog = toolPolicy.candidateToolIds
-            .map((toolId) => `- ${toolId}: ${toolPolicy.toolDescriptions?.[toolId] || toolId}`)
+            .map((toolId) => {
+                const score = Number(toolPolicy?.candidateToolScores?.[toolId]?.score || 0);
+                const reasons = Array.isArray(toolPolicy?.candidateToolScores?.[toolId]?.reasons)
+                    ? toolPolicy.candidateToolScores[toolId].reasons.slice(0, 2).join('; ')
+                    : '';
+                return `- ${toolId}: ${toolPolicy.toolDescriptions?.[toolId] || toolId}${Number.isFinite(score) && score > 0 ? ` (score ${score.toFixed(2)})` : ''}${reasons ? ` [${reasons}]` : ''}`;
+            })
             .join('\n');
         const planningPrompt = String(objective || '');
         const prompt = [
             'You are planning tool usage for an application-owned agent runtime.',
+            'Classify first, then choose the smallest safe tool sequence that follows the classification and verified evidence.',
             'Return JSON only.',
             'If tools are unnecessary, return {"steps":[]}.',
             `Execution profile: ${executionProfile}`,
             `Task type: ${taskType}`,
+            ...(toolPolicy?.classification
+                ? [
+                    `Request classification: ${JSON.stringify(toolPolicy.classification)}`,
+                    'Treat the classification as a strong prior. Only deviate from it when the verified tool results or active workflow clearly justify a different tool sequence.',
+                    toolPolicy.classification.groundingRequirement === 'required'
+                        ? 'Grounding is required. Start with web-search, web-fetch, or web-scrape before any final document generation or synthesis step.'
+                        : 'Grounding is optional unless the verified evidence shows the request is current-information sensitive.',
+                ]
+                : []),
             'Candidate tools:',
             toolCatalog,
             '',
@@ -5791,6 +6592,11 @@ class ConversationOrchestrator extends EventEmitter {
             toolEvents.length > 0
                 ? JSON.stringify(summarizeToolEventsForPlanner(toolEvents), null, 2)
                 : '(none)',
+            '',
+            'Evidence-first planning rules:',
+            'Reject steps that repeat a no-op command from this run, mismatch the active surface, skip required grounding, or omit required parameters.',
+            'If the active surface is notes page editing, stay inside notes-safe research tools rather than switching to file, deploy, or document workflows.',
+            'If grounding is required, do not jump straight to `document-workflow generate` unless verified web evidence already exists in this run.',
             '',
             'Return exactly this shape:',
             '{"steps":[{"tool":"tool-id","reason":"why","params":{}}]}',
@@ -5924,7 +6730,7 @@ class ConversationOrchestrator extends EventEmitter {
                     : []),
         ].join('\n');
 
-        const plannerOutput = await this.completeText(prompt, { model, reasoningEffort });
+        const plannerOutput = await this.completeText(prompt, roleOptions);
         const parsed = safeJsonParse(plannerOutput);
         const plannerReturnedSteps = Array.isArray(parsed?.steps);
         const requestedSteps = (Array.isArray(parsed?.steps) ? parsed.steps : [])
@@ -5936,13 +6742,17 @@ class ConversationOrchestrator extends EventEmitter {
                 recentMessages,
                 toolContext,
             }))
-            .filter((step) => step.tool && toolPolicy.candidateToolIds.includes(step.tool));
+            .filter((step) => step.tool && toolPolicy.candidateToolIds.includes(step.tool))
+            .filter((step) => this.isPlannerStepAllowed(step, {
+                toolPolicy,
+                toolEvents,
+            }));
 
         if (requestedSteps.length > 0) {
             return requestedSteps;
         }
 
-        if (plannerReturnedSteps) {
+        if (plannerReturnedSteps && Array.isArray(parsed?.steps) && parsed.steps.length === 0) {
             return [];
         }
 
@@ -6109,6 +6919,13 @@ class ConversationOrchestrator extends EventEmitter {
             toolPolicy,
             clientSurface,
         });
+        const roleOptions = resolveRoleExecutionOptions({
+            role: 'repair',
+            model,
+            reasoningEffort,
+            toolPolicy,
+            toolEvents,
+        });
 
         const repairPrompt = [
             'The previous draft was invalid because it claimed runtime tools were unavailable after verified tool execution.',
@@ -6116,6 +6933,12 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not mention turn-level tool availability, missing tools, sandbox limits, or inability to execute commands.',
             'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
             'If a tool failed, state the exact tool failure plainly.',
+            ...(toolPolicy?.classification?.groundingRequirement === 'required'
+                ? [
+                    'Do not answer with unverified current information. If the verified results are insufficient, say you were not able to verify it yet.',
+                    'Treat any recalled memory as supplemental only, not as proof of a current fact.',
+                ]
+                : []),
             'When the request is research-heavy, synthesize across the verified sources and keep concrete facts, comparisons, and caveats instead of collapsing everything into a shallow summary.',
             `Task type: ${taskType}`,
             ...(taskType === NOTES_EXECUTION_PROFILE
@@ -6158,8 +6981,8 @@ class ConversationOrchestrator extends EventEmitter {
             contextMessages,
             recentMessages,
             stream: false,
-            model,
-            reasoningEffort,
+            model: roleOptions.model,
+            reasoningEffort: roleOptions.reasoningEffort,
             enableAutomaticToolCalls: false,
         }), {
             objective,
@@ -6172,6 +6995,7 @@ class ConversationOrchestrator extends EventEmitter {
         return this.withResponseMetadata(response, {
             executionProfile,
             runtimeMode,
+            finalizationMode: 'repair',
             toolEvents,
             toolPolicy,
             autonomyApproved,
@@ -6204,6 +7028,13 @@ class ConversationOrchestrator extends EventEmitter {
             toolPolicy,
             clientSurface,
         });
+        const roleOptions = resolveRoleExecutionOptions({
+            role: toolEvents.length === 0 ? 'direct' : 'synthesis',
+            model,
+            reasoningEffort,
+            toolPolicy,
+            toolEvents,
+        });
 
         if (toolEvents.length === 0) {
             const response = recoverEmptyModelResponse(await this.requestResponse({
@@ -6212,8 +7043,8 @@ class ConversationOrchestrator extends EventEmitter {
                 contextMessages,
                 recentMessages,
                 stream: false,
-                model,
-                reasoningEffort,
+                model: roleOptions.model,
+                reasoningEffort: roleOptions.reasoningEffort,
                 enableAutomaticToolCalls: false,
             }), {
                 objective,
@@ -6226,6 +7057,7 @@ class ConversationOrchestrator extends EventEmitter {
             return this.withResponseMetadata(response, {
                 executionProfile,
                 runtimeMode,
+                finalizationMode: 'direct-response',
                 toolEvents: [],
                 toolPolicy,
                 autonomyApproved,
@@ -6241,6 +7073,13 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
             'Do not wrap the final answer in code fences.',
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
+            ...(toolPolicy?.classification?.groundingRequirement === 'required'
+                ? [
+                    'This request requires grounded evidence.',
+                    'Do not present current facts unless they are supported by the verified tool results below.',
+                    'If the verified tool results are insufficient, say what remains unverified instead of guessing.',
+                ]
+                : []),
             'If the request is research-heavy, synthesize across the verified sources with concrete detail, cross-source comparison, and caveats instead of flattening the findings into one thin paragraph.',
             ...(taskType === NOTES_EXECUTION_PROFILE
                 ? [
@@ -6289,8 +7128,8 @@ class ConversationOrchestrator extends EventEmitter {
             contextMessages,
             recentMessages,
             stream: false,
-            model,
-            reasoningEffort,
+            model: roleOptions.model,
+            reasoningEffort: roleOptions.reasoningEffort,
             enableAutomaticToolCalls: false,
         });
 
@@ -6306,8 +7145,8 @@ class ConversationOrchestrator extends EventEmitter {
                 contextMessages: [],
                 recentMessages: [],
                 stream: false,
-                model,
-                reasoningEffort,
+                model: roleOptions.model,
+                reasoningEffort: roleOptions.reasoningEffort,
                 enableAutomaticToolCalls: false,
             });
         }
@@ -6323,6 +7162,7 @@ class ConversationOrchestrator extends EventEmitter {
         return this.withResponseMetadata(response, {
             executionProfile,
             runtimeMode,
+            finalizationMode: 'tool-synthesis',
             toolEvents,
             toolPolicy,
             autonomyApproved,
@@ -6364,6 +7204,16 @@ class ConversationOrchestrator extends EventEmitter {
         if (allowedToolIds.length > 0) {
             parts.push(`Runtime-available tools for this request: ${allowedToolIds.join(', ')}.`);
             parts.push('Do not claim tools are unavailable if they are listed as runtime-available tools.');
+        }
+
+        if (toolPolicy?.classification) {
+            parts.push(`Request classification: task family ${toolPolicy.classification.taskFamily}, surface ${toolPolicy.classification.surfaceMode}, preferred path ${toolPolicy.classification.preferredExecutionPath}, confidence ${Number(toolPolicy.classification.confidence || 0).toFixed(2)}.`);
+            if (toolPolicy.classification.groundingRequirement === 'required') {
+                parts.push('This request requires grounding. Treat recalled memory as supplemental only and base any current-information answer on verified web or tool results.');
+            }
+            if (toolPolicy.classification.checkpointNeed === 'required') {
+                parts.push('This request has a required decision gate before major work. Prefer `user-checkpoint` over guessing or overcommitting to one implementation path.');
+            }
         }
 
         if (canUseUserCheckpoint) {
@@ -6557,6 +7407,15 @@ class ConversationOrchestrator extends EventEmitter {
             taskType,
             executionProfile,
             runtimeMode,
+            classification: toolPolicy?.classification || null,
+            candidateToolScores: toolPolicy?.candidateToolScores || null,
+            replanReason: extractLatestReplanReason(executionTrace),
+            recallSummary: summarizeRecallTrace(memoryTrace),
+            finalizationMode: inferFinalizationMode({
+                runtimeMode,
+                toolEvents,
+                assistantMetadata: tracedResponse?.metadata || null,
+            }),
             toolCount: toolEvents.length,
             tools: toolPolicy.candidateToolIds,
             duration: Date.now() - startedAt,

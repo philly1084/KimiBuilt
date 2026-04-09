@@ -51,11 +51,14 @@ function buildContinuityInstructions(extra = '') {
 function buildPlannerPromptSurface() {
   return [
     'You are planning tool usage for an application-owned agent runtime.',
+    'Classify the request first, then choose the smallest safe tool sequence that fits the classification and verified evidence.',
     'Return JSON only.',
     'If tools are unnecessary, return {"steps":[]}.',
     'Choose only from the runtime-provided candidate tools.',
     'Use at most 4 steps.',
     'Avoid redundant tool calls.',
+    'Reject steps that repeat a no-op command from this run, mismatch the active surface, skip required grounding, or omit required parameters.',
+    'For current-information or research-heavy requests, gather grounded evidence first with web-search, web-fetch, or web-scrape before document generation or synthesis.',
     'Do not invent SSH hosts, usernames, file paths, or credentials.',
     'Every remote-command step must include a non-empty params.command string.',
     'Every agent-workload step must pass the full original user request and let the runtime extract schedule and command details.',

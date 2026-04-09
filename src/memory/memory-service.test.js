@@ -3,8 +3,13 @@ const {
     DEFAULT_RECALL_PROFILE,
     RESEARCH_RECALL_PROFILE,
 } = require('./memory-service');
+const config = require('../config');
 
 describe('MemoryService recall profiles', () => {
+    beforeEach(() => {
+        config.config.runtime.judgmentV2Enabled = false;
+    });
+
     test('uses wider recall for normal conversations by default', () => {
         const service = new MemoryService();
 
@@ -149,6 +154,79 @@ describe('MemoryService recall profiles', () => {
             artifactFilename: 'brief.html',
             artifactFormat: 'html',
             chunkIndex: 0,
+        }));
+    });
+
+    test('judgment v2 returns typed recall bundles and rationale details', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'memory-artifact-1',
+                score: 0.82,
+                text: 'Created pricing-report.html for the latest GPU pricing brief.',
+                sessionId: 'session-1',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    memoryType: 'artifact',
+                    artifactId: 'artifact-1',
+                    artifactFilename: 'pricing-report.html',
+                    artifactFormat: 'html',
+                    keywords: ['gpu', 'pricing', 'report'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('revise the latest GPU pricing report', {
+            sessionId: 'session-1',
+            profile: RESEARCH_RECALL_PROFILE,
+            returnDetails: true,
+        });
+
+        expect(recall.bundles.artifact).toHaveLength(1);
+        expect(recall.trace.bundles).toEqual(expect.objectContaining({
+            artifact: 1,
+        }));
+        expect(recall.trace.selected[0].rationale).toEqual(expect.arrayContaining([
+            expect.stringContaining('keyword overlap'),
+        ]));
+    });
+
+    test('judgment v2 boosts workflow-summary skills when tool family matches the new objective', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'skill-1',
+                score: 0.35,
+                text: 'Reusable workflow: Repair the remote k3s rollout. Verified steps: remote-command -> k3s-deploy.',
+                sessionId: 'session-1',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    memoryType: 'skill',
+                    skillKind: 'workflow-summary',
+                    toolFamily: 'remote',
+                    toolIds: ['remote-command', 'k3s-deploy'],
+                    keywords: ['remote', 'k3s', 'rollout'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('Continue the remote k3s rollout fix', {
+            sessionId: 'session-1',
+            returnDetails: true,
+            preferredToolIds: ['remote-command'],
+        });
+
+        expect(recall.bundles.skill).toHaveLength(1);
+        expect(recall.trace.selected[0]).toEqual(expect.objectContaining({
+            typeGroup: 'skill',
+            rationale: expect.arrayContaining([
+                'workflow family match: remote',
+                'matches preferred tools',
+            ]),
         }));
     });
 });

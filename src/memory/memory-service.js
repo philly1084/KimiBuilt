@@ -11,6 +11,7 @@ const FACT_MEMORY_TYPE = 'fact';
 const ARTIFACT_MEMORY_TYPE = 'artifact';
 const SKILL_MEMORY_TYPE = 'skill';
 const RESEARCH_MEMORY_TYPE = 'research';
+const WORKFLOW_SUMMARY_SKILL_KIND = 'workflow-summary';
 const DEFAULT_FACT_LIMIT = 6;
 const DEFAULT_ARTIFACT_LIMIT = 4;
 const DEFAULT_SKILL_LIMIT = 3;
@@ -90,6 +91,122 @@ function summarizeSkillText({ objective = '', assistantText = '', toolEvents = [
     ].filter(Boolean).join('\n');
 }
 
+function normalizeToolFamily(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+
+    return normalized;
+}
+
+function deriveToolFamilyFromToolEvents(toolEvents = []) {
+    const toolIds = (Array.isArray(toolEvents) ? toolEvents : [])
+        .map((event) => String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim())
+        .filter(Boolean);
+
+    if (toolIds.some((toolId) => ['remote-command', 'ssh-execute', 'k3s-deploy', 'docker-exec'].includes(toolId))) {
+        return 'remote';
+    }
+
+    if (toolIds.some((toolId) => ['opencode-run', 'git-safe', 'file-write', 'file-read', 'file-search'].includes(toolId))) {
+        return 'repo';
+    }
+
+    if (toolIds.some((toolId) => ['web-search', 'web-fetch', 'web-scrape'].includes(toolId))) {
+        return 'research';
+    }
+
+    if (toolIds.some((toolId) => [ARTIFACT_MEMORY_TYPE, 'asset-search', 'image-from-url', 'image-search-unsplash'].includes(toolId))) {
+        return 'artifact';
+    }
+
+    if (toolIds.some((toolId) => ['document-workflow'].includes(toolId))) {
+        return 'document';
+    }
+
+    if (toolIds.some((toolId) => ['image-generate', 'speech-generate'].includes(toolId))) {
+        return 'media';
+    }
+
+    return toolIds[0] || '';
+}
+
+function inferQueryToolFamily(query = '') {
+    const normalized = String(query || '').trim().toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+
+    if (/\b(ssh|server|host|cluster|k3s|k8s|kubernetes|kubectl|deployment|pod|service|ingress|docker)\b/.test(normalized)) {
+        return 'remote';
+    }
+
+    if (/\b(repo|repository|code|codebase|workspace|implement|refactor|fix|build|compile|test|commit|push)\b/.test(normalized)) {
+        return 'repo';
+    }
+
+    if (/\b(research|latest|current|today|news|compare|comparison|look up|search|browse|pricing)\b/.test(normalized)) {
+        return 'research';
+    }
+
+    if (/\b(document|report|brief|slides|presentation|deck|html|docx|pdf)\b/.test(normalized)) {
+        return 'document';
+    }
+
+    if (/\b(artifact|file|image|images|photo|pdf|document|previous|earlier|generated|uploaded|attachment)\b/.test(normalized)) {
+        return 'artifact';
+    }
+
+    return '';
+}
+
+function deriveKeywordOverlapForEntry(entry = {}, queryKeywords = []) {
+    const normalizedQueryKeywords = normalizeMemoryKeywords(queryKeywords || []);
+    if (!normalizedQueryKeywords.length) {
+        return [];
+    }
+
+    const directOverlap = Array.isArray(entry?.keywordOverlap)
+        ? normalizeMemoryKeywords(entry.keywordOverlap)
+        : [];
+    if (directOverlap.length > 0) {
+        return directOverlap;
+    }
+
+    const metadataKeywords = normalizeMemoryKeywords(entry?.metadata?.keywords || []);
+    const text = String(entry?.text || '').toLowerCase();
+    return normalizedQueryKeywords.filter((keyword) => metadataKeywords.includes(keyword) || text.includes(keyword));
+}
+
+function extractProjectPlanFocus(session = null, explicitProjectPlan = null) {
+    const candidate = explicitProjectPlan
+        || session?.controlState?.projectPlan
+        || session?.metadata?.controlState?.projectPlan
+        || null;
+
+    if (!candidate || typeof candidate !== 'object') {
+        return '';
+    }
+
+    return summarizeLine(
+        candidate.title
+        || candidate.objective
+        || candidate.summary
+        || '',
+        140,
+    );
+}
+
+function buildRecallBundles(entries = []) {
+    return {
+        fact: entries.filter((entry) => entry?.typeGroup === 'fact'),
+        artifact: entries.filter((entry) => entry?.typeGroup === 'artifact'),
+        skill: entries.filter((entry) => entry?.typeGroup === 'skill'),
+        research: entries.filter((entry) => entry?.typeGroup === 'research'),
+    };
+}
+
 function isArtifactFollowupQuery(query = '') {
     const normalized = String(query || '').trim().toLowerCase();
     if (!normalized) {
@@ -141,6 +258,16 @@ class MemoryService {
             ...(metadata?.artifactFilename ? { artifactFilename: String(metadata.artifactFilename).trim() } : {}),
             ...(metadata?.artifactFormat ? { artifactFormat: String(metadata.artifactFormat).trim().toLowerCase() } : {}),
             ...(metadata?.skillId ? { skillId: String(metadata.skillId).trim() } : {}),
+            ...(metadata?.skillKind ? { skillKind: String(metadata.skillKind).trim().toLowerCase() } : {}),
+            ...(metadata?.toolFamily ? { toolFamily: normalizeToolFamily(metadata.toolFamily) } : {}),
+            ...(Array.isArray(metadata?.toolIds) && metadata.toolIds.length > 0
+                ? {
+                    toolIds: metadata.toolIds
+                        .map((toolId) => String(toolId || '').trim())
+                        .filter(Boolean)
+                        .slice(0, 8),
+                }
+                : {}),
             ...(metadata?.summary ? { summary: summarizeLine(metadata.summary, 280) } : {}),
             ...(metadata?.chunkIndex != null ? { chunkIndex: Number(metadata.chunkIndex) } : {}),
         };
@@ -232,10 +359,18 @@ class MemoryService {
             return null;
         }
 
+        const relevantToolIds = Array.from(new Set(relevantToolEvents
+            .map((event) => String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim())
+            .filter(Boolean)));
+        const toolFamily = deriveToolFamilyFromToolEvents(relevantToolEvents);
+
         return this.remember(sessionId, skillText, 'skill', {
             ...metadata,
             memoryType: SKILL_MEMORY_TYPE,
             visibility: metadata?.visibility || 'frontend-shared',
+            skillKind: WORKFLOW_SUMMARY_SKILL_KIND,
+            toolFamily,
+            toolIds: relevantToolIds,
             importance: normalizeImportance(metadata?.importance, DEFAULT_SKILL_IMPORTANCE),
             memoryKeywords: mergeMemoryKeywords(
                 metadata?.memoryKeywords || metadata?.keywords || [],
@@ -244,7 +379,8 @@ class MemoryService {
                     assistantText,
                     artifact?.filename || '',
                     artifact?.format || '',
-                    relevantToolEvents.map((event) => event?.toolCall?.function?.name || event?.result?.toolId || '').join(' '),
+                    relevantToolIds.join(' '),
+                    toolFamily,
                 ].join('\n'),
             ),
         });
@@ -333,9 +469,14 @@ class MemoryService {
     scoreRecallEntry(entry = {}, {
         queryKeywords = [],
         artifactFollowup = false,
+        preferredToolIds = [],
+        objectiveToolFamily = '',
+        activeProjectFocus = '',
+        profile = DEFAULT_RECALL_PROFILE,
     } = {}) {
+        const judgmentV2Enabled = config.runtime?.judgmentV2Enabled === true;
         const metadata = entry?.metadata || {};
-        const keywordOverlap = Array.isArray(entry?.keywordOverlap) ? entry.keywordOverlap : [];
+        const keywordOverlap = deriveKeywordOverlapForEntry(entry, queryKeywords);
         const semanticScore = Number(entry?.semanticScore ?? entry?.score ?? 0);
         const importance = normalizeImportance(metadata?.importance, DEFAULT_FACT_IMPORTANCE);
         const timestamp = Date.parse(metadata?.timestamp || entry?.timestamp || '');
@@ -348,12 +489,75 @@ class MemoryService {
             : 0;
         const typeGroup = this.getMemoryTypeGroup(entry);
         const artifactBoost = artifactFollowup && typeGroup === 'artifact' ? 0.25 : 0;
-        const skillBoost = typeGroup === 'skill' ? 0.1 : 0;
+        const skillKind = String(metadata?.skillKind || '').trim().toLowerCase();
+        const workflowFamilyMatch = objectiveToolFamily
+            && normalizeToolFamily(metadata?.toolFamily || '') === normalizeToolFamily(objectiveToolFamily);
+        const workflowSimilarityBoost = skillKind === WORKFLOW_SUMMARY_SKILL_KIND
+            ? (workflowFamilyMatch && keywordOverlap.length > 0 ? 0.28 : (workflowFamilyMatch ? 0.16 : -0.06))
+            : 0;
+        const preferredToolMatch = Array.isArray(metadata?.toolIds)
+            && metadata.toolIds.some((toolId) => preferredToolIds.includes(toolId));
+        const preferredToolBoost = judgmentV2Enabled && preferredToolMatch ? 0.1 : 0;
+        const projectPlanBoost = judgmentV2Enabled && activeProjectFocus
+            && String(entry?.text || '').toLowerCase().includes(activeProjectFocus.toLowerCase())
+            ? 0.12
+            : 0;
+        const researchBoost = judgmentV2Enabled && typeGroup === 'research' && profile === RESEARCH_RECALL_PROFILE ? 0.08 : 0;
+        const skillBoost = typeGroup === 'skill'
+            ? (workflowSimilarityBoost + preferredToolBoost + projectPlanBoost + 0.04)
+            : 0;
         const textBoost = queryKeywords.some((keyword) => String(entry?.text || '').toLowerCase().includes(keyword))
             ? 0.05
             : 0;
 
-        return semanticScore + keywordBoost + recencyBoost + artifactBoost + skillBoost + textBoost + importance;
+        return semanticScore
+            + keywordBoost
+            + recencyBoost
+            + artifactBoost
+            + (judgmentV2Enabled ? skillBoost : (typeGroup === 'skill' ? 0.1 : 0))
+            + textBoost
+            + researchBoost
+            + importance;
+    }
+
+    buildRecallRationale(entry = {}, {
+        queryKeywords = [],
+        artifactFollowup = false,
+        preferredToolIds = [],
+        objectiveToolFamily = '',
+        activeProjectFocus = '',
+        profile = DEFAULT_RECALL_PROFILE,
+    } = {}) {
+        const metadata = entry?.metadata || {};
+        const reasons = [];
+        const keywordOverlap = deriveKeywordOverlapForEntry(entry, queryKeywords);
+        const toolIds = Array.isArray(metadata?.toolIds) ? metadata.toolIds : [];
+        const toolFamily = normalizeToolFamily(metadata?.toolFamily || '');
+        const skillKind = String(metadata?.skillKind || '').trim().toLowerCase();
+
+        if (Number(entry?.semanticScore || 0) >= 0.7) {
+            reasons.push('strong semantic match');
+        }
+        if (keywordOverlap.length > 0) {
+            reasons.push(`keyword overlap: ${keywordOverlap.join(', ')}`);
+        }
+        if (artifactFollowup && entry?.typeGroup === 'artifact') {
+            reasons.push('artifact-followup boost');
+        }
+        if (skillKind === WORKFLOW_SUMMARY_SKILL_KIND && objectiveToolFamily && toolFamily === normalizeToolFamily(objectiveToolFamily)) {
+            reasons.push(`workflow family match: ${toolFamily}`);
+        }
+        if (toolIds.some((toolId) => preferredToolIds.includes(toolId))) {
+            reasons.push('matches preferred tools');
+        }
+        if (activeProjectFocus && String(entry?.text || '').toLowerCase().includes(activeProjectFocus.toLowerCase())) {
+            reasons.push('matches active project focus');
+        }
+        if (entry?.typeGroup === 'research' && profile === RESEARCH_RECALL_PROFILE) {
+            reasons.push('research recall profile');
+        }
+
+        return reasons.length > 0 ? reasons : ['semantic recall'];
     }
 
     mergeRecallResults(semanticResults = [], keywordResults = [], options = {}) {
@@ -385,6 +589,12 @@ class MemoryService {
 
         const queryKeywords = normalizeMemoryKeywords(options.queryKeywords || []);
         const artifactFollowup = Boolean(options.artifactFollowup);
+        const preferredToolIds = Array.isArray(options.preferredToolIds)
+            ? options.preferredToolIds.map((toolId) => String(toolId || '').trim()).filter(Boolean)
+            : [];
+        const objectiveToolFamily = inferQueryToolFamily(options.objective || '');
+        const activeProjectFocus = summarizeLine(options.activeProjectFocus || '', 120);
+        const profile = String(options.profile || DEFAULT_RECALL_PROFILE).trim().toLowerCase() || DEFAULT_RECALL_PROFILE;
 
         return Array.from(merged.values())
             .map((entry) => ({
@@ -393,6 +603,18 @@ class MemoryService {
                 finalScore: this.scoreRecallEntry(entry, {
                     queryKeywords,
                     artifactFollowup,
+                    preferredToolIds,
+                    objectiveToolFamily,
+                    activeProjectFocus,
+                    profile,
+                }),
+                rationale: this.buildRecallRationale(entry, {
+                    queryKeywords,
+                    artifactFollowup,
+                    preferredToolIds,
+                    objectiveToolFamily,
+                    activeProjectFocus,
+                    profile,
                 }),
             }))
             .sort((left, right) => right.finalScore - left.finalScore);
@@ -434,6 +656,7 @@ class MemoryService {
             fact: [],
             artifact: [],
             skill: [],
+            research: [],
         };
 
         for (const entry of entries) {
@@ -458,6 +681,11 @@ class MemoryService {
                 continue;
             }
 
+            if (typeGroup === 'research') {
+                sections.research.push(`- ${text}`);
+                continue;
+            }
+
             sections.fact.push(`- ${text}`);
         }
 
@@ -471,6 +699,9 @@ class MemoryService {
         if (sections.skill.length > 0) {
             rendered.push('Reusable skills:', ...sections.skill);
         }
+        if (sections.research.length > 0) {
+            rendered.push('Relevant research notes:', ...sections.research);
+        }
 
         return rendered.length > 0 ? [rendered.join('\n')] : [];
     }
@@ -483,6 +714,10 @@ class MemoryService {
         scoreThreshold,
         profile = DEFAULT_RECALL_PROFILE,
         memoryKeywords = [],
+        objective = '',
+        session = null,
+        projectPlan = null,
+        preferredToolIds = [],
     } = {}) {
         const recallOptions = this.getRecallOptions({
             profile,
@@ -506,9 +741,16 @@ class MemoryService {
         const mergedResults = this.mergeRecallResults(semanticResults, keywordResults, {
             queryKeywords,
             artifactFollowup,
+            objective: objective || query,
+            activeProjectFocus: extractProjectPlanFocus(session, projectPlan),
+            preferredToolIds: preferredToolIds.length > 0
+                ? preferredToolIds
+                : (Array.isArray(session?.metadata?.agent?.tools) ? session.metadata.agent.tools : []),
+            profile,
         });
         const { selected, counts } = this.selectRecallGroups(mergedResults, recallOptions.topK);
         const contextMessages = this.formatRecallSections(selected);
+        const bundles = buildRecallBundles(selected);
         const trace = {
             query: summarizeLine(query, 200),
             matchedKeywords: queryKeywords,
@@ -521,8 +763,12 @@ class MemoryService {
                 semanticScore: Number(entry.semanticScore || 0),
                 keywordOverlap: entry.keywordOverlap || [],
                 artifactId: entry?.metadata?.artifactId || null,
+                rationale: entry?.rationale || [],
             })),
             counts,
+            bundles: Object.fromEntries(
+                Object.entries(bundles).map(([key, entries]) => [key, entries.length]),
+            ),
         };
 
         runtimeDiagnostics.recordMemoryHitMix({
@@ -537,6 +783,7 @@ class MemoryService {
 
         return {
             entries: selected,
+            bundles,
             contextMessages,
             trace,
         };
@@ -551,6 +798,10 @@ class MemoryService {
         profile = DEFAULT_RECALL_PROFILE,
         memoryKeywords = [],
         returnDetails = false,
+        objective = '',
+        session = null,
+        projectPlan = null,
+        preferredToolIds = [],
     } = {}) {
         const details = await this.recallDetailed(query, {
             sessionId,
@@ -560,6 +811,10 @@ class MemoryService {
             scoreThreshold,
             profile,
             memoryKeywords,
+            objective,
+            session,
+            projectPlan,
+            preferredToolIds,
         });
 
         return returnDetails ? details : details.contextMessages;
@@ -586,6 +841,10 @@ class MemoryService {
                 ownerId: sessionIsolation ? null : ownerId,
                 memoryScope,
                 memoryKeywords,
+                objective: options?.objective || message,
+                session: options?.session || null,
+                projectPlan: options?.projectPlan || null,
+                preferredToolIds: options?.preferredToolIds || [],
             });
         } catch (err) {
             console.error('[Memory] Failed to recall context:', err.message);
