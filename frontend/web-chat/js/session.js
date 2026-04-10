@@ -8,7 +8,7 @@ const SESSION_MANAGER_TASK_TYPE = 'chat';
 const SESSION_MANAGER_CLIENT_SURFACE = 'web-chat';
 const sessionGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const SESSION_DEFAULT_MODEL = sessionGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
-const resolvePreferredChatModel = sessionGatewayHelpers.resolvePreferredChatModel
+const resolveSessionPreferredModel = sessionGatewayHelpers.resolvePreferredChatModel
     || ((models, preferredModel = '', fallbackModel = SESSION_DEFAULT_MODEL) => {
         const availableModels = Array.isArray(models) ? models : [];
         const availableIds = new Set(
@@ -31,7 +31,7 @@ const resolvePreferredChatModel = sessionGatewayHelpers.resolvePreferredChatMode
     });
 
 function normalizeSessionModel(model, fallbackModel = SESSION_DEFAULT_MODEL) {
-    return resolvePreferredChatModel([], model, fallbackModel);
+    return resolveSessionPreferredModel([], model, fallbackModel);
 }
 
 class SessionManager extends EventTarget {
