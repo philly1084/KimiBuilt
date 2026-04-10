@@ -93,10 +93,15 @@ class ToolBase {
    * Execute with timeout protection
    */
   async executeWithTimeout(params, context) {
+    const requestedTimeout = Number(params?.timeout);
+    const effectiveTimeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+      ? requestedTimeout
+      : this.timeout;
+
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error(`Tool ${this.id} timed out after ${this.timeout}ms`));
-      }, this.timeout);
+        reject(new Error(`Tool ${this.id} timed out after ${effectiveTimeout}ms`));
+      }, effectiveTimeout);
       
       Promise.resolve(this.handler(params, context, this.sideEffectTracker))
         .then(result => {

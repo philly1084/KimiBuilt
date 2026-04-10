@@ -12,6 +12,11 @@ jest.mock('../../../../routes/admin/settings.controller', () => ({
 const { SSHExecuteTool } = require('./SSHExecuteTool');
 
 describe('SSHExecuteTool', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
   test('buildExecutionScript safely assembles working directory and environment', () => {
     const tool = new SSHExecuteTool();
 
@@ -65,5 +70,54 @@ describe('SSHExecuteTool', () => {
     ].join('\n'));
 
     expect(cleaned).toBe('kubectl: command not found');
+  });
+
+  test('execute honors per-call timeout overrides beyond the default backend timeout', async () => {
+    jest.useFakeTimers();
+
+    const tool = new SSHExecuteTool();
+    jest.spyOn(tool, 'getConnectionConfig').mockResolvedValue({
+      host: '10.0.0.5',
+      port: 22,
+      username: 'ubuntu',
+      password: 'secret',
+      privateKeyPath: '',
+    });
+    jest.spyOn(tool, 'buildExecutionScript').mockReturnValue('echo ok');
+    const executeSsh = jest.spyOn(tool, 'executeSSH').mockImplementation((_connection, _script, timeout) => (
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            stdout: 'ok',
+            stderr: '',
+            exitCode: 0,
+            duration: 70000,
+            host: '10.0.0.5:22',
+            observedTimeout: timeout,
+          });
+        }, 70000);
+      })
+    ));
+
+    const executionPromise = tool.execute({
+      command: 'echo ok',
+      timeout: 120000,
+    }, {});
+
+    await jest.advanceTimersByTimeAsync(70000);
+    const result = await executionPromise;
+
+    expect(result.success).toBe(true);
+    expect(executeSsh).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: '10.0.0.5',
+        username: 'ubuntu',
+      }),
+      'echo ok',
+      120000,
+      expect.objectContaining({
+        originalCommand: 'echo ok',
+      }),
+    );
   });
 });
