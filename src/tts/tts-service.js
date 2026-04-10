@@ -23,7 +23,7 @@ class TtsService {
             return ['piper', 'openai'];
         }
 
-        return ['openai', 'piper'];
+        return ['piper', 'openai'];
     }
 
     getProvider(providerId = '') {

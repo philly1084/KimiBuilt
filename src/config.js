@@ -198,7 +198,7 @@ const config = {
     },
 
     tts: {
-        provider: process.env.TTS_PROVIDER || 'auto',
+        provider: process.env.TTS_PROVIDER || 'piper',
         openai: {
             enabled: process.env.OPENAI_TTS_ENABLED !== 'false',
             apiKey: process.env.OPENAI_TTS_API_KEY || process.env.OPENAI_MEDIA_API_KEY || process.env.OPENAI_API_KEY || '',
