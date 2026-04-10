@@ -10,6 +10,17 @@ const { parseLenientJson } = require('./utils/lenient-json');
 
 const REMOTE_CONTINUATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const IMAGE_COUNT_WORDS = new Map([
+    ['one', 1],
+    ['two', 2],
+    ['three', 3],
+    ['four', 4],
+    ['five', 5],
+    ['couple', 2],
+    ['few', 3],
+    ['several', 3],
+    ['multiple', 2],
+]);
 
 function normalizeReasoningEffort(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -460,7 +471,7 @@ function hasImplicitImageArtifactFollowupReference(text = '') {
         return false;
     }
 
-    return /\b(last|latest|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+    return /\b(last|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
         || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
         || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
 }
@@ -497,6 +508,97 @@ function shouldPreGenerateImagesForArtifactRequest({
     return hasExplicitImageGenerationIntent(text);
 }
 
+function parseRequestedImageCountToken(value = '', fallback = null) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+        return fallback;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+        return Math.min(Math.max(Number(normalized), 1), 5);
+    }
+
+    if (IMAGE_COUNT_WORDS.has(normalized)) {
+        return Math.min(Math.max(IMAGE_COUNT_WORDS.get(normalized), 1), 5);
+    }
+
+    return fallback;
+}
+
+function singularizeImageNoun(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'image';
+    }
+
+    const singularMap = {
+        images: 'image',
+        image: 'image',
+        photos: 'photo',
+        photo: 'photo',
+        pictures: 'picture',
+        picture: 'picture',
+        illustrations: 'illustration',
+        illustration: 'illustration',
+        renders: 'render',
+        render: 'render',
+    };
+
+    return singularMap[normalized] || 'image';
+}
+
+function extractRequestedImageCount(text = '', fallback = 1) {
+    const prompt = String(text || '').trim();
+    if (!prompt) {
+        return fallback;
+    }
+
+    const patterns = [
+        /\b(?<count>\d+|one|two|three|four|five)\s+(?:different\s+|distinct\s+|separate\s+)?(?:images?|photos?|pictures?|illustrations?|renders?)\b/i,
+        /\b(?:a\s+)?(?<count>couple|few)\s+of?\s*(?:different\s+|distinct\s+|separate\s+)?(?:images?|photos?|pictures?|illustrations?|renders?)\b/i,
+        /\b(?<count>multiple|several)\s+(?:different\s+|distinct\s+|separate\s+)?(?:images?|photos?|pictures?|illustrations?|renders?)\b/i,
+        /^\s*(?:make|create|generate|build|produce|prepare|render|design|draw|illustrate|craft)\b(?:\s+(?:me|us))?\s+(?<count>\d+|one|two|three|four|five|multiple|several|(?:a\s+)?couple|(?:a\s+)?few)\b/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = prompt.match(pattern);
+        const token = String(match?.groups?.count || '').trim().replace(/^a\s+/i, '');
+        const parsed = parseRequestedImageCountToken(token, null);
+        if (parsed != null) {
+            return parsed;
+        }
+    }
+
+    return fallback;
+}
+
+function stripRequestedImageBatchLanguage(text = '', requestedCount = 1) {
+    let cleaned = String(text || '').trim();
+    if (!cleaned || requestedCount <= 1) {
+        return cleaned;
+    }
+
+    cleaned = cleaned.replace(
+        /^\s*(?<verb>make|create|generate|build|produce|prepare|render|design|draw|illustrate|craft)\s+(?:me\s+|us\s+)?(?:a\s+couple\s+of|a\s+few|multiple|several|\d+|one|two|three|four|five)\s+(?<subject>.+?)\s+(?<noun>images?|photos?|pictures?|illustrations?|renders?)\b/i,
+        (_match, verb, subject, noun) => {
+            const normalizedSubject = String(subject || '')
+                .replace(/^(?:different|distinct|separate)\s+/i, '')
+                .trim();
+            return `${verb} ${normalizedSubject} ${singularizeImageNoun(noun)}`.trim();
+        },
+    );
+
+    cleaned = cleaned.replace(
+        /\b(?:a\s+couple\s+of|a\s+few|multiple|several|\d+|one|two|three|four|five)\s+(?:different\s+|distinct\s+|separate\s+)?(?<noun>images?|photos?|pictures?|illustrations?|renders?)\b/gi,
+        (_match, noun) => `an ${singularizeImageNoun(noun)}`,
+    );
+
+    return cleaned
+        .replace(/\ban image\b/gi, 'an image')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function buildImagePromptFromArtifactRequest(text = '') {
     const prompt = String(text || '').trim();
     if (!prompt) {
@@ -513,7 +615,7 @@ function buildImagePromptFromArtifactRequest(text = '') {
         cleaned = prompt;
     }
 
-    return cleaned;
+    return stripRequestedImageBatchLanguage(cleaned, extractRequestedImageCount(prompt, 1));
 }
 
 function promptHasExplicitSshIntent(text = '') {
@@ -1021,9 +1123,13 @@ async function maybePrepareImagesForArtifactPrompt({
     }
 
     const imagePrompt = buildImagePromptFromArtifactRequest(text);
+    const requestedImageCount = extractRequestedImageCount(text, 1);
     const toolResult = await toolManager.executeTool(
         'image-generate',
-        { prompt: imagePrompt },
+        {
+            prompt: imagePrompt,
+            ...(requestedImageCount > 1 ? { n: requestedImageCount } : {}),
+        },
         {
             sessionId,
             route,
@@ -1061,7 +1167,10 @@ async function maybePrepareImagesForArtifactPrompt({
             toolCall: {
                 function: {
                     name: 'image-generate',
-                    arguments: JSON.stringify({ prompt: imagePrompt }),
+                    arguments: JSON.stringify({
+                        prompt: imagePrompt,
+                        ...(requestedImageCount > 1 ? { n: requestedImageCount } : {}),
+                    }),
                 },
             },
             result: toolResult,
@@ -1138,6 +1247,7 @@ module.exports = {
     hasExplicitNotesPageEditIntent,
     hasImplicitNotesPageBuildIntent,
     stripInjectedNotesPageEditDirective,
+    extractRequestedImageCount,
     hasExplicitImageGenerationIntent,
     inferRequestedOutputFormat,
     isArtifactContinuationPrompt,

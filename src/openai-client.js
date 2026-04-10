@@ -4,7 +4,10 @@ const { config } = require('./config');
 const { runtimeDiagnostics } = require('./runtime-diagnostics');
 const { AGENT_NOTES_CHAR_LIMIT } = require('./agent-notes');
 const settingsController = require('./routes/admin/settings.controller');
-const { normalizeReasoningEffort } = require('./ai-route-utils');
+const {
+    hasExplicitImageGenerationIntent,
+    normalizeReasoningEffort,
+} = require('./ai-route-utils');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
 const { isSessionIsolationEnabled } = require('./session-scope');
 const {
@@ -315,7 +318,7 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
             sizes: ['256x256', '512x512', '1024x1024'],
             qualities: ['standard'],
             styles: [],
-            maxImages: 10,
+            maxImages: 5,
         };
     }
 
@@ -328,7 +331,7 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
             sizes: ['1024x1024', '1536x1024', '1024x1536', 'auto'],
             qualities: ['low', 'medium', 'high', 'auto'],
             styles: [],
-            maxImages: 10,
+            maxImages: 5,
         };
     }
 
@@ -340,7 +343,7 @@ function getImageModelMetadata(modelId, ownedBy = 'openai') {
         sizes: ['1024x1024'],
         qualities: [],
         styles: [],
-        maxImages: 1,
+        maxImages: 5,
     };
 }
 
@@ -1237,7 +1240,7 @@ function hasImplicitImageArtifactFollowupReferenceForPreflight(text = '') {
         return false;
     }
 
-    return /\b(last|latest|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+    return /\b(last|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
         || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
         || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
 }
@@ -1898,9 +1901,13 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         hasExplicitWebResearchIntent(prompt)
         || /\b(latest|current|today|news|look up|search for|search the web|browse)\b/i.test(normalizedPrompt)
     );
+    const hasExplicitImageGenerationRequest = hasExplicitImageGenerationIntent(prompt);
     const hasImageIntent = /\b(image|images|visual|visuals|illustration|illustrations|photo|photos|hero image|background image|cover image)\b/i.test(normalizedPrompt);
     const hasUnsplashIntent = /\bunsplash\b/i.test(normalizedPrompt);
     const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(normalizedPrompt);
+    const hasVerifiedImagePreference = hasUnsplashIntent
+        || hasDirectImageUrl
+        || /\b(real images?|real photos?|stock|reference)\b/i.test(normalizedPrompt);
     const hasArchitectureIntent = /\b(architecture|system design|service diagram|deployment diagram|architecture diagram|design the system)\b/i.test(normalizedPrompt);
     const hasUmlIntent = /\b(uml|class diagram|sequence diagram|activity diagram|use ?case diagram|state diagram|component diagram)\b/i.test(normalizedPrompt);
     const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
@@ -1913,6 +1920,11 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/i.test(normalizedPrompt)
         && (hasWebResearchIntent || hasExplicitScrapeIntent || hasUrl)
     );
+    const hasResearchDocumentIntent = hasDocumentWorkflowIntent
+        && (
+            hasWebResearchIntent
+            || /\b(news|headline|headlines|article|articles|coverage|timeline|analysis|newsletter|current events?)\b/i.test(normalizedPrompt)
+        );
     const hasSubAgentIntent = hasExplicitSubAgentIntent(prompt);
     const canonicalWorkload = buildCanonicalWorkloadAction({
         request: prompt,
@@ -1959,6 +1971,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         selectedIds.add('web-search');
     }
 
+    if (hasResearchDocumentIntent) {
+        selectedIds.add('web-fetch');
+    }
+
     if (hasExplicitScrapeIntent) {
         selectedIds.add('web-search');
         selectedIds.add('web-scrape');
@@ -1975,11 +1991,15 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         }
     }
 
-    if (hasImageIntent && /\b(generate|create|make|design)\b/i.test(normalizedPrompt)) {
+    if (hasExplicitImageGenerationRequest && !hasVerifiedImagePreference) {
         selectedIds.add('image-generate');
     }
 
     if (hasUnsplashIntent || (hasImageIntent && /\b(search|find|browse|reference|stock)\b/i.test(normalizedPrompt))) {
+        selectedIds.add('image-search-unsplash');
+    }
+
+    if (hasResearchDocumentIntent && availableToolIds.has('image-search-unsplash')) {
         selectedIds.add('image-search-unsplash');
     }
 
@@ -2232,7 +2252,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-generate')) {
-        guidance.push('- Use `image-generate` to create visual assets and return hosted image URLs the user can reuse.');
+        guidance.push('- Use `image-generate` only when the user explicitly wants new generated artwork or synthetic visuals that direct URLs, prior artifacts, or Unsplash cannot satisfy.');
+        guidance.push('- Default `image-generate` to one image. Only request more than one image when the user explicitly asks for multiple distinct outputs, and keep image batches to 5 or fewer.');
+        guidance.push('- When `image-generate` uses `n > 1`, write the prompt for one image, not a collage, contact sheet, storyboard, or multi-panel layout unless the user explicitly wants that composition.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'image-search-unsplash')) {
@@ -2246,6 +2268,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => ['image-generate', 'image-search-unsplash', 'image-from-url'].includes(entry.id))) {
         guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
         guidance.push('- For HTML, PDF, and DOCX document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
+        guidance.push('- For research-backed reports, news pages, and current-events documents, gather grounded sources with `web-search` and `web-fetch`, then source real visuals with `image-search-unsplash` or `image-from-url` before composing the document.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'asset-search')) {
@@ -3899,7 +3922,7 @@ async function generateImage({
 
     const params = {
         prompt,
-        n: Math.min(n || 1, selectedModel.maxImages || 10),
+        n: Math.min(Math.max(Number(n) || 1, 1), Math.min(selectedModel.maxImages || 5, 5)),
         size: supportedSizes.includes(size) ? size : (supportedSizes[0] || size || '1024x1024'),
     };
 

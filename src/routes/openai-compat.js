@@ -1885,6 +1885,7 @@ router.post('/images/generations', async (req, res, next) => {
             quality = 'standard',
             style = 'vivid',
         } = req.body;
+        const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
 
         let sessionId = resolveSessionId(req);
         const ownerId = getRequestOwnerId(req);
@@ -1916,7 +1917,7 @@ router.post('/images/generations', async (req, res, next) => {
             size,
             quality,
             style,
-            n: Math.min(n, 10),
+            n: requestedCount,
         });
         const persistedImages = await persistGeneratedImages({
             sessionId,
@@ -1933,7 +1934,7 @@ router.post('/images/generations', async (req, res, next) => {
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
         await updateSessionProjectMemory(sessionId, {
             userText: prompt,
-            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : n} image result(s).`,
+            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : requestedCount} image result(s).`,
             artifacts: persistedImages.artifacts,
             toolEvents: [{
                 toolCall: {

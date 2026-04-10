@@ -487,6 +487,68 @@ describe('ArtifactService', () => {
         }));
     });
 
+    test('allows tool orchestration for research-backed html news documents', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan-news-1',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'EV Tariff Watch',
+                        sections: [
+                            { heading: 'Lead', purpose: 'Summarize the update', keyPoints: ['Tariff change'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand-news-1',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'EV Tariff Watch',
+                        sections: [
+                            { heading: 'Lead', content: 'Lead section', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose-news-1',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>EV Tariff Watch</h1></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-news-research', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create an HTML news report on the latest EV tariffs with sourced visuals and current reporting.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+            toolManager: { id: 'tool-manager' },
+            toolContext: { sessionId: 'session-1' },
+        });
+
+        expect(createResponse.mock.calls[0][0]).toEqual(expect.objectContaining({
+            enableAutomaticToolCalls: true,
+            toolManager: { id: 'tool-manager' },
+            toolContext: { sessionId: 'session-1' },
+        }));
+        const joinedInstructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
+        expect(joinedInstructions).toContain('web-search and web-fetch');
+        expect(joinedInstructions).toContain('verified real image sources');
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            metadata: expect.objectContaining({
+                toolOrchestrationEnabled: true,
+            }),
+        }));
+    });
+
     test('serializeArtifact exposes server preview and bundle download paths for site bundles', () => {
         const serialized = artifactService.serializeArtifact({
             id: 'artifact-site-1',
@@ -770,6 +832,86 @@ describe('ArtifactService', () => {
         expect(instructions).toContain('https://images.unsplash.com/photo-999');
         expect(instructions).toContain('[Verified image references]');
         expect(instructions).toContain('up to 20 images');
+    });
+
+    test('diversifies repeated html image urls when multiple verified references are available', async () => {
+        isConfigured.mockReturnValue(true);
+        searchImages.mockResolvedValue({
+            results: [
+                {
+                    description: 'Market overview photo',
+                    altDescription: 'Chart wall',
+                    urls: { regular: 'https://images.unsplash.com/photo-111' },
+                },
+                {
+                    description: 'Factory floor photo',
+                    altDescription: 'Production line',
+                    urls: { regular: 'https://images.unsplash.com/photo-222' },
+                },
+                {
+                    description: 'Port logistics photo',
+                    altDescription: 'Cargo port',
+                    urls: { regular: 'https://images.unsplash.com/photo-333' },
+                },
+            ],
+        });
+
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan-dup',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Tariff Watch',
+                        sections: [
+                            { heading: 'Lead', purpose: 'Summarize the update', keyPoints: ['Lead'], targetLength: 'short' },
+                            { heading: 'Supply Chain', purpose: 'Explain the logistics impact', keyPoints: ['Ports'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand-dup',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Tariff Watch',
+                        sections: [
+                            { heading: 'Lead', content: 'Lead section', level: 1 },
+                            { heading: 'Supply Chain', content: 'Supply chain section', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose-dup',
+                output: [{
+                    type: 'message',
+                    content: [{ text: [
+                        '<!DOCTYPE html><html><body>',
+                        '<img src="https://images.unsplash.com/photo-111" alt="Lead image">',
+                        '<section><img src="https://images.unsplash.com/photo-111" alt="Repeated image"></section>',
+                        '<section><img src="https://images.unsplash.com/photo-111" alt="Repeated again"></section>',
+                        '</body></html>',
+                    ].join('') }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-dup', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a visual HTML news report on the latest EV tariffs with real sourced images.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        const renderedHtml = renderArtifact.mock.calls[0][0]?.content || '';
+        expect(renderedHtml).toContain('https://images.unsplash.com/photo-111');
+        expect(renderedHtml).toContain('https://images.unsplash.com/photo-222');
+        expect(renderedHtml).toContain('https://images.unsplash.com/photo-333');
     });
 
     test('ignores internal artifact image links and prefers external urls for document visuals', async () => {

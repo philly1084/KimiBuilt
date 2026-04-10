@@ -1187,18 +1187,34 @@ The AI will generate appropriate Mermaid syntax. If AI is unavailable, a templat
         try {
             const response = await api.generateImage(prompt, options);
             
-            if (response.data && response.data.length > 0) {
-                const image = response.data[0];
-                const imageUrl = image.url || image.b64_json;
-                
-                const fileId = this.addSessionFile(
-                    `image-${Date.now()}.png`, 
-                    imageUrl, 
-                    'image/png', 
-                    'image'
-                );
+            const generatedImages = Array.isArray(response.data) ? response.data : [];
+
+            if (generatedImages.length > 0) {
+                const timestamp = Date.now();
+                const fileIds = generatedImages
+                    .map((image, index) => {
+                        const imageUrl = image.url || (image.b64_json ? `data:image/png;base64,${image.b64_json}` : null);
+                        if (!imageUrl) {
+                            return null;
+                        }
+
+                        return this.addSessionFile(
+                            `image-${timestamp}-${index + 1}.png`,
+                            imageUrl,
+                            'image/png',
+                            'image'
+                        );
+                    })
+                    .filter((fileId) => fileId !== null);
+
+                if (fileIds.length === 0) {
+                    this.printError('No usable image data received from API');
+                    this.setStatus('error');
+                    return;
+                }
+
                 this.printSystem('Image generated with ' + (response.model || options.model || 'backend default') + ' (' + (response.size || options.size || '1024x1024') + ')');
-                this.printSystem('Image saved as file #' + fileId + '. Use /download ' + fileId + ' or /open.');
+                this.printSystem('Saved ' + fileIds.length + ' image file(s): #' + fileIds.join(', #') + '. Use /download <id> or /open.');
             } else {
                 this.printError('No image data received from API');
             }

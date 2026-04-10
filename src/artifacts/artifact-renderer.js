@@ -340,6 +340,70 @@ async function inlineInternalArtifactImagesForPdf(html = '') {
     });
 }
 
+async function inlineExternalImagesForPdf(html = '') {
+    const source = String(html || '');
+    const imgSrcPattern = /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/ig;
+    const matches = [...source.matchAll(imgSrcPattern)];
+    if (matches.length === 0 || typeof fetch !== 'function') {
+        return source;
+    }
+
+    const replacements = new Map();
+    for (const match of matches) {
+        const originalUrl = String(match?.[2] || '').trim();
+        if (!/^https?:\/\//i.test(originalUrl) || replacements.has(originalUrl)) {
+            continue;
+        }
+
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
+
+        try {
+            const response = await fetch(originalUrl, {
+                method: 'GET',
+                signal: controller?.signal,
+                headers: {
+                    Accept: 'image/*',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
+            if (!contentType.startsWith('image/')) {
+                throw new Error(`Unexpected content-type: ${contentType || 'unknown'}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            replacements.set(
+                originalUrl,
+                `data:${contentType.split(';')[0].trim()};base64,${Buffer.from(arrayBuffer).toString('base64')}`,
+            );
+        } catch (error) {
+            console.warn('[Artifacts] Failed to inline external image for PDF:', error.message);
+        } finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
+    }
+
+    if (replacements.size === 0) {
+        return source;
+    }
+
+    return source.replace(imgSrcPattern, (fullMatch, prefix, url, suffix) => {
+        return `${prefix}${replacements.get(url) || url}${suffix}`;
+    });
+}
+
+async function inlineRenderableImagesForPdf(html = '') {
+    const withInternalImages = await inlineInternalArtifactImagesForPdf(html);
+    return inlineExternalImagesForPdf(withInternalImages);
+}
+
 function buildPdfBufferFromText(text, title = 'Document') {
     const lines = normalizeWhitespace(text || '').split('\n');
     const safeLines = lines.length > 0 ? lines : [''];
@@ -614,9 +678,15 @@ async function resolveBrowserPath() {
 function getBrowserArgs(outputPath, inputPath, html = '') {
     const configuredArgs = String(config.artifacts.browserArgs || '').trim();
     const extraArgs = configuredArgs ? configuredArgs.split(/\s+/).filter(Boolean) : [];
-    const virtualTimeBudget = /class="mermaid"|cdn\.jsdelivr\.net\/npm\/mermaid/i.test(String(html || ''))
-        ? 10000
-        : 5000;
+    const htmlSource = String(html || '');
+    const imageCount = (htmlSource.match(/<img\b/ig) || []).length;
+    let virtualTimeBudget = 5000;
+    if (/class="mermaid"|cdn\.jsdelivr\.net\/npm\/mermaid/i.test(htmlSource)) {
+        virtualTimeBudget = Math.max(virtualTimeBudget, 10000);
+    }
+    if (imageCount > 0) {
+        virtualTimeBudget = Math.max(virtualTimeBudget, Math.min(20000, 8000 + (imageCount * 1000)));
+    }
     return [
         '--headless',
         '--disable-gpu',
@@ -644,7 +714,7 @@ async function renderPdfViaBrowser(html, title) {
     const pdfPath = path.join(tempDir, `${baseName}.pdf`);
 
     try {
-        const resolvedHtml = await inlineInternalArtifactImagesForPdf(html);
+        const resolvedHtml = await inlineRenderableImagesForPdf(html);
         const pdfHtml = injectArtifactBaseForPdf(resolvedHtml);
         await fs.writeFile(htmlPath, pdfHtml, 'utf8');
         await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, pdfHtml), {
@@ -746,6 +816,8 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
 module.exports = {
     ensureHtmlDocument,
     extractCompositeDocumentParts,
+    inlineExternalImagesForPdf,
+    inlineRenderableImagesForPdf,
     inlineInternalArtifactImagesForPdf,
     normalizeMermaidSource,
     renderArtifact,

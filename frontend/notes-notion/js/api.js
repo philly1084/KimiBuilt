@@ -427,10 +427,15 @@ const API = (function() {
             }
             
             const data = await response.json();
-            const firstImage = data.data?.[0] || {};
+            const images = Array.isArray(data.data) ? data.data : [];
+            const firstImage = images[0] || {};
             const imageUrl = firstImage.url || (firstImage.b64_json ? `data:image/png;base64,${firstImage.b64_json}` : null);
             
             return {
+                data: images,
+                images,
+                artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+                count: images.length,
                 url: imageUrl,
                 revised_prompt: firstImage.revised_prompt,
                 created: data.created,

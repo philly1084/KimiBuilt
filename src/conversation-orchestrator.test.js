@@ -3946,6 +3946,41 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('direct image actions preserve explicit requested image counts without leaving batch wording in the prompt', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'image-generate'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Generate 3 hypercar images and put them in a PDF brochure.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective: 'Generate 3 hypercar images and put them in a PDF brochure.',
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual({
+            tool: 'image-generate',
+            reason: 'Explicit image-generation request should start by materializing reusable image artifacts.',
+            params: {
+                prompt: 'Generate hypercar image',
+                n: 3,
+            },
+        });
+    });
+
     test('notes synthesis instructions keep repaired answers on the page instead of drifting into workspace writes', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

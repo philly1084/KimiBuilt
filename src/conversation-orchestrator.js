@@ -6,6 +6,7 @@ const settingsController = require('./routes/admin/settings.controller');
 const { inferExecutionProfile: inferRuntimeExecutionProfile } = require('./runtime-execution');
 const {
     buildImagePromptFromArtifactRequest,
+    extractRequestedImageCount,
     hasExplicitImageGenerationIntent,
     resolveSshRequestContext,
     extractSshSessionMetadataFromToolEvents,
@@ -6369,11 +6370,13 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (toolPolicy.candidateToolIds.includes('image-generate') && hasExplicitImageGenerationIntent(objective)) {
+            const requestedImageCount = extractRequestedImageCount(objective, 1);
             return finalizeAction({
                 tool: 'image-generate',
                 reason: 'Explicit image-generation request should start by materializing reusable image artifacts.',
                 params: {
                     prompt: buildImagePromptFromArtifactRequest(objective),
+                    ...(requestedImageCount > 1 ? { n: requestedImageCount } : {}),
                 },
             });
         }
@@ -6625,11 +6628,13 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (toolPolicy.candidateToolIds.includes('image-generate') && hasExplicitImageGenerationIntent(prompt)) {
+            const requestedImageCount = extractRequestedImageCount(prompt, 1);
             return [{
                 tool: 'image-generate',
                 reason: 'Deterministic fallback for explicit image-generation intent.',
                 params: {
                     prompt: buildImagePromptFromArtifactRequest(prompt),
+                    ...(requestedImageCount > 1 ? { n: requestedImageCount } : {}),
                 },
             }];
         }

@@ -21,6 +21,7 @@ const settingsController = require('./routes/admin/settings.controller');
 const {
     buildImagePromptFromArtifactRequest,
     buildArtifactCompletionMessage,
+    extractRequestedImageCount,
     generateOutputArtifactFromPrompt,
     extractSshSessionMetadataFromToolEvents,
     hasExplicitArtifactDeliveryIntent,
@@ -241,6 +242,13 @@ describe('ai-route-utils', () => {
     test('extracts an image-only prompt from mixed image-plus-artifact requests', () => {
         expect(buildImagePromptFromArtifactRequest('Make a hypercar image and put it in a PDF brochure.'))
             .toBe('Make a hypercar image');
+    });
+
+    test('extracts requested image counts and strips batch wording from image prompts', () => {
+        expect(extractRequestedImageCount('Generate 3 hypercar images and put them in a PDF brochure.')).toBe(3);
+        expect(extractRequestedImageCount('Create a couple of hero images for the landing page.')).toBe(2);
+        expect(buildImagePromptFromArtifactRequest('Generate 3 hypercar images and put them in a PDF brochure.'))
+            .toBe('Generate hypercar image');
     });
 
     test('only pre-generates images for explicit image-plus-document requests', () => {
@@ -479,6 +487,43 @@ describe('ai-route-utils', () => {
                 }),
             })],
         });
+    });
+
+    test('maybePrepareImagesForArtifactPrompt passes explicit multi-image counts through to the image tool', async () => {
+        const toolManager = {
+            getTool: jest.fn(() => ({ id: 'image-generate' })),
+            executeTool: jest.fn().mockResolvedValue({
+                success: true,
+                toolId: 'image-generate',
+                data: {
+                    artifacts: [
+                        { id: 'image-1', filename: 'hypercar-01.png' },
+                        { id: 'image-2', filename: 'hypercar-02.png' },
+                        { id: 'image-3', filename: 'hypercar-03.png' },
+                    ],
+                },
+            }),
+        };
+
+        await maybePrepareImagesForArtifactPrompt({
+            toolManager,
+            sessionId: 'session-1',
+            route: '/api/chat',
+            transport: 'http',
+            taskType: 'chat',
+            text: 'Generate 3 hypercar images and put them in a PDF brochure.',
+            outputFormat: 'pdf',
+            artifactIds: [],
+        });
+
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'image-generate',
+            expect.objectContaining({
+                prompt: 'Generate hypercar image',
+                n: 3,
+            }),
+            expect.any(Object),
+        );
     });
 
     test('getPreferredRemoteToolId prefers remote-command when both SSH tools exist', () => {

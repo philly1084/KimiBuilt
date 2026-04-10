@@ -1701,6 +1701,7 @@ const Blocks = (function() {
                         }
                         
                         block.content.imageUrl = storedImageUrl;
+                        block.content.generatedImages = Array.isArray(result.images) ? result.images : (Array.isArray(result.data) ? result.data : []);
                         block.content.imageAssetId = imageAssetId;
                         block.content._resolvedImageUrl = storedImageUrl && !String(storedImageUrl).startsWith('asset://') ? storedImageUrl : null;
                         block.content.status = 'done';

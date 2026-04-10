@@ -231,7 +231,7 @@ async function fetchImageModels() {
         sizes: ['256x256', '512x512', '1024x1024'],
         qualities: ['standard'],
         styles: ['natural'],
-        maxImages: 10,
+        maxImages: 5,
       },
     ];
   }

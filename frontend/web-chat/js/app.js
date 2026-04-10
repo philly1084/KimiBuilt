@@ -4078,10 +4078,29 @@ class ChatApp {
             const result = await apiClient.generateImage(options);
             
             // Update the image message with the result
-            if (result.data && result.data.length > 0) {
-                const imageData = result.data[0];
-                const imageUrl = imageData.url || (imageData.b64_json ? `data:image/png;base64,${imageData.b64_json}` : null);
-                
+            const generatedImages = (Array.isArray(result.data) ? result.data : [])
+                .map((image) => this.normalizeGeneratedImage(image, options.prompt, result.model || options.model || ''))
+                .filter(Boolean);
+
+            if (generatedImages.length > 1) {
+                const selectionMessage = {
+                    id: imageMessageId,
+                    role: 'assistant',
+                    type: 'image-selection',
+                    content: `Generated image options for "${options.prompt || 'image'}"`,
+                    prompt: options.prompt,
+                    model: result.model || options.model,
+                    results: generatedImages,
+                    timestamp: new Date().toISOString(),
+                };
+
+                this.upsertSessionMessage(sessionId, selectionMessage);
+                this.renderOrReplaceMessage(selectionMessage);
+                uiHelpers.scrollToBottom();
+                uiHelpers.showToast(`Generated ${generatedImages.length} image options`, 'success');
+            } else if (generatedImages.length === 1) {
+                const imageData = generatedImages[0];
+
                 // Update session storage
                 const messages = sessionManager.getMessages(sessionId);
                 const msgIndex = messages.findIndex(m => m.id === imageMessageId);
@@ -4089,22 +4108,25 @@ class ChatApp {
                     messages[msgIndex] = {
                         ...messages[msgIndex],
                         isLoading: false,
-                        imageUrl: imageUrl,
-                        revisedPrompt: imageData.revised_prompt,
-                        model: result.model || options.model
+                        imageUrl: imageData.imageUrl,
+                        generatedImages,
+                        revisedPrompt: imageData.revisedPrompt,
+                        model: result.model || options.model,
                     };
                     sessionManager.saveToStorage();
                 }
-                
+
                 // Update UI
                 uiHelpers.updateImageMessage(imageMessageId, {
-                    url: imageUrl,
+                    url: imageData.imageUrl,
                     prompt: options.prompt,
-                    revised_prompt: imageData.revised_prompt,
-                    model: result.model || options.model
+                    revised_prompt: imageData.revisedPrompt,
+                    model: result.model || options.model,
                 });
-                
+
                 uiHelpers.showToast('Image generated successfully', 'success');
+            } else {
+                throw new Error('No image data received from API');
             }
         } catch (error) {
             console.error('Image generation failed:', error);

@@ -614,7 +614,7 @@ function refersToPriorImages(text = '') {
         return false;
     }
 
-    return /\b(last|latest|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
+    return /\b(last|generated|previous|prior|same|those|these|this|earlier|above)\b[\s\S]{0,40}\b(images?|photos?|pictures?|illustrations?|renders?)\b/i.test(normalized)
         || /\b(images?|photos?|pictures?|illustrations?|renders?)\b[\s\S]{0,60}\b(from earlier|from before|from above|you made|you generated|we generated|from the last turn)\b/i.test(normalized)
         || /\b(use|put|place|include|embed|make|turn|convert|compile)\b[\s\S]{0,40}\b(those|these|the generated|the previous|the earlier)\b[\s\S]{0,20}\b(images?|photos?|pictures?)\b/i.test(normalized);
 }
@@ -640,6 +640,27 @@ function extractImageReferencesFromSession(session = null) {
     });
 
     return Array.from(unique.values()).slice(-DEFAULT_DOCUMENT_IMAGE_TARGET);
+}
+
+function extractImageReferencesFromText(text = '') {
+    const unique = new Map();
+    const matches = String(text || '').match(/https?:\/\/\S+/ig) || [];
+
+    matches.forEach((candidate) => {
+        const normalizedUrl = normalizeImageReferenceUrl(String(candidate || '').replace(/[),.;!?]+$/g, ''));
+        if (!normalizedUrl || !isExternalImageReferenceUrl(normalizedUrl) || !isLikelyImageUrl(normalizedUrl)) {
+            return;
+        }
+
+        unique.set(normalizedUrl, {
+            url: normalizedUrl,
+            title: 'Prompt image reference',
+            source: 'prompt',
+            toolId: 'image-from-url',
+        });
+    });
+
+    return Array.from(unique.values()).slice(0, DEFAULT_DOCUMENT_IMAGE_TARGET);
 }
 
 function extractImageReferencesFromArtifacts(artifacts = []) {
@@ -678,10 +699,12 @@ function buildDocumentImageInstructions() {
         'When verified image URLs are available in session memory or prompt context, use those real images with standard HTML <img> tags.',
         'Prefer remembered direct image URLs and Unsplash image URLs over generated decorative placeholders.',
         `When the user asks for real or image-rich output, reuse as many as ${DEFAULT_DOCUMENT_IMAGE_TARGET} verified image references across the document before falling back to text-only sections.`,
+        'For news, research, latest, current-events, and source-backed reports, prefer real sourced photography and fetched online image references over AI-generated illustrations unless the user explicitly asks for generated art.',
         'Prefer standard HTML <img src="..."> elements over background-image-only treatments when the image is meaningful content.',
         'For HTML, PDF, and DOCX designs, distribute real images throughout the document instead of clustering them in a single appendix or final page.',
         'Use a strong visual rhythm: opening hero image, repeated section visuals, image cards, and galleries when enough verified image URLs exist.',
         'If there are enough verified images, include visuals in most major sections rather than only one or two isolated slots.',
+        'Do not reuse the same image URL across multiple major sections when multiple verified image references are available. Use distinct images first and only repeat an image after the pool is exhausted.',
         'Never create inline SVG artwork, multilayered SVG mockups, CSS-only fake photos, canvas placeholders, blob URLs, or data:image embeds unless the user explicitly asks for vector artwork.',
         'If no verified image URL is available for a visual slot, omit the image block and keep the section text-only.',
         'Use descriptive alt text and keep images tied to the content instead of decorative filler.',
@@ -782,6 +805,117 @@ function pickImageReference(imageReferences = [], index = 0) {
     }
 
     return normalized[index % normalized.length];
+}
+
+function normalizeImageReferencePool(imageReferences = []) {
+    const unique = new Map();
+
+    (Array.isArray(imageReferences) ? imageReferences : []).forEach((entry) => {
+        const url = normalizeImageReferenceUrl(entry?.url || '');
+        const allowInternal = entry?.internal === true || isInternalArtifactImageReferenceUrl(url);
+        if (!url || !isRenderableImageReferenceUrl(url, { allowInternal }) || unique.has(url)) {
+            return;
+        }
+
+        unique.set(url, {
+            ...entry,
+            url,
+        });
+    });
+
+    return Array.from(unique.values());
+}
+
+function diversifyHtmlImageReferences(html = '', imageReferences = []) {
+    const source = String(html || '');
+    if (!source || !/<img\b/i.test(source)) {
+        return source;
+    }
+
+    const pool = normalizeImageReferencePool(imageReferences);
+    if (pool.length < 2) {
+        return source;
+    }
+
+    const imgTagPattern = /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/ig;
+    const matches = Array.from(source.matchAll(imgTagPattern));
+    if (matches.length < 2) {
+        return source;
+    }
+
+    const currentUrls = matches
+        .map((match) => normalizeImageReferenceUrl(match[2]) || String(match[2] || '').trim())
+        .filter(Boolean);
+    const uniqueCurrentCount = new Set(currentUrls).size;
+    if (uniqueCurrentCount >= Math.min(matches.length, pool.length)) {
+        return source;
+    }
+
+    let changed = false;
+    let cursor = 0;
+    const used = new Set();
+
+    const rewritten = source.replace(imgTagPattern, (fullMatch, prefix, src, suffix) => {
+        const normalizedSrc = normalizeImageReferenceUrl(src) || String(src || '').trim();
+        let nextUrl = normalizedSrc;
+
+        if (pool.some((entry) => entry.url === normalizedSrc) && !used.has(normalizedSrc)) {
+            used.add(normalizedSrc);
+        } else {
+            let attempts = 0;
+            while (attempts < pool.length) {
+                const candidate = pool[cursor % pool.length]?.url || '';
+                cursor += 1;
+                attempts += 1;
+                if (candidate && !used.has(candidate)) {
+                    nextUrl = candidate;
+                    used.add(candidate);
+                    break;
+                }
+            }
+
+            if (!nextUrl) {
+                const fallbackCandidate = pool[cursor % pool.length]?.url || normalizedSrc;
+                cursor += 1;
+                nextUrl = fallbackCandidate || normalizedSrc;
+            }
+        }
+
+        if (nextUrl && nextUrl !== normalizedSrc) {
+            changed = true;
+        }
+
+        return `${prefix}${nextUrl || src}${suffix}`;
+    });
+
+    return changed ? rewritten : source;
+}
+
+function diversifyBundleImageReferences(bundle = {}, imageReferences = []) {
+    if (!bundle || typeof bundle !== 'object' || !Array.isArray(bundle.files) || bundle.files.length === 0) {
+        return bundle;
+    }
+
+    const files = bundle.files.map((file) => {
+        if (!/\.html?$/i.test(String(file?.path || ''))) {
+            return file;
+        }
+
+        const content = diversifyHtmlImageReferences(String(file?.content || ''), imageReferences);
+        if (content === file.content) {
+            return file;
+        }
+
+        return {
+            ...file,
+            content,
+        };
+    });
+
+    return {
+        ...bundle,
+        files,
+    };
 }
 
 function buildExpandedDocumentHtml(title = 'Document', sections = [], imageReferences = [], creativePlan = null) {
@@ -994,7 +1128,7 @@ function inferUnsplashQuery(prompt = '') {
     const cleaned = String(prompt || '').toLowerCase()
         .replace(/^(create|make|generate|build|produce|write|draft)\s+/i, '')
         .replace(/\b(a|an|the|with|for|using|use|real|visual|visuals|image|images|photo|photos|unsplash)\b/g, ' ')
-        .replace(/\b(html|pdf|docx|page|document|website|web|landing|create|make|generate|build|polished|guide|brief|report)\b/g, ' ')
+        .replace(/\b(html|pdf|docx|page|document|website|web|landing|create|make|generate|build|polished|guide|brief|report|news|headline|headlines|latest|recent|current|article|articles|coverage)\b/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 
@@ -1015,11 +1149,25 @@ function isFrontendDemoArtifactRequest(prompt = '') {
         || isDashboardRequest(normalized);
 }
 
+function isResearchBackedArtifactRequest(prompt = '', format = '') {
+    const normalizedPrompt = String(prompt || '').trim().toLowerCase();
+    const normalizedFormat = normalizeFormat(format);
+    if (!normalizedPrompt || !MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)) {
+        return false;
+    }
+
+    return /\b(research|source|sources|citations?|latest|recent|current|news|headline|headlines|article|articles|coverage|fact-check|verify|look up|search the web|browse|web search|online|current events?)\b/.test(normalizedPrompt);
+}
+
 function shouldEnableArtifactToolOrchestration(prompt = '', format = '') {
     const normalizedPrompt = String(prompt || '').trim().toLowerCase();
     const normalizedFormat = normalizeFormat(format);
-    if (!normalizedPrompt || normalizedFormat !== 'html') {
+    if (!normalizedPrompt || !MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)) {
         return false;
+    }
+
+    if (isResearchBackedArtifactRequest(normalizedPrompt, normalizedFormat)) {
+        return true;
     }
 
     if (!isFrontendDemoArtifactRequest(normalizedPrompt)) {
@@ -1456,12 +1604,16 @@ class ArtifactService {
         const dashboardInstructions = normalizedFormat === 'html'
             ? buildDashboardHtmlInstructions(requestPrompt, existingContent)
             : '';
+        const researchBackedRequest = isResearchBackedArtifactRequest(requestPrompt, normalizedFormat);
         const baseContext = [
             'You are the LillyBuilt Business Agent.',
             'Produce business-ready output only, with no surrounding commentary.',
             allowToolOrchestration
                 ? 'Use available tools when they materially improve factual grounding, research coverage, or delegated page planning. Do not mention tool invocation syntax or process notes in the final artifact output.'
                 : 'Do not use external tools, function calls, or tool invocation syntax.',
+            allowToolOrchestration && researchBackedRequest
+                ? 'For research-backed, latest, current-events, and news-style documents, gather grounded online sources with web-search and web-fetch before composing, and prefer verified real image sources from Unsplash or direct image URLs over AI-generated imagery.'
+                : '',
             'Do not mention environment limitations, permissions, API keys, or inability to create files.',
             'The platform will render, store, and deliver the file artifact for the user.',
             promptContext,
@@ -1714,9 +1866,10 @@ class ArtifactService {
         const desiredCount = Math.max(1, Number(options.desiredCount || DEFAULT_DOCUMENT_IMAGE_TARGET) || DEFAULT_DOCUMENT_IMAGE_TARGET);
         const selectedArtifacts = Array.isArray(options.selectedArtifacts) ? options.selectedArtifacts : [];
         const selectedArtifactRefs = extractImageReferencesFromArtifacts(selectedArtifacts);
+        const promptRefs = extractImageReferencesFromText(prompt);
         const sessionRefs = extractImageReferencesFromSession(session);
         const unique = new Map();
-        [...selectedArtifactRefs, ...sessionRefs].forEach((entry) => {
+        [...selectedArtifactRefs, ...promptRefs, ...sessionRefs].forEach((entry) => {
             const allowInternal = entry?.internal === true || isInternalArtifactImageReferenceUrl(entry?.url || '');
             if (!entry?.url || !isRenderableImageReferenceUrl(entry.url, { allowInternal }) || unique.has(entry.url)) {
                 return;
@@ -1796,7 +1949,14 @@ class ArtifactService {
     }) {
         const resolvedImageReferences = Array.isArray(imageReferences) ? imageReferences : [];
         const resolvedImageReferenceContext = imageReferenceContext || this.formatImageReferenceContext(resolvedImageReferences);
-        const enrichedPromptContext = [promptContext, resolvedImageReferenceContext].filter(Boolean).join('\n\n');
+        const researchToolContext = enableAutomaticToolCalls && isResearchBackedArtifactRequest(prompt, format)
+            ? [
+                '[Research workflow]',
+                'Before drafting or composing, use available tools to ground current claims with web-search and web-fetch.',
+                'Prefer verified real image sources from Unsplash or direct image URLs over AI-generated illustrations unless the user explicitly asks for generated art.',
+            ].join('\n')
+            : '';
+        const enrichedPromptContext = [promptContext, resolvedImageReferenceContext, researchToolContext].filter(Boolean).join('\n\n');
         const planPass = await this.runGenerationPass({
             session,
             input: prompt,
@@ -1929,6 +2089,7 @@ class ArtifactService {
                 generationPasses: ['plan', 'expand', 'compose'],
                 sectionCount: expandedDocument.sections.length,
                 compositionRecovered: usedCompositionRecovery,
+                toolOrchestrationEnabled: enableAutomaticToolCalls,
                 creativeDirectionId: creativePlan.id,
                 creativeDirection: creativePlan.label,
                 creativeRationale: creativePlan.rationale,
@@ -2079,23 +2240,33 @@ class ArtifactService {
         const frontendPayload = frontendDemoRequest
             ? buildFrontendArtifactPayload(outputText)
             : null;
-        const hasFrontendBundleArchive = Array.isArray(frontendPayload?.metadata?.bundle?.files)
+        const normalizedFrontendPayload = frontendPayload
+            ? {
+                ...frontendPayload,
+                content: diversifyHtmlImageReferences(frontendPayload.content, imageReferences),
+                metadata: {
+                    ...(frontendPayload.metadata || {}),
+                    bundle: diversifyBundleImageReferences(frontendPayload.metadata?.bundle || null, imageReferences),
+                },
+            }
+            : null;
+        const hasFrontendBundleArchive = Array.isArray(normalizedFrontendPayload?.metadata?.bundle?.files)
             && (
-                frontendPayload.metadata.bundle.files.length > 1
-                || String(frontendPayload.metadata?.frameworkTarget || '').trim().toLowerCase() === 'vite'
+                normalizedFrontendPayload.metadata.bundle.files.length > 1
+                || String(normalizedFrontendPayload.metadata?.frameworkTarget || '').trim().toLowerCase() === 'vite'
                 || complexFrontendBundleRequest
             );
-        const renderSource = frontendPayload
-            ? frontendPayload.content
-            : unwrapCodeFence(outputText);
-        const title = frontendPayload?.metadata?.title
+        const renderSource = normalizedFrontendPayload
+            ? normalizedFrontendPayload.content
+            : diversifyHtmlImageReferences(unwrapCodeFence(outputText), imageReferences);
+        const title = normalizedFrontendPayload?.metadata?.title
             || generated.title
             || `${normalizedFormat}-${new Date().toISOString().slice(0, 10)}`;
 
         const rendered = hasFrontendBundleArchive
             ? buildFrontendBundleArtifact({
-                ...frontendPayload.metadata.bundle,
-                frameworkTarget: frontendPayload.metadata.frameworkTarget,
+                ...normalizedFrontendPayload.metadata.bundle,
+                frameworkTarget: normalizedFrontendPayload.metadata.frameworkTarget,
             }, title)
             : normalizedFormat === 'xlsx'
             ? await renderArtifact({
@@ -2148,7 +2319,7 @@ class ArtifactService {
                 artifactIds,
                 ...creativeMetadata,
                 ...dashboardMetadata,
-                ...(frontendPayload?.metadata || {}),
+                ...(normalizedFrontendPayload?.metadata || {}),
                 ...(generated.metadata || {}),
             },
             vectorize: Boolean(rendered.extractedText),

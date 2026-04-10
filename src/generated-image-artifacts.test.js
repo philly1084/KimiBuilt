@@ -16,8 +16,11 @@ const { sessionStore } = require('./session-store');
 const { persistGeneratedImages } = require('./generated-image-artifacts');
 
 describe('generated-image-artifacts', () => {
+    let originalFetch;
+
     beforeEach(() => {
         jest.clearAllMocks();
+        originalFetch = global.fetch;
         artifactService.createStoredArtifact.mockResolvedValue({
             id: 'artifact-1',
             sessionId: 'session-1',
@@ -35,6 +38,10 @@ describe('generated-image-artifacts', () => {
             metadata: {},
         });
         sessionStore.update.mockResolvedValue({});
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
     });
 
     test('persists inline generated images as session artifacts and returns reusable artifact urls', async () => {
@@ -71,6 +78,39 @@ describe('generated-image-artifacts', () => {
         expect(result.artifacts[0]).toEqual(expect.objectContaining({
             id: 'artifact-1',
             inlinePath: '/api/artifacts/artifact-1/download?inline=1',
+        }));
+    });
+
+    test('downloads remote generated image urls so they become reusable artifacts too', async () => {
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            headers: {
+                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/png' : null),
+            },
+            arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+        }));
+
+        const result = await persistGeneratedImages({
+            sessionId: 'session-1',
+            sourceMode: 'image',
+            prompt: 'Editorial hero image',
+            model: 'gpt-image-1',
+            images: [{
+                url: 'https://images.example.com/generated-hero.png',
+                revised_prompt: 'Editorial hero image, clean and bold',
+            }],
+        });
+
+        expect(global.fetch).toHaveBeenCalledWith('https://images.example.com/generated-hero.png', expect.objectContaining({
+            method: 'GET',
+        }));
+        expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-1',
+            filename: expect.stringContaining('editorial-hero-image-01'),
+        }));
+        expect(result.images[0]).toEqual(expect.objectContaining({
+            url: '/api/artifacts/artifact-1/download?inline=1',
+            artifactId: 'artifact-1',
         }));
     });
 });

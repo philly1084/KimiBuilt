@@ -75,6 +75,63 @@ function decodeGeneratedImage(image = {}) {
     return decodeDataUrl(image?.url || '');
 }
 
+function inferMimeTypeFromUrl(url = '') {
+    const normalized = String(url || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'image/png';
+    }
+
+    if (/\.jpe?g(?:[?#].*)?$/.test(normalized)) return 'image/jpeg';
+    if (/\.svg(?:[?#].*)?$/.test(normalized)) return 'image/svg+xml';
+    if (/\.webp(?:[?#].*)?$/.test(normalized)) return 'image/webp';
+    if (/\.gif(?:[?#].*)?$/.test(normalized)) return 'image/gif';
+    return 'image/png';
+}
+
+async function downloadGeneratedImage(image = {}) {
+    const imageUrl = String(image?.url || '').trim();
+    if (!/^https?:\/\//i.test(imageUrl) || typeof fetch !== 'function') {
+        return null;
+    }
+
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 15000) : null;
+
+    try {
+        const response = await fetch(imageUrl, {
+            method: 'GET',
+            signal: controller?.signal,
+            headers: {
+                Accept: 'image/*',
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const contentType = String(response.headers?.get?.('content-type') || '').trim().toLowerCase();
+        const mimeType = contentType.startsWith('image/')
+            ? contentType.split(';')[0].trim()
+            : inferMimeTypeFromUrl(imageUrl);
+        const extension = extensionForMimeType(mimeType);
+        const arrayBuffer = await response.arrayBuffer();
+
+        return {
+            mimeType,
+            extension,
+            buffer: Buffer.from(arrayBuffer),
+        };
+    } catch (error) {
+        console.warn('[Images] Failed to download generated image URL for persistence:', error.message);
+        return null;
+    } finally {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+    }
+}
+
 function buildGeneratedImageFilename(prompt = '', index = 0, extension = 'png') {
     const base = String(prompt || '')
         .trim()
@@ -147,7 +204,7 @@ async function persistGeneratedImages({
     for (let index = 0; index < (Array.isArray(images) ? images : []).length; index += 1) {
         const image = images[index] || {};
         let storedArtifact = null;
-        const decoded = decodeGeneratedImage(image);
+        const decoded = decodeGeneratedImage(image) || await downloadGeneratedImage(image);
 
         if (sessionId && decoded?.buffer?.length) {
             try {

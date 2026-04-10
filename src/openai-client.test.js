@@ -658,6 +658,9 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('up to 20 relevant Unsplash images');
         expect(guidance).toContain('batches of up to 20 direct image URLs');
         expect(guidance).toContain('prefer `image-search-unsplash` and `image-from-url` over `image-generate`');
+        expect(guidance).toContain('research-backed reports, news pages, and current-events documents');
+        expect(guidance).toContain('Default `image-generate` to one image');
+        expect(guidance).toContain('prompt for one image, not a collage');
     });
 
     test('asset search guidance explains how to recover prior files and visuals', () => {
@@ -1491,6 +1494,46 @@ describe('openai-client automatic tool orchestration helpers', () => {
             'image-search-unsplash',
             'image-from-url',
         ]));
+    });
+
+    test('prefers verified image tools over generation for real-image document requests', () => {
+        const toolManager = createToolManager();
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            'Create a landing page with real images from Unsplash and this image URL https://example.com/photo.png.',
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            'Create a landing page with real images from Unsplash and this image URL https://example.com/photo.png.',
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(expect.arrayContaining([
+            'image-search-unsplash',
+            'image-from-url',
+        ]));
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('image-generate');
+    });
+
+    test('selects research and real-image tools for news-style html document requests', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Create an HTML news report on the latest EV tariffs with sourced visuals and current reporting.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(expect.arrayContaining([
+            'web-search',
+            'web-fetch',
+            'image-search-unsplash',
+        ]));
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('image-generate');
     });
 
     test('selects promoted architecture, api, schema, and migration tools for matching prompts', () => {

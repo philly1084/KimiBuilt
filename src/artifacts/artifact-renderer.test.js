@@ -9,11 +9,20 @@ const {
     normalizeMermaidSource,
     ensureHtmlDocument,
     extractCompositeDocumentParts,
+    inlineExternalImagesForPdf,
+    inlineRenderableImagesForPdf,
     inlineInternalArtifactImagesForPdf,
 } = require('./artifact-renderer');
 
+let originalFetch;
+
 beforeEach(() => {
     jest.clearAllMocks();
+    originalFetch = global.fetch;
+});
+
+afterEach(() => {
+    global.fetch = originalFetch;
 });
 
 describe('normalizeMermaidSource', () => {
@@ -114,12 +123,44 @@ describe('normalizeMermaidSource', () => {
         expect(html).not.toContain('/api/artifacts/image-artifact-1/download?inline=1');
     });
 
-    test('keeps external image urls unchanged during PDF rendering', async () => {
-        const html = await inlineInternalArtifactImagesForPdf(
+    test('inlines external image urls for PDF rendering when they can be fetched ahead of time', async () => {
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            headers: {
+                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/png' : null),
+            },
+            arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+        }));
+
+        const html = await inlineExternalImagesForPdf(
             '<html><body><img src="https://images.example.com/cat.png" alt="External image"></body></html>',
         );
 
-        expect(artifactStore.get).not.toHaveBeenCalled();
-        expect(html).toContain('https://images.example.com/cat.png');
+        expect(global.fetch).toHaveBeenCalledWith('https://images.example.com/cat.png', expect.objectContaining({
+            method: 'GET',
+        }));
+        expect(html).toContain('src="data:image/png;base64,');
+        expect(html).not.toContain('https://images.example.com/cat.png');
+    });
+
+    test('combined PDF inlining keeps working with both internal and external image sources', async () => {
+        artifactStore.get.mockResolvedValue({
+            id: 'image-artifact-1',
+            mimeType: 'image/png',
+            contentBuffer: Buffer.from('png-bytes'),
+        });
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            headers: {
+                get: (name) => (String(name).toLowerCase() === 'content-type' ? 'image/jpeg' : null),
+            },
+            arrayBuffer: async () => Uint8Array.from([5, 6, 7, 8]).buffer,
+        }));
+
+        const html = await inlineRenderableImagesForPdf(
+            '<html><body><img src="/api/artifacts/image-artifact-1/download?inline=1"><img src="https://images.example.com/cat.jpg"></body></html>',
+        );
+
+        expect(html.match(/src="data:image\//g)).toHaveLength(2);
     });
 });

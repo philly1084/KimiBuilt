@@ -285,15 +285,45 @@ class AIAssistant {
                 style: this.imageSettings.style
             });
             
-            if (response.data && response.data.length > 0) {
-                await this.addImageToCanvas(response.data[0]);
-                this.addConversationMessage('assistant', 'Generated an image and placed it on the canvas.');
-                this.showStatus('Image generated successfully!', 'success');
+            const generatedImages = Array.isArray(response.data)
+                ? response.data.filter((image) => image?.url || image?.b64_json)
+                : [];
+
+            if (generatedImages.length > 0) {
+                const canvas = window.infiniteCanvas;
+                const center = canvas.screenToWorld(
+                    canvas.canvas.width / 2,
+                    canvas.canvas.height / 2
+                );
+                const basePosition = this.pendingImagePosition
+                    ? { ...this.pendingImagePosition }
+                    : center;
+                this.pendingImagePosition = null;
+
+                const [widthStr, heightStr] = this.imageSettings.size.split('x');
+                const aspectRatio = parseInt(widthStr, 10) / parseInt(heightStr, 10) || 1;
+                const previewWidth = 400;
+                const previewHeight = previewWidth / aspectRatio;
+                const columns = Math.min(generatedImages.length, 2);
+                const gap = 40;
+
+                for (let index = 0; index < generatedImages.length; index += 1) {
+                    const row = Math.floor(index / columns);
+                    const col = index % columns;
+                    await this.addImageToCanvas(generatedImages[index], {
+                        x: basePosition.x + (col * (previewWidth + gap)),
+                        y: basePosition.y + (row * (previewHeight + gap)),
+                    });
+                }
+
+                const noun = generatedImages.length === 1 ? 'image' : 'images';
+                this.addConversationMessage('assistant', `Generated ${generatedImages.length} ${noun} and placed them on the canvas.`);
+                this.showStatus(`Generated ${generatedImages.length} ${noun} successfully!`, 'success');
                 this.input.value = '';
                 
                 // Show revised prompt if available
-                if (response.data[0].revised_prompt) {
-                    console.log('Revised prompt:', response.data[0].revised_prompt);
+                if (generatedImages[0].revised_prompt) {
+                    console.log('Revised prompt:', generatedImages[0].revised_prompt);
                 }
             } else {
                 this.showStatus('No image generated. Try a different prompt.', 'error');
@@ -308,7 +338,7 @@ class AIAssistant {
         }
     }
     
-    async addImageToCanvas(imageData) {
+    async addImageToCanvas(imageData, position = null) {
         const canvas = window.infiniteCanvas;
         
         // Create image element
@@ -320,7 +350,10 @@ class AIAssistant {
                 // Calculate position
                 let x, y;
                 
-                if (this.pendingImagePosition) {
+                if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+                    x = position.x;
+                    y = position.y;
+                } else if (this.pendingImagePosition) {
                     // Use the position where user clicked with AI Image tool
                     x = this.pendingImagePosition.x;
                     y = this.pendingImagePosition.y;
@@ -372,7 +405,7 @@ class AIAssistant {
                 reject(new Error('Failed to load generated image'));
             };
             
-            img.src = imageData.url;
+            img.src = imageData.url || (imageData.b64_json ? `data:image/png;base64,${imageData.b64_json}` : '');
         });
     }
     
@@ -940,6 +973,5 @@ class AIAssistant {
 
 // Create global instance
 window.aiAssistant = new AIAssistant();
-
 
 

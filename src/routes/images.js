@@ -59,6 +59,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             style = 'vivid',
             n = 1,
         } = req.body;
+        const requestedCount = Math.min(Math.max(Number(n) || 1, 1), 5);
         let { sessionId } = req.body;
         const ownerId = getRequestOwnerId(req);
         const requestedClientSurface = resolveClientSurface(req.body || {}, null, 'image');
@@ -91,7 +92,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
             size,
             quality,
             style,
-            n: Math.min(n, 10),
+            n: requestedCount,
         });
         const persistedImages = await persistGeneratedImages({
             sessionId,
@@ -108,7 +109,7 @@ router.post('/', validate(imageSchema), async (req, res, next) => {
         await sessionStore.recordResponse(sessionId, `img_${Date.now()}`);
         await updateSessionProjectMemory(sessionId, {
             userText: prompt,
-            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : n} image result(s).`,
+            assistantText: `Generated ${Array.isArray(normalizedResponse?.data) ? normalizedResponse.data.length : requestedCount} image result(s).`,
             artifacts: persistedImages.artifacts,
             toolEvents: [{
                 toolCall: { function: { name: 'image-generate' } },

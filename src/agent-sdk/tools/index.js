@@ -1248,16 +1248,17 @@ class ToolManager {
         id: 'image-generate',
         name: 'Image Generator',
         category: 'system',
-        description: 'Generate one or more images from a prompt and return hosted image URLs',
+        description: 'Generate a single image by default, or up to 5 when the caller explicitly requests multiple distinct outputs, and return reusable hosted image URLs',
         backend: {
           handler: async (params, context = {}) => {
+            const requestedCount = Math.min(Math.max(Number(params.n) || 1, 1), 5);
             const response = await generateImage({
               prompt: params.prompt,
               model: params.model || null,
               size: params.size || '1536x1024',
               quality: params.quality || 'standard',
               style: params.style || 'vivid',
-              n: Math.min(Math.max(params.n || 1, 1), 4),
+              n: requestedCount,
             });
             const persistedImages = await persistGeneratedImages({
               sessionId: context?.sessionId || '',
@@ -1281,8 +1282,15 @@ class ToolManager {
               source: 'generated',
               prompt: params.prompt,
               model: response.model,
+              count: images.length,
+              requestedCount,
+              image: images[0] || null,
               images,
               artifacts: persistedImages.artifacts || [],
+              artifactIds: (persistedImages.artifactIds || []).slice(),
+              markdownImage: images[0]?.url
+                ? `![${images[0].alt}](${images[0].url})`
+                : null,
               markdownImages: images
                 .filter((image) => image.url)
                 .map((image) => `![${image.alt}](${image.url})`),
@@ -1301,7 +1309,12 @@ class ToolManager {
             size: { type: 'string' },
             quality: { type: 'string' },
             style: { type: 'string' },
-            n: { type: 'integer', minimum: 1, maximum: 4 },
+            n: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description: 'Number of distinct images to return. Default to 1 and only set this above 1 when the user explicitly asks for multiple images.',
+            },
           },
         },
         skill: {
