@@ -166,8 +166,14 @@ class TtsService {
             };
         }
 
+        const configuredVoiceProviders = providerConfigs.filter((configEntry) => (
+            configEntry.configured === true
+            && Array.isArray(configEntry.voices)
+            && configEntry.voices.length > 0
+        ));
+
         const seenVoiceIds = new Set();
-        const voices = providerConfigs
+        const voices = configuredVoiceProviders
             .flatMap((configEntry) => configEntry.voices || [])
             .filter((voice) => {
                 const voiceId = String(voice?.id || '').trim();
@@ -182,7 +188,9 @@ class TtsService {
         const configured = providerConfigs.some((configEntry) => configEntry.configured === true);
         const maxTextChars = activeConfig.maxTextChars
             || Math.max(200, ...providerConfigs.map((configEntry) => Number(configEntry.maxTextChars) || 2400));
-        const defaultVoiceId = activeConfig.defaultVoiceId || voices[0]?.id || null;
+        const defaultVoiceId = configured
+            ? (activeConfig.defaultVoiceId || voices[0]?.id || null)
+            : null;
 
         return {
             configured,

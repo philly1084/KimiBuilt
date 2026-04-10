@@ -815,15 +815,15 @@
                                 autocomplete="off"
                                 aria-label="Message input"
                             ></textarea>
-                            <div class="flex items-center gap-2 pr-3 pb-3">
-                                <span id="char-counter" class="text-xs text-text-secondary hidden" aria-live="polite">0/4000</span>
+                            <div class="composer-shell__actions flex items-center gap-2 pr-3 pb-3">
+                                <span id="char-counter" class="composer-shell__counter text-xs text-text-secondary hidden" aria-live="polite">0/4000</span>
                                 <button id="voice-output-btn" class="composer-audio-btn" aria-label="Read the latest assistant reply aloud" title="Read the latest assistant reply aloud" type="button">
                                     <i data-lucide="volume-2" class="w-4 h-4" aria-hidden="true"></i>
                                 </button>
                                 <button id="voice-input-btn" class="composer-audio-btn" aria-label="Start voice input" title="Start voice input" type="button">
                                     <i data-lucide="mic" class="w-4 h-4" aria-hidden="true"></i>
                                 </button>
-                                <button id="send-btn" class="btn-primary p-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95" disabled aria-label="Send message">
+                                <button id="send-btn" class="btn-primary composer-send-btn p-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95" disabled aria-label="Send message">
                                     <i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>
                                 </button>
                             </div>

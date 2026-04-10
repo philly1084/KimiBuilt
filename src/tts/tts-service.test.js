@@ -123,4 +123,47 @@ describe('TtsService', () => {
             ]),
         }));
     });
+
+    test('does not expose voices from providers that are not configured', () => {
+        const piper = createProvider('piper', 'ready', undefined, {
+            defaultVoiceId: 'hfc-female-rich',
+            voices: [
+                { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
+            ],
+            diagnostics: {
+                status: 'ready',
+                message: '1 Piper voice ready.',
+            },
+        });
+        const openai = createProvider('openai', 'misconfigured', undefined, {
+            configured: false,
+            defaultVoiceId: null,
+            voices: [
+                { id: 'openai-marin-natural', label: 'Marin natural', provider: 'openai' },
+            ],
+            diagnostics: {
+                status: 'misconfigured',
+                message: 'OpenAI voice playback is enabled, but no API key is configured.',
+            },
+        });
+        const service = new TtsService({
+            provider: 'piper',
+        }, {
+            piper,
+            openai,
+        });
+
+        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
+            configured: true,
+            provider: 'piper',
+            defaultVoiceId: 'hfc-female-rich',
+            voices: [
+                expect.objectContaining({ id: 'hfc-female-rich', provider: 'piper' }),
+            ],
+            providers: expect.arrayContaining([
+                expect.objectContaining({ provider: 'piper', configured: true }),
+                expect.objectContaining({ provider: 'openai', configured: false }),
+            ]),
+        }));
+    });
 });

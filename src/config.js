@@ -83,9 +83,44 @@ function parsePiperVoicesPayload(rawValue = '', defaults = {}) {
     }
 }
 
+function getBundledPiperRoot() {
+    return path.resolve(__dirname, '../data/piper');
+}
+
+function resolveBundledPiperBinaryPath() {
+    const executableName = process.platform === 'win32' ? 'piper.exe' : 'piper';
+    const bundledBinaryPath = path.join(getBundledPiperRoot(), 'runtime', 'piper', executableName);
+
+    try {
+        return fs.existsSync(bundledBinaryPath) ? bundledBinaryPath : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
+function resolveBundledPiperVoicesPath() {
+    const bundledVoicesPath = path.join(getBundledPiperRoot(), 'voices', 'manifest.json');
+
+    try {
+        return fs.existsSync(bundledVoicesPath) ? bundledVoicesPath : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
 function loadConfiguredPiperVoices(defaults = {}) {
-    const voicesPath = resolveConfigPath(process.env.PIPER_TTS_VOICES_PATH || '');
-    if (voicesPath) {
+    const candidateVoicesPaths = [
+        resolveConfigPath(process.env.PIPER_TTS_VOICES_PATH || ''),
+        resolveBundledPiperVoicesPath(),
+    ].filter(Boolean);
+    const seenPaths = new Set();
+
+    for (const voicesPath of candidateVoicesPaths) {
+        if (seenPaths.has(voicesPath)) {
+            continue;
+        }
+        seenPaths.add(voicesPath);
+
         try {
             const fileContents = fs.readFileSync(voicesPath, 'utf8');
             const parsedVoices = parsePiperVoicesPayload(fileContents, defaults);
@@ -103,7 +138,7 @@ function loadConfiguredPiperVoices(defaults = {}) {
     const parsedVoices = parsePiperVoicesPayload(process.env.PIPER_TTS_VOICES_JSON || '', defaults);
     if (parsedVoices.length > 0) {
         return {
-            voicesPath,
+            voicesPath: resolveConfigPath(process.env.PIPER_TTS_VOICES_PATH || '') || resolveBundledPiperVoicesPath(),
             voices: parsedVoices,
         };
     }
@@ -122,7 +157,7 @@ function loadConfiguredPiperVoices(defaults = {}) {
     }, defaults);
 
     return {
-        voicesPath,
+        voicesPath: resolveConfigPath(process.env.PIPER_TTS_VOICES_PATH || '') || resolveBundledPiperVoicesPath(),
         voices: legacyVoice ? [legacyVoice] : [],
     };
 }
@@ -215,13 +250,16 @@ const config = {
         },
         piper: {
             enabled: process.env.PIPER_TTS_ENABLED !== 'false',
-            binaryPath: resolveConfigPath(process.env.PIPER_TTS_BINARY_PATH || 'piper'),
+            binaryPath: resolveConfigPath(process.env.PIPER_TTS_BINARY_PATH || resolveBundledPiperBinaryPath() || 'piper'),
             voicesPath: configuredPiperVoices.voicesPath,
             voices: configuredPiperVoices.voices,
             modelPath: resolveConfigPath(process.env.PIPER_TTS_MODEL_PATH || ''),
             configPath: resolveConfigPath(process.env.PIPER_TTS_CONFIG_PATH || ''),
             voiceId: piperVoiceDefaults.id,
-            defaultVoiceId: process.env.PIPER_TTS_DEFAULT_VOICE_ID || piperVoiceDefaults.id,
+            defaultVoiceId: process.env.PIPER_TTS_DEFAULT_VOICE_ID
+                || configuredPiperVoices.voices.find((voice) => voice.id === 'hfc-female-rich')?.id
+                || configuredPiperVoices.voices[0]?.id
+                || piperVoiceDefaults.id,
             voiceLabel: piperVoiceDefaults.label,
             voiceDescription: piperVoiceDefaults.description,
             speakerId: parseOptionalInteger(process.env.PIPER_TTS_SPEAKER_ID),
