@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const OpenAI = require('openai');
+const { toFile } = OpenAI;
 const { config } = require('./config');
 const { runtimeDiagnostics } = require('./runtime-diagnostics');
 const { AGENT_NOTES_CHAR_LIMIT } = require('./agent-notes');
@@ -257,6 +258,16 @@ function uniqueById(models = []) {
         seen.add(id);
         return true;
     });
+}
+
+function sanitizeUploadFilename(filename = '', fallbackExtension = 'webm') {
+    const normalized = String(filename || '').trim();
+    const cleaned = normalized.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '');
+    if (cleaned) {
+        return cleaned;
+    }
+
+    return `recording.${fallbackExtension}`;
 }
 
 function sortImageModels(models = []) {
@@ -4010,6 +4021,50 @@ async function createResponse({
     }
 }
 
+async function transcribeAudio({
+    audioBuffer,
+    filename = 'recording.webm',
+    mimeType = 'audio/webm',
+    language = '',
+    prompt = '',
+    model = null,
+} = {}) {
+    if (!audioBuffer || !Buffer.isBuffer(audioBuffer) || audioBuffer.length === 0) {
+        const error = new Error('An audio buffer is required for transcription.');
+        error.statusCode = 400;
+        error.code = 'audio_buffer_required';
+        throw error;
+    }
+
+    const effectiveModel = normalizeModelId(model) || config.audio.transcriptionModel;
+    const effectiveMimeType = String(mimeType || 'audio/webm').trim() || 'audio/webm';
+    const extension = effectiveMimeType.includes('/')
+        ? effectiveMimeType.split('/')[1].split(';')[0].trim() || 'webm'
+        : 'webm';
+    const upload = await toFile(
+        audioBuffer,
+        sanitizeUploadFilename(filename, extension),
+        { type: effectiveMimeType },
+    );
+    const response = await getClient().audio.transcriptions.create({
+        file: upload,
+        model: effectiveModel,
+        response_format: 'json',
+        ...(String(language || '').trim() ? { language: String(language).trim() } : {}),
+        ...(String(prompt || '').trim() ? { prompt: String(prompt).trim() } : {}),
+    });
+
+    const text = String(response?.text || '').trim();
+
+    return {
+        text,
+        model: effectiveModel,
+        language: String(response?.language || language || '').trim(),
+        duration: Number.isFinite(response?.duration) ? response.duration : null,
+        provider: 'openai',
+    };
+}
+
 async function generateImage({
     prompt,
     model = null,
@@ -4066,6 +4121,7 @@ module.exports = {
     listModels,
     listImageModels,
     createResponse,
+    transcribeAudio,
     generateImage,
     __testUtils: {
         buildMessages,

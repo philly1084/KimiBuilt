@@ -1,4 +1,5 @@
 const DEFAULT_TTS_CACHE_LIMIT = 24;
+const DEFAULT_BROWSER_VOICE_ID = 'browser:default';
 
 class WebChatTtsManager extends EventTarget {
     constructor() {
@@ -14,15 +15,22 @@ class WebChatTtsManager extends EventTarget {
             status: 'unavailable',
             binaryReachable: false,
             voicesLoaded: false,
-            message: 'Piper voice is unavailable.',
+            message: 'Voice playback is unavailable.',
         };
         this.selectedVoiceId = this.storageGet(this.storageKeys.voiceId) || '';
         this.autoPlay = this.parseBoolean(this.storageGet(this.storageKeys.autoPlay), false);
         this.loadingMessageId = '';
         this.currentMessageId = '';
         this.currentAudio = null;
+        this.currentUtterance = null;
         this.cachedAudioUrls = new Map();
         this.pendingConfigPromise = null;
+        this.browserSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+        this.handleBrowserVoicesChanged = this.handleBrowserVoicesChanged.bind(this);
+
+        if (this.browserSpeechSupported && typeof window.speechSynthesis?.addEventListener === 'function') {
+            window.speechSynthesis.addEventListener('voiceschanged', this.handleBrowserVoicesChanged);
+        }
     }
 
     parseBoolean(value, fallback = false) {
@@ -98,11 +106,23 @@ class WebChatTtsManager extends EventTarget {
         };
     }
 
+    getProvider() {
+        return String(this.provider || 'piper').trim() || 'piper';
+    }
+
+    getProviderLabel() {
+        return this.getProvider() === 'browser' ? 'Browser voice' : 'Piper';
+    }
+
     getStatus() {
         return String(this.diagnostics?.status || '').trim() || (this.isAvailable() ? 'ready' : 'unavailable');
     }
 
     isAvailable() {
+        if (this.provider === 'browser') {
+            return this.available === true;
+        }
+
         return this.available === true && this.voices.length > 0;
     }
 
@@ -119,7 +139,10 @@ class WebChatTtsManager extends EventTarget {
     setSelectedVoiceId(voiceId = '') {
         const requestedVoiceId = String(voiceId || '').trim();
         const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
-        const nextVoiceId = matchingVoice?.id || this.voices[0]?.id || '';
+        const fallbackVoiceId = this.provider === 'browser'
+            ? (this.voices[0]?.id || DEFAULT_BROWSER_VOICE_ID)
+            : (this.voices[0]?.id || '');
+        const nextVoiceId = matchingVoice?.id || fallbackVoiceId;
 
         if (this.selectedVoiceId === nextVoiceId) {
             return;
@@ -135,12 +158,12 @@ class WebChatTtsManager extends EventTarget {
 
     getSelectedVoiceId() {
         if (!this.voices.length) {
-            return '';
+            return this.provider === 'browser' ? DEFAULT_BROWSER_VOICE_ID : '';
         }
 
         const requestedId = String(this.selectedVoiceId || '').trim();
         const matchingVoice = this.voices.find((voice) => voice.id === requestedId);
-        return matchingVoice?.id || this.voices[0].id;
+        return matchingVoice?.id || this.voices[0].id || (this.provider === 'browser' ? DEFAULT_BROWSER_VOICE_ID : '');
     }
 
     getSelectedVoice() {
@@ -149,7 +172,7 @@ class WebChatTtsManager extends EventTarget {
     }
 
     getVoiceLabel() {
-        return this.getSelectedVoice()?.label || 'Piper voice';
+        return this.getSelectedVoice()?.label || (this.provider === 'browser' ? 'System voice' : 'Piper voice');
     }
 
     isLoadingMessage(messageId = '') {
@@ -158,6 +181,93 @@ class WebChatTtsManager extends EventTarget {
 
     isPlayingMessage(messageId = '') {
         return Boolean(messageId) && this.currentMessageId === String(messageId);
+    }
+
+    getBrowserVoices() {
+        if (!this.browserSpeechSupported || typeof window.speechSynthesis?.getVoices !== 'function') {
+            return [{
+                id: DEFAULT_BROWSER_VOICE_ID,
+                label: 'System voice',
+                description: 'Default browser speech synthesis voice.',
+                provider: 'browser',
+                voiceURI: '',
+            }];
+        }
+
+        const voices = window.speechSynthesis.getVoices();
+        if (!Array.isArray(voices) || voices.length === 0) {
+            return [{
+                id: DEFAULT_BROWSER_VOICE_ID,
+                label: 'System voice',
+                description: 'Default browser speech synthesis voice.',
+                provider: 'browser',
+                voiceURI: '',
+            }];
+        }
+
+        return voices.map((voice) => ({
+            id: `browser:${String(voice.voiceURI || voice.name || 'default').trim() || 'default'}`,
+            label: String(voice.name || voice.voiceURI || 'System voice').trim() || 'System voice',
+            description: [voice.lang, voice.default ? 'Default' : ''].filter(Boolean).join(' | '),
+            provider: 'browser',
+            voiceURI: String(voice.voiceURI || '').trim(),
+        }));
+    }
+
+    resolveBrowserVoice(voiceId = '') {
+        if (!this.browserSpeechSupported || typeof window.speechSynthesis?.getVoices !== 'function') {
+            return null;
+        }
+
+        const normalizedVoiceId = String(voiceId || '').trim();
+        const selectedVoice = this.voices.find((voice) => voice.id === normalizedVoiceId) || null;
+        const selectedVoiceUri = String(selectedVoice?.voiceURI || '').trim();
+        const voices = window.speechSynthesis.getVoices();
+
+        if (!Array.isArray(voices) || voices.length === 0) {
+            return null;
+        }
+
+        if (selectedVoiceUri) {
+            return voices.find((voice) => String(voice.voiceURI || '').trim() === selectedVoiceUri) || null;
+        }
+
+        return voices.find((voice) => voice.default) || voices[0] || null;
+    }
+
+    useBrowserFallback(message = 'Browser speech synthesis is ready.') {
+        this.provider = 'browser';
+        this.available = this.browserSpeechSupported;
+        this.voices = this.getBrowserVoices();
+        this.diagnostics = {
+            status: this.available ? 'ready' : 'unavailable',
+            binaryReachable: this.available,
+            voicesLoaded: this.voices.length > 0,
+            message: this.available ? message : 'Browser speech synthesis is unavailable.',
+        };
+
+        const fallbackVoiceId = this.voices[0]?.id || DEFAULT_BROWSER_VOICE_ID;
+        const requestedVoiceId = String(
+            this.storageGet(this.storageKeys.voiceId)
+            || this.selectedVoiceId
+            || fallbackVoiceId,
+        ).trim();
+        const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
+        this.selectedVoiceId = matchingVoice?.id || fallbackVoiceId;
+        this.storageSet(this.storageKeys.voiceId, this.selectedVoiceId);
+    }
+
+    handleBrowserVoicesChanged() {
+        if (!this.browserSpeechSupported) {
+            return;
+        }
+
+        if (this.provider !== 'browser') {
+            return;
+        }
+
+        this.useBrowserFallback('Browser speech synthesis is ready.');
+        this.emitStateChange('configchange');
     }
 
     async ensureConfigLoaded(options = {}) {
@@ -176,55 +286,77 @@ class WebChatTtsManager extends EventTarget {
     async loadConfig(options = {}) {
         try {
             const manifest = await window.apiClient?.getTtsVoices?.();
-            this.available = manifest?.configured === true;
-            this.provider = manifest?.provider || 'piper';
-            this.voices = Array.isArray(manifest?.voices) ? manifest.voices : [];
-            this.diagnostics = manifest?.diagnostics && typeof manifest.diagnostics === 'object'
+            const manifestConfigured = manifest?.configured === true;
+            const manifestVoices = Array.isArray(manifest?.voices) ? manifest.voices : [];
+            const manifestDiagnostics = manifest?.diagnostics && typeof manifest.diagnostics === 'object'
                 ? {
-                    status: String(manifest.diagnostics.status || '').trim() || (this.available ? 'ready' : 'unavailable'),
+                    status: String(manifest.diagnostics.status || '').trim() || (manifestConfigured ? 'ready' : 'unavailable'),
                     binaryReachable: manifest.diagnostics.binaryReachable === true,
                     voicesLoaded: manifest.diagnostics.voicesLoaded === true,
                     message: String(manifest.diagnostics.message || '').trim()
-                        || (this.available
+                        || (manifestConfigured
                             ? 'Piper is ready.'
-                            : 'Piper voice is unavailable.'),
+                            : 'Piper voice playback is unavailable.'),
                 }
                 : {
-                    status: this.available ? 'ready' : 'unavailable',
-                    binaryReachable: this.available,
-                    voicesLoaded: this.voices.length > 0,
-                    message: this.available
+                    status: manifestConfigured ? 'ready' : 'unavailable',
+                    binaryReachable: manifestConfigured,
+                    voicesLoaded: manifestVoices.length > 0,
+                    message: manifestConfigured
                         ? 'Piper is ready.'
-                        : 'Piper voice is unavailable.',
+                        : 'Piper voice playback is unavailable.',
                 };
 
-            const fallbackVoiceId = String(manifest?.defaultVoiceId || this.voices[0]?.id || '').trim();
-            const requestedVoiceId = String(
-                this.storageGet(this.storageKeys.voiceId)
-                || this.selectedVoiceId
-                || fallbackVoiceId,
-            ).trim();
-            const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
-            this.selectedVoiceId = matchingVoice?.id || fallbackVoiceId;
+            if (manifestConfigured && manifestVoices.length > 0) {
+                this.available = true;
+                this.provider = manifest?.provider || 'piper';
+                this.voices = manifestVoices;
+                this.diagnostics = manifestDiagnostics;
 
-            if (this.selectedVoiceId) {
-                this.storageSet(this.storageKeys.voiceId, this.selectedVoiceId);
+                const fallbackVoiceId = String(manifest?.defaultVoiceId || this.voices[0]?.id || '').trim();
+                const requestedVoiceId = String(
+                    this.storageGet(this.storageKeys.voiceId)
+                    || this.selectedVoiceId
+                    || fallbackVoiceId,
+                ).trim();
+                const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
+                this.selectedVoiceId = matchingVoice?.id || fallbackVoiceId;
+
+                if (this.selectedVoiceId) {
+                    this.storageSet(this.storageKeys.voiceId, this.selectedVoiceId);
+                }
+            } else if (this.browserSpeechSupported) {
+                this.useBrowserFallback(
+                    manifestDiagnostics.status === 'misconfigured'
+                        ? `${manifestDiagnostics.message} Using browser speech synthesis instead.`
+                        : 'Browser speech synthesis is ready.',
+                );
+            } else {
+                this.available = false;
+                this.provider = manifest?.provider || 'piper';
+                this.voices = manifestVoices;
+                this.diagnostics = manifestDiagnostics;
             }
 
             if (!this.isAvailable() && options.quiet !== true) {
                 this.stop();
             }
         } catch (_error) {
-            this.available = false;
-            this.voices = [];
-            this.selectedVoiceId = '';
-            this.diagnostics = {
-                status: 'unavailable',
-                binaryReachable: false,
-                voicesLoaded: false,
-                message: 'Piper voice is unavailable.',
-            };
-            this.stop();
+            if (this.browserSpeechSupported) {
+                this.useBrowserFallback('Browser speech synthesis is ready.');
+            } else {
+                this.available = false;
+                this.provider = 'piper';
+                this.voices = [];
+                this.selectedVoiceId = '';
+                this.diagnostics = {
+                    status: 'unavailable',
+                    binaryReachable: false,
+                    voicesLoaded: false,
+                    message: 'Voice playback is unavailable.',
+                };
+                this.stop();
+            }
         }
 
         this.emitStateChange('configchange');
@@ -241,7 +373,16 @@ class WebChatTtsManager extends EventTarget {
             }
         }
 
+        if (this.browserSpeechSupported && window.speechSynthesis) {
+            try {
+                window.speechSynthesis.cancel();
+            } catch (_error) {
+                // Ignore synthesis cancellation errors.
+            }
+        }
+
         this.currentAudio = null;
+        this.currentUtterance = null;
         this.currentMessageId = '';
         this.loadingMessageId = '';
         this.emitStateChange();
@@ -250,6 +391,16 @@ class WebChatTtsManager extends EventTarget {
     cleanupAudio(audio) {
         if (this.currentAudio === audio) {
             this.currentAudio = null;
+            this.currentMessageId = '';
+        }
+
+        this.loadingMessageId = '';
+        this.emitStateChange();
+    }
+
+    cleanupUtterance(utterance) {
+        if (this.currentUtterance === utterance) {
+            this.currentUtterance = null;
             this.currentMessageId = '';
         }
 
@@ -269,6 +420,7 @@ class WebChatTtsManager extends EventTarget {
 
     buildCacheKey(messageId = '', text = '') {
         return [
+            this.getProvider(),
             this.getSelectedVoiceId(),
             String(messageId || '').trim() || this.hashText(text),
             this.hashText(text),
@@ -288,10 +440,10 @@ class WebChatTtsManager extends EventTarget {
 
     async playAudioUrl(audioUrl, messageId = '') {
         if (!audioUrl) {
-            throw new Error('No audio was returned by Piper.');
+            throw new Error('No audio was returned for playback.');
         }
 
-        if (this.currentAudio) {
+        if (this.currentAudio || this.currentUtterance) {
             this.stop();
         }
 
@@ -313,6 +465,42 @@ class WebChatTtsManager extends EventTarget {
         }
     }
 
+    speakWithBrowserVoice({ messageId = '', text = '' } = {}) {
+        if (!this.browserSpeechSupported || typeof window.SpeechSynthesisUtterance !== 'function') {
+            throw new Error('Browser speech synthesis is unavailable.');
+        }
+
+        const normalizedText = String(text || '').trim();
+        if (!normalizedText) {
+            throw new Error('No text is available to read aloud.');
+        }
+
+        if (this.currentAudio || this.currentUtterance) {
+            this.stop();
+        }
+
+        const utterance = new window.SpeechSynthesisUtterance(normalizedText);
+        const browserVoice = this.resolveBrowserVoice(this.getSelectedVoiceId());
+        if (browserVoice) {
+            utterance.voice = browserVoice;
+            if (browserVoice.lang) {
+                utterance.lang = browserVoice.lang;
+            }
+        }
+
+        utterance.onend = () => this.cleanupUtterance(utterance);
+        utterance.onerror = () => this.cleanupUtterance(utterance);
+
+        this.currentUtterance = utterance;
+        this.currentMessageId = String(messageId || '').trim();
+        this.loadingMessageId = '';
+        this.emitStateChange();
+
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+        return true;
+    }
+
     async speakMessage({ messageId = '', text = '' } = {}) {
         const normalizedText = String(text || '').trim();
         if (!normalizedText) {
@@ -321,10 +509,17 @@ class WebChatTtsManager extends EventTarget {
 
         await this.ensureConfigLoaded({ quiet: true });
         if (!this.isAvailable()) {
-            throw new Error('Piper voice playback is not configured on the server.');
+            throw new Error('Voice playback is not available right now.');
         }
 
         const normalizedMessageId = String(messageId || '').trim();
+        if (this.provider === 'browser') {
+            return this.speakWithBrowserVoice({
+                messageId: normalizedMessageId,
+                text: normalizedText,
+            });
+        }
+
         const cacheKey = this.buildCacheKey(normalizedMessageId, normalizedText);
         const cachedAudioUrl = this.cachedAudioUrls.get(cacheKey);
         if (cachedAudioUrl) {
@@ -344,6 +539,13 @@ class WebChatTtsManager extends EventTarget {
             this.trimCache();
             return this.playAudioUrl(audioUrl, normalizedMessageId);
         } catch (error) {
+            if (this.browserSpeechSupported) {
+                return this.speakWithBrowserVoice({
+                    messageId: normalizedMessageId,
+                    text: normalizedText,
+                });
+            }
+
             this.loadingMessageId = '';
             this.currentMessageId = '';
             this.emitStateChange();

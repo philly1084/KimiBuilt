@@ -225,6 +225,14 @@ const config = {
         },
     },
 
+    audio: {
+        transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
+        maxUploadBytes: Math.max(
+            1024 * 1024,
+            parseInt(process.env.OPENAI_TRANSCRIPTION_MAX_UPLOAD_BYTES, 10) || (25 * 1024 * 1024),
+        ),
+    },
+
     auth: {
         username: process.env.LILLYBUILT_AUTH_USERNAME || process.env.KIMIBUILT_AUTH_USERNAME || '',
         password: process.env.LILLYBUILT_AUTH_PASSWORD || process.env.KIMIBUILT_AUTH_PASSWORD || '',

@@ -5,15 +5,20 @@
 
 const webChatGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const WEB_CHAT_DEFAULT_MODEL = webChatGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
-const webChatIsCodexBackedModel = webChatGatewayHelpers.isCodexBackedModel || ((modelId) => String(modelId || '').trim() === WEB_CHAT_DEFAULT_MODEL);
-const webChatSelectPreferredCodexModel = webChatGatewayHelpers.selectPreferredCodexModel
-    || ((models, preferredModel = '') => {
-        const preferredId = String(preferredModel || '').trim();
-        if (preferredId && webChatIsCodexBackedModel(preferredId)) {
-            return preferredId;
-        }
+
+function webChatSelectPreferredModel(models = [], preferredModel = '') {
+    const availableModels = Array.isArray(models) ? models : [];
+    const preferredId = String(preferredModel || '').trim();
+    if (preferredId && availableModels.some((model) => String(model?.id || '').trim() === preferredId)) {
+        return preferredId;
+    }
+
+    if (availableModels.some((model) => String(model?.id || '').trim() === WEB_CHAT_DEFAULT_MODEL)) {
         return WEB_CHAT_DEFAULT_MODEL;
-    });
+    }
+
+    return String(availableModels[0]?.id || WEB_CHAT_DEFAULT_MODEL).trim() || WEB_CHAT_DEFAULT_MODEL;
+}
 
 class UIHelpers {
     constructor() {
@@ -40,7 +45,7 @@ class UIHelpers {
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         const savedReasoningEffort = window.sessionManager?.safeStorageGet?.('kimibuilt_reasoning_effort');
         const savedRemoteAutonomy = window.sessionManager?.safeStorageGet?.('kimibuilt_remote_build_autonomy');
-        this.currentModel = webChatIsCodexBackedModel(savedModel) ? savedModel : WEB_CHAT_DEFAULT_MODEL;
+        this.currentModel = String(savedModel || WEB_CHAT_DEFAULT_MODEL).trim() || WEB_CHAT_DEFAULT_MODEL;
         this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
         this.remoteBuildAutonomyApproved = this.parseRemoteBuildAutonomyPreference(savedRemoteAutonomy);
         this.soundManager = window.WebChatSoundManager
@@ -3264,7 +3269,7 @@ class UIHelpers {
             this.availableModels = typeof apiClient.filterChatModels === 'function'
                 ? apiClient.filterChatModels(models)
                 : models;
-            const preferredModel = webChatSelectPreferredCodexModel(this.availableModels, this.currentModel);
+            const preferredModel = webChatSelectPreferredModel(this.availableModels, this.currentModel);
             if (preferredModel !== this.currentModel) {
                 this.currentModel = preferredModel;
                 window.sessionManager?.safeStorageSet?.('kimibuilt_default_model', preferredModel);
@@ -3901,7 +3906,7 @@ class UIHelpers {
             status: 'unavailable',
             binaryReachable: false,
             voicesLoaded: false,
-            message: 'Piper voice is unavailable.',
+            message: 'Voice playback is unavailable.',
         };
     }
 
@@ -3928,8 +3933,18 @@ class UIHelpers {
         return this.ttsManager?.getVoices?.() || [];
     }
 
+    getTtsProviderLabel() {
+        return this.ttsManager?.getProviderLabel?.() || 'Voice';
+    }
+
+    getTtsFeatureLabel() {
+        return this.getTtsProviderLabel() === 'Browser voice'
+            ? 'Browser voice'
+            : 'Piper voice';
+    }
+
     getTtsVoiceLabel() {
-        return this.ttsManager?.getVoiceLabel?.() || 'Piper voice';
+        return this.ttsManager?.getVoiceLabel?.() || 'Voice';
     }
 
     setSelectedTtsVoiceId(voiceId = '') {
@@ -3986,7 +4001,7 @@ class UIHelpers {
             button.setAttribute('aria-pressed', available && autoPlayEnabled ? 'true' : 'false');
             button.title = available
                 ? (autoPlayEnabled ? 'Read replies aloud: On' : 'Read replies aloud: Off')
-                : `Piper voice ${statusLabel.toLowerCase()}`;
+                : `${this.getTtsFeatureLabel()} ${statusLabel.toLowerCase()}`;
         }
 
         if (label) {
@@ -4001,7 +4016,7 @@ class UIHelpers {
 
         if (voiceSelect) {
             if (!voices.length) {
-                voiceSelect.innerHTML = `<option value="">Piper ${statusLabel.toLowerCase()}</option>`;
+                voiceSelect.innerHTML = `<option value="">${this.escapeHtml(this.getTtsProviderLabel())} ${statusLabel.toLowerCase()}</option>`;
                 voiceSelect.disabled = true;
                 voiceSelect.value = '';
             } else {
@@ -4020,8 +4035,8 @@ class UIHelpers {
 
         if (hint) {
             hint.textContent = available
-                ? `Piper status: Ready. ${this.getTtsVoiceLabel()} is ready through Piper. Use the speaker button on any assistant reply, enable autoplay here, or preview the sample lines above.`
-                : `Piper status: ${statusLabel}. ${String(diagnostics.message || 'Piper voice is unavailable.').trim()}`;
+                ? `Voice status: Ready. ${this.getTtsVoiceLabel()} is ready through ${this.getTtsProviderLabel()}. Use the speaker button on any assistant reply, enable autoplay here, or preview the sample lines above.`
+                : `Voice status: ${statusLabel}. ${String(diagnostics.message || 'Voice playback is unavailable.').trim()}`;
         }
     }
 
@@ -4037,7 +4052,7 @@ class UIHelpers {
             const title = !sample
                 ? 'Preview unavailable'
                 : (!available
-                    ? 'Piper voice unavailable'
+                    ? `${this.getTtsFeatureLabel()} unavailable`
                     : (isPlaying ? `Stop preview: ${sample.label}` : `Preview: ${sample.label}`));
 
             button.disabled = !available || !sample || isLoading;
@@ -4057,9 +4072,9 @@ class UIHelpers {
         if (!this.isTtsAvailable()) {
             const diagnostics = this.getTtsDiagnostics();
             this.showToast(
-                String(diagnostics.message || 'Piper voice playback is not configured on the server.'),
+                String(diagnostics.message || 'Voice playback is unavailable.'),
                 'warning',
-                'Piper voice',
+                this.getTtsFeatureLabel(),
             );
             return;
         }
@@ -4070,7 +4085,7 @@ class UIHelpers {
                 text: sample.text,
             });
         } catch (error) {
-            this.showToast(error.message || 'Failed to preview the Piper voice sample.', 'error', 'Piper voice');
+            this.showToast(error.message || 'Failed to preview the voice sample.', 'error', this.getTtsFeatureLabel());
         }
     }
 
@@ -4083,9 +4098,9 @@ class UIHelpers {
         if (!this.isTtsAvailable()) {
             const diagnostics = this.getTtsDiagnostics();
             this.showToast(
-                String(diagnostics.message || 'Piper voice playback is not configured on the server.'),
+                String(diagnostics.message || 'Voice playback is unavailable.'),
                 'warning',
-                'Piper voice',
+                this.getTtsFeatureLabel(),
             );
             return;
         }
@@ -4095,7 +4110,7 @@ class UIHelpers {
         this.showToast(
             nextValue ? 'Assistant replies will play aloud' : 'Assistant reply autoplay stopped',
             'success',
-            'Piper voice',
+            this.getTtsFeatureLabel(),
         );
     }
 
@@ -4157,8 +4172,8 @@ class UIHelpers {
         const title = !speakableText
             ? 'No readable text in this message'
             : (!available
-                ? 'Piper voice unavailable'
-                : (isPlaying ? 'Stop voice playback' : 'Read aloud with Piper'));
+                ? `${this.getTtsFeatureLabel()} unavailable`
+                : (isPlaying ? 'Stop voice playback' : `Read aloud with ${this.getTtsProviderLabel()}`));
 
         return {
             visible,
@@ -4240,7 +4255,7 @@ class UIHelpers {
         const speakableText = this.buildSpeakableMessageText(message);
 
         if (!speakableText) {
-            this.showToast('There is no readable text in this assistant message.', 'info', 'Piper voice');
+            this.showToast('There is no readable text in this assistant message.', 'info', this.getTtsFeatureLabel());
             return;
         }
 
@@ -4250,7 +4265,7 @@ class UIHelpers {
                 text: speakableText,
             });
         } catch (error) {
-            this.showToast(error.message || 'Failed to generate voice playback.', 'error', 'Piper voice');
+            this.showToast(error.message || 'Failed to generate voice playback.', 'error', this.getTtsFeatureLabel());
         }
     }
 

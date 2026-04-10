@@ -757,6 +757,12 @@
                             ></textarea>
                             <div class="flex items-center gap-2 pr-3 pb-3">
                                 <span id="char-counter" class="text-xs text-text-secondary hidden" aria-live="polite">0/4000</span>
+                                <button id="voice-output-btn" class="composer-audio-btn" aria-label="Read the latest assistant reply aloud" title="Read the latest assistant reply aloud" type="button">
+                                    <i data-lucide="volume-2" class="w-4 h-4" aria-hidden="true"></i>
+                                </button>
+                                <button id="voice-input-btn" class="composer-audio-btn" aria-label="Start voice input" title="Start voice input" type="button">
+                                    <i data-lucide="mic" class="w-4 h-4" aria-hidden="true"></i>
+                                </button>
                                 <button id="send-btn" class="btn-primary p-2.5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95" disabled aria-label="Send message">
                                     <i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>
                                 </button>
@@ -767,6 +773,7 @@
                                 <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Shift</kbd> + <kbd class="font-sans bg-bg-tertiary px-1.5 py-0.5 rounded border border-border">Enter</kbd> for new line
                             </p>
                             <div id="input-meta-actions" class="flex items-center gap-2">
+                                <span id="voice-input-indicator" class="composer-audio-indicator hidden" aria-live="polite"></span>
                                 <!-- Quick Model Indicator -->
                                 <button id="input-model-indicator" class="text-xs text-text-tertiary hover:text-accent transition-colors flex items-center gap-1" onclick="uiHelpers.toggleModelSelector()" aria-label="Current model">
                                     <i data-lucide="cpu" class="w-3 h-3" aria-hidden="true"></i>
@@ -995,15 +1002,15 @@
     
     <!-- Scripts -->
     <script src="/shared/openai-sse.js?v=20260410a"></script>
-    <script src="js/api.js?v=20260410b"></script>
+    <script src="js/api.js?v=20260410d"></script>
     <script src="js/session.js?v=20260406a"></script>
     <script src="js/sound-manager.js?v=20260409a"></script>
-    <script src="js/tts-manager.js?v=20260409a"></script>
+    <script src="js/tts-manager.js?v=20260410a"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260410b"></script>
-    <script src="js/app.js?v=20260410b"></script>
+    <script src="js/ui.js?v=20260410d"></script>
+    <script src="js/app.js?v=20260410c"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>
 </html>

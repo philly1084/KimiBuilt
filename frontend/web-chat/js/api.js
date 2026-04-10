@@ -1186,7 +1186,9 @@ class OpenAIAPIClient extends EventTarget {
     }
 
     filterChatModels(models = []) {
-        return filterCodexBackedModels(models);
+        return Array.isArray(models)
+            ? models.filter((model) => Boolean(String(model?.id || '').trim()))
+            : [];
     }
 
     async getImageModels() {
@@ -1438,6 +1440,41 @@ class OpenAIAPIClient extends EventTarget {
             voiceLabel: response.headers.get('x-tts-voice-label') || '',
             provider: response.headers.get('x-tts-provider') || 'piper',
         };
+    }
+
+    async transcribeAudio(audioBlob, options = {}) {
+        if (!(audioBlob instanceof Blob)) {
+            throw new Error('An audio recording is required for transcription.');
+        }
+
+        const formData = new FormData();
+        const mimeType = String(audioBlob.type || 'audio/webm').trim() || 'audio/webm';
+        const fallbackExtension = mimeType.includes('/')
+            ? (mimeType.split('/')[1].split(';')[0].trim() || 'webm')
+            : 'webm';
+        formData.append('file', audioBlob, options.filename || `voice-note.${fallbackExtension}`);
+
+        if (options.language) {
+            formData.append('language', String(options.language));
+        }
+
+        if (options.prompt) {
+            formData.append('prompt', String(options.prompt));
+        }
+
+        const response = await fetch(`${BASE_URL_WITHOUT_API}/api/audio/transcribe`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            error.status = response.status;
+            error.response = await this.parseErrorPayload(response);
+            throw new Error(this.parseErrorMessage(error, error.response));
+        }
+
+        return response.json();
     }
 
     async getAvailableTools(category = null) {

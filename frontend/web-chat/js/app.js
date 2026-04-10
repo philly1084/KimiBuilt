@@ -66,6 +66,9 @@ class ChatApp {
     constructor() {
         this.messageInput = document.getElementById('message-input');
         this.sendBtn = document.getElementById('send-btn');
+        this.voiceInputBtn = document.getElementById('voice-input-btn');
+        this.voiceOutputBtn = document.getElementById('voice-output-btn');
+        this.voiceInputIndicator = document.getElementById('voice-input-indicator');
         this.messagesContainer = document.getElementById('messages-container');
         this.charCounter = document.getElementById('char-counter');
         this.currentSessionInfo = document.getElementById('current-session-info');
@@ -131,6 +134,12 @@ class ChatApp {
         
         // Abort controller for current stream
         this.currentAbortController = null;
+        this.voiceInputState = {
+            mode: 'idle',
+            recorder: null,
+            stream: null,
+            chunks: [],
+        };
         this.workloadsOpen = false;
         this.workloadsAvailable = true;
         this.currentSessionWorkloads = [];
@@ -176,6 +185,9 @@ class ChatApp {
         
         // Load models in background
         uiHelpers.loadModels();
+
+        uiHelpers.ttsManager?.addEventListener('statechange', () => this.updateAudioControls());
+        uiHelpers.ttsManager?.addEventListener('configchange', () => this.updateAudioControls());
         
         // Load sessions
         await this.loadSessions();
@@ -190,6 +202,7 @@ class ChatApp {
         
         // Focus input
         this.messageInput?.focus();
+        this.updateAudioControls();
         
         // Remove preload class after a short delay
         setTimeout(() => {
@@ -207,6 +220,8 @@ class ChatApp {
     setupEventListeners() {
         // Send button
         this.sendBtn?.addEventListener('click', () => this.sendMessage());
+        this.voiceInputBtn?.addEventListener('click', () => this.toggleVoiceInput());
+        this.voiceOutputBtn?.addEventListener('click', () => this.toggleLatestAssistantSpeech());
         
         // Input handling
         this.messageInput?.addEventListener('keydown', (e) => {
@@ -220,6 +235,7 @@ class ChatApp {
         this.messageInput?.addEventListener('input', () => {
             this.updateSendButton();
             uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
+            this.updateAudioControls();
             
             // Check for slash commands
             const value = this.messageInput.value.trim();
@@ -674,6 +690,7 @@ class ChatApp {
         
         if (messages.length === 0) {
             uiHelpers.showWelcomeMessage();
+            this.updateAudioControls();
             return;
         }
         
@@ -696,6 +713,7 @@ class ChatApp {
                 uiHelpers.updateMessageSpeechButtons(this.messagesContainer);
                 uiHelpers.highlightCodeBlocks(this.messagesContainer);
                 uiHelpers.scrollToBottom(false);
+                this.updateAudioControls();
             }
         };
         
@@ -1668,6 +1686,294 @@ class ChatApp {
         }
     }
 
+    isVoiceInputSupported() {
+        return Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+    }
+
+    getPreferredAudioMimeType() {
+        if (typeof window.MediaRecorder?.isTypeSupported !== 'function') {
+            return '';
+        }
+
+        return [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+        ].find((mimeType) => window.MediaRecorder.isTypeSupported(mimeType)) || '';
+    }
+
+    getLatestSpeakableAssistantMessage() {
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId) {
+            return null;
+        }
+
+        const messages = sessionManager.getMessages(sessionId);
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return null;
+        }
+
+        return [...messages]
+            .reverse()
+            .find((message) => (
+                message?.role === 'assistant'
+                && message?.isLoading !== true
+                && message?.isStreaming !== true
+                && Boolean(uiHelpers.buildSpeakableMessageText(message))
+            )) || null;
+    }
+
+    updateVoiceInputIndicator(text = '', mode = 'idle') {
+        if (!this.voiceInputIndicator) {
+            return;
+        }
+
+        const normalizedText = String(text || '').trim();
+        this.voiceInputIndicator.textContent = normalizedText;
+        this.voiceInputIndicator.classList.toggle('hidden', !normalizedText);
+        this.voiceInputIndicator.classList.toggle('is-recording', mode === 'recording');
+    }
+
+    updateAudioControls() {
+        const latestAssistantMessage = this.getLatestSpeakableAssistantMessage();
+        const speakableText = latestAssistantMessage
+            ? uiHelpers.buildSpeakableMessageText(latestAssistantMessage)
+            : '';
+        const latestMessageId = String(latestAssistantMessage?.id || '').trim();
+        const ttsAvailable = uiHelpers.isTtsAvailable();
+        const outputLoading = latestMessageId && uiHelpers.ttsManager?.isLoadingMessage?.(latestMessageId) === true;
+        const outputPlaying = latestMessageId && uiHelpers.ttsManager?.isPlayingMessage?.(latestMessageId) === true;
+
+        if (this.voiceOutputBtn) {
+            const icon = outputLoading ? 'loader-2' : (outputPlaying ? 'square' : 'volume-2');
+            const title = !ttsAvailable
+                ? `${uiHelpers.getTtsFeatureLabel()} unavailable`
+                : (!speakableText
+                    ? 'No assistant reply is ready to read aloud yet'
+                    : (outputPlaying ? 'Stop reading the latest assistant reply' : 'Read the latest assistant reply aloud'));
+
+            this.voiceOutputBtn.disabled = !ttsAvailable || (!speakableText && !outputPlaying) || outputLoading;
+            this.voiceOutputBtn.title = title;
+            this.voiceOutputBtn.setAttribute('aria-label', title);
+            this.voiceOutputBtn.classList.toggle('is-active', outputPlaying);
+            this.voiceOutputBtn.classList.toggle('is-busy', outputLoading);
+            this.voiceOutputBtn.innerHTML = `
+                <i data-lucide="${icon}" class="w-4 h-4${outputLoading ? ' animate-spin' : ''}" aria-hidden="true"></i>
+            `;
+            uiHelpers.reinitializeIcons(this.voiceOutputBtn);
+        }
+
+        if (this.voiceInputBtn) {
+            const mode = String(this.voiceInputState.mode || 'idle').trim();
+            const inputSupported = this.isVoiceInputSupported();
+            const inputLoading = mode === 'transcribing';
+            const inputRecording = mode === 'recording';
+            const title = !inputSupported
+                ? 'Voice input requires microphone capture support in this browser'
+                : (inputLoading
+                    ? 'Transcribing your recording'
+                    : (inputRecording ? 'Stop voice input' : 'Start voice input'));
+            const icon = inputLoading ? 'loader-2' : (inputRecording ? 'square' : 'mic');
+
+            this.voiceInputBtn.disabled = !inputSupported || inputLoading;
+            this.voiceInputBtn.title = title;
+            this.voiceInputBtn.setAttribute('aria-label', title);
+            this.voiceInputBtn.classList.toggle('is-busy', inputLoading);
+            this.voiceInputBtn.classList.toggle('is-recording', inputRecording);
+            this.voiceInputBtn.innerHTML = `
+                <i data-lucide="${icon}" class="w-4 h-4${inputLoading ? ' animate-spin' : ''}" aria-hidden="true"></i>
+            `;
+            uiHelpers.reinitializeIcons(this.voiceInputBtn);
+
+            if (inputRecording) {
+                this.updateVoiceInputIndicator('Listening...', 'recording');
+            } else if (inputLoading) {
+                this.updateVoiceInputIndicator('Transcribing...', 'transcribing');
+            } else {
+                this.updateVoiceInputIndicator('', 'idle');
+            }
+        }
+    }
+
+    async toggleLatestAssistantSpeech() {
+        const latestAssistantMessage = this.getLatestSpeakableAssistantMessage();
+        const speakableText = latestAssistantMessage
+            ? uiHelpers.buildSpeakableMessageText(latestAssistantMessage)
+            : '';
+
+        if (!speakableText || !latestAssistantMessage?.id) {
+            uiHelpers.showToast('There is no completed assistant reply to read aloud yet.', 'info', uiHelpers.getTtsFeatureLabel());
+            return;
+        }
+
+        try {
+            await uiHelpers.ttsManager?.toggleMessagePlayback?.({
+                messageId: latestAssistantMessage.id,
+                text: speakableText,
+            });
+        } catch (error) {
+            uiHelpers.showToast(error.message || 'Failed to start voice playback.', 'error', uiHelpers.getTtsFeatureLabel());
+        } finally {
+            this.updateAudioControls();
+        }
+    }
+
+    async toggleVoiceInput() {
+        const mode = String(this.voiceInputState.mode || 'idle').trim();
+        if (mode === 'recording') {
+            this.stopVoiceRecording();
+            return;
+        }
+
+        if (mode === 'transcribing') {
+            return;
+        }
+
+        await this.startVoiceRecording();
+    }
+
+    async startVoiceRecording() {
+        if (!this.isVoiceInputSupported()) {
+            uiHelpers.showToast('Voice input is unavailable in this browser.', 'warning', 'Voice input');
+            this.updateAudioControls();
+            return;
+        }
+
+        try {
+            uiHelpers.stopSpeechPlayback();
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
+            });
+            const mimeType = this.getPreferredAudioMimeType();
+            const recorder = mimeType
+                ? new MediaRecorder(stream, { mimeType })
+                : new MediaRecorder(stream);
+
+            this.voiceInputState = {
+                mode: 'recording',
+                recorder,
+                stream,
+                chunks: [],
+            };
+
+            recorder.addEventListener('dataavailable', (event) => {
+                if (event.data && event.data.size > 0) {
+                    this.voiceInputState.chunks.push(event.data);
+                }
+            });
+
+            recorder.addEventListener('stop', async () => {
+                const recordedChunks = Array.isArray(this.voiceInputState.chunks)
+                    ? [...this.voiceInputState.chunks]
+                    : [];
+                const recordedMimeType = mimeType || recorder.mimeType || 'audio/webm';
+
+                this.teardownVoiceRecordingStream();
+                this.voiceInputState = {
+                    mode: 'transcribing',
+                    recorder: null,
+                    stream: null,
+                    chunks: [],
+                };
+                this.updateAudioControls();
+
+                try {
+                    const blob = new Blob(recordedChunks, { type: recordedMimeType });
+                    if (blob.size === 0) {
+                        throw new Error('No audio was captured.');
+                    }
+
+                    const extension = recordedMimeType.includes('/')
+                        ? (recordedMimeType.split('/')[1].split(';')[0].trim() || 'webm')
+                        : 'webm';
+                    const result = await apiClient.transcribeAudio(blob, {
+                        filename: `voice-note.${extension}`,
+                    });
+                    const transcript = String(result?.text || '').trim();
+
+                    if (!transcript) {
+                        uiHelpers.showToast('No spoken words were detected in that recording.', 'info', 'Voice input');
+                    } else {
+                        this.insertVoiceTranscript(transcript);
+                        uiHelpers.showToast('Voice input added to the composer.', 'success', 'Voice input');
+                    }
+                } catch (error) {
+                    uiHelpers.showToast(error.message || 'Voice transcription failed.', 'error', 'Voice input');
+                } finally {
+                    this.voiceInputState = {
+                        mode: 'idle',
+                        recorder: null,
+                        stream: null,
+                        chunks: [],
+                    };
+                    this.updateAudioControls();
+                }
+            });
+
+            recorder.start();
+            this.updateAudioControls();
+        } catch (error) {
+            const message = error?.name === 'NotAllowedError'
+                ? 'Microphone access was blocked.'
+                : (error?.message || 'Unable to start voice input.');
+            uiHelpers.showToast(message, 'error', 'Voice input');
+            this.teardownVoiceRecordingStream();
+            this.voiceInputState = {
+                mode: 'idle',
+                recorder: null,
+                stream: null,
+                chunks: [],
+            };
+            this.updateAudioControls();
+        }
+    }
+
+    stopVoiceRecording() {
+        const recorder = this.voiceInputState.recorder;
+        if (!recorder || recorder.state === 'inactive') {
+            return;
+        }
+
+        recorder.stop();
+        this.updateAudioControls();
+    }
+
+    teardownVoiceRecordingStream() {
+        const stream = this.voiceInputState.stream;
+        if (!stream) {
+            return;
+        }
+
+        stream.getTracks().forEach((track) => {
+            try {
+                track.stop();
+            } catch (_error) {
+                // Ignore media track cleanup errors.
+            }
+        });
+    }
+
+    insertVoiceTranscript(transcript = '') {
+        const normalizedTranscript = String(transcript || '').trim();
+        if (!normalizedTranscript || !this.messageInput) {
+            return;
+        }
+
+        const currentValue = String(this.messageInput.value || '');
+        const separator = currentValue.trim()
+            ? (/\s$/.test(currentValue) ? '' : ' ')
+            : '';
+        this.messageInput.value = `${currentValue}${separator}${normalizedTranscript}`.trim();
+        this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+        this.messageInput.focus();
+    }
+
     // ============================================
     // Message Handling
     // ============================================
@@ -2589,6 +2895,7 @@ class ChatApp {
         }
 
         uiHelpers.reinitializeIcons(nextEl);
+        this.updateAudioControls();
         return nextEl;
     }
 
@@ -4840,6 +5147,8 @@ class ChatApp {
                 uiHelpers.reinitializeIcons(this.sendBtn);
             }
         }
+
+        this.updateAudioControls();
     }
     
     // ============================================

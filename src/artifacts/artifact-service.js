@@ -4,7 +4,7 @@ const { artifactStore } = require('./artifact-store');
 const { extractArtifact } = require('./artifact-extractor');
 const { renderArtifact } = require('./artifact-renderer');
 const { FORMAT_MIME_TYPES, SUPPORTED_GENERATION_FORMATS, SUPPORTED_UPLOAD_FORMATS, inferFormat, normalizeFormat } = require('./constants');
-const { chunkText, escapeHtml, stripHtml, stripNullCharacters } = require('../utils/text');
+const { chunkText, escapeHtml, stripHtml, stripNullCharacters, normalizeWhitespace } = require('../utils/text');
 const { vectorStore } = require('../memory/vector-store');
 const { buildSessionInstructions } = require('../session-instructions');
 const { assetManager } = require('../asset-manager');
@@ -47,6 +47,30 @@ const COMPOSITION_META_PHRASES = [
     /\bthe final pass should\b/i,
     /\bverification date used for the build\b/i,
 ];
+const DOCUMENT_CONTENT_NOISE_PATTERNS = [
+    /^\[research workflow\]$/i,
+    /^\[verified image references\]$/i,
+    /^current-information request should start with perplexity-backed web search\.?$/i,
+    /^explicit research request should start with perplexity-backed web search\.?$/i,
+    /^before drafting or composing, use available tools to ground current claims with web-search and web-fetch\.?$/i,
+    /^prefer verified real image sources from unsplash or direct image urls over ai-generated illustrations unless the user explicitly asks for generated art\.?$/i,
+    /^use these real image urls when the output benefits from visuals\.?$/i,
+    /^these verified references can be reused throughout the document.*$/i,
+    /^prefer standard html <img src=".*"> elements.*$/i,
+    /^source:\s*(tool|unsplash|artifact|prompt|session)(?:\s+via\s+[\w-]+)?$/i,
+    /^.*\s+source:\s*(tool|unsplash|artifact|prompt|session)(?:\s+via\s+[\w-]+)?$/i,
+    /^<\/?(?:creative_direction|sample_handling|continuity)>$/i,
+    /^(?:blueprint|direction|rationale|voice cues|layout cues|human feel cues|preferred theme|recent related tasks|recent related artifacts|recent creative directions|recent dialog context):/i,
+];
+const UNSPLASH_QUERY_STOPWORDS = new Set([
+    'a', 'an', 'and', 'are', 'article', 'articles', 'as', 'at', 'be', 'brief', 'build', 'built',
+    'can', 'case', 'casefile', 'create', 'current', 'day', 'design', 'do', 'doc', 'docx', 'document',
+    'edition', 'enough', 'feature', 'file', 'files', 'final', 'for', 'generate', 'guide', 'have', 'html',
+    'how', 'image', 'images', 'in', 'is', 'it', 'latest', 'make', 'mockup', 'news', 'now', 'of', 'on', 'one', 'our', 'page',
+    'pages', 'pdf', 'photo', 'photos', 'piece', 'polished', 'prototype', 'real', 'report', 'resources', 'serious', 'ship', 'site',
+    'story', 'studio', 'the', 'this', 'to', 'today', 'update', 'usable', 'we', 'website', 'with', 'work',
+    'unsplash', 'visual', 'visuals',
+]);
 
 function sha256(buffer) {
     return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -472,20 +496,111 @@ function inferDocumentTitle(prompt = '', fallback = 'Document') {
     return title || fallback;
 }
 
+function looksLikeKeywordStuffing(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    const commaCount = (normalized.match(/,/g) || []).length;
+    if (commaCount >= 6) {
+        return true;
+    }
+
+    return normalized.length > 140 && !/[.!?]/.test(normalized);
+}
+
+function sanitizeDocumentText(text = '') {
+    const normalized = normalizeWhitespace(stripNullCharacters(text || ''));
+    if (!normalized) {
+        return '';
+    }
+
+    const lines = normalized.split('\n');
+    const cleaned = [];
+    let previousComparable = '';
+
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            if (cleaned.length > 0 && cleaned[cleaned.length - 1] !== '') {
+                cleaned.push('');
+            }
+            previousComparable = '';
+            return;
+        }
+
+        if (DOCUMENT_CONTENT_NOISE_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+            return;
+        }
+
+        if (looksLikeKeywordStuffing(trimmed)) {
+            return;
+        }
+
+        const comparable = trimmed.toLowerCase();
+        if (comparable === previousComparable) {
+            return;
+        }
+
+        cleaned.push(trimmed);
+        previousComparable = comparable;
+    });
+
+    return cleaned
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function sanitizeImageReferenceTitle(title = '', fallback = 'Document image') {
+    let normalized = normalizeWhitespace(stripNullCharacters(title || ''))
+        .replace(/\s+Source:\s*(tool|unsplash|artifact|prompt|session)(?:\s+via\s+[\w-]+)?$/i, '')
+        .replace(/^[`"']+|[`"']+$/g, '')
+        .trim();
+
+    if (!normalized) {
+        return fallback;
+    }
+
+    if (looksLikeKeywordStuffing(normalized)) {
+        const commaSegments = normalized
+            .split(',')
+            .map((segment) => segment.trim())
+            .filter(Boolean);
+        const firstUsefulSegment = commaSegments.find((segment) => segment.split(/\s+/).length >= 2 && segment.length <= 80);
+        normalized = firstUsefulSegment || fallback;
+    }
+
+    if (normalized.length > 90) {
+        normalized = `${normalized.slice(0, 87).trim()}...`;
+    }
+
+    return normalized || fallback;
+}
+
+function tokenizeUnsplashQuery(value = '') {
+    return String(value || '')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !UNSPLASH_QUERY_STOPWORDS.has(token));
+}
+
 function normalizePlanSections(sections = []) {
     return (Array.isArray(sections) ? sections : [])
         .slice(0, 12)
         .map((section, index) => ({
-            heading: String(section?.heading || section?.title || `Section ${index + 1}`).trim(),
-            purpose: String(section?.purpose || section?.goal || '').trim(),
+            heading: sanitizeDocumentText(String(section?.heading || section?.title || `Section ${index + 1}`)).trim(),
+            purpose: sanitizeDocumentText(String(section?.purpose || section?.goal || '')).trim(),
             keyPoints: (Array.isArray(section?.keyPoints) ? section.keyPoints : [])
-                .map((point) => String(point || '').trim())
+                .map((point) => sanitizeDocumentText(String(point || '')).trim())
                 .filter(Boolean)
                 .slice(0, 6),
             targetLength: String(section?.targetLength || 'medium').trim() || 'medium',
             layout: String(section?.layout || section?.sectionLayout || '').trim() || 'narrative',
-            tone: String(section?.tone || '').trim(),
-            visualIntent: String(section?.visualIntent || section?.visual || '').trim(),
+            tone: sanitizeDocumentText(String(section?.tone || '')).trim(),
+            visualIntent: sanitizeDocumentText(String(section?.visualIntent || section?.visual || '')).trim(),
         }))
         .filter((section) => section.heading);
 }
@@ -496,11 +611,11 @@ function normalizeDocumentSections(sections = [], fallbackSections = []) {
     return (Array.isArray(sections) ? sections : [])
         .slice(0, 18)
         .map((section, index) => ({
-            heading: String(section?.heading || section?.title || fallbackByIndex[index]?.heading || `Section ${index + 1}`).trim(),
-            content: String(section?.content || section?.body || '').trim(),
+            heading: sanitizeDocumentText(String(section?.heading || section?.title || fallbackByIndex[index]?.heading || `Section ${index + 1}`)).trim(),
+            content: sanitizeDocumentText(String(section?.content || section?.body || '')).trim(),
             level: Number(section?.level) > 0 ? Number(section.level) : 1,
-            kicker: String(section?.kicker || fallbackByIndex[index]?.tone || '').trim(),
-            visualIntent: String(section?.visualIntent || fallbackByIndex[index]?.visualIntent || '').trim(),
+            kicker: sanitizeDocumentText(String(section?.kicker || fallbackByIndex[index]?.tone || '')).trim(),
+            visualIntent: sanitizeDocumentText(String(section?.visualIntent || fallbackByIndex[index]?.visualIntent || '')).trim(),
         }))
         .filter((section) => section.heading && section.content);
 }
@@ -633,7 +748,7 @@ function extractImageReferencesFromSession(session = null) {
 
         unique.set(url, {
             url,
-            title: String(entry?.title || '').trim(),
+            title: sanitizeImageReferenceTitle(String(entry?.title || '').trim(), ''),
             source: String(entry?.source || '').trim() || 'session',
             toolId: String(entry?.toolId || '').trim(),
         });
@@ -654,7 +769,7 @@ function extractImageReferencesFromText(text = '') {
 
         unique.set(normalizedUrl, {
             url: normalizedUrl,
-            title: 'Prompt image reference',
+            title: sanitizeImageReferenceTitle('Prompt image reference'),
             source: 'prompt',
             toolId: 'image-from-url',
         });
@@ -677,13 +792,13 @@ function extractImageReferencesFromArtifacts(artifacts = []) {
         const url = buildArtifactInlinePath(artifactId);
         unique.set(url, {
             url,
-            title: String(
+            title: sanitizeImageReferenceTitle(String(
                 artifact?.metadata?.altText
                 || artifact?.metadata?.title
                 || artifact?.metadata?.revisedPrompt
                 || artifact?.filename
                 || 'Generated image'
-            ).trim(),
+            ).trim()),
             source: 'artifact',
             toolId: String(artifact?.metadata?.generatedBy || 'image-generate').trim(),
             internal: true,
@@ -708,6 +823,7 @@ function buildDocumentImageInstructions() {
         'Never create inline SVG artwork, multilayered SVG mockups, CSS-only fake photos, canvas placeholders, blob URLs, or data:image embeds unless the user explicitly asks for vector artwork.',
         'If no verified image URL is available for a visual slot, omit the image block and keep the section text-only.',
         'Use descriptive alt text and keep images tied to the content instead of decorative filler.',
+        'Do not surface raw search metadata, comma-separated keyword dumps, or source labels as visible document prose.',
     ].join('\n');
 }
 
@@ -778,7 +894,7 @@ function buildImageFigureHtml(imageReference, fallbackAlt = 'Document image') {
         return '';
     }
 
-    const alt = escapeHtml(String(imageReference?.title || fallbackAlt || 'Document image').trim());
+    const alt = escapeHtml(sanitizeImageReferenceTitle(String(imageReference?.title || fallbackAlt || 'Document image').trim(), fallbackAlt || 'Document image'));
     const sourceLabel = escapeHtml(String(imageReference?.source || 'source').trim());
     const safeUrl = escapeHtml(url);
 
@@ -1125,18 +1241,12 @@ function shouldFetchUnsplashReferences(prompt = '') {
 }
 
 function inferUnsplashQuery(prompt = '') {
-    const cleaned = String(prompt || '').toLowerCase()
-        .replace(/^(create|make|generate|build|produce|write|draft)\s+/i, '')
-        .replace(/\b(a|an|the|with|for|using|use|real|visual|visuals|image|images|photo|photos|unsplash)\b/g, ' ')
-        .replace(/\b(html|pdf|docx|page|document|website|web|landing|create|make|generate|build|polished|guide|brief|report|news|headline|headlines|latest|recent|current|article|articles|coverage)\b/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    if (!cleaned) {
+    const tokens = tokenizeUnsplashQuery(prompt);
+    if (tokens.length === 0) {
         return null;
     }
 
-    return cleaned.split(' ').slice(0, 6).join(' ');
+    return tokens.slice(0, 6).join(' ');
 }
 
 function isFrontendDemoArtifactRequest(prompt = '') {
@@ -1756,6 +1866,7 @@ class ArtifactService {
             'Each section should have a concrete purpose, a visible layout role, and 2-5 key points that must be covered.',
             'If verified images are available, plan where real images support the document, but do not invent illustrations.',
             'Do not mirror placeholder headings or sample copy from provided templates.',
+            'Treat instruction blocks such as <creative_direction>, <sample_handling>, <continuity>, [Verified image references], and [Research workflow] as guidance only. Never copy them into the document plan.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
             promptContext,
             creativityContext,
@@ -1799,6 +1910,7 @@ class ArtifactService {
             'Vary rhythm between sections instead of giving every section the same sentence cadence.',
             'If verified image references are available, mention the real image use naturally in the section content instead of describing fake illustrations.',
             'Do not echo placeholder copy, sample headings, or tutorial language from the scaffold.',
+            'Never quote or reproduce instruction-only metadata such as [Verified image references], [Research workflow], Source: tool, Source: unsplash, or creative-direction labels in the section content.',
             existingContent ? `Existing content to revise:\n${existingContent}` : '',
             promptContext,
             creativityContext,
@@ -1837,6 +1949,7 @@ class ArtifactService {
             'When verified image URLs are available, make the design image-rich with a hero image, repeated section visuals, image cards, and gallery treatments across the document.',
             'Do not output a layout plan, source register instructions, build checklist, editorial note, or any meta-document that describes how a future document should be assembled.',
             'The output must be the finished document itself, not instructions for building it.',
+            'Do not print workflow labels, source metadata, tool notes, or image search descriptions verbatim in the body or captions.',
             buildDocumentImageInstructions(),
             promptContext,
             creativityContext,
@@ -1899,7 +2012,7 @@ class ArtifactService {
             const unsplashRefs = (Array.isArray(results?.results) ? results.results : [])
                 .map((image) => ({
                     url: normalizeImageReferenceUrl(image?.urls?.regular || image?.urls?.full || image?.urls?.small || ''),
-                    title: String(image?.description || image?.altDescription || query).trim(),
+                    title: sanitizeImageReferenceTitle(String(image?.description || image?.altDescription || query).trim(), ''),
                     source: 'unsplash',
                     toolId: 'image-search-unsplash',
                 }))
@@ -1949,7 +2062,8 @@ class ArtifactService {
     }) {
         const resolvedImageReferences = Array.isArray(imageReferences) ? imageReferences : [];
         const resolvedImageReferenceContext = imageReferenceContext || this.formatImageReferenceContext(resolvedImageReferences);
-        const researchToolContext = enableAutomaticToolCalls && isResearchBackedArtifactRequest(prompt, format)
+        const canUseResearchTools = enableAutomaticToolCalls && Boolean(toolManager?.executeTool);
+        const researchToolContext = canUseResearchTools && isResearchBackedArtifactRequest(prompt, format)
             ? [
                 '[Research workflow]',
                 'Before drafting or composing, use available tools to ground current claims with web-search and web-fetch.',
@@ -2127,6 +2241,7 @@ class ArtifactService {
         const complexFrontendBundleRequest = normalizedFormat === 'html'
             && isComplexFrontendBundleRequest(prompt, [template, existingContent].filter(Boolean).join('\n\n'));
         const enableArtifactToolOrchestration = shouldEnableArtifactToolOrchestration(prompt, normalizedFormat);
+        const canUseArtifactToolOrchestration = enableArtifactToolOrchestration && Boolean(toolManager?.executeTool);
         if (!SUPPORTED_GENERATION_FORMATS.has(normalizedFormat)) {
             throw new Error(`Unsupported generation format: ${format}`);
         }
@@ -2171,7 +2286,7 @@ class ArtifactService {
                             [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
                             creativityPacket,
                             prompt,
-                            enableArtifactToolOrchestration,
+                            canUseArtifactToolOrchestration,
                         ),
                     ),
                     model,
@@ -2181,13 +2296,13 @@ class ArtifactService {
                     recentMessages,
                     toolManager,
                     toolContext,
-                    enableAutomaticToolCalls: enableArtifactToolOrchestration,
+                    enableAutomaticToolCalls: canUseArtifactToolOrchestration,
                     executionProfile,
                 })),
                 title: inferDocumentTitle(prompt, 'Frontend Demo'),
                 metadata: {
                     generationStrategy: 'single-pass-frontend-demo',
-                    toolOrchestrationEnabled: enableArtifactToolOrchestration,
+                    toolOrchestrationEnabled: canUseArtifactToolOrchestration,
                 },
             }
             : MULTI_PASS_DOCUMENT_FORMATS.has(normalizedFormat)
@@ -2206,7 +2321,7 @@ class ArtifactService {
                 recentMessages,
                 toolManager,
                 toolContext,
-                enableAutomaticToolCalls: enableArtifactToolOrchestration,
+                enableAutomaticToolCalls: canUseArtifactToolOrchestration,
                 executionProfile,
             })
             : await this.runGenerationPass({
@@ -2220,7 +2335,7 @@ class ArtifactService {
                         [promptContext, imageReferenceContext].filter(Boolean).join('\n\n'),
                         creativityPacket,
                         prompt,
-                        enableArtifactToolOrchestration,
+                        canUseArtifactToolOrchestration,
                     ),
                 ),
                 model,
@@ -2230,7 +2345,7 @@ class ArtifactService {
                 recentMessages,
                 toolManager,
                 toolContext,
-                enableAutomaticToolCalls: enableArtifactToolOrchestration,
+                enableAutomaticToolCalls: canUseArtifactToolOrchestration,
                 executionProfile,
             });
 

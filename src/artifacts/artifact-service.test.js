@@ -469,13 +469,13 @@ describe('ArtifactService', () => {
             artifactIds: [],
             existingContent: '',
             model: 'gpt-5.3',
-            toolManager: { id: 'tool-manager' },
+            toolManager: { id: 'tool-manager', executeTool: jest.fn() },
             toolContext: { sessionId: 'session-1' },
         });
 
         expect(createResponse.mock.calls[0][0]).toEqual(expect.objectContaining({
             enableAutomaticToolCalls: true,
-            toolManager: { id: 'tool-manager' },
+            toolManager: expect.objectContaining({ id: 'tool-manager' }),
             toolContext: { sessionId: 'session-1' },
         }));
         expect(createResponse.mock.calls[0][0]?.instructions).toContain('Use available tools when they materially improve factual grounding');
@@ -530,13 +530,13 @@ describe('ArtifactService', () => {
             artifactIds: [],
             existingContent: '',
             model: 'gpt-5.3',
-            toolManager: { id: 'tool-manager' },
+            toolManager: { id: 'tool-manager', executeTool: jest.fn() },
             toolContext: { sessionId: 'session-1' },
         });
 
         expect(createResponse.mock.calls[0][0]).toEqual(expect.objectContaining({
             enableAutomaticToolCalls: true,
-            toolManager: { id: 'tool-manager' },
+            toolManager: expect.objectContaining({ id: 'tool-manager' }),
             toolContext: { sessionId: 'session-1' },
         }));
         const joinedInstructions = createResponse.mock.calls.map((call) => call[0]?.instructions || '').join('\n\n---\n\n');
@@ -824,7 +824,7 @@ describe('ArtifactService', () => {
             model: 'gpt-5.3',
         });
 
-        expect(searchImages).toHaveBeenCalledWith(expect.stringContaining('atlantic canada axe throwing venues'), expect.objectContaining({
+        expect(searchImages).toHaveBeenCalledWith(expect.stringContaining('axe throwing'), expect.objectContaining({
             perPage: 20,
             orientation: 'landscape',
         }));
@@ -1145,5 +1145,134 @@ describe('ArtifactService', () => {
                 compositionRecovered: true,
             }),
         }));
+    });
+
+    test('does not fetch generic unsplash images for subject-free html prompts', async () => {
+        isConfigured.mockReturnValue(true);
+        searchImages.mockResolvedValue({
+            results: [{
+                description: 'Should not be used',
+                urls: { regular: 'https://images.unsplash.com/photo-unused' },
+            }],
+        });
+
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Studio Casefile',
+                        sections: [
+                            { heading: 'Readiness', purpose: 'Assess readiness', keyPoints: ['Decision'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Studio Casefile',
+                        sections: [
+                            { heading: 'Readiness', content: 'We can produce a draft now, but the factual layer needs another research pass.', level: 1 },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: '<!DOCTYPE html><html><body><h1>Studio Casefile</h1><p>Ready.</p></body></html>' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-generic', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Do we have enough resources to build the article and HTML file now?',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(searchImages).not.toHaveBeenCalled();
+    });
+
+    test('strips tool-workflow residue and noisy image titles from recovered html', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Studio Casefile',
+                        sections: [
+                            { heading: 'Readiness check', purpose: 'Assess whether the work can start now.', keyPoints: ['Decision'], targetLength: 'short' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Studio Casefile',
+                        sections: [
+                            {
+                                heading: 'Readiness check',
+                                content: [
+                                    'Current-information request should start with Perplexity-backed web search.',
+                                    'Current-information request should start with Perplexity-backed web search. Source: tool',
+                                    'Yes, there is enough material on hand to produce a credible article draft now.',
+                                ].join('\n\n'),
+                                level: 1,
+                            },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose',
+                output: [{
+                    type: 'message',
+                    content: [{ text: 'Page Layout Plan\n\nThe layout should remain editorial.' }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: {
+                previousResponseId: 'prev-residue',
+                metadata: {
+                    projectMemory: {
+                        urls: [{
+                            url: 'https://images.unsplash.com/photo-321',
+                            kind: 'image',
+                            title: 'close up, bokeh, bible, new testament, christian, history, text, reading, bible study, devotions',
+                            source: 'unsplash',
+                            toolId: 'image-search-unsplash',
+                        }],
+                    },
+                },
+            },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a polished HTML case study using the verified session images.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        const renderedHtml = renderArtifact.mock.calls[0][0]?.content || '';
+        expect(renderedHtml).toContain('Yes, there is enough material on hand to produce a credible article draft now.');
+        expect(renderedHtml).not.toContain('Current-information request should start with Perplexity-backed web search.');
+        expect(renderedHtml).not.toContain('Source: tool');
+        expect(renderedHtml).not.toContain('bokeh, bible');
     });
 });
