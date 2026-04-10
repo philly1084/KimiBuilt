@@ -31,6 +31,8 @@ const VALID_TASK_STATUSES = new Set([
     'completed',
     'skipped',
 ]);
+const REMOTE_WORKSPACE_DEPLOY_TIMEOUT_MS = 600000;
+const REMOTE_VERIFICATION_TIMEOUT_MS = 240000;
 
 function normalizeText(value = '') {
     return String(value || '').trim();
@@ -883,6 +885,7 @@ function buildEndToEndWorkflowPlan({
                 ...(currentWorkflow.remoteTarget?.username ? { username: currentWorkflow.remoteTarget.username } : {}),
                 ...(currentWorkflow.remoteTarget?.port ? { port: currentWorkflow.remoteTarget.port } : {}),
                 ...(currentWorkflow.workspacePath ? { workingDirectory: currentWorkflow.workspacePath } : {}),
+                timeout: REMOTE_WORKSPACE_DEPLOY_TIMEOUT_MS,
                 workflowAction: 'build-and-deploy-remote-workspace',
                 command: buildRemoteWorkspaceDeployCommand(currentWorkflow),
             },
@@ -949,6 +952,7 @@ function buildEndToEndWorkflowPlan({
                     ...(currentWorkflow.remoteTarget?.host ? { host: currentWorkflow.remoteTarget.host } : {}),
                     ...(currentWorkflow.remoteTarget?.username ? { username: currentWorkflow.remoteTarget.username } : {}),
                     ...(currentWorkflow.remoteTarget?.port ? { port: currentWorkflow.remoteTarget.port } : {}),
+                    timeout: REMOTE_VERIFICATION_TIMEOUT_MS,
                     command: currentWorkflow.lane === 'inspect-only'
                         ? buildInspectCommand(currentWorkflow)
                         : buildVerificationCommand(currentWorkflow),
