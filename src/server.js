@@ -20,7 +20,7 @@ const sessionsRouter = require('./routes/sessions');
 const modelsRouter = require('./routes/models');
 const ttsRouter = require('./routes/tts');
 const audioRouter = require('./routes/audio');
-const { piperTtsService } = require('./tts/piper-tts-service');
+const { ttsService } = require('./tts/tts-service');
 const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
 const { artifactService } = require('./artifacts/artifact-service');
@@ -362,8 +362,8 @@ async function start() {
         app.locals.agentWorkloadRunner.start();
         app.locals.dashboardController = new DashboardController(conversationOrchestrator);
         setDashboardController(app.locals.dashboardController);
-        const piperConfig = piperTtsService.getPublicConfig();
-        console.log(`[Boot] Piper TTS ${piperConfig.diagnostics?.status || 'unknown'}: ${piperConfig.diagnostics?.message || 'No details available.'}`);
+        const ttsConfig = ttsService.getPublicConfig();
+        console.log(`[Boot] TTS ${ttsConfig.provider || 'unknown'} ${ttsConfig.diagnostics?.status || 'unknown'}: ${ttsConfig.diagnostics?.message || 'No details available.'}`);
         startupState.ready = true;
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);

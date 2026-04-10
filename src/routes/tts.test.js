@@ -5,39 +5,39 @@ jest.mock('../middleware/validate', () => ({
     validate: () => (_req, _res, next) => next(),
 }));
 
-jest.mock('../tts/piper-tts-service', () => ({
-    piperTtsService: {
+jest.mock('../tts/tts-service', () => ({
+    ttsService: {
         getPublicConfig: jest.fn(),
         synthesize: jest.fn(),
     },
 }));
 
-const { piperTtsService } = require('../tts/piper-tts-service');
+const { ttsService } = require('../tts/tts-service');
 const ttsRouter = require('./tts');
 
 describe('/api/tts', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        piperTtsService.getPublicConfig.mockReturnValue({
+        ttsService.getPublicConfig.mockReturnValue({
             configured: true,
-            provider: 'piper',
-            defaultVoiceId: 'piper-female-natural',
+            provider: 'openai',
+            defaultVoiceId: 'openai-marin-natural',
             diagnostics: {
                 status: 'ready',
                 binaryReachable: true,
                 voicesLoaded: true,
-                message: 'Piper is ready.',
+                message: 'OpenAI voice playback is ready.',
             },
             voices: [{
-                id: 'piper-female-natural',
-                label: 'Female natural',
-                description: 'Clear and natural.',
-                provider: 'piper',
+                id: 'openai-marin-natural',
+                label: 'Marin natural',
+                description: 'Warm and natural.',
+                provider: 'openai',
             }],
         });
     });
 
-    test('returns Piper voice availability', async () => {
+    test('returns voice availability', async () => {
         const app = express();
         app.use('/api/tts', ttsRouter);
 
@@ -46,8 +46,8 @@ describe('/api/tts', () => {
         expect(response.status).toBe(200);
         expect(response.body).toEqual(expect.objectContaining({
             configured: true,
-            provider: 'piper',
-            defaultVoiceId: 'piper-female-natural',
+            provider: 'openai',
+            defaultVoiceId: 'openai-marin-natural',
             diagnostics: expect.objectContaining({
                 status: 'ready',
                 binaryReachable: true,
@@ -62,12 +62,13 @@ describe('/api/tts', () => {
         app.use('/api/tts', ttsRouter);
 
         const buffer = Buffer.from('RIFF-test-audio');
-        piperTtsService.synthesize.mockResolvedValue({
+        ttsService.synthesize.mockResolvedValue({
             audioBuffer: buffer,
             contentType: 'audio/wav',
+            provider: 'openai',
             voice: {
-                id: 'piper-female-natural',
-                label: 'Female natural',
+                id: 'openai-marin-natural',
+                label: 'Marin natural',
             },
         });
 
@@ -75,13 +76,13 @@ describe('/api/tts', () => {
             .post('/api/tts/synthesize')
             .send({
                 text: 'Hello from Piper.',
-                voiceId: 'piper-female-natural',
+                voiceId: 'openai-marin-natural',
             });
 
         expect(response.status).toBe(200);
         expect(response.headers['content-type']).toMatch(/audio\/wav/);
-        expect(response.headers['x-tts-provider']).toBe('piper');
-        expect(response.headers['x-tts-voice-id']).toBe('piper-female-natural');
+        expect(response.headers['x-tts-provider']).toBe('openai');
+        expect(response.headers['x-tts-voice-id']).toBe('openai-marin-natural');
         expect(response.body.equals(buffer)).toBe(true);
     });
 
@@ -93,7 +94,7 @@ describe('/api/tts', () => {
         const error = new Error('Piper TTS is not configured.');
         error.statusCode = 503;
         error.code = 'tts_unavailable';
-        piperTtsService.synthesize.mockRejectedValue(error);
+        ttsService.synthesize.mockRejectedValue(error);
 
         const response = await request(app)
             .post('/api/tts/synthesize')
