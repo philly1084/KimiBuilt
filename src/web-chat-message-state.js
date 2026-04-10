@@ -2,8 +2,8 @@ const { v4: uuidv4 } = require('uuid');
 const { stripNullCharacters } = require('./utils/text');
 const { parseLenientJson } = require('./utils/lenient-json');
 
-const COLLAPSIBLE_ARTIFACT_FORMATS = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'power-query']);
-const COLLAPSIBLE_ARTIFACT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.pq', '.m'];
+const COLLAPSIBLE_ARTIFACT_FORMATS = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query']);
+const COLLAPSIBLE_ARTIFACT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m'];
 
 function offsetIsoTimestamp(timestamp = null, offsetMs = 0) {
     const parsed = timestamp ? new Date(timestamp) : new Date();
@@ -130,7 +130,12 @@ function buildArtifactSummary(artifacts = []) {
 
         const format = String(artifact?.format || '').toLowerCase();
         const filename = String(artifact?.filename || '').toLowerCase();
-        return format === 'html' || filename.endsWith('.html') || filename.endsWith('.htm');
+        return format === 'html'
+            || format === 'mermaid'
+            || filename.endsWith('.html')
+            || filename.endsWith('.htm')
+            || filename.endsWith('.mmd')
+            || filename.endsWith('.mermaid');
     });
     const actionLabel = hasPreview ? 'Preview and Download below.' : 'Use Download below.';
 

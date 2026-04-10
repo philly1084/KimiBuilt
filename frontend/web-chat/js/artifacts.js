@@ -177,6 +177,10 @@
                 margin-bottom: 12px;
             }
 
+            .artifact-generated-card .artifact-mermaid-preview .mermaid-render-surface {
+                min-height: 220px;
+            }
+
             .artifact-generated-card .artifact-html-preview {
                 margin-bottom: 12px;
                 border: 1px solid rgba(245, 158, 11, 0.22);
@@ -423,7 +427,23 @@
             return String(div.textContent || '').trim();
         }
 
+        if (typeof artifact.contentPreview === 'string' && artifact.contentPreview.trim()) {
+            return String(artifact.contentPreview).trim();
+        }
+
+        if (typeof artifact.metadata?.mermaidSource === 'string' && artifact.metadata.mermaidSource.trim()) {
+            return String(artifact.metadata.mermaidSource).trim();
+        }
+
         return '';
+    }
+
+    function isMermaidArtifact(artifact = null) {
+        const format = String(artifact?.format || '').toLowerCase();
+        const filename = String(artifact?.filename || '').toLowerCase();
+        return format === 'mermaid'
+            || filename.endsWith('.mmd')
+            || filename.endsWith('.mermaid');
     }
 
     function getFileIconClass(filename, artifact = null) {
@@ -480,8 +500,8 @@
 
         const format = String(artifact?.format || '').toLowerCase();
         const filename = String(artifact?.filename || '').toLowerCase();
-        const collapsibleFormats = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'power-query']);
-        const collapsibleExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.pq', '.m'];
+        const collapsibleFormats = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query']);
+        const collapsibleExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m'];
         return collapsibleFormats.has(format) || collapsibleExtensions.some((ext) => filename.endsWith(ext));
     }
 
@@ -495,6 +515,7 @@
             const format = String(artifact?.format || '').toLowerCase();
             const filename = String(artifact?.filename || '').toLowerCase();
             return Boolean(artifact?.previewUrl)
+                || isMermaidArtifact(artifact)
                 || format === 'html'
                 || filename.endsWith('.html')
                 || filename.endsWith('.htm');
@@ -530,15 +551,22 @@
     function buildArtifactCardMarkup(artifact) {
         const iconClass = getFileIconClass(artifact.filename, artifact);
         const iconName = getFileIcon(artifact.filename, artifact);
-        const mermaidSource = String(artifact.format || '').toLowerCase() === 'mermaid'
-            ? getMermaidSourceFromArtifact(artifact)
-            : '';
+        const mermaidArtifact = isMermaidArtifact(artifact);
+        const mermaidSource = mermaidArtifact ? getMermaidSourceFromArtifact(artifact) : '';
         const mermaidBaseName = getArtifactBaseName(artifact.filename);
+        const mermaidDownloadUrl = mermaidArtifact && artifact?.downloadUrl
+            ? `${API_BASE}${artifact.downloadUrl}`
+            : '';
         const htmlPreviewUrl = getArtifactPreviewUrl(artifact);
-        const mermaidPreview = mermaidSource
+        const mermaidPreview = mermaidArtifact
             ? `
                 <div class="artifact-mermaid-preview">
-                    <div class="mermaid-render-surface" data-mermaid-source="${escapeHtmlAttr(mermaidSource)}" data-mermaid-filename="${escapeHtmlAttr(mermaidBaseName)}">
+                    <div
+                        class="mermaid-render-surface"
+                        data-mermaid-source="${escapeHtmlAttr(mermaidSource)}"
+                        data-mermaid-filename="${escapeHtmlAttr(mermaidBaseName)}"
+                        data-mermaid-url="${escapeHtmlAttr(mermaidDownloadUrl)}"
+                    >
                         <div class="mermaid-placeholder">Rendering diagram...</div>
                     </div>
                 </div>
@@ -551,14 +579,15 @@
                 </div>
             `
             : '';
-        const mermaidActions = mermaidSource
+        const mermaidActions = mermaidArtifact
             ? `
-                <button onclick="uiHelpers.downloadMermaidSource(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.mmd">
-                    <i data-lucide="file-code" class="w-4 h-4"></i>
-                    .mmd
-                </button>
-                <button onclick="uiHelpers.downloadMermaidPdf(this)" data-code="${escapeHtmlAttr(mermaidSource)}" data-filename="${escapeHtmlAttr(mermaidBaseName)}.pdf">
-                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                <button
+                    onclick="uiHelpers.downloadMermaidPdf(this)"
+                    data-code="${escapeHtmlAttr(mermaidSource)}"
+                    data-mermaid-url="${escapeHtmlAttr(mermaidDownloadUrl)}"
+                    data-filename="${escapeHtmlAttr(mermaidBaseName)}.pdf"
+                >
+                    <i data-lucide="download" class="w-4 h-4"></i>
                     PDF
                 </button>
             `

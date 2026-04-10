@@ -180,11 +180,7 @@ function normalizeAssistantMetadata(value) {
         nextMetadata.taskType = value.taskType.trim();
     }
 
-    const reasoningSummary = typeof value.reasoningSummary === 'string' && value.reasoningSummary.trim()
-        ? value.reasoningSummary.trim()
-        : (typeof value.reasoning_summary === 'string' && value.reasoning_summary.trim()
-            ? value.reasoning_summary.trim()
-            : '');
+    const reasoningSummary = extractReasoningSummary(value);
     if (reasoningSummary) {
         nextMetadata.reasoningSummary = reasoningSummary;
         nextMetadata.reasoningAvailable = true;
@@ -236,6 +232,71 @@ function normalizeAssistantMetadata(value) {
     return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
 }
 
+function extractReasoningSummary(value) {
+    if (typeof value === 'string') {
+        return stripNullCharacters(value).trim();
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => extractReasoningSummary(entry))
+            .filter(Boolean)
+            .join('')
+            .trim();
+    }
+
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    if (value.type === 'reasoning') {
+        return extractReasoningSummary(
+            value.summary
+            || value.summary_text
+            || value.reasoning_content
+            || value.reasoning
+            || value.text
+            || value.content
+            || value.output_text
+            || value.value
+            || '',
+        );
+    }
+
+    const directCandidates = [
+        value.reasoningSummary,
+        value.reasoning_summary,
+        value.reasoning_content,
+        value.reasoning,
+        value.summary_text,
+    ];
+    for (const candidate of directCandidates) {
+        const normalized = extractReasoningSummary(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    const nestedCandidates = [
+        value.choices?.[0]?.message?.reasoning,
+        value.choices?.[0]?.message?.reasoning_content,
+        value.message?.reasoning,
+        value.message?.reasoning_content,
+        value.response?.choices?.[0]?.message?.reasoning,
+        value.response?.choices?.[0]?.message?.reasoning_content,
+        value.response?.message?.reasoning,
+        value.response?.message?.reasoning_content,
+    ];
+    for (const candidate of nestedCandidates) {
+        const normalized = extractReasoningSummary(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    return '';
+}
+
 function mergeAssistantMetadata(currentValue, nextValue) {
     const currentMetadata = currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)
         ? currentValue
@@ -262,6 +323,8 @@ function extractAssistantMetadata(value) {
         value.assistant_metadata,
         value.response?.assistantMetadata,
         value.response?.assistant_metadata,
+        value.choices?.[0]?.message,
+        value.response?.choices?.[0]?.message,
         value.response?.metadata,
         value.metadata,
     ];
@@ -546,9 +609,14 @@ class OpenAIAPIClient extends EventTarget {
             return events;
         }
 
-        if (parsed.type === 'response.reasoning_summary_text.delta' && parsed.delta) {
+        const streamedReasoning = stripNullCharacters(
+            parsed?.choices?.[0]?.delta?.reasoning
+            || parsed?.delta
+            || '',
+        );
+        if ((parsed.type === 'response.reasoning_summary_text.delta' && parsed.delta) || streamedReasoning) {
             const summary = String(parsed.summary || parsed.reasoningSummary || parsed.reasoning_summary || '').trim()
-                || String(parsed.delta || '').trim();
+                || streamedReasoning.trim();
             pendingDone.assistantMetadata = mergeAssistantMetadata(
                 pendingDone.assistantMetadata,
                 {
@@ -559,7 +627,7 @@ class OpenAIAPIClient extends EventTarget {
             events.push(this.buildStatusEvent('reasoning', 'Working through the answer'));
             events.push({
                 type: 'reasoning_summary_delta',
-                content: String(parsed.delta || ''),
+                content: streamedReasoning,
                 summary,
             });
         }
@@ -901,6 +969,25 @@ class OpenAIAPIClient extends EventTarget {
                     return;
                 }
                 
+                const reasoning = stripNullCharacters(chunk.choices[0]?.delta?.reasoning || '');
+                if (reasoning) {
+                    const currentSummary = String(pendingAssistantMetadata?.reasoningSummary || '').trim();
+                    const nextSummary = `${currentSummary}${reasoning}`.trim();
+                    pendingAssistantMetadata = mergeAssistantMetadata(
+                        pendingAssistantMetadata,
+                        {
+                            reasoningSummary: nextSummary,
+                            reasoningAvailable: true,
+                        },
+                    );
+                    yield this.buildStatusEvent('reasoning', 'Working through the answer');
+                    yield {
+                        type: 'reasoning_summary_delta',
+                        content: reasoning,
+                        summary: nextSummary,
+                    };
+                }
+
                 const content = stripNullCharacters(chunk.choices[0]?.delta?.content || '');
                 if (content) {
                     yield this.buildStatusEvent('writing', 'Writing the reply');

@@ -1,9 +1,19 @@
 const {
+    buildArtifactSummary,
     buildFrontendAssistantMetadata,
     buildWebChatSessionMessages,
 } = require('./web-chat-message-state');
 
 describe('buildWebChatSessionMessages', () => {
+    test('treats Mermaid artifacts as previewable files in the assistant summary', () => {
+        expect(buildArtifactSummary([{
+            id: 'artifact-mermaid-1',
+            filename: 'system-flow.mmd',
+            format: 'mermaid',
+            downloadUrl: '/api/artifacts/artifact-mermaid-1/download',
+        }])).toBe('Created system-flow.mmd. Preview and Download below.');
+    });
+
     test('stores artifacts inline on the assistant message without a separate gallery message', () => {
         const messages = buildWebChatSessionMessages({
             userText: 'Question first',
@@ -175,6 +185,38 @@ describe('buildWebChatSessionMessages', () => {
                     downloadUrl: '/api/artifacts/artifact-html-1/download',
                     previewUrl: '/api/artifacts/artifact-html-1/preview',
                     bundleDownloadUrl: '/api/artifacts/artifact-html-1/bundle',
+                }),
+            ],
+        }));
+    });
+
+    test('preserves Mermaid preview payloads for frontend rendering', () => {
+        const metadata = buildFrontendAssistantMetadata({
+            taskType: 'chat',
+            artifacts: [{
+                id: 'artifact-mermaid-2',
+                filename: 'auth-flow.mmd',
+                format: 'mermaid',
+                downloadUrl: '/api/artifacts/artifact-mermaid-2/download',
+                preview: {
+                    type: 'text',
+                    content: 'flowchart TD\nA[User] --> B[Login]',
+                },
+            }],
+        });
+
+        expect(metadata).toEqual(expect.objectContaining({
+            taskType: 'chat',
+            artifacts: [
+                expect.objectContaining({
+                    id: 'artifact-mermaid-2',
+                    filename: 'auth-flow.mmd',
+                    format: 'mermaid',
+                    downloadUrl: '/api/artifacts/artifact-mermaid-2/download',
+                    preview: expect.objectContaining({
+                        type: 'text',
+                        content: expect.stringContaining('flowchart TD'),
+                    }),
                 }),
             ],
         }));

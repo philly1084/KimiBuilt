@@ -147,7 +147,7 @@ describe('/v1/chat/completions stream forwarding', () => {
         sessionStore.update.mockResolvedValue(session);
     });
 
-    test('forwards reasoning-summary and tool-item events alongside normal deltas', async () => {
+    test('forwards reasoning deltas through chat completion chunks alongside tool events', async () => {
         executeConversationRuntime.mockResolvedValue({
             handledPersistence: true,
             response: (async function* streamEvents() {
@@ -208,11 +208,53 @@ describe('/v1/chat/completions stream forwarding', () => {
         expect(response.headers['cache-control']).toContain('no-transform');
         expect(response.headers['x-accel-buffering']).toBe('no');
         expect(response.text.startsWith(': stream-open\n\n')).toBe(true);
+        expect(response.text).toContain('"delta":{"reasoning":"Checking the request. "}');
         expect(response.text).toContain('"type":"response.reasoning_summary_text.delta"');
         expect(response.text).toContain('"summary":"Checking the request. "');
         expect(response.text).toContain('"type":"response.output_item.added"');
         expect(response.text).toContain('"name":"web_search"');
         expect(response.text).toContain('"delta":{"content":"Answer"}');
         expect(response.text).toContain('data: [DONE]');
+    });
+
+    test('includes final reasoning on non-stream chat completion messages', async () => {
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-compat-final-1',
+                model: 'gpt-4o',
+                output_text: 'Answer',
+                output: [{
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Answer' }],
+                }],
+                metadata: {
+                    reasoningSummary: 'Checked the request and chose the direct path.',
+                    reasoningAvailable: true,
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1', openAiCompatRouter);
+
+        const response = await request(app)
+            .post('/v1/chat/completions')
+            .send({
+                messages: [
+                    { role: 'user', content: 'Check this request.' },
+                ],
+                taskType: 'chat',
+                clientSurface: 'web-chat',
+                stream: false,
+                session_id: 'web-chat-stream-1',
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.body.choices[0].message.content).toBe('Answer');
+        expect(response.body.choices[0].message.reasoning).toBe('Checked the request and chose the direct path.');
     });
 });

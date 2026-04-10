@@ -730,7 +730,7 @@ class UIHelpers {
                                     <span>.mmd</span>
                                 </button>
                                 <button class="code-copy-btn" onclick="uiHelpers.downloadMermaidPdf(this)" data-code="${escapedAttrCode}" data-filename="${filenameBase}.pdf" aria-label="Download Mermaid PDF">
-                                    <i data-lucide="file-text" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    <i data-lucide="download" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                     <span>PDF</span>
                                 </button>
                             </div>
@@ -4733,12 +4733,60 @@ class UIHelpers {
         }
     }
 
-    getMermaidSourceFromButton(button) {
-        return this.normalizeMermaidSource(button?.dataset?.code || '');
+    async fetchMermaidSourceFromUrl(url = '') {
+        const targetUrl = String(url || '').trim();
+        if (!targetUrl) {
+            return '';
+        }
+
+        const response = await fetch(targetUrl, {
+            credentials: 'same-origin',
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to load Mermaid source (${response.status})`);
+        }
+
+        return this.normalizeMermaidSource(await response.text());
+    }
+
+    async resolveMermaidSource(element = null) {
+        if (!element) {
+            return '';
+        }
+
+        const inlineSource = this.normalizeMermaidSource(
+            element?.dataset?.code
+            || element?.dataset?.mermaidSource
+            || '',
+        );
+        if (inlineSource) {
+            return inlineSource;
+        }
+
+        const fetchUrl = String(element?.dataset?.mermaidUrl || '').trim();
+        if (!fetchUrl) {
+            return '';
+        }
+
+        const fetchedSource = await this.fetchMermaidSourceFromUrl(fetchUrl);
+        if (!fetchedSource) {
+            return '';
+        }
+
+        if (element?.dataset) {
+            element.dataset.code = fetchedSource;
+            element.dataset.mermaidSource = fetchedSource;
+        }
+
+        return fetchedSource;
+    }
+
+    async getMermaidSourceFromButton(button) {
+        return this.resolveMermaidSource(button);
     }
 
     async downloadMermaidSource(button) {
-        const source = this.getMermaidSourceFromButton(button);
+        const source = await this.getMermaidSourceFromButton(button);
         if (!source) {
             this.showToast('No Mermaid source to download', 'error');
             return;
@@ -4821,7 +4869,7 @@ class UIHelpers {
     }
 
     async downloadMermaidPdf(button) {
-        const source = this.getMermaidSourceFromButton(button);
+        const source = await this.getMermaidSourceFromButton(button);
         if (!source) {
             this.showToast('No Mermaid source to export', 'error');
             return;
@@ -4884,14 +4932,13 @@ class UIHelpers {
 
         const targets = Array.from(container.querySelectorAll('.mermaid-render-surface'));
         for (const target of targets) {
-            const source = this.normalizeMermaidSource(target.dataset.mermaidSource || '');
-            if (!source || target.dataset.mermaidRenderedSource === source) {
-                continue;
-            }
-
-            const renderId = `mermaid-inline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
             try {
+                const source = await this.resolveMermaidSource(target);
+                if (!source || target.dataset.mermaidRenderedSource === source) {
+                    continue;
+                }
+
+                const renderId = `mermaid-inline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                 const result = await mermaid.render(renderId, source);
                 target.innerHTML = result.svg;
                 target.dataset.mermaidRenderedSource = source;
@@ -4899,6 +4946,7 @@ class UIHelpers {
                     result.bindFunctions(target);
                 }
             } catch (error) {
+                const source = this.normalizeMermaidSource(target.dataset.mermaidSource || target.dataset.code || '');
                 target.innerHTML = `
                     <div class="mermaid-render-error">Mermaid render failed: ${this.escapeHtml(error.message)}</div>
                     <pre class="mermaid-source-block"><code>${this.escapeHtml(source)}</code></pre>

@@ -261,6 +261,15 @@ function resolveCompatAssistantText({ response = {}, outputText = '', userText =
     };
 }
 
+function extractCompatReasoningSummary(response = {}, artifacts = []) {
+    const assistantMetadata = buildFrontendAssistantMetadata({
+        ...(response?.metadata || {}),
+        ...(Array.isArray(artifacts) && artifacts.length > 0 ? { artifacts } : {}),
+    });
+
+    return String(assistantMetadata?.reasoningSummary || '').trim();
+}
+
 function isRemotePermissionGrantText(text = '') {
     const normalized = stripNullCharacters(String(text || '')).trim().toLowerCase();
     if (!normalized) {
@@ -949,7 +958,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
                         model: model || 'gpt-4o',
-                        choices: [{ index: 0, delta: {}, finish_reason: null }],
+                        choices: [{ index: 0, delta: { reasoning: event.delta }, finish_reason: null }],
                         type: 'response.reasoning_summary_text.delta',
                         delta: event.delta,
                         summary: event.summary || '',
@@ -1234,6 +1243,7 @@ router.post('/chat/completions', async (req, res, next) => {
             duration: Date.now() - startedAt,
             metadata: response?.metadata || {},
         });
+        const compatReasoningSummary = extractCompatReasoningSummary(response, artifacts);
 
         res.json({
             id: `chatcmpl-${response.id}`,
@@ -1245,6 +1255,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 message: {
                     role: 'assistant',
                     content: outputText,
+                    ...(compatReasoningSummary ? { reasoning: compatReasoningSummary } : {}),
                     artifacts,
                 },
                 finish_reason: 'stop',

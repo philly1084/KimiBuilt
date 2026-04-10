@@ -259,11 +259,7 @@
       nextMetadata.taskType = value.taskType.trim();
     }
 
-    const reasoningSummary = typeof value.reasoningSummary === 'string' && value.reasoningSummary.trim()
-      ? value.reasoningSummary.trim()
-      : (typeof value.reasoning_summary === 'string' && value.reasoning_summary.trim()
-        ? value.reasoning_summary.trim()
-        : '');
+    const reasoningSummary = extractReasoningSummary(value);
     if (reasoningSummary) {
       nextMetadata.reasoningSummary = reasoningSummary;
       nextMetadata.reasoningAvailable = true;
@@ -283,6 +279,71 @@
     return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
   }
 
+  function extractReasoningSummary(value) {
+    if (typeof value === 'string') {
+      return stripNullCharacters(value).trim();
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => extractReasoningSummary(entry))
+        .filter(Boolean)
+        .join('')
+        .trim();
+    }
+
+    if (!value || typeof value !== 'object') {
+      return '';
+    }
+
+    if (value.type === 'reasoning') {
+      return extractReasoningSummary(
+        value.summary
+        || value.summary_text
+        || value.reasoning_content
+        || value.reasoning
+        || value.text
+        || value.content
+        || value.output_text
+        || value.value
+        || '',
+      );
+    }
+
+    const directCandidates = [
+      value.reasoningSummary,
+      value.reasoning_summary,
+      value.reasoning_content,
+      value.reasoning,
+      value.summary_text,
+    ];
+    for (const candidate of directCandidates) {
+      const normalized = extractReasoningSummary(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    const nestedCandidates = [
+      value.choices?.[0]?.message?.reasoning,
+      value.choices?.[0]?.message?.reasoning_content,
+      value.message?.reasoning,
+      value.message?.reasoning_content,
+      value.response?.choices?.[0]?.message?.reasoning,
+      value.response?.choices?.[0]?.message?.reasoning_content,
+      value.response?.message?.reasoning,
+      value.response?.message?.reasoning_content,
+    ];
+    for (const candidate of nestedCandidates) {
+      const normalized = extractReasoningSummary(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return '';
+  }
+
   function extractAssistantMetadata(value) {
     if (!value || typeof value !== 'object') {
       return null;
@@ -293,6 +354,8 @@
       value.assistant_metadata,
       value.response?.assistantMetadata,
       value.response?.assistant_metadata,
+      value.choices?.[0]?.message,
+      value.response?.choices?.[0]?.message,
       value.response?.metadata,
       value.metadata,
     ];
@@ -540,6 +603,18 @@
           events.push({
             type: 'text_delta',
             content,
+            finalChunk: true,
+            raw: payload,
+            ...metadata,
+          });
+        }
+
+        const reasoningSummary = extractAssistantMetadata(payload)?.reasoningSummary || '';
+        if (reasoningSummary) {
+          events.push({
+            type: 'reasoning_delta',
+            content: reasoningSummary,
+            summary: reasoningSummary,
             finalChunk: true,
             raw: payload,
             ...metadata,
