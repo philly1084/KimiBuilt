@@ -16,11 +16,13 @@ FROM --platform=$TARGETPLATFORM node:20-bookworm-slim
 WORKDIR /app
 
 ARG PIPER_TTS_VERSION=1.4.2
+ARG PIPER_VOICES_REF=v1.0.0
+ARG PIPER_VOICES_BASE_URL=https://huggingface.co/rhasspy/piper-voices/resolve
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates openssh-client docker.io git curl bash python3 python3-pip && \
-  python3 -m pip install --no-cache-dir "piper-tts==${PIPER_TTS_VERSION}" && \
-  piper --version >/dev/null && \
+  python3 -m pip install --break-system-packages --no-cache-dir "piper-tts==${PIPER_TTS_VERSION}" && \
+  command -v piper >/dev/null && \
   rm -rf /var/lib/apt/lists/*
 
 # Security: run as non-root
@@ -30,9 +32,29 @@ RUN groupadd --gid 1001 kimibuilt && \
 COPY --from=deps /app/node_modules ./node_modules
 COPY src/ ./src/
 COPY frontend/ ./frontend/
-COPY data/piper/voices/ ./data/piper/voices/
+COPY data/piper/voices/manifest.json ./data/piper/voices/manifest.json
 COPY package.json ./
 COPY package-lock.json* ./
+
+RUN mkdir -p /app/data/piper/voices && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/amy/medium/en_US-amy-medium.onnx" \
+    --output /app/data/piper/voices/en_US-amy-medium.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/amy/medium/en_US-amy-medium.onnx.json" \
+    --output /app/data/piper/voices/en_US-amy-medium.onnx.json && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx" \
+    --output /app/data/piper/voices/en_US-hfc_female-medium.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json" \
+    --output /app/data/piper/voices/en_US-hfc_female-medium.onnx.json && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/kathleen/low/en_US-kathleen-low.onnx" \
+    --output /app/data/piper/voices/en_US-kathleen-low.onnx && \
+  curl --fail --show-error --silent --location --retry 3 \
+    "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/kathleen/low/en_US-kathleen-low.onnx.json" \
+    --output /app/data/piper/voices/en_US-kathleen-low.onnx.json
 
 RUN mkdir -p /home/kimibuilt/.opencode && \
   chown -R kimibuilt:kimibuilt /home/kimibuilt /app

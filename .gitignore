@@ -10,6 +10,12 @@ asset-index.json
 coverage/
 dist/
 data/
+!data/
+!data/piper/
+data/piper/*
+!data/piper/voices/
+data/piper/voices/*
+!data/piper/voices/manifest.json
 
 # Logs
 *.log

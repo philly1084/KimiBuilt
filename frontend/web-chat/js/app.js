@@ -209,6 +209,12 @@ class ChatApp {
         this.isLoadingWorkloads = false;
         this.isSavingWorkload = false;
         this.sharedSessionSyncTimer = null;
+        this.activeStreamRequest = null;
+        this.pendingStreamResync = null;
+        this.resumeSyncTimer = null;
+        this.resumeSyncInFlight = false;
+        this.pageWasHidden = document.hidden === true;
+        this.lastResumeSyncAt = 0;
         
         this.init();
     }
@@ -434,18 +440,19 @@ class ChatApp {
         
         // Handle visibility change for resuming
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                this.checkConnection();
-                void this.refreshSharedSessionState().catch((error) => {
-                    console.warn('Failed to refresh shared session state:', error);
-                });
+            if (document.hidden) {
+                this.pageWasHidden = true;
+                this.markActiveStreamInterrupted('background');
+                return;
             }
+
+            this.scheduleResumeSync('visibility', 0);
         });
 
         window.addEventListener('focus', () => {
-            void this.refreshSharedSessionState().catch((error) => {
-                console.warn('Failed to refresh shared session state:', error);
-            });
+            if (this.pageWasHidden || this.pendingStreamResync) {
+                this.scheduleResumeSync('focus', 0);
+            }
         });
     }
 
@@ -646,11 +653,13 @@ class ChatApp {
     setupConnectivityListeners() {
         window.addEventListener('online', () => {
             console.log('Browser went online');
-            this.checkConnection();
+            this.scheduleResumeSync('online', 0);
         });
         
         window.addEventListener('offline', () => {
             console.log('Browser went offline');
+            this.pageWasHidden = true;
+            this.markActiveStreamInterrupted('offline');
             this.updateConnectionStatus('disconnected');
             uiHelpers.showToast('You are offline', 'warning');
         });
@@ -780,29 +789,19 @@ class ChatApp {
         }
         
         uiHelpers.hideWelcomeMessage();
-        
-        // Use requestAnimationFrame for smoother rendering of many messages
-        const renderBatch = (index) => {
-            const batchSize = 10;
-            const end = Math.min(index + batchSize, messages.length);
-            
-            for (let i = index; i < end; i++) {
-                const messageEl = uiHelpers.renderMessage(messages[i]);
-                this.messagesContainer.appendChild(messageEl);
-            }
-            
-            if (end < messages.length) {
-                requestAnimationFrame(() => renderBatch(end));
-            } else {
-                uiHelpers.reinitializeIcons(this.messagesContainer);
-                uiHelpers.updateMessageSpeechButtons(this.messagesContainer);
-                uiHelpers.highlightCodeBlocks(this.messagesContainer);
-                uiHelpers.scrollToBottom(false);
-                this.updateAudioControls();
-            }
-        };
-        
-        renderBatch(0);
+
+        const fragment = document.createDocumentFragment();
+        messages.forEach((message) => {
+            const messageEl = uiHelpers.renderMessage(message);
+            fragment.appendChild(messageEl);
+        });
+
+        this.messagesContainer.appendChild(fragment);
+        uiHelpers.reinitializeIcons(this.messagesContainer);
+        uiHelpers.updateMessageSpeechButtons(this.messagesContainer);
+        uiHelpers.highlightCodeBlocks(this.messagesContainer);
+        uiHelpers.scrollToBottom(false);
+        this.updateAudioControls();
     }
 
     clearCurrentSession() {
@@ -2099,7 +2098,7 @@ class ChatApp {
                 }
             });
 
-            recorder.start();
+            recorder.start(250);
             this.updateAudioControls();
         } catch (error) {
             const errorName = String(error?.name || '').trim();
@@ -2126,6 +2125,14 @@ class ChatApp {
         const recorder = this.voiceInputState.recorder;
         if (!recorder || recorder.state === 'inactive') {
             return;
+        }
+
+        if (typeof recorder.requestData === 'function') {
+            try {
+                recorder.requestData();
+            } catch (_error) {
+                // Ignore flush errors when the recorder has no buffered audio yet.
+            }
         }
 
         recorder.stop();
@@ -2211,6 +2218,7 @@ class ChatApp {
         }
 
         const sessionId = sessionManager.currentSessionId;
+        const previousMessages = sessionManager.getMessages(sessionId).slice();
 
         // Hide welcome message
         uiHelpers.hideWelcomeMessage();
@@ -2222,9 +2230,9 @@ class ChatApp {
             timestamp: new Date().toISOString()
         };
 
-        sessionManager.addMessage(sessionId, userMessage);
+        const storedUserMessage = sessionManager.addMessage(sessionId, userMessage);
 
-        const userMessageEl = uiHelpers.renderMessage(userMessage);
+        const userMessageEl = uiHelpers.renderMessage(storedUserMessage);
         this.messagesContainer.appendChild(userMessageEl);
         uiHelpers.playAcknowledgementCue();
         uiHelpers.scrollToBottom();
@@ -2249,14 +2257,21 @@ class ChatApp {
         this.currentStreamingMessageId = uiHelpers.generateMessageId();
         assistantMessage.id = this.currentStreamingMessageId;
 
-        sessionManager.addMessage(sessionId, assistantMessage);
-        const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
+        const storedAssistantMessage = sessionManager.addMessage(sessionId, assistantMessage);
+        const assistantMessageEl = uiHelpers.renderMessage(storedAssistantMessage, true);
         this.messagesContainer.appendChild(assistantMessageEl);
         uiHelpers.reinitializeIcons(assistantMessageEl);
         uiHelpers.scrollToBottom();
         this.beginAssistantStream({
             messageId: this.currentStreamingMessageId,
             detail: 'Gathering context and preparing the reply.',
+        });
+        this.trackActiveStreamRequest({
+            sessionId,
+            requestType: 'chat',
+            previousMessages,
+            userMessage: storedUserMessage,
+            placeholderMessage: storedAssistantMessage,
         });
         
         // Build message history for OpenAI API format
@@ -2275,7 +2290,15 @@ class ChatApp {
             let streamFailed = false;
 
             // Stream the chat
-            for await (const chunk of apiClient.streamChat(messages, model, this.currentAbortController.signal, reasoningEffort)) {
+            for await (const chunk of apiClient.streamChat(
+                messages,
+                model,
+                this.currentAbortController.signal,
+                reasoningEffort,
+                {
+                    shouldResyncAfterDisconnect: (error) => this.shouldResyncAfterDisconnect(error),
+                },
+            )) {
                 if (chunk.sessionId) {
                     this.syncBackendSession(chunk.sessionId);
                 }
@@ -2318,6 +2341,10 @@ class ChatApp {
                         if (retryCount > 1) {
                             uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
                         }
+                        break;
+                    case 'resync_required':
+                        streamFailed = true;
+                        this.handleInterruptedStreamResync(chunk);
                         break;
                 }
             }
@@ -4551,6 +4578,7 @@ class ChatApp {
         if (!this.currentStreamingMessageId) return;
 
         this.clearAmbientReasoningTimer();
+        this.clearPendingStreamResync();
         
         // Reset retry counter on success
         this.retryAttempt = 0;
@@ -4668,6 +4696,7 @@ class ChatApp {
             detail: '',
             reasoningSummary: '',
         };
+        this.activeStreamRequest = null;
         this.resetAmbientReasoningState();
         this.updateSendButton();
         this.scheduleLiveIndicatorHide();
@@ -4699,6 +4728,13 @@ class ChatApp {
             normalizedMessage.includes('disconnected');
 
         const isServerError = typeof status === 'number' && status >= 500;
+
+        if (isNetworkError && !isServerError && this.shouldResyncAfterDisconnect(message)) {
+            this.handleInterruptedStreamResync({
+                reason: 'connection_interrupted',
+            });
+            return;
+        }
         
         // For network errors, try to retry instead of immediately failing
         if (isNetworkError && !isServerError && this.retryAttempt < this.maxRetries) {
@@ -4757,6 +4793,8 @@ class ChatApp {
         
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
+        this.clearPendingStreamResync();
+        this.activeStreamRequest = null;
         this.liveResponseState = {
             phase: 'idle',
             detail: '',
@@ -4806,6 +4844,8 @@ class ChatApp {
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
         uiHelpers.hideTypingIndicator();
+        this.clearPendingStreamResync();
+        this.activeStreamRequest = null;
         
         // Remove the streaming message placeholder
         if (this.currentStreamingMessageId) {
@@ -4857,6 +4897,7 @@ class ChatApp {
         if (userMessageIndex < 0) return;
         
         const userMessage = messages[userMessageIndex];
+        const previousMessages = messages.slice();
         
         // Remove the old assistant message
         messages.splice(messageIndex, 1);
@@ -4882,8 +4923,8 @@ class ChatApp {
         this.currentStreamingMessageId = uiHelpers.generateMessageId();
         assistantMessage.id = this.currentStreamingMessageId;
         
-        sessionManager.addMessage(sessionId, assistantMessage);
-        const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
+        const storedAssistantMessage = sessionManager.addMessage(sessionId, assistantMessage);
+        const assistantMessageEl = uiHelpers.renderMessage(storedAssistantMessage, true);
         this.messagesContainer.appendChild(assistantMessageEl);
         uiHelpers.reinitializeIcons(assistantMessageEl);
         uiHelpers.scrollToBottom();
@@ -4895,6 +4936,13 @@ class ChatApp {
         // Get current model
         const model = uiHelpers.getCurrentModel();
         const reasoningEffort = uiHelpers.getCurrentReasoningEffort();
+        this.trackActiveStreamRequest({
+            sessionId,
+            requestType: 'regenerate',
+            previousMessages,
+            userMessage,
+            placeholderMessage: storedAssistantMessage,
+        });
         
         // Build message history and stream
         this.currentAbortController = new AbortController();
@@ -4903,7 +4951,15 @@ class ChatApp {
             apiClient.setSessionId(sessionId);
             const history = this.buildMessageHistory(sessionId);
             
-            for await (const chunk of apiClient.streamChat(history, model, this.currentAbortController.signal, reasoningEffort)) {
+            for await (const chunk of apiClient.streamChat(
+                history,
+                model,
+                this.currentAbortController.signal,
+                reasoningEffort,
+                {
+                    shouldResyncAfterDisconnect: (error) => this.shouldResyncAfterDisconnect(error),
+                },
+            )) {
                 if (chunk.sessionId) {
                     this.syncBackendSession(chunk.sessionId);
                 }
@@ -4938,6 +4994,9 @@ class ChatApp {
                         if (chunk.attempt > 1) {
                             uiHelpers.showToast(`Retrying... (attempt ${chunk.attempt}/${chunk.maxAttempts})`, 'info');
                         }
+                        break;
+                    case 'resync_required':
+                        this.handleInterruptedStreamResync(chunk);
                         break;
                 }
             }
@@ -5396,8 +5455,285 @@ class ChatApp {
         return health;
     }
 
-    async refreshSharedSessionState() {
-        if (this.isProcessing) {
+    trackActiveStreamRequest(context = {}) {
+        const sessionId = String(context.sessionId || sessionManager.currentSessionId || '').trim();
+        if (!sessionId) {
+            return null;
+        }
+
+        this.activeStreamRequest = {
+            sessionId,
+            requestType: String(context.requestType || 'chat'),
+            startedAt: Date.now(),
+            lifecycleInterrupted: false,
+            interruptionReason: '',
+            previousMessages: Array.isArray(context.previousMessages) ? context.previousMessages.slice() : [],
+            userMessage: context.userMessage || null,
+            placeholderMessage: context.placeholderMessage || null,
+            assistantMessageId: String(context.placeholderMessage?.id || '').trim(),
+            maxResyncAttempts: 6,
+            resyncAttempts: 0,
+        };
+        this.pendingStreamResync = null;
+        return this.activeStreamRequest;
+    }
+
+    markActiveStreamInterrupted(reason = 'connection') {
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (!trackedRequest) {
+            return;
+        }
+
+        trackedRequest.lifecycleInterrupted = true;
+        trackedRequest.interruptionReason = String(reason || 'connection');
+        trackedRequest.interruptedAt = Date.now();
+        this.pendingStreamResync = trackedRequest;
+    }
+
+    clearPendingStreamResync() {
+        if (this.resumeSyncTimer) {
+            clearTimeout(this.resumeSyncTimer);
+            this.resumeSyncTimer = null;
+        }
+        this.pendingStreamResync = null;
+        this.resumeSyncInFlight = false;
+    }
+
+    shouldResyncAfterDisconnect(error = null) {
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (!trackedRequest) {
+            return false;
+        }
+
+        if (trackedRequest.lifecycleInterrupted) {
+            return true;
+        }
+
+        if (document.hidden) {
+            return true;
+        }
+
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            return true;
+        }
+
+        const normalizedMessage = String(error?.message || error || '').toLowerCase();
+        return this.pageWasHidden && (
+            normalizedMessage.includes('network')
+            || normalizedMessage.includes('fetch')
+            || normalizedMessage.includes('timeout')
+            || normalizedMessage.includes('disconnect')
+        );
+    }
+
+    scheduleResumeSync(reason = 'resume', delayMs = 150) {
+        const now = Date.now();
+        if (reason !== 'stream-resync' && reason !== 'online' && now - this.lastResumeSyncAt < 1200) {
+            return;
+        }
+
+        if (this.resumeSyncTimer) {
+            clearTimeout(this.resumeSyncTimer);
+        }
+
+        this.resumeSyncTimer = setTimeout(() => {
+            this.runResumeSync(reason).catch((error) => {
+                console.warn(`Failed to sync state after ${reason}:`, error);
+            });
+        }, delayMs);
+    }
+
+    async runResumeSync(reason = 'resume') {
+        this.resumeSyncTimer = null;
+        this.lastResumeSyncAt = Date.now();
+
+        try {
+            await this.checkConnection();
+        } catch (error) {
+            console.warn(`Failed to refresh connection status after ${reason}:`, error);
+        }
+
+        if (this.pendingStreamResync) {
+            await this.recoverInterruptedStream();
+        } else {
+            await this.refreshSharedSessionState();
+        }
+
+        this.pageWasHidden = false;
+    }
+
+    async recoverInterruptedStream() {
+        const trackedRequest = this.pendingStreamResync;
+        if (!trackedRequest || this.resumeSyncInFlight || document.hidden) {
+            return;
+        }
+
+        this.resumeSyncInFlight = true;
+
+        try {
+            const sessionId = trackedRequest.sessionId || sessionManager.currentSessionId;
+            if (!sessionId) {
+                this.finalizeInterruptedStreamFailure();
+                return;
+            }
+
+            apiClient.setSessionId(sessionId);
+            await sessionManager.loadSessions();
+            await sessionManager.loadSessionMessagesFromBackend(sessionId);
+
+            const messages = this.syncAnnotatedSurveyStates(sessionId);
+            if (this.hasRecoveredInterruptedStream(messages, trackedRequest)) {
+                this.renderMessages(messages);
+                this.playCueForNewAssistantMessages(trackedRequest.previousMessages, messages);
+                this.updateSessionInfo();
+                uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+                this.clearPendingStreamResync();
+                this.activeStreamRequest = null;
+                this.isProcessing = false;
+                this.currentStreamingMessageId = null;
+                this.liveResponseState = {
+                    phase: 'idle',
+                    detail: '',
+                    reasoningSummary: '',
+                };
+                uiHelpers.hideTypingIndicator();
+                this.resetAmbientReasoningState();
+                this.updateSendButton();
+                this.scheduleLiveIndicatorHide();
+                return;
+            }
+
+            trackedRequest.resyncAttempts += 1;
+
+            if (trackedRequest.placeholderMessage) {
+                const placeholderMessage = this.upsertSessionMessage(sessionId, {
+                    ...trackedRequest.placeholderMessage,
+                    content: trackedRequest.placeholderMessage.content || '',
+                    isStreaming: true,
+                    liveState: {
+                        phase: 'thinking',
+                        detail: 'Connection restored. Syncing the latest reply.',
+                        reasoningSummary: '',
+                    },
+                });
+                this.currentStreamingMessageId = placeholderMessage?.id || trackedRequest.assistantMessageId || null;
+                this.renderOrReplaceMessage(placeholderMessage);
+                uiHelpers.scrollToBottom(false);
+            }
+
+            this.updateLiveResponsePhase('thinking', 'Connection restored. Syncing the latest reply.');
+            this.updateSendButton();
+
+            if (trackedRequest.resyncAttempts >= trackedRequest.maxResyncAttempts) {
+                this.finalizeInterruptedStreamFailure();
+                return;
+            }
+
+            this.scheduleResumeSync('stream-resync', 1500);
+        } finally {
+            this.resumeSyncInFlight = false;
+        }
+    }
+
+    hasRecoveredInterruptedStream(messages, trackedRequest) {
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return false;
+        }
+
+        const referenceTimestamp = trackedRequest?.userMessage?.timestamp
+            || trackedRequest?.placeholderMessage?.timestamp
+            || new Date(trackedRequest?.startedAt || Date.now()).toISOString();
+        const referenceTime = new Date(referenceTimestamp).getTime();
+        const latestAssistantMessage = [...messages].reverse().find((message) => (
+            message?.role === 'assistant'
+            && message?.isStreaming !== true
+            && Boolean(String(message?.content || message?.displayContent || '').trim())
+        ));
+        if (!latestAssistantMessage) {
+            return false;
+        }
+
+        const latestAssistantTime = new Date(latestAssistantMessage.timestamp || 0).getTime();
+        if (Number.isFinite(referenceTime) && Number.isFinite(latestAssistantTime) && latestAssistantTime >= referenceTime - 1000) {
+            return true;
+        }
+
+        return messages.length > trackedRequest.previousMessages.length
+            && messages[messages.length - 1]?.role === 'assistant';
+    }
+
+    finalizeInterruptedStreamFailure() {
+        const sessionId = sessionManager.currentSessionId;
+        const messageId = this.pendingStreamResync?.assistantMessageId || this.currentStreamingMessageId;
+        if (sessionId && messageId) {
+            const failedEl = document.getElementById(messageId);
+            if (failedEl) {
+                failedEl.remove();
+            }
+
+            const messages = sessionManager.getMessages(sessionId);
+            const index = messages.findIndex((message) => message.id === messageId);
+            if (index !== -1) {
+                messages.splice(index, 1);
+                sessionManager.saveToStorage();
+            }
+        }
+
+        this.isProcessing = false;
+        this.currentStreamingMessageId = null;
+        this.clearLiveIndicatorTimer();
+        this.clearPendingStreamResync();
+        this.activeStreamRequest = null;
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+        };
+        this.resetAmbientReasoningState();
+        this.updateSendButton();
+        uiHelpers.hideTypingIndicator();
+        uiHelpers.showToast('Connection was restored, but the latest reply could not be synced. Retry if needed.', 'warning', 'Sync incomplete');
+    }
+
+    handleInterruptedStreamResync(chunk = {}) {
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (!trackedRequest) {
+            return;
+        }
+
+        this.markActiveStreamInterrupted(chunk.reason || 'connection');
+        this.retryAttempt = 0;
+        this.currentAbortController = null;
+        this.updateConnectionStatus('checking');
+        this.updateLiveResponsePhase('thinking', 'Connection changed. Syncing the latest reply.');
+
+        if (trackedRequest.placeholderMessage) {
+            this.updateStreamingMessageState({
+                content: trackedRequest.placeholderMessage.content || '',
+                isStreaming: true,
+                liveState: {
+                    phase: 'thinking',
+                    detail: 'Connection changed. Syncing the latest reply.',
+                    reasoningSummary: '',
+                },
+            }, {
+                render: true,
+                scroll: false,
+            });
+        }
+
+        if (!trackedRequest.notifiedResync) {
+            uiHelpers.showToast('Connection changed while the app was asleep. Syncing the latest reply...', 'info', 'Reconnected');
+            trackedRequest.notifiedResync = true;
+        }
+
+        if (!document.hidden) {
+            this.scheduleResumeSync('stream-resync', 0);
+        }
+    }
+
+    async refreshSharedSessionState(options = {}) {
+        if (this.isProcessing && options.allowWhileProcessing !== true) {
             return;
         }
 
@@ -5458,7 +5794,10 @@ class ChatApp {
                 return;
             }
 
-            this.refreshSharedSessionState().catch((error) => {
+            const refreshAction = this.pendingStreamResync
+                ? this.recoverInterruptedStream()
+                : this.refreshSharedSessionState();
+            refreshAction.catch((error) => {
                 console.warn('Failed to refresh shared session state:', error);
             });
         }, 15000);

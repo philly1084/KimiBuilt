@@ -21,10 +21,13 @@ describe('config bundled Piper defaults', () => {
         process.env = ORIGINAL_ENV;
     });
 
-    test('uses bundled Piper runtime and voices when explicit env overrides are absent', () => {
+    test('loads the bundled Piper voice manifest and chooses the rich default voice when explicit env overrides are absent', () => {
         const { config } = require('./config');
 
-        expect(config.tts.piper.binaryPath).toContain(path.join('data', 'piper', 'runtime', 'piper'));
+        expect(
+            config.tts.piper.binaryPath === 'piper'
+            || config.tts.piper.binaryPath.includes(path.join('data', 'piper', 'runtime', 'piper')),
+        ).toBe(true);
         expect(config.tts.piper.voicesPath).toContain(path.join('data', 'piper', 'voices', 'manifest.json'));
         expect(config.tts.piper.voices).toEqual(expect.arrayContaining([
             expect.objectContaining({ id: 'amy-medium' }),

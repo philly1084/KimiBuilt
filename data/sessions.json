@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "savedAt": "2026-04-08T21:43:21.813Z",
+  "sessions": [
+    {
+      "id": "779b26bb-0447-4831-8378-b2cbc20c27ab",
+      "previousResponseId": null,
+      "createdAt": "2026-04-08T21:43:21.812Z",
+      "updatedAt": "2026-04-08T21:43:21.812Z",
+      "messageCount": 0,
+      "metadata": {
+        "mode": "chat",
+        "memoryScope": "chat",
+        "sessionIsolation": true
+      },
+      "controlState": {}
+    }
+  ],
+  "messages": [
+    [
+      "779b26bb-0447-4831-8378-b2cbc20c27ab",
+      []
+    ]
+  ],
+  "userSessionState": []
+}

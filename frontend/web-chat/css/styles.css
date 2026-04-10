@@ -1521,7 +1521,7 @@ a {
 }
 
 html {
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
 }
 
 body {
@@ -3546,7 +3546,7 @@ body.layout-minimal #input-meta-row {
    ============================================ */
 
 #messages-container {
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
     position: relative;
 }
 
@@ -3595,6 +3595,76 @@ body.layout-minimal #input-meta-row {
 .message-avatar.assistant {
     background: linear-gradient(135deg, var(--accent), var(--purple));
     color: white;
+}
+
+.message-avatar.assistant.message-avatar--live {
+    position: relative;
+    overflow: visible;
+    background: transparent;
+    color: var(--accent);
+    box-shadow: none;
+    --message-live-avatar-color: color-mix(in srgb, var(--accent) 92%, white 8%);
+    --message-live-avatar-track: rgba(255, 255, 255, 0.08);
+}
+
+.message-avatar.assistant.message-avatar--live::before {
+    content: '';
+    position: absolute;
+    inset: -0.16rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.message-avatar.assistant.message-avatar--live::after {
+    content: '';
+    position: absolute;
+    inset: -0.28rem;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    border-top-color: var(--message-live-avatar-color);
+    border-right-color: color-mix(in srgb, var(--message-live-avatar-color) 68%, transparent);
+    border-bottom-color: var(--message-live-avatar-track);
+    border-left-color: rgba(255, 255, 255, 0.04);
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--message-live-avatar-color) 32%, transparent));
+    animation: spin 0.9s linear infinite;
+}
+
+.message-avatar__live-orb {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(88, 166, 255, 0.14);
+    color: var(--accent);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 10px 20px rgba(5, 10, 18, 0.22);
+    animation: live-orb-pulse 1.8s ease-in-out infinite;
+}
+
+.message-avatar--live[data-live-phase="checking-tools"] {
+    --message-live-avatar-color: color-mix(in srgb, var(--purple) 92%, white 8%);
+    color: var(--purple);
+}
+
+.message-avatar--live[data-live-phase="checking-tools"] .message-avatar__live-orb {
+    background: var(--purple-light);
+    color: var(--purple);
+}
+
+.message-avatar--live[data-live-phase="ready"] {
+    --message-live-avatar-color: color-mix(in srgb, var(--success) 92%, white 8%);
+    color: var(--success);
+}
+
+.message-avatar--live[data-live-phase="ready"] .message-avatar__live-orb {
+    background: rgba(34, 197, 94, 0.14);
+    color: var(--success);
 }
 
 .message-avatar.system {

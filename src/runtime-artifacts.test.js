@@ -33,6 +33,39 @@ describe('runtime artifact helpers', () => {
         ]);
     });
 
+    test('extracts deep-research presentation documents from successful tool events', () => {
+        const artifacts = extractArtifactsFromToolEvents([{
+            toolCall: {
+                function: {
+                    name: 'deep-research-presentation',
+                },
+            },
+            result: {
+                success: true,
+                data: {
+                    action: 'research_and_generate_presentation',
+                    document: {
+                        id: 'deck-1',
+                        filename: 'pigeon-love-research.pptx',
+                        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        downloadUrl: '/api/documents/deck-1/download',
+                        metadata: { format: 'pptx' },
+                    },
+                },
+            },
+        }]);
+
+        expect(artifacts).toEqual([
+            expect.objectContaining({
+                id: 'deck-1',
+                filename: 'pigeon-love-research.pptx',
+                format: 'pptx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                downloadUrl: '/api/documents/deck-1/download',
+            }),
+        ]);
+    });
+
     test('deduplicates runtime artifacts across tool and generated sources', () => {
         const merged = mergeRuntimeArtifacts(
             [{

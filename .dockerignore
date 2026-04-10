@@ -1,4 +1,13 @@
 node_modules/
+**/node_modules/
+data/
+!data/
+data/*
+!data/piper/
+data/piper/*
+!data/piper/voices/
+data/piper/voices/*
+!data/piper/voices/manifest.json
 .env
 .git
 coverage/

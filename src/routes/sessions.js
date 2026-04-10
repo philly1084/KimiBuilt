@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { memoryService } = require('../memory/memory-service');
 const { artifactService } = require('../artifacts/artifact-service');
+const { mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
     buildScopedSessionMetadata,
     hasSessionScopeHints,
@@ -65,6 +66,26 @@ function getRequestedScopeKey(source = {}) {
     return hasSessionScopeHints(scopeInput)
         ? resolveSessionScope(scopeInput)
         : null;
+}
+
+function extractArtifactsFromMessages(messages = []) {
+    const artifactSets = (Array.isArray(messages) ? messages : [])
+        .flatMap((message) => {
+            if (!message || typeof message !== 'object') {
+                return [];
+            }
+
+            const sets = [];
+            if (Array.isArray(message.artifacts) && message.artifacts.length > 0) {
+                sets.push(message.artifacts);
+            }
+            if (Array.isArray(message.metadata?.artifacts) && message.metadata.artifacts.length > 0) {
+                sets.push(message.metadata.artifacts);
+            }
+            return sets;
+        });
+
+    return mergeRuntimeArtifacts(...artifactSets);
 }
 
 router.post('/', async (req, res, next) => {
@@ -162,7 +183,14 @@ router.get('/:id/artifacts', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
-        const artifacts = await artifactService.listSessionArtifacts(req.params.id);
+        const [storedArtifacts, messages] = await Promise.all([
+            artifactService.listSessionArtifacts(req.params.id),
+            sessionStore.listMessages(req.params.id, 500, getRequestOwnerId(req)),
+        ]);
+        const artifacts = mergeRuntimeArtifacts(
+            storedArtifacts,
+            extractArtifactsFromMessages(messages),
+        );
         res.json({ sessionId: req.params.id, artifacts, count: artifacts.length });
     } catch (err) {
         next(err);

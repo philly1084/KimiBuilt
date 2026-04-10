@@ -1,0 +1,57 @@
+[
+  {
+    "id": "amy-medium",
+    "label": "Amy Soft",
+    "description": "Balanced U.S. English female voice with a soft, natural tone.",
+    "modelPath": "data/piper/voices/en_US-amy-medium.onnx",
+    "configPath": "data/piper/voices/en_US-amy-medium.onnx.json",
+    "lengthScale": 1.06,
+    "noiseScale": 0.42,
+    "noiseW": 0.72,
+    "sentenceSilence": 0.3
+  },
+  {
+    "id": "amy-expressive",
+    "label": "Amy Expressive",
+    "description": "Amy tuned for brighter feminine inflection and more conversational lift.",
+    "modelPath": "data/piper/voices/en_US-amy-medium.onnx",
+    "configPath": "data/piper/voices/en_US-amy-medium.onnx.json",
+    "lengthScale": 0.98,
+    "noiseScale": 0.52,
+    "noiseW": 0.82,
+    "sentenceSilence": 0.24
+  },
+  {
+    "id": "hfc-female-medium",
+    "label": "HFC Warm",
+    "description": "Warm female voice with a fuller tone for longer replies.",
+    "modelPath": "data/piper/voices/en_US-hfc_female-medium.onnx",
+    "configPath": "data/piper/voices/en_US-hfc_female-medium.onnx.json",
+    "lengthScale": 1.03,
+    "noiseScale": 0.48,
+    "noiseW": 0.76,
+    "sentenceSilence": 0.28
+  },
+  {
+    "id": "hfc-female-rich",
+    "label": "HFC Rich",
+    "description": "Richer feminine local voice with steadier cadence and fuller body for assistant replies.",
+    "modelPath": "data/piper/voices/en_US-hfc_female-medium.onnx",
+    "configPath": "data/piper/voices/en_US-hfc_female-medium.onnx.json",
+    "lengthScale": 1.01,
+    "noiseScale": 0.44,
+    "noiseW": 0.72,
+    "sentenceSilence": 0.26
+  },
+  {
+    "id": "kathleen-low",
+    "label": "Kathleen Gentle",
+    "description": "Very soft female voice with lighter fidelity and a relaxed pace.",
+    "modelPath": "data/piper/voices/en_US-kathleen-low.onnx",
+    "configPath": "data/piper/voices/en_US-kathleen-low.onnx.json",
+    "lengthScale": 1.12,
+    "noiseScale": 0.36,
+    "noiseW": 0.68,
+    "sentenceSilence": 0.34
+  }
+]

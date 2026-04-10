@@ -831,6 +831,9 @@
                     }
                 }
                 state.artifacts = [...state.lastDone.artifacts, ...state.artifacts.filter((artifact) => !state.lastDone.artifacts.find((next) => next.id === artifact.id))];
+                state.lastDone.artifacts.forEach((artifact) => {
+                    window.fileManager?.addFile?.(artifact);
+                });
                 state.selectedArtifactIds = [];
                 renderSelectedChips();
                 state.lastDone = null;
@@ -1006,7 +1009,7 @@
         downloadArtifact: async (id, filename) => {
             const artifact = state.artifacts.find((entry) => entry.id === id) || state.lastDone?.artifacts?.find((entry) => entry.id === id);
             // Use file manager if available
-            if (window.fileManager && !artifact?.bundleDownloadUrl) {
+            if (window.fileManager && !artifact?.bundleDownloadUrl && window.fileManager.files?.some?.((file) => file.id === id)) {
                 await window.fileManager.downloadFile(id);
                 return;
             }

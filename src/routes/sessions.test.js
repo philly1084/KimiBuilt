@@ -32,6 +32,7 @@ jest.mock('../artifacts/artifact-service', () => ({
 }));
 
 const { sessionStore } = require('../session-store');
+const { artifactService } = require('../artifacts/artifact-service');
 const sessionsRouter = require('./sessions');
 
 describe('/api/sessions route', () => {
@@ -164,5 +165,49 @@ describe('/api/sessions route', () => {
         expect(response.status).toBe(200);
         expect(sessionStore.setActiveSession).toHaveBeenCalledWith('phill', 'session-1', 'web-chat');
         expect(sessionStore.getActiveOwnedSession).toHaveBeenCalledWith('phill', 'web-chat');
+    });
+
+    test('merges message-derived document links into the session artifact list', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+        artifactService.listSessionArtifacts.mockResolvedValue([]);
+        sessionStore.listMessages.mockResolvedValue([
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                metadata: {
+                    artifacts: [{
+                        id: 'doc-77',
+                        filename: 'pigeon-love-research.pptx',
+                        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        downloadUrl: '/api/documents/doc-77/download',
+                        metadata: { format: 'pptx' },
+                    }],
+                },
+            },
+        ]);
+
+        const app = express();
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app).get('/api/sessions/session-1/artifacts');
+
+        expect(response.status).toBe(200);
+        expect(artifactService.listSessionArtifacts).toHaveBeenCalledWith('session-1');
+        expect(sessionStore.listMessages).toHaveBeenCalledWith('session-1', 500, 'phill');
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'doc-77',
+                filename: 'pigeon-love-research.pptx',
+                format: 'pptx',
+                downloadUrl: '/api/documents/doc-77/download',
+            }),
+        ]);
     });
 });

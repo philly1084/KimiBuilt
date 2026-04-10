@@ -34,6 +34,120 @@ function normalizeSessionModel(model, fallbackModel = SESSION_DEFAULT_MODEL) {
     return resolveSessionPreferredModel([], model, fallbackModel);
 }
 
+function extractSessionReasoningSummary(value) {
+    if (typeof value === 'string') {
+        return String(value || '').trim();
+    }
+
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => extractSessionReasoningSummary(entry))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    if (!value || typeof value !== 'object') {
+        return '';
+    }
+
+    const leafCandidates = [
+        value.text,
+        value.output_text,
+        value.summary_text,
+        value.value,
+    ];
+    for (const candidate of leafCandidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return candidate.trim();
+        }
+    }
+
+    if (value.type === 'reasoning') {
+        return extractSessionReasoningSummary(
+            value.summary
+            || value.summary_text
+            || value.reasoning_content
+            || value.reasoning
+            || value.text
+            || value.content
+            || value.output_text
+            || value.value
+            || '',
+        );
+    }
+
+    const directCandidates = [
+        value.reasoningSummary,
+        value.reasoning_summary,
+        value.reasoning,
+        value.reasoning_text,
+        value.reasoningText,
+        value.reasoning_content,
+        value.reasoningContent,
+        value.reasoning_details,
+        value.reasoningDetails,
+        value.summary,
+        value.summaryText,
+        value.summary_text,
+    ];
+    for (const candidate of directCandidates) {
+        const normalized = extractSessionReasoningSummary(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    return '';
+}
+
+function normalizeSessionMessage(message = {}) {
+    const assistantMetadata = message?.assistantMetadata && typeof message.assistantMetadata === 'object' && !Array.isArray(message.assistantMetadata)
+        ? message.assistantMetadata
+        : (message?.assistant_metadata && typeof message.assistant_metadata === 'object' && !Array.isArray(message.assistant_metadata)
+            ? message.assistant_metadata
+            : {});
+    const metadata = message?.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata)
+        ? message.metadata
+        : {};
+    const mergedMetadata = {
+        ...assistantMetadata,
+        ...metadata,
+    };
+    const reasoningSummary = extractSessionReasoningSummary(
+        message?.reasoningSummary
+        || message?.reasoning_summary
+        || mergedMetadata.reasoningSummary
+        || mergedMetadata.reasoning_summary
+        || message?.reasoning
+        || message?.reasoning_text
+        || message?.reasoning_content
+        || message?.reasoning_details
+        || '',
+    );
+    const reasoningAvailable = Boolean(reasoningSummary)
+        || message?.reasoningAvailable === true
+        || message?.reasoning_available === true
+        || mergedMetadata.reasoningAvailable === true
+        || mergedMetadata.reasoning_available === true;
+
+    if (reasoningSummary) {
+        mergedMetadata.reasoningSummary = reasoningSummary;
+        mergedMetadata.reasoningAvailable = true;
+    } else if (reasoningAvailable) {
+        mergedMetadata.reasoningAvailable = true;
+    }
+
+    return {
+        ...mergedMetadata,
+        ...message,
+        metadata: mergedMetadata,
+        ...(reasoningSummary ? { reasoningSummary } : {}),
+        ...(reasoningAvailable ? { reasoningAvailable: true } : {}),
+    };
+}
+
 class SessionManager extends EventTarget {
     constructor() {
         super();
@@ -259,16 +373,12 @@ class SessionManager extends EventTarget {
     }
 
     hydrateBackendMessage(message = {}) {
-        const metadata = message?.metadata && typeof message.metadata === 'object' && !Array.isArray(message.metadata)
-            ? message.metadata
-            : {};
+        const normalizedMessage = normalizeSessionMessage(message);
 
         return {
-            ...metadata,
-            ...message,
-            metadata,
-            id: message.id || this.generateLocalId(),
-            timestamp: message.timestamp || new Date().toISOString(),
+            ...normalizedMessage,
+            id: normalizedMessage.id || this.generateLocalId(),
+            timestamp: normalizedMessage.timestamp || new Date().toISOString(),
         };
     }
 
@@ -693,9 +803,9 @@ class SessionManager extends EventTarget {
         }
         
         const messageWithMeta = {
-            ...message,
+            ...normalizeSessionMessage(message),
             id: message.id || this.generateLocalId(),
-            timestamp: message.timestamp || new Date().toISOString()
+            timestamp: message.timestamp || new Date().toISOString(),
         };
         
         messages.push(messageWithMeta);
@@ -738,8 +848,10 @@ class SessionManager extends EventTarget {
         }
 
         const mergedMessage = {
-            ...messages[index],
-            ...message,
+            ...normalizeSessionMessage({
+                ...messages[index],
+                ...message,
+            }),
             id: messages[index].id,
             timestamp: message.timestamp || messages[index].timestamp || new Date().toISOString(),
         };

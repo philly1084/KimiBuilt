@@ -180,6 +180,22 @@ function normalizeAssistantMetadata(value) {
         nextMetadata.taskType = value.taskType.trim();
     }
 
+    const artifacts = (Array.isArray(value.artifacts) ? value.artifacts : [])
+        .filter((artifact) => artifact && typeof artifact === 'object')
+        .map((artifact) => ({
+            ...artifact,
+            id: String(artifact.id || '').trim(),
+            filename: String(artifact.filename || '').trim(),
+            format: String(artifact.format || '').trim(),
+            downloadUrl: String(artifact.downloadUrl || '').trim(),
+            previewUrl: String(artifact.previewUrl || '').trim(),
+            bundleDownloadUrl: String(artifact.bundleDownloadUrl || '').trim(),
+        }))
+        .filter((artifact) => artifact.id && artifact.downloadUrl);
+    if (artifacts.length > 0) {
+        nextMetadata.artifacts = artifacts;
+    }
+
     const reasoningSummary = extractReasoningSummary(value);
     if (reasoningSummary) {
         nextMetadata.reasoningSummary = reasoningSummary;
@@ -808,7 +824,7 @@ class OpenAIAPIClient extends EventTarget {
         }
 
         try {
-            yield* this.streamChatWithFetch(params, controller.signal, requestId);
+            yield* this.streamChatWithFetch(params, controller.signal, requestId, requestOptions);
         } finally {
             this.abortControllers.delete(requestId);
         }
@@ -817,7 +833,7 @@ class OpenAIAPIClient extends EventTarget {
     /**
      * Stream chat using fetch fallback with retry logic
      */
-    async *streamChatWithFetch(params, signal, requestId) {
+    async *streamChatWithFetch(params, signal, requestId, requestOptions = {}) {
         let lastError = null;
         
         for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
@@ -982,6 +998,25 @@ class OpenAIAPIClient extends EventTarget {
                     yield { type: 'error', error: message, status: error.status, details: error.details };
                     yield { type: 'done', sessionId: this.currentSessionId };
                     return;
+                }
+
+                if (typeof requestOptions?.shouldResyncAfterDisconnect === 'function') {
+                    const shouldResync = requestOptions.shouldResyncAfterDisconnect(error, {
+                        attempt: attempt + 1,
+                        maxAttempts: RETRY_CONFIG.maxRetries + 1,
+                        hidden: typeof document !== 'undefined' ? document.hidden === true : false,
+                        online: typeof navigator !== 'undefined' ? navigator.onLine !== false : true,
+                    });
+                    if (shouldResync) {
+                        yield {
+                            type: 'resync_required',
+                            reason: 'connection_interrupted',
+                            attempt: attempt + 1,
+                            maxAttempts: RETRY_CONFIG.maxRetries + 1,
+                            sessionId: this.currentSessionId,
+                        };
+                        return;
+                    }
                 }
                 
                 // Last attempt failed

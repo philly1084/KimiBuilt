@@ -2211,12 +2211,104 @@ class UIHelpers {
         }
     }
 
+    buildAssistantAvatarMarkup(message = null, isStreaming = false) {
+        if (isStreaming !== true) {
+            return `<div class="message-avatar assistant" aria-hidden="true"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
+        }
+
+        const phaseMeta = this.getLivePhaseMeta(message?.liveState?.phase || 'thinking');
+
+        return `
+            <div class="message-avatar assistant message-avatar--live" data-live-phase="${this.escapeHtmlAttr(phaseMeta.phase)}" aria-hidden="true">
+                <span class="message-avatar__live-orb" aria-hidden="true">
+                    <i data-lucide="${this.escapeHtmlAttr(phaseMeta.icon)}" class="w-3.5 h-3.5"></i>
+                </span>
+            </div>
+        `;
+    }
+
+    extractReasoningText(value = null) {
+        if (typeof value === 'string') {
+            return String(value || '').trim();
+        }
+
+        if (Array.isArray(value)) {
+            return value
+                .map((entry) => this.extractReasoningText(entry))
+                .filter(Boolean)
+                .join(' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        if (!value || typeof value !== 'object') {
+            return '';
+        }
+
+        const leafCandidates = [
+            value.text,
+            value.output_text,
+            value.summary_text,
+            value.value,
+        ];
+        for (const candidate of leafCandidates) {
+            if (typeof candidate === 'string' && candidate.trim()) {
+                return candidate.trim();
+            }
+        }
+
+        if (value.type === 'reasoning') {
+            return this.extractReasoningText(
+                value.summary
+                || value.summary_text
+                || value.reasoning_content
+                || value.reasoning
+                || value.text
+                || value.content
+                || value.output_text
+                || value.value
+                || '',
+            );
+        }
+
+        const directCandidates = [
+            value.reasoningSummary,
+            value.reasoning_summary,
+            value.reasoning,
+            value.reasoning_text,
+            value.reasoningText,
+            value.reasoning_content,
+            value.reasoningContent,
+            value.reasoning_details,
+            value.reasoningDetails,
+            value.summary,
+            value.summaryText,
+            value.summary_text,
+        ];
+        for (const candidate of directCandidates) {
+            const normalized = this.extractReasoningText(candidate);
+            if (normalized) {
+                return normalized;
+            }
+        }
+
+        return '';
+    }
+
     getMessageReasoningSummary(message = null) {
-        return String(
+        return this.extractReasoningText(
             message?.reasoningSummary
             || message?.metadata?.reasoningSummary
+            || message?.reasoning
+            || message?.reasoning_text
+            || message?.reasoning_content
+            || message?.reasoning_details
+            || message?.assistantMetadata?.reasoningSummary
+            || message?.assistantMetadata?.reasoning
+            || message?.assistant_metadata?.reasoningSummary
+            || message?.assistant_metadata?.reasoning
             || '',
-        ).trim();
+        );
     }
 
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
@@ -2456,9 +2548,9 @@ class UIHelpers {
         messageEl.setAttribute('role', 'article');
         messageEl.setAttribute('aria-label', `${isUser ? 'Your message' : 'Assistant response'}`);
 
-        const avatar = isUser ? 
-            `<div class="message-avatar user" aria-hidden="true"><i data-lucide="user" class="w-4 h-4"></i></div>` :
-            `<div class="message-avatar assistant" aria-hidden="true"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
+        const avatar = isUser
+            ? `<div class="message-avatar user" aria-hidden="true"><i data-lucide="user" class="w-4 h-4"></i></div>`
+            : this.buildAssistantAvatarMarkup(message, effectiveStreaming);
 
         const renderedContent = isUser ? 
             message.content :
@@ -6563,7 +6655,7 @@ class UIHelpers {
     // Scroll & View Utilities
     // ============================================
 
-    scrollToBottom(smooth = true) {
+    scrollToBottom(smooth = false) {
         this.messageContainer.scrollTo({
             top: this.messageContainer.scrollHeight,
             behavior: smooth ? 'smooth' : 'auto'

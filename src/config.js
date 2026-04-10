@@ -41,6 +41,18 @@ function parseOptionalFloat(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseOptionalStringList(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return [];
+    }
+
+    return normalized
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
 function normalizePiperVoiceDefinition(value = {}, defaults = {}) {
     if (!value || typeof value !== 'object') {
         return null;
@@ -288,6 +300,7 @@ const config = {
             || process.env.OPENAI_BASE_URL
             || 'https://api.openai.com/v1',
         transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
+        fallbackModels: parseOptionalStringList(process.env.OPENAI_TRANSCRIPTION_FALLBACK_MODELS),
         maxUploadBytes: Math.max(
             1024 * 1024,
             parseInt(process.env.OPENAI_TRANSCRIPTION_MAX_UPLOAD_BYTES, 10) || (25 * 1024 * 1024),
