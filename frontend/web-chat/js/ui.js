@@ -5890,26 +5890,34 @@ class UIHelpers {
         }
 
         const phaseMeta = this.getLivePhaseMeta(state.phase || 'thinking');
+        const content = indicator.querySelector('.typing-indicator-content');
         const label = document.getElementById('typing-phase-label');
         const text = document.getElementById('typing-text');
         const detail = document.getElementById('typing-detail');
         const icon = indicator.querySelector('[data-live-icon]');
+        const nextText = String(state.text || phaseMeta.text).trim() || phaseMeta.text;
+        const nextDetail = String(state.detail || phaseMeta.detail).trim() || phaseMeta.detail;
+        const statusLabel = `${phaseMeta.label}: ${nextDetail || nextText}`;
 
         indicator.dataset.livePhase = phaseMeta.phase;
         indicator.classList.remove('hidden');
         indicator.setAttribute('aria-hidden', 'false');
+        indicator.setAttribute('aria-label', statusLabel);
 
         if (label) {
             label.textContent = phaseMeta.label;
         }
         if (text) {
-            text.textContent = String(state.text || phaseMeta.text).trim() || phaseMeta.text;
+            text.textContent = nextText;
         }
         if (detail) {
-            detail.textContent = String(state.detail || phaseMeta.detail).trim() || phaseMeta.detail;
+            detail.textContent = nextDetail;
         }
         if (icon) {
             icon.setAttribute('data-lucide', phaseMeta.icon);
+        }
+        if (content) {
+            content.setAttribute('title', statusLabel);
         }
 
         this.reinitializeIcons(indicator);
@@ -5923,6 +5931,11 @@ class UIHelpers {
 
         indicator.classList.add('hidden');
         indicator.setAttribute('aria-hidden', 'true');
+        indicator.removeAttribute('aria-label');
+        const content = indicator.querySelector('.typing-indicator-content');
+        if (content) {
+            content.removeAttribute('title');
+        }
         delete indicator.dataset.livePhase;
     }
 

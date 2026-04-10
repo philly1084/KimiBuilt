@@ -63,7 +63,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260406e">
+    <link rel="stylesheet" href="css/styles.css?v=20260410a">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
@@ -655,27 +655,15 @@
                 <div id="workloads-list" class="workloads-list"></div>
             </section>
             
-            <!-- Typing Indicator (Fixed below header) -->
+            <!-- Activity Indicator (Corner beacon while streaming) -->
             <div id="typing-indicator" class="typing-indicator-container hidden" aria-hidden="true">
                 <div class="typing-indicator-content" role="status" aria-live="polite">
-                    <div class="typing-phase-chip">
-                        <span class="typing-phase-icon" aria-hidden="true">
-                            <i data-live-icon data-lucide="sparkles" class="w-4 h-4"></i>
-                        </span>
-                        <span id="typing-phase-label" class="typing-phase-label">Thinking</span>
-                    </div>
-                    <div class="typing-bubble">
-                        <div class="typing-bubble__copy">
-                            <span id="typing-text" class="typing-text">Assistant is thinking</span>
-                            <span id="typing-detail" class="typing-detail">Gathering context and preparing the reply.</span>
-                        </div>
-                        <div class="typing-progress" aria-hidden="true">
-                            <span class="typing-progress__bar"></span>
-                        </div>
-                        <div class="typing-dots" aria-hidden="true">
-                            <span></span><span></span><span></span>
-                        </div>
-                    </div>
+                    <span class="assistant-stream-placeholder__phase-icon typing-phase-icon" aria-hidden="true">
+                        <i data-live-icon data-lucide="sparkles" class="w-4 h-4"></i>
+                    </span>
+                    <span id="typing-phase-label" class="sr-only">Thinking</span>
+                    <span id="typing-text" class="sr-only">Assistant is thinking</span>
+                    <span id="typing-detail" class="sr-only">Gathering context and preparing the reply.</span>
                 </div>
             </div>
             
@@ -1013,7 +1001,7 @@
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260409a"></script>
+    <script src="js/ui.js?v=20260410a"></script>
     <script src="js/app.js?v=20260409a"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>
