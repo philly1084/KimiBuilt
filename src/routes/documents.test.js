@@ -8,11 +8,12 @@ jest.mock('../middleware/validate', () => ({
 const documentsRouter = require('./documents');
 
 describe('/api/documents route', () => {
-  function buildApp(documentService) {
+  function buildApp(documentService, { artifactService = null, templateStore = null } = {}) {
     const app = express();
     app.use(express.json());
     app.locals.documentService = documentService;
-    app.locals.templateStore = null;
+    app.locals.artifactService = artifactService;
+    app.locals.templateStore = templateStore;
     app.use('/api/documents', documentsRouter);
     return app;
   }
@@ -182,5 +183,116 @@ describe('/api/documents route', () => {
     expect(response.body.templateMatches).toEqual([
       expect.objectContaining({ id: 'executive-brief' }),
     ]);
+  });
+
+  test('routes non-presentation html ai generation through the artifact pipeline', async () => {
+    const documentService = {
+      buildDocumentPlan: jest.fn().mockReturnValue({
+        inferredType: 'report',
+        outlineType: 'document',
+        blueprint: { id: 'report' },
+      }),
+      shouldUsePresentationPipeline: jest.fn().mockReturnValue(false),
+      aiGenerate: jest.fn(),
+    };
+    const runtimeArtifactService = {
+      generateArtifact: jest.fn().mockResolvedValue({
+        artifact: {
+          id: 'artifact-1',
+          filename: 'visual-brief.html',
+          format: 'html',
+          mimeType: 'text/html',
+          sizeBytes: 2048,
+          downloadUrl: '/api/artifacts/artifact-1/download',
+          preview: { type: 'html', content: '<!DOCTYPE html><html><body><h1>Visual Brief</h1></body></html>' },
+          metadata: {
+            title: 'Visual Brief',
+            generationStrategy: 'multi-pass',
+          },
+        },
+      }),
+    };
+
+    const response = await request(buildApp(documentService, {
+      artifactService: runtimeArtifactService,
+    }))
+      .post('/api/documents/ai-generate')
+      .send({
+        prompt: 'Create a visual HTML brief with multiple images for the campaign launch.',
+        format: 'html',
+        documentType: 'report',
+        tone: 'professional',
+        length: 'medium',
+        options: {
+          theme: 'editorial',
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(runtimeArtifactService.generateArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'document',
+      prompt: 'Create a visual HTML brief with multiple images for the campaign launch.',
+      format: 'html',
+      contextMessages: expect.arrayContaining([
+        expect.stringContaining('[Document route preferences]'),
+        expect.stringContaining('"blueprint"'),
+      ]),
+    }));
+    expect(documentService.aiGenerate).not.toHaveBeenCalled();
+    expect(response.body.document).toEqual(expect.objectContaining({
+      id: 'artifact-1',
+      filename: 'visual-brief.html',
+      mimeType: 'text/html',
+      size: 2048,
+      metadata: expect.objectContaining({
+        format: 'html',
+        title: 'Visual Brief',
+        generationStrategy: 'multi-pass',
+      }),
+    }));
+    expect(response.body.downloadUrl).toBe('/api/artifacts/artifact-1/download');
+  });
+
+  test('keeps html presentation requests on the document service pipeline', async () => {
+    const documentService = {
+      buildDocumentPlan: jest.fn().mockReturnValue({
+        inferredType: 'website-slides',
+        outlineType: 'slides',
+        blueprint: { id: 'website-slides' },
+      }),
+      shouldUsePresentationPipeline: jest.fn().mockReturnValue(true),
+      aiGenerate: jest.fn().mockResolvedValue({
+        id: 'doc-2',
+        filename: 'website-slides.html',
+        mimeType: 'text/html',
+        size: 1234,
+        metadata: { format: 'html' },
+        preview: [],
+      }),
+    };
+    const runtimeArtifactService = {
+      generateArtifact: jest.fn(),
+    };
+
+    const response = await request(buildApp(documentService, {
+      artifactService: runtimeArtifactService,
+    }))
+      .post('/api/documents/ai-generate')
+      .send({
+        prompt: 'Create website slides for the launch story.',
+        format: 'html',
+        documentType: 'website-slides',
+      });
+
+    expect(response.status).toBe(200);
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      'Create website slides for the launch story.',
+      expect.objectContaining({
+        documentType: 'website-slides',
+        format: 'html',
+      }),
+    );
+    expect(runtimeArtifactService.generateArtifact).not.toHaveBeenCalled();
+    expect(response.body.downloadUrl).toBe('/api/documents/doc-2/download');
   });
 });

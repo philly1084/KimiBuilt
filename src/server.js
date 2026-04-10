@@ -22,6 +22,7 @@ const ttsRouter = require('./routes/tts');
 const { piperTtsService } = require('./tts/piper-tts-service');
 const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
+const { artifactService } = require('./artifacts/artifact-service');
 const openaiCompatRouter = require('./routes/openai-compat');
 const documentsRouter = require('./routes/documents');
 const templatesRouter = require('./routes/templates');
@@ -313,6 +314,7 @@ async function start() {
         };
         const documentService = new DocumentService(openaiClient);
         app.locals.documentService = documentService;
+        app.locals.artifactService = artifactService;
         console.log('[Boot] Document service ready');
 
         console.log('[Boot] Initializing conversation orchestrator...');

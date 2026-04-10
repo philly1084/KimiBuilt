@@ -3,7 +3,10 @@
  * API endpoints for template-based, AI-powered, and assembly document generation
  */
 
+const { randomUUID } = require('crypto');
 const { Router } = require('express');
+const { artifactService } = require('../artifacts/artifact-service');
+const { normalizeFormat } = require('../artifacts/constants');
 const { validate } = require('../middleware/validate');
 
 const router = Router();
@@ -90,6 +93,63 @@ function normalizeTemplateIds(value) {
   }
 
   return [];
+}
+
+function shouldUseArtifactHtmlPipeline(documentService, documentType = '', format = '') {
+  const normalizedFormat = normalizeFormat(format);
+  if (normalizedFormat !== 'html') {
+    return false;
+  }
+
+  if (typeof documentService?.shouldUsePresentationPipeline === 'function') {
+    return !documentService.shouldUsePresentationPipeline(documentType, normalizedFormat);
+  }
+
+  return true;
+}
+
+function buildArtifactContextMessages({
+  documentType = '',
+  tone = 'professional',
+  length = 'medium',
+  theme = '',
+  templateContext = '',
+  productionPlan = null,
+} = {}) {
+  const preferenceContext = [
+    '[Document route preferences]',
+    documentType ? `- Document type: ${documentType}` : '',
+    tone ? `- Tone: ${tone}` : '',
+    length ? `- Length: ${length}` : '',
+    theme ? `- Visual theme: ${theme}` : '',
+  ].filter(Boolean).join('\n');
+
+  return [
+    preferenceContext,
+    templateContext,
+    productionPlan ? `[Document production plan]\n${JSON.stringify(productionPlan, null, 2)}` : '',
+  ].filter(Boolean);
+}
+
+function serializeArtifactAsDocument(artifact = null) {
+  const metadata = artifact?.metadata && typeof artifact.metadata === 'object' && !Array.isArray(artifact.metadata)
+    ? artifact.metadata
+    : {};
+
+  return {
+    id: artifact?.id || '',
+    filename: artifact?.filename || 'document.html',
+    mimeType: artifact?.mimeType || 'text/html',
+    size: Number(artifact?.sizeBytes || 0),
+    metadata: {
+      generatedAt: new Date().toISOString(),
+      aiGenerated: true,
+      format: artifact?.format || 'html',
+      ...metadata,
+    },
+    preview: artifact?.preview || null,
+    downloadUrl: artifact?.downloadUrl || null,
+  };
 }
 
 async function buildDocumentTemplateSelection(templateStore, {
@@ -336,6 +396,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
     } = req.body;
 
     const documentService = req.app.locals.documentService;
+    const runtimeArtifactService = req.app.locals.artifactService || artifactService;
     const templateSelection = await buildDocumentTemplateSelection(req.app.locals.templateStore, {
       prompt,
       documentType,
@@ -351,16 +412,53 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       length,
     });
 
-    const document = await documentService.aiGenerate(prompt, {
-      documentType,
-      tone,
-      length,
-      format,
-      model,
-      designPlan: productionPlan,
-      templateContext: templateSelection.context,
-      ...options,
-    });
+    let document = null;
+    let downloadUrl = null;
+
+    if (shouldUseArtifactHtmlPipeline(documentService, documentType, format)) {
+      try {
+        const generated = await runtimeArtifactService.generateArtifact({
+          session: {
+            previousResponseId: null,
+            metadata: {},
+          },
+          sessionId: `document-ai-${randomUUID()}`,
+          mode: 'document',
+          prompt,
+          format: normalizeFormat(format) || 'html',
+          model,
+          contextMessages: buildArtifactContextMessages({
+            documentType,
+            tone,
+            length,
+            theme: options.theme || '',
+            templateContext: templateSelection.context,
+            productionPlan,
+          }),
+        });
+
+        document = serializeArtifactAsDocument(generated.artifact);
+        downloadUrl = document.downloadUrl;
+      } catch (error) {
+        if (error?.statusCode !== 503) {
+          throw error;
+        }
+      }
+    }
+
+    if (!document) {
+      document = await documentService.aiGenerate(prompt, {
+        documentType,
+        tone,
+        length,
+        format,
+        model,
+        designPlan: productionPlan,
+        templateContext: templateSelection.context,
+        ...options,
+      });
+      downloadUrl = `/api/documents/${document.id}/download`;
+    }
 
     res.json({
       success: true,
@@ -374,7 +472,7 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       },
       productionPlan,
       templateMatches: templateSelection.matches,
-      downloadUrl: `/api/documents/${document.id}/download`,
+      downloadUrl,
     });
   } catch (err) {
     next(err);
