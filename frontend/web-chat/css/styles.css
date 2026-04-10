@@ -111,6 +111,7 @@
 .bg-bg-tertiary { background-color: var(--bg-tertiary); }
 .bg-bg-hover { background-color: var(--bg-hover); }
 .bg-bg-elevated { background-color: var(--bg-elevated); }
+.hidden { display: none !important; }
 
 .text-text-primary { color: var(--text-primary); }
 .text-text-secondary { color: var(--text-secondary); }
