@@ -731,6 +731,33 @@ describe('ai-route-utils', () => {
         expect(sshContext.effectivePrompt).toContain('philly1084@gmail.com');
     });
 
+    test('resolveSshRequestContext does not treat lets-encrypt registration email domains as SSH hosts', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const sshContext = resolveSshRequestContext(
+            'lets go ahead setting up with lets encrypt. We can use philly1084@gmail.com for the registration. remote command into the server to do it on the k3s cluster',
+            {
+                metadata: {},
+            },
+        );
+
+        expect(sshContext.shouldTreatAsSsh).toBe(true);
+        expect(sshContext.target).toEqual({
+            host: '10.0.0.5',
+            username: 'ubuntu',
+            port: 22,
+        });
+        expect(sshContext.effectivePrompt).toContain('philly1084@gmail.com');
+        expect(sshContext.effectivePrompt).not.toContain('gmail.com:22');
+    });
+
     test('resolveSshRequestContext does not treat index.html as an SSH host override', () => {
         const sshContext = resolveSshRequestContext(
             'SSH into the server and replace the index.html with the 3D tic tac toe game on game.demoserver2.buzz.',

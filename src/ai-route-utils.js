@@ -555,6 +555,16 @@ function isFileLikeSshTargetHost(host = '') {
     return blockedExtensions.has(lastLabel);
 }
 
+function hasImmediateSshTargetContext(text = '', matchIndex = 0) {
+    const source = String(text || '');
+    const prefix = source.slice(Math.max(0, matchIndex - 48), Math.max(0, matchIndex)).toLowerCase();
+    if (!prefix) {
+        return false;
+    }
+
+    return /\b(?:ssh(?:\s+into|\s+to)?|connect(?:\s+to)?|login(?:\s+to)?|log\s+into|remote command(?:\s+into|\s+on)?|execute(?:\s+on|\s+against)?|run(?:\s+on|\s+against)?|targeting|target|host|server|machine|node)\b[\s\S]{0,24}$/.test(prefix);
+}
+
 function extractExplicitSshTarget(text = '') {
     const normalized = String(text || '').trim();
     if (!normalized) {
@@ -570,6 +580,10 @@ function extractExplicitSshTarget(text = '') {
     for (const match of candidates) {
         const host = match?.groups?.host || '';
         if (!host || isSuspiciousSshTargetHost(host) || isFileLikeSshTargetHost(host)) {
+            continue;
+        }
+
+        if (match?.groups?.username && !hasImmediateSshTargetContext(normalized, match.index || 0)) {
             continue;
         }
 

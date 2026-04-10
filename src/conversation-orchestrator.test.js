@@ -5297,6 +5297,48 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('keeps deploy-only workflow verification pinned to the configured ssh target when the prompt includes a registration email', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'k3s-deploy', 'tool-doc-read', 'web-search']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'lets go ahead setting up with lets encrypt. We can use philly1084@gmail.com for the registration. remote command into the server to do it on the k3s cluster';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.workflow).toEqual(expect.objectContaining({
+            lane: 'deploy-only',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        }));
+    });
+
     test('runs the repo-to-deploy workflow through opencode and git-safe, leaving deployment for follow-up', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
