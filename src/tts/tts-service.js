@@ -30,18 +30,35 @@ class TtsService {
         return this.providers[String(providerId || '').trim().toLowerCase()] || null;
     }
 
+    getOrderedProviders() {
+        const seen = new Set();
+        return this.getPreferredProviderOrder()
+            .map((providerId) => {
+                const normalizedProviderId = String(providerId || '').trim().toLowerCase();
+                if (!normalizedProviderId || seen.has(normalizedProviderId)) {
+                    return null;
+                }
+
+                seen.add(normalizedProviderId);
+                return {
+                    id: normalizedProviderId,
+                    provider: this.getProvider(normalizedProviderId),
+                };
+            })
+            .filter((entry) => Boolean(entry?.provider));
+    }
+
     getActiveProvider() {
-        const order = this.getPreferredProviderOrder();
-        const readyProviderId = order.find((providerId) => {
-            const provider = this.getProvider(providerId);
+        const order = this.getOrderedProviders();
+        const readyProviderId = order.find(({ provider }) => {
             return provider?.getDiagnostics?.().status === 'ready';
-        });
+        })?.id;
 
         if (readyProviderId) {
             return this.getProvider(readyProviderId);
         }
 
-        return this.getProvider(order[0]) || this.getProvider(order[1]) || null;
+        return order[0]?.provider || order[1]?.provider || null;
     }
 
     getProviderCandidates(voiceId = '') {
@@ -100,14 +117,46 @@ class TtsService {
     }
 
     getPublicConfig() {
-        const activeProvider = this.getActiveProvider();
-        if (!activeProvider) {
+        const providerConfigs = this.getOrderedProviders()
+            .map(({ id, provider }) => {
+                const publicConfig = provider?.getPublicConfig?.();
+                if (!publicConfig || typeof publicConfig !== 'object') {
+                    return null;
+                }
+
+                return {
+                    configured: publicConfig.configured === true,
+                    provider: String(publicConfig.provider || id).trim() || id,
+                    maxTextChars: Math.max(200, Number(publicConfig.maxTextChars) || 2400),
+                    defaultVoiceId: String(publicConfig.defaultVoiceId || '').trim() || null,
+                    voices: Array.isArray(publicConfig.voices) ? publicConfig.voices : [],
+                    diagnostics: publicConfig.diagnostics && typeof publicConfig.diagnostics === 'object'
+                        ? {
+                            ...publicConfig.diagnostics,
+                            status: String(publicConfig.diagnostics.status || '').trim() || (publicConfig.configured ? 'ready' : 'unavailable'),
+                        }
+                        : {
+                            status: publicConfig.configured ? 'ready' : 'unavailable',
+                            binaryReachable: publicConfig.configured === true,
+                            voicesLoaded: Array.isArray(publicConfig.voices) && publicConfig.voices.length > 0,
+                            message: publicConfig.configured ? 'Voice playback is ready.' : 'Voice playback is unavailable.',
+                        },
+                };
+            })
+            .filter(Boolean);
+
+        const activeConfig = providerConfigs.find((configEntry) => configEntry.diagnostics?.status === 'ready')
+            || providerConfigs[0]
+            || null;
+
+        if (!activeConfig) {
             return {
                 configured: false,
                 provider: 'none',
                 maxTextChars: 2400,
                 defaultVoiceId: null,
                 voices: [],
+                providers: [],
                 diagnostics: {
                     status: 'unavailable',
                     binaryReachable: false,
@@ -117,7 +166,36 @@ class TtsService {
             };
         }
 
-        return activeProvider.getPublicConfig();
+        const seenVoiceIds = new Set();
+        const voices = providerConfigs
+            .flatMap((configEntry) => configEntry.voices || [])
+            .filter((voice) => {
+                const voiceId = String(voice?.id || '').trim();
+                if (!voiceId || seenVoiceIds.has(voiceId)) {
+                    return false;
+                }
+
+                seenVoiceIds.add(voiceId);
+                return true;
+            });
+
+        const configured = providerConfigs.some((configEntry) => configEntry.configured === true);
+        const maxTextChars = activeConfig.maxTextChars
+            || Math.max(200, ...providerConfigs.map((configEntry) => Number(configEntry.maxTextChars) || 2400));
+        const defaultVoiceId = activeConfig.defaultVoiceId || voices[0]?.id || null;
+
+        return {
+            configured,
+            provider: activeConfig.provider || 'none',
+            maxTextChars,
+            defaultVoiceId,
+            voices,
+            providers: providerConfigs,
+            diagnostics: {
+                ...activeConfig.diagnostics,
+                voicesLoaded: voices.length > 0,
+            },
+        };
     }
 
     async synthesize({ text = '', voiceId = '' } = {}) {

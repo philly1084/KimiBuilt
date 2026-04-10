@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-chat-theme="obsidian">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -100,7 +100,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260410g">
+    <link rel="stylesheet" href="css/styles.css?v=20260410h">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
@@ -548,6 +548,28 @@
         </div>
     </div>
 
+    <!-- Theme Gallery -->
+    <div id="theme-gallery-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="theme-gallery-title" aria-hidden="true">
+        <div class="modal-overlay" onclick="uiHelpers.closeThemeGallery()"></div>
+        <div class="modal-content theme-gallery-modal-content">
+            <div class="modal-header theme-gallery-header">
+                <div>
+                    <p class="search-bar-kicker">Appearance</p>
+                    <h2 id="theme-gallery-title">Theme gallery</h2>
+                    <p class="theme-gallery-subtitle">Curated background presets with wallpaper, surface tint, and bubble styling.</p>
+                </div>
+                <button class="btn-icon" onclick="uiHelpers.closeThemeGallery()" aria-label="Close theme gallery">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="modal-body theme-gallery-body">
+                <div id="theme-gallery-grid" class="theme-gallery-grid" role="listbox" aria-label="Theme presets">
+                    <!-- Theme presets rendered by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="app" class="app-shell flex h-full">
         <!-- Sidebar -->
         <aside id="sidebar" class="sidebar sidebar-panel bg-bg-secondary border-r border-border flex flex-col" aria-label="Conversation sidebar">
@@ -603,12 +625,11 @@
                     <span class="sidebar-btn-text" id="minimalist-toggle-sidebar-text">Focus Mode</span>
                 </button>
                 
-                <!-- Theme Toggle -->
+                <!-- Appearance -->
                 <div class="sidebar-footer-label sidebar-footer-label--subtle">Appearance</div>
-                <button id="theme-toggle" class="btn-secondary w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium transition-all" aria-label="Toggle dark/light mode" title="Toggle Theme">
-                    <i data-lucide="sun" class="w-4 h-4 hidden" id="theme-icon-light" aria-hidden="true"></i>
-                    <i data-lucide="moon" class="w-4 h-4" id="theme-icon-dark" aria-hidden="true"></i>
-                    <span class="sidebar-btn-text" id="theme-text">Dark Mode</span>
+                <button id="theme-toggle" class="btn-secondary w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium transition-all" aria-label="Open theme gallery" title="Theme Gallery">
+                    <i data-lucide="swatches" class="w-4 h-4" id="theme-icon" aria-hidden="true"></i>
+                    <span class="sidebar-btn-text" id="theme-text">Obsidian Theme</span>
                 </button>
             </div>
         </aside>
@@ -703,6 +724,8 @@
                     <span id="typing-detail" class="sr-only">Gathering context and preparing the reply.</span>
                 </div>
             </div>
+
+            <div id="background-workload-status" class="background-workload-status hidden" role="status" aria-live="polite"></div>
             
             <!-- Messages Container -->
             <div id="messages-container" class="flex-1 overflow-y-auto px-4 py-6 space-y-6 scroll-smooth" role="log" aria-label="Conversation messages" aria-live="polite">
@@ -881,10 +904,10 @@
                 </button>
                 <button class="mobile-chat-menu__action" data-mobile-menu-action="theme">
                     <span class="mobile-chat-menu__action-main">
-                        <i data-lucide="sun-medium" class="w-4 h-4" aria-hidden="true"></i>
+                        <i data-lucide="swatches" class="w-4 h-4" aria-hidden="true"></i>
                         <span>Appearance</span>
                     </span>
-                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-theme-value">Dark mode</span>
+                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-theme-value">Obsidian</span>
                 </button>
                 <button class="mobile-chat-menu__action" data-mobile-menu-action="layout">
                     <span class="mobile-chat-menu__action-main">
@@ -1042,12 +1065,12 @@
     <script src="js/api.js?v=20260410g"></script>
     <script src="js/session.js?v=20260410e"></script>
     <script src="js/sound-manager.js?v=20260410b"></script>
-    <script src="js/tts-manager.js?v=20260410c"></script>
+    <script src="js/tts-manager.js?v=20260410d"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260410e"></script>
-    <script src="js/app.js?v=20260410f"></script>
+    <script src="js/ui.js?v=20260410g"></script>
+    <script src="js/app.js?v=20260410g"></script>
     <script src="js/artifacts.js?v=20260410a"></script>
 </body>
 </html>

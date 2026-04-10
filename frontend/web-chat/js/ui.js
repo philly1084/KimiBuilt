@@ -5,6 +5,99 @@
 
 const webChatGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const WEB_CHAT_DEFAULT_MODEL = webChatGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
+const WEB_CHAT_THEME_PRESET_STORAGE_KEY = 'kimibuilt_theme_preset';
+const WEB_CHAT_THEME_MODE_STORAGE_KEY = 'kimibuilt_theme';
+const WEB_CHAT_THEME_DEFAULTS = Object.freeze({
+    dark: 'obsidian',
+    light: 'paper',
+});
+const WEB_CHAT_THEME_PRESETS = Object.freeze([
+    {
+        id: 'obsidian',
+        name: 'Obsidian',
+        mode: 'dark',
+        description: 'Deep graphite glass with cool blue bloom and ember edge light.',
+        metaColor: '#0a1018',
+        preview: {
+            background: 'radial-gradient(circle at 18% 18%, rgba(88, 166, 255, 0.28), transparent 36%), radial-gradient(circle at 82% 14%, rgba(255, 138, 91, 0.18), transparent 24%), linear-gradient(180deg, #060b12 0%, #0a1018 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)), rgba(16, 23, 34, 0.82)',
+            userBubble: 'linear-gradient(135deg, #4f8df6, #3d8dff)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015)), rgba(18, 27, 41, 0.92)',
+            accent: '#58a6ff',
+        },
+    },
+    {
+        id: 'aurora',
+        name: 'Aurora',
+        mode: 'dark',
+        description: 'Indigo and teal haze with a cooler glass treatment.',
+        metaColor: '#0b1120',
+        preview: {
+            background: 'radial-gradient(circle at 12% 12%, rgba(99, 102, 241, 0.34), transparent 34%), radial-gradient(circle at 78% 16%, rgba(45, 212, 191, 0.22), transparent 26%), radial-gradient(circle at 52% 100%, rgba(125, 211, 252, 0.18), transparent 30%), linear-gradient(180deg, #070d1a 0%, #0d1324 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(190, 242, 255, 0.02)), rgba(18, 24, 43, 0.84)',
+            userBubble: 'linear-gradient(135deg, #5b8cff, #2dd4bf)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(192, 132, 252, 0.02)), rgba(20, 28, 51, 0.9)',
+            accent: '#7dd3fc',
+        },
+    },
+    {
+        id: 'harbor',
+        name: 'Harbor',
+        mode: 'dark',
+        description: 'A navy harbor grid with cyan highlights and tidal depth.',
+        metaColor: '#08131f',
+        preview: {
+            background: 'radial-gradient(circle at 20% 18%, rgba(56, 189, 248, 0.22), transparent 30%), repeating-linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0 2px, transparent 2px 16px), linear-gradient(180deg, #07111b 0%, #0b1724 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(125, 211, 252, 0.015)), rgba(11, 24, 37, 0.86)',
+            userBubble: 'linear-gradient(135deg, #38bdf8, #0ea5e9)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(14, 165, 233, 0.015)), rgba(16, 31, 46, 0.9)',
+            accent: '#38bdf8',
+        },
+    },
+    {
+        id: 'ember',
+        name: 'Ember',
+        mode: 'dark',
+        description: 'Charcoal surfaces warmed by copper glow and subtle woven texture.',
+        metaColor: '#140d0b',
+        preview: {
+            background: 'radial-gradient(circle at 18% 18%, rgba(251, 146, 60, 0.22), transparent 30%), repeating-linear-gradient(45deg, rgba(251, 146, 60, 0.06) 0 2px, transparent 2px 14px), linear-gradient(180deg, #100909 0%, #18100f 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(251, 146, 60, 0.02)), rgba(27, 18, 16, 0.86)',
+            userBubble: 'linear-gradient(135deg, #fb923c, #ea580c)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(251, 146, 60, 0.015)), rgba(31, 21, 19, 0.92)',
+            accent: '#fb923c',
+        },
+    },
+    {
+        id: 'paper',
+        name: 'Paper',
+        mode: 'light',
+        description: 'Stone paper wash with cool blue accents and gentle grain.',
+        metaColor: '#f4f7fb',
+        preview: {
+            background: 'radial-gradient(circle at 12% 14%, rgba(61, 141, 255, 0.14), transparent 30%), radial-gradient(circle at 82% 16%, rgba(234, 106, 59, 0.08), transparent 22%), repeating-linear-gradient(0deg, rgba(148, 163, 184, 0.06) 0 1px, transparent 1px 14px), linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 253, 0.92)), rgba(255, 255, 255, 0.94)',
+            userBubble: 'linear-gradient(135deg, #3d8dff, #2e78e5)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.96)), rgba(255, 255, 255, 0.96)',
+            accent: '#3d8dff',
+        },
+    },
+    {
+        id: 'daybreak',
+        name: 'Daybreak',
+        mode: 'light',
+        description: 'Warm morning light with fine dotted texture and brighter blue detail.',
+        metaColor: '#f6efe7',
+        preview: {
+            background: 'radial-gradient(circle at 16% 12%, rgba(250, 204, 21, 0.18), transparent 28%), radial-gradient(circle at 82% 12%, rgba(96, 165, 250, 0.16), transparent 24%), radial-gradient(circle, rgba(251, 146, 60, 0.08) 1px, transparent 1px), linear-gradient(180deg, #fbf4ec 0%, #f4ede5 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(250, 245, 238, 0.94)), rgba(255, 250, 244, 0.94)',
+            userBubble: 'linear-gradient(135deg, #2f7bf6, #2563eb)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 248, 242, 0.96)), rgba(255, 248, 242, 0.96)',
+            accent: '#2f7bf6',
+        },
+    },
+]);
+const WEB_CHAT_THEME_PRESET_MAP = new Map(WEB_CHAT_THEME_PRESETS.map((preset) => [preset.id, preset]));
 
 function webChatSelectPreferredModel(models = [], preferredModel = '') {
     const availableModels = Array.isArray(models) ? models : [];
@@ -45,6 +138,7 @@ class UIHelpers {
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         const savedReasoningEffort = window.sessionManager?.safeStorageGet?.('kimibuilt_reasoning_effort');
         const savedRemoteAutonomy = window.sessionManager?.safeStorageGet?.('kimibuilt_remote_build_autonomy');
+        this.currentThemePresetId = WEB_CHAT_THEME_DEFAULTS.dark;
         this.currentModel = String(savedModel || WEB_CHAT_DEFAULT_MODEL).trim() || WEB_CHAT_DEFAULT_MODEL;
         this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
         this.remoteBuildAutonomyApproved = this.parseRemoteBuildAutonomyPreference(savedRemoteAutonomy);
@@ -86,6 +180,8 @@ class UIHelpers {
 
         this.layoutPreferenceKey = 'webchat_layout_mode';
         this.layoutMode = 'full';
+
+        this.renderThemeGallery();
         
         // Setup draft saving
         this.setupDraftSaving();
@@ -96,13 +192,7 @@ class UIHelpers {
         // Setup code block scroll indicators
         this.setupCodeBlockScrollIndicators();
 
-        if (typeof mermaid !== 'undefined') {
-            mermaid.initialize({
-                startOnLoad: false,
-                securityLevel: 'loose',
-                theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark',
-            });
-        }
+        this.initializeMermaidTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
     }
 
     getGenericFilenameWords() {
@@ -221,6 +311,108 @@ class UIHelpers {
             this.storageAvailable = false;
             return false;
         }
+    }
+
+    getSystemPreferredThemeMode() {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    getDefaultThemePresetId(mode = 'dark') {
+        return WEB_CHAT_THEME_DEFAULTS[mode] || WEB_CHAT_THEME_DEFAULTS.dark;
+    }
+
+    getSavedThemePresetId() {
+        const presetId = String(this.storageGet(WEB_CHAT_THEME_PRESET_STORAGE_KEY) || '').trim().toLowerCase();
+        return WEB_CHAT_THEME_PRESET_MAP.has(presetId) ? presetId : '';
+    }
+
+    mapLegacyThemeToPreset(mode = '') {
+        return String(mode || '').trim().toLowerCase() === 'light'
+            ? WEB_CHAT_THEME_DEFAULTS.light
+            : WEB_CHAT_THEME_DEFAULTS.dark;
+    }
+
+    getThemePresetById(presetId = '') {
+        return WEB_CHAT_THEME_PRESET_MAP.get(String(presetId || '').trim().toLowerCase())
+            || WEB_CHAT_THEME_PRESET_MAP.get(this.getDefaultThemePresetId(this.getSystemPreferredThemeMode()));
+    }
+
+    getCurrentThemePreset() {
+        return this.getThemePresetById(this.currentThemePresetId);
+    }
+
+    getThemePreviewStyle(preview = {}) {
+        return [
+            `--theme-preview-background: ${preview.background || 'transparent'}`,
+            `--theme-preview-surface: ${preview.surface || 'transparent'}`,
+            `--theme-preview-user-bubble: ${preview.userBubble || 'transparent'}`,
+            `--theme-preview-assistant-bubble: ${preview.assistantBubble || 'transparent'}`,
+            `--theme-preview-accent: ${preview.accent || '#58a6ff'}`,
+        ].join('; ');
+    }
+
+    renderThemeGallery() {
+        const container = document.getElementById('theme-gallery-grid');
+        if (!container) {
+            return;
+        }
+
+        const currentPreset = this.getCurrentThemePreset();
+        container.innerHTML = WEB_CHAT_THEME_PRESETS.map((preset) => {
+            const isActive = preset.id === currentPreset.id;
+            const previewStyle = this.escapeHtmlAttr(this.getThemePreviewStyle(preset.preview));
+            const title = this.escapeHtml(preset.name);
+            const description = this.escapeHtml(preset.description);
+            const modeLabel = preset.mode === 'light' ? 'Light' : 'Dark';
+            return `
+                <button
+                    type="button"
+                    class="theme-card ${isActive ? 'is-active' : ''}"
+                    data-theme-preset="${this.escapeHtmlAttr(preset.id)}"
+                    role="option"
+                    aria-selected="${isActive ? 'true' : 'false'}"
+                    title="${title}"
+                >
+                    <span class="theme-card__preview" style="${previewStyle}">
+                        <span class="theme-card__preview-shell"></span>
+                        <span class="theme-card__preview-assistant"></span>
+                        <span class="theme-card__preview-user"></span>
+                    </span>
+                    <span class="theme-card__body">
+                        <span class="theme-card__title-row">
+                            <span class="theme-card__title">${title}</span>
+                            <span class="theme-card__mode">${modeLabel}</span>
+                        </span>
+                        <span class="theme-card__description">${description}</span>
+                    </span>
+                    <span class="theme-card__check" aria-hidden="true">
+                        <i data-lucide="check" class="w-4 h-4"></i>
+                    </span>
+                </button>
+            `;
+        }).join('');
+
+        this.reinitializeIcons(container);
+    }
+
+    initializeMermaidTheme(mode = 'dark') {
+        if (typeof mermaid === 'undefined') {
+            return;
+        }
+
+        mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'loose',
+            theme: mode === 'light' ? 'default' : 'dark',
+        });
+    }
+
+    refreshMermaidTheme(mode = 'dark') {
+        this.initializeMermaidTheme(mode);
+        document.querySelectorAll('.mermaid-render-surface').forEach((target) => {
+            delete target.dataset.mermaidRenderedSource;
+        });
+        void this.renderMermaidDiagrams(document);
     }
 
     generatePleasantFilenameBase() {
@@ -3013,6 +3205,7 @@ class UIHelpers {
 
     openImageModal() {
         const modal = document.getElementById('image-modal');
+        this.closeThemeGallery({ silent: true });
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
         
@@ -3317,6 +3510,7 @@ class UIHelpers {
         }
 
         this.closeSearch({ silent: true });
+        this.closeThemeGallery({ silent: true });
         this.closeSidebar();
         this.closeMobileActionSheet({ silent: true });
         dropdown.classList.remove('hidden');
@@ -3937,6 +4131,19 @@ class UIHelpers {
         return this.ttsManager?.getProviderLabel?.() || 'Voice';
     }
 
+    getTtsVoiceOptionLabel(voice = {}) {
+        const voiceLabel = String(voice?.label || voice?.id || 'Voice').trim() || 'Voice';
+        const providerId = String(voice?.provider || '').trim().toLowerCase();
+        if (!providerId) {
+            return voiceLabel;
+        }
+
+        const providerLabel = providerId === 'openai'
+            ? 'OpenAI'
+            : (providerId === 'browser' ? 'Browser' : 'Piper');
+        return `${providerLabel} - ${voiceLabel}`;
+    }
+
     getTtsFeatureLabel() {
         const providerId = this.ttsManager?.getProvider?.() || '';
         if (providerId === 'browser') {
@@ -4019,7 +4226,7 @@ class UIHelpers {
         }
 
         if (voiceSelectWrap) {
-            voiceSelectWrap.hidden = voices.length <= 1;
+            voiceSelectWrap.hidden = voices.length === 0;
         }
 
         if (voiceSelect) {
@@ -4030,13 +4237,13 @@ class UIHelpers {
             } else {
                 const optionsMarkup = voices
                     .map((voice) => `
-                        <option value="${this.escapeHtmlAttr(voice.id)}">${this.escapeHtml(voice.label || voice.id)}</option>
+                        <option value="${this.escapeHtmlAttr(voice.id)}">${this.escapeHtml(this.getTtsVoiceOptionLabel(voice))}</option>
                     `)
                     .join('');
                 if (voiceSelect.innerHTML !== optionsMarkup) {
                     voiceSelect.innerHTML = optionsMarkup;
                 }
-                voiceSelect.disabled = !available || voices.length <= 1;
+                voiceSelect.disabled = !available;
                 voiceSelect.value = selectedVoiceId || voices[0].id;
             }
         }
@@ -4872,53 +5079,142 @@ class UIHelpers {
     // ============================================
 
     initTheme() {
-        // Check for saved theme or system preference
-        const savedTheme = window.sessionManager?.safeStorageGet?.('kimibuilt_theme');
-        
-        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        
-        const theme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
-        this.setTheme(theme);
-        
-        // Listen for system theme changes
+        const savedPresetId = this.getSavedThemePresetId();
+        const legacyTheme = String(this.storageGet(WEB_CHAT_THEME_MODE_STORAGE_KEY) || '').trim().toLowerCase();
+        const shouldPersistInitialPreset = Boolean(savedPresetId) || legacyTheme === 'light' || legacyTheme === 'dark';
+        const initialPresetId = savedPresetId
+            || (legacyTheme ? this.mapLegacyThemeToPreset(legacyTheme) : this.getDefaultThemePresetId(this.getSystemPreferredThemeMode()));
+
+        this.applyThemePreset(initialPresetId, {
+            persist: shouldPersistInitialPreset,
+            playCue: false,
+            showToast: false,
+        });
+
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            const hasSavedTheme = window.sessionManager?.safeStorageGet?.('kimibuilt_theme');
-            if (!hasSavedTheme) {
-                this.setTheme(e.matches ? 'dark' : 'light');
+            const hasSavedPreset = this.getSavedThemePresetId();
+            if (!hasSavedPreset) {
+                this.applyThemePreset(this.getDefaultThemePresetId(e.matches ? 'dark' : 'light'), {
+                    persist: true,
+                    playCue: false,
+                    showToast: false,
+                });
             }
         });
     }
 
     setTheme(theme) {
-        document.documentElement.setAttribute('data-theme', theme);
-        window.sessionManager?.safeStorageSet?.('kimibuilt_theme', theme);
+        this.applyThemePreset(this.getDefaultThemePresetId(theme === 'light' ? 'light' : 'dark'));
+    }
 
-        // Update theme toggle UI
-        const lightIcon = document.getElementById('theme-icon-light');
-        const darkIcon = document.getElementById('theme-icon-dark');
-        const themeText = document.getElementById('theme-text');
+    applyThemePreset(presetId, options = {}) {
+        const preset = this.getThemePresetById(presetId);
+        const root = document.documentElement;
         const prismTheme = document.getElementById('prism-theme');
+        const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
-        if (theme === 'light') {
-            lightIcon?.classList.remove('hidden');
-            darkIcon?.classList.add('hidden');
-            if (themeText) themeText.textContent = 'Light Mode';
+        this.currentThemePresetId = preset.id;
+        root.setAttribute('data-chat-theme', preset.id);
+        root.setAttribute('data-theme', preset.mode);
+
+        if (options.persist !== false) {
+            this.storageSet(WEB_CHAT_THEME_PRESET_STORAGE_KEY, preset.id);
+            this.storageSet(WEB_CHAT_THEME_MODE_STORAGE_KEY, preset.mode);
+        }
+
+        if (preset.mode === 'light') {
             if (prismTheme) prismTheme.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css');
         } else {
-            lightIcon?.classList.add('hidden');
-            darkIcon?.classList.remove('hidden');
-            if (themeText) themeText.textContent = 'Dark Mode';
             if (prismTheme) prismTheme.setAttribute('href', 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css');
         }
 
+        if (themeColorMeta) {
+            themeColorMeta.setAttribute('content', preset.metaColor || (preset.mode === 'light' ? '#f4f7fb' : '#0a1018'));
+        }
+
+        this.refreshMermaidTheme(preset.mode);
+        this.updateThemeUI();
         this.updateMobileActionSheetUI();
+
+        if (options?.playCue !== false) {
+            this.playMenuCue('menu-select');
+        }
+
+        if (options?.showToast === true) {
+            this.showToast(`${preset.name} theme applied`, 'success', 'Appearance');
+        }
     }
 
     toggleTheme() {
-        const currentTheme = document.documentElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-        this.setTheme(newTheme);
-        this.playMenuCue('menu-select');
+        const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
+        this.setTheme(nextTheme);
+    }
+
+    updateThemeUI() {
+        const preset = this.getCurrentThemePreset();
+        const themeButton = document.getElementById('theme-toggle');
+        const themeText = document.getElementById('theme-text');
+
+        if (themeButton) {
+            themeButton.setAttribute('title', `${preset.name} theme`);
+            themeButton.setAttribute('aria-label', `Open theme gallery. Current theme: ${preset.name}`);
+        }
+        if (themeText) {
+            themeText.textContent = `${preset.name} Theme`;
+        }
+
+        this.renderThemeGallery();
+    }
+
+    openThemeGallery() {
+        const modal = document.getElementById('theme-gallery-modal');
+        if (!modal) {
+            return;
+        }
+
+        this.closeSearch({ silent: true });
+        this.closeModelSelector({ silent: true });
+        this.closeMobileActionSheet({ silent: true });
+        this.closeSidebar();
+        this.renderThemeGallery();
+        this.lastFocusedElement = document.activeElement;
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        this.playMenuCue('menu-open');
+        this.trapFocus(modal);
+    }
+
+    closeThemeGallery(options = {}) {
+        const modal = document.getElementById('theme-gallery-modal');
+        if (!modal || modal.classList.contains('hidden')) {
+            return;
+        }
+
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+
+        if (options?.silent !== true) {
+            this.playMenuCue('menu-close');
+        }
+
+        if (this.lastFocusedElement && typeof this.lastFocusedElement.focus === 'function') {
+            this.lastFocusedElement.focus();
+            this.lastFocusedElement = null;
+        }
+    }
+
+    selectThemePreset(presetId, options = {}) {
+        const preset = this.getThemePresetById(presetId);
+        this.applyThemePreset(preset.id, {
+            persist: true,
+            playCue: options.playCue !== false,
+            showToast: options.showToast !== false,
+        });
+
+        if (options?.closeModal !== false) {
+            this.closeThemeGallery({ silent: true });
+        }
     }
 
     // ============================================
@@ -4978,6 +5274,7 @@ class UIHelpers {
         }
 
         this.closeModelSelector({ silent: true });
+        this.closeThemeGallery({ silent: true });
         this.closeSidebar();
         this.closeMobileActionSheet({ silent: true });
 
@@ -5144,6 +5441,7 @@ class UIHelpers {
     openCommandPalette() {
         const palette = document.getElementById('command-palette');
         const input = document.getElementById('command-input');
+        this.closeThemeGallery({ silent: true });
         palette.classList.remove('hidden');
         palette.setAttribute('aria-hidden', 'false');
         input.value = '';
@@ -5386,7 +5684,7 @@ class UIHelpers {
             { category: 'Navigation', icon: 'sidebar', title: 'Toggle Sidebar', description: 'Show or hide the sidebar', action: 'toggle-sidebar', shortcut: 'Ctrl+B' },
             { category: 'View', icon: 'minimize-2', title: this.isMinimalistMode() ? 'Return to Full Interface' : 'Enter Minimalist Mode', description: 'Switch between the full workspace and a chat-first view', action: 'toggle-minimalist-mode', shortcut: 'Ctrl+Shift+M' },
             { category: 'View', icon: 'minimize-2', title: 'Toggle Input Area', description: 'Show or hide the message input', action: 'toggle-input-area', shortcut: 'Ctrl+Shift+H' },
-            { category: 'View', icon: 'sun', title: 'Toggle Theme', description: 'Switch between light and dark mode', action: 'toggle-theme' },
+            { category: 'View', icon: 'swatches', title: 'Open Theme Gallery', description: 'Browse curated wallpaper and color presets', action: 'open-theme-gallery' },
             ...(hasMessages ? [
                 { category: 'Export', icon: 'download', title: 'Export as Markdown', description: 'Download conversation as .md file', action: 'export-md' },
                 { category: 'Export', icon: 'download', title: 'Export as JSON', description: 'Download conversation as .json file', action: 'export-json' },
@@ -5449,8 +5747,8 @@ class UIHelpers {
             case 'toggle-input-area':
                 this.toggleInputArea();
                 break;
-            case 'toggle-theme':
-                this.toggleTheme();
+            case 'open-theme-gallery':
+                this.openThemeGallery();
                 break;
             case 'export-md':
                 window.chatApp?.exportConversation('markdown');
@@ -5502,6 +5800,7 @@ class UIHelpers {
     openShortcutsModal() {
         // Close any existing shortcuts modal first
         this.closeShortcutsModal();
+        this.closeThemeGallery({ silent: true });
         
         // Save last focused element
         this.lastFocusedElement = document.activeElement;
@@ -5588,6 +5887,7 @@ class UIHelpers {
     openImportModal() {
         // Remove any existing import modal
         this.closeImportModal();
+        this.closeThemeGallery({ silent: true });
         
         // Show the new import modal from HTML
         const modal = document.getElementById('import-modal');
@@ -5838,6 +6138,7 @@ class UIHelpers {
         }
         
         const modal = document.getElementById('export-modal');
+        this.closeThemeGallery({ silent: true });
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
         
@@ -6088,6 +6389,7 @@ class UIHelpers {
         this.closeSidebar();
         this.closeSearch({ silent: true });
         this.closeModelSelector({ silent: true });
+        this.closeThemeGallery({ silent: true });
         this.updateMobileActionSheetUI();
 
         this.lastFocusedElement = document.activeElement;
@@ -6129,7 +6431,7 @@ class UIHelpers {
         const layoutValue = document.getElementById('mobile-chat-menu-layout-value');
         const displayName = this.getModelDisplayName({ id: this.currentModel });
         const reasoningLabel = this.getReasoningDisplayLabel(this.getCurrentReasoningEffort()).replace('Reasoning: ', '');
-        const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        const preset = this.getCurrentThemePreset();
         const isMinimal = this.isMinimalistMode();
 
         if (modelValue) {
@@ -6137,7 +6439,7 @@ class UIHelpers {
         }
 
         if (themeValue) {
-            themeValue.textContent = theme === 'light' ? 'Light mode' : 'Dark mode';
+            themeValue.textContent = preset.name;
         }
 
         if (layoutLabel) {
@@ -6174,7 +6476,7 @@ class UIHelpers {
                 this.openExportModal();
                 break;
             case 'theme':
-                this.toggleTheme();
+                this.openThemeGallery();
                 break;
             case 'layout':
                 this.playMenuCue('menu-select');
@@ -6359,6 +6661,15 @@ class UIHelpers {
             }
         });
 
+        document.getElementById('theme-gallery-grid')?.addEventListener('click', (event) => {
+            const presetButton = event.target.closest('[data-theme-preset]');
+            if (!presetButton) {
+                return;
+            }
+
+            this.selectThemePreset(presetButton.dataset.themePreset || '');
+        });
+
         // Command palette input
         const commandInput = document.getElementById('command-input');
         if (commandInput) {
@@ -6421,6 +6732,7 @@ class UIHelpers {
                 this.closeImageModal();
                 this.closeImageLightbox();
                 this.closeModelSelector();
+                this.closeThemeGallery();
                 this.closeShortcutsModal();
                 this.closeImportModal();
                 this.closeMobileActionSheet();

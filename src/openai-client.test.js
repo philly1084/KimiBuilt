@@ -1150,8 +1150,9 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ].join('\n'));
 
         expect(checkpoint).toEqual(expect.objectContaining({
+            title: 'Quick choice',
             question: 'What should this server be mainly?',
-            preamble: expect.stringContaining('one inline checkpoint card at a time'),
+            preamble: 'Pick the closest fit below and I will continue from there.',
             options: [
                 expect.objectContaining({ id: 'a', label: 'Personal app host' }),
                 expect.objectContaining({ id: 'b', label: 'Staging/dev box' }),
@@ -1395,6 +1396,42 @@ describe('openai-client automatic tool orchestration helpers', () => {
                             id: 'checkpoint-1',
                             question: 'Which direction?',
                         },
+                    },
+                },
+            },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('user-checkpoint');
+    });
+
+    test('suppresses user-checkpoint on survey response turns so the agent continues the work', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Survey response (checkpoint-1): chose "Pricing tables" [pricing-tables].';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 1,
+                        pending: null,
+                    },
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    clientSurface: 'web-chat',
+                    userCheckpointPolicy: {
+                        enabled: true,
+                        remaining: 1,
+                        pending: null,
                     },
                 },
             },

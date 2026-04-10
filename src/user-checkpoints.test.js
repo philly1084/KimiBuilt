@@ -5,6 +5,7 @@ const {
     buildUserCheckpointPolicy,
     buildUserCheckpointResponseMessage,
     extractPendingUserCheckpoint,
+    isUserCheckpointResponseText,
     normalizeCheckpointRequest,
     parseUserCheckpointResponseMessage,
 } = require('./user-checkpoints');
@@ -83,6 +84,9 @@ describe('user checkpoint helpers', () => {
         expect(instructions).toContain('Do not mention checkpoint quotas, budgets, remaining counts, or internal runtime policy to the user.');
         expect(instructions).toContain('do not output a prose questionnaire');
         expect(instructions).toContain('do not say the quota or budget is exhausted');
+        expect(instructions).toContain('After a checkpoint answer, do not ask a fresh checkpoint');
+        expect(instructions).toContain('For research, web-search, web-fetch, or web-scrape work');
+        expect(instructions).toContain('use one short choice checkpoint with 2 to 4 concrete options');
     });
 
     test('extracts a pending checkpoint from tool events and increments asked count', () => {
@@ -148,6 +152,7 @@ describe('user checkpoint helpers', () => {
             checkpointId: 'checkpoint-3',
             summary: 'chose "Fast patch" [fast]. Notes: Keep the backend changes narrow.',
         });
+        expect(isUserCheckpointResponseText(message)).toBe(true);
     });
 
     test('normalizes short multi-step questionnaires with text and time inputs', () => {

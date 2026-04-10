@@ -3,7 +3,7 @@ const { TtsService } = require('./tts-service');
 function createProvider(id, diagnosticsStatus = 'ready', synthesizeImpl = async () => ({
     provider: id,
     audioBuffer: Buffer.from(`${id}-audio`),
-})) {
+}), publicConfigOverrides = {}) {
     return {
         getDiagnostics: jest.fn(() => ({
             status: diagnosticsStatus,
@@ -15,6 +15,7 @@ function createProvider(id, diagnosticsStatus = 'ready', synthesizeImpl = async 
             diagnostics: {
                 status: diagnosticsStatus,
             },
+            ...publicConfigOverrides,
         })),
         resolveVoiceProfile: jest.fn(() => null),
         synthesize: jest.fn(synthesizeImpl),
@@ -73,5 +74,53 @@ describe('TtsService', () => {
 
         expect(piper.synthesize).toHaveBeenCalledTimes(1);
         expect(openai.synthesize).not.toHaveBeenCalled();
+    });
+
+    test('returns an aggregated public voice catalog across providers', () => {
+        const piper = createProvider('piper', 'ready', undefined, {
+            defaultVoiceId: 'piper-amy',
+            voices: [
+                { id: 'piper-amy', label: 'Amy', provider: 'piper' },
+                { id: 'piper-hfc', label: 'HFC Rich', provider: 'piper' },
+            ],
+            diagnostics: {
+                status: 'ready',
+                message: '2 Piper voices ready.',
+            },
+        });
+        const openai = createProvider('openai', 'ready', undefined, {
+            defaultVoiceId: 'openai-marin-natural',
+            voices: [
+                { id: 'openai-marin-natural', label: 'Marin natural', provider: 'openai' },
+            ],
+            diagnostics: {
+                status: 'ready',
+                message: '1 OpenAI voice preset ready.',
+            },
+        });
+        const service = new TtsService({
+            provider: 'piper',
+        }, {
+            piper,
+            openai,
+        });
+
+        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
+            configured: true,
+            provider: 'piper',
+            defaultVoiceId: 'piper-amy',
+            diagnostics: expect.objectContaining({
+                status: 'ready',
+                voicesLoaded: true,
+            }),
+            voices: expect.arrayContaining([
+                expect.objectContaining({ id: 'piper-amy', provider: 'piper' }),
+                expect.objectContaining({ id: 'openai-marin-natural', provider: 'openai' }),
+            ]),
+            providers: expect.arrayContaining([
+                expect.objectContaining({ provider: 'piper', configured: true }),
+                expect.objectContaining({ provider: 'openai', configured: true }),
+            ]),
+        }));
     });
 });

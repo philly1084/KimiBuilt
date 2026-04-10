@@ -1086,7 +1086,7 @@ function normalizeUserCheckpointPlanStep(step = {}) {
     const options = rawOptions
         .map((option) => normalizeUserCheckpointPlanOption(option))
         .filter(Boolean)
-        .slice(0, 5);
+        .slice(0, 4);
     const inputType = typeof step.inputType === 'string'
         ? step.inputType.trim()
         : (typeof step.type === 'string'
@@ -5808,10 +5808,12 @@ class ConversationOrchestrator extends EventEmitter {
             : {};
         const subAgentDepth = Number(toolContext?.subAgentDepth || metadata?.subAgentDepth || 0);
         const canUseSubAgents = subAgentDepth < 1;
+        const isSurveyResponseTurn = Boolean(parseUserCheckpointResponseMessage(objective));
         const canUseUserCheckpoint = allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
             && userCheckpointPolicy.enabled === true
             && Number(userCheckpointPolicy.remaining || 0) > 0
-            && !userCheckpointPolicy.pending;
+            && !userCheckpointPolicy.pending
+            && !isSurveyResponseTurn;
         const hasUrl = /https?:\/\//i.test(prompt);
         const hasExplicitWebResearchIntent = hasExplicitWebResearchIntentText(prompt);
         const hasExplicitScrapeIntent = /\b(scrape|extract|selector|structured|parse)\b/.test(prompt);
@@ -6169,6 +6171,7 @@ class ConversationOrchestrator extends EventEmitter {
                 enabled: userCheckpointPolicy.enabled === true,
                 remaining: Math.max(0, Number(userCheckpointPolicy.remaining) || 0),
                 pending: userCheckpointPolicy.pending || null,
+                surveyResponseTurn: isSurveyResponseTurn,
             },
             opencode: {
                 target: opencodeTarget,
@@ -6792,6 +6795,8 @@ class ConversationOrchestrator extends EventEmitter {
             'Keep `user-checkpoint` to one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake.',
             'Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use mutually exclusive, actionable options and leave the free-text field enabled when helpful.',
             'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or more than 6 steps.',
+            'When the latest user turn starts with `Survey response (`, treat that as the resolved answer to the prior checkpoint and continue the work instead of planning another survey.',
+            'For research, web-search, web-fetch, or web-scrape work, avoid long scrape surveys and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
@@ -7337,10 +7342,12 @@ class ConversationOrchestrator extends EventEmitter {
     }) {
         const remoteToolId = getPreferredRemoteToolId(toolPolicy);
         const userCheckpointPolicy = toolPolicy?.userCheckpointPolicy || {};
+        const isSurveyResponseTurn = userCheckpointPolicy.surveyResponseTurn === true;
         const canUseUserCheckpoint = allowedToolIds.includes(USER_CHECKPOINT_TOOL_ID)
             && userCheckpointPolicy.enabled === true
             && Number(userCheckpointPolicy.remaining || 0) > 0
-            && !userCheckpointPolicy.pending;
+            && !userCheckpointPolicy.pending
+            && !isSurveyResponseTurn;
         const normalizedClientSurface = String(clientSurface || '').trim().toLowerCase();
         const parts = [
             String(baseInstructions || '').trim(),
@@ -7380,8 +7387,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Keep checkpoint surveys concise: one card with one visible step at a time. Prefer 1 question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake.');
             parts.push('Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and leave the free-text field available when helpful.');
             parts.push('Do not turn checkpoints into long questionnaires, pages of questions, or more than 6 steps.');
+            parts.push('When the latest user turn starts with `Survey response (`, treat that as a resolved checkpoint answer and continue the work instead of asking another survey.');
+            parts.push('For research, web-search, web-fetch, or web-scrape work, avoid long scrape surveys and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.');
         } else if (userCheckpointPolicy.enabled === true && userCheckpointPolicy.pending) {
             parts.push('A `user-checkpoint` is already pending for this session. Do not ask another survey question until the user answers it.');
+        } else if (isSurveyResponseTurn) {
+            parts.push('The latest user turn is a checkpoint answer. Continue execution from that decision instead of opening a new checkpoint.');
         }
 
         if (toolPolicy?.workflow?.status === 'active') {

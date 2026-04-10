@@ -92,7 +92,7 @@ class WebChatTtsManager extends EventTarget {
     getState() {
         return {
             available: this.available,
-            provider: this.provider,
+            provider: this.getProvider(),
             voices: this.getVoices(),
             diagnostics: this.getDiagnostics(),
             selectedVoiceId: this.getSelectedVoiceId(),
@@ -114,8 +114,28 @@ class WebChatTtsManager extends EventTarget {
         };
     }
 
+    resolveVoiceProvider(voiceId = '') {
+        const normalizedVoiceId = String(voiceId || '').trim();
+        if (!normalizedVoiceId) {
+            return '';
+        }
+
+        return String(
+            this.voices.find((voice) => voice.id === normalizedVoiceId)?.provider || '',
+        ).trim().toLowerCase();
+    }
+
+    getFallbackVoiceId() {
+        if (!this.voices.length) {
+            return this.provider === 'browser' ? DEFAULT_BROWSER_VOICE_ID : '';
+        }
+
+        return this.voices[0]?.id || (this.provider === 'browser' ? DEFAULT_BROWSER_VOICE_ID : '');
+    }
+
     getProvider() {
-        return String(this.provider || 'piper').trim() || 'piper';
+        const selectedVoiceProvider = this.resolveVoiceProvider(this.getSelectedVoiceId());
+        return selectedVoiceProvider || String(this.provider || 'piper').trim() || 'piper';
     }
 
     getProviderLabel() {
@@ -157,9 +177,7 @@ class WebChatTtsManager extends EventTarget {
     setSelectedVoiceId(voiceId = '') {
         const requestedVoiceId = String(voiceId || '').trim();
         const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
-        const fallbackVoiceId = this.provider === 'browser'
-            ? (this.voices[0]?.id || DEFAULT_BROWSER_VOICE_ID)
-            : (this.voices[0]?.id || '');
+        const fallbackVoiceId = this.getFallbackVoiceId();
         const nextVoiceId = matchingVoice?.id || fallbackVoiceId;
 
         if (this.selectedVoiceId === nextVoiceId) {
@@ -181,7 +199,7 @@ class WebChatTtsManager extends EventTarget {
 
         const requestedId = String(this.selectedVoiceId || '').trim();
         const matchingVoice = this.voices.find((voice) => voice.id === requestedId);
-        return matchingVoice?.id || this.voices[0].id || (this.provider === 'browser' ? DEFAULT_BROWSER_VOICE_ID : '');
+        return matchingVoice?.id || this.getFallbackVoiceId();
     }
 
     getSelectedVoice() {
@@ -194,11 +212,11 @@ class WebChatTtsManager extends EventTarget {
             return this.getSelectedVoice().label;
         }
 
-        if (this.provider === 'browser') {
+        if (this.getProvider() === 'browser') {
             return 'System voice';
         }
 
-        if (this.provider === 'openai') {
+        if (this.getProvider() === 'openai') {
             return 'OpenAI voice';
         }
 
@@ -317,7 +335,13 @@ class WebChatTtsManager extends EventTarget {
         try {
             const manifest = await window.apiClient?.getTtsVoices?.();
             const manifestConfigured = manifest?.configured === true;
-            const manifestVoices = Array.isArray(manifest?.voices) ? manifest.voices : [];
+            const manifestProviders = Array.isArray(manifest?.providers) ? manifest.providers : [];
+            const providerVoices = manifestProviders.flatMap((providerConfig) => (
+                Array.isArray(providerConfig?.voices) ? providerConfig.voices : []
+            ));
+            const manifestVoices = Array.isArray(manifest?.voices) && manifest.voices.length > 0
+                ? manifest.voices
+                : providerVoices;
             const manifestProvider = String(manifest?.provider || 'piper').trim() || 'piper';
             const manifestProviderLabel = manifestProvider === 'openai'
                 ? 'OpenAI'
@@ -346,7 +370,7 @@ class WebChatTtsManager extends EventTarget {
 
             if (manifestConfigured && manifestVoices.length > 0) {
                 this.available = true;
-                this.provider = manifest?.provider || 'piper';
+                this.provider = manifest?.provider || manifestVoices[0]?.provider || 'piper';
                 this.voices = manifestVoices;
                 this.diagnostics = manifestDiagnostics;
 
@@ -358,6 +382,7 @@ class WebChatTtsManager extends EventTarget {
                 ).trim();
                 const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
                 this.selectedVoiceId = matchingVoice?.id || fallbackVoiceId;
+                this.provider = this.resolveVoiceProvider(this.selectedVoiceId) || this.provider;
 
                 if (this.selectedVoiceId) {
                     this.storageSet(this.storageKeys.voiceId, this.selectedVoiceId);

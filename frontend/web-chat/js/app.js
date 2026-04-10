@@ -73,6 +73,7 @@ class ChatApp {
         this.charCounter = document.getElementById('char-counter');
         this.currentSessionInfo = document.getElementById('current-session-info');
         this.typingIndicator = document.getElementById('typing-indicator');
+        this.backgroundWorkloadStatus = document.getElementById('background-workload-status');
         this.workloadsBtn = document.getElementById('workloads-btn');
         this.workloadsPanel = document.getElementById('workloads-panel');
         this.workloadsEmpty = document.getElementById('workloads-empty');
@@ -259,9 +260,9 @@ class ChatApp {
             this.clearCurrentSession();
         });
         
-        // Theme toggle
+        // Theme gallery
         document.getElementById('theme-toggle')?.addEventListener('click', () => {
-            uiHelpers.toggleTheme();
+            uiHelpers.openThemeGallery();
         });
         
         // Mobile sidebar toggle
@@ -784,6 +785,7 @@ class ChatApp {
 
     renderWorkloadsPanel() {
         if (!this.workloadsPanel || !this.workloadsEmpty || !this.workloadsList) {
+            this.renderBackgroundWorkloadStatus();
             return;
         }
 
@@ -794,6 +796,8 @@ class ChatApp {
         if (this.newWorkloadBtn) {
             this.newWorkloadBtn.disabled = !sessionId || !this.workloadsAvailable;
         }
+        this.renderBackgroundWorkloadStatus();
+        this.updateSessionInfo();
 
         if (!sessionId) {
             this.workloadsEmpty.textContent = 'Open a conversation to manage workloads.';
@@ -823,6 +827,101 @@ class ChatApp {
             .map((workload) => this.renderWorkloadCard(workload))
             .join('');
         uiHelpers.reinitializeIcons(this.workloadsList);
+    }
+
+    getCurrentBackgroundWorkloadSnapshot() {
+        const session = sessionManager.getCurrentSession();
+        const sessionSummary = session?.workloadSummary || {};
+        const aggregatedSummary = this.currentSessionWorkloads.reduce((accumulator, workload) => {
+            const summary = workload?.workloadSummary || {};
+            accumulator.queued += Math.max(0, Number(summary.queued || 0));
+            accumulator.running += Math.max(0, Number(summary.running || 0));
+            accumulator.failed += Math.max(0, Number(summary.failed || 0));
+            return accumulator;
+        }, {
+            queued: 0,
+            running: 0,
+            failed: 0,
+        });
+
+        const titles = this.currentSessionWorkloads
+            .filter((workload) => {
+                const summary = workload?.workloadSummary || {};
+                return Number(summary.running || 0) > 0 || Number(summary.queued || 0) > 0;
+            })
+            .map((workload) => String(workload?.title || '').trim())
+            .filter(Boolean)
+            .slice(0, 2);
+
+        return {
+            running: Math.max(
+                Math.max(0, Number(sessionSummary.running || 0)),
+                aggregatedSummary.running,
+            ),
+            queued: Math.max(
+                Math.max(0, Number(sessionSummary.queued || 0)),
+                aggregatedSummary.queued,
+            ),
+            failed: Math.max(
+                Math.max(0, Number(sessionSummary.failed || 0)),
+                aggregatedSummary.failed,
+            ),
+            titles,
+        };
+    }
+
+    formatBackgroundTaskCount(count, label = 'background task') {
+        const normalizedCount = Math.max(0, Number(count || 0));
+        return `${normalizedCount} ${label}${normalizedCount === 1 ? '' : 's'}`;
+    }
+
+    renderBackgroundWorkloadStatus() {
+        if (!this.backgroundWorkloadStatus) {
+            return;
+        }
+
+        const sessionId = sessionManager.currentSessionId;
+        if (!sessionId || !this.workloadsAvailable) {
+            this.backgroundWorkloadStatus.innerHTML = '';
+            this.backgroundWorkloadStatus.classList.add('hidden');
+            return;
+        }
+
+        const snapshot = this.getCurrentBackgroundWorkloadSnapshot();
+        if (snapshot.running < 1 && snapshot.queued < 1) {
+            this.backgroundWorkloadStatus.innerHTML = '';
+            this.backgroundWorkloadStatus.classList.add('hidden');
+            return;
+        }
+
+        const detailParts = [];
+        if (snapshot.running > 0) {
+            detailParts.push(`${this.formatBackgroundTaskCount(snapshot.running)} running`);
+        }
+        if (snapshot.queued > 0) {
+            detailParts.push(`${this.formatBackgroundTaskCount(snapshot.queued)} queued`);
+        }
+
+        const title = snapshot.running > 0
+            ? 'Background work is running'
+            : 'Background work is queued';
+        const detail = `${detailParts.join(' and ')}. Updates will appear in this chat automatically.`;
+        const titles = snapshot.titles.length > 0
+            ? `Active: ${snapshot.titles.join(' • ')}`
+            : '';
+
+        this.backgroundWorkloadStatus.innerHTML = `
+            <span class="background-workload-status__icon" aria-hidden="true">
+                <i data-lucide="${snapshot.running > 0 ? 'loader-2' : 'clock-3'}" class="w-4 h-4"></i>
+            </span>
+            <div class="background-workload-status__copy">
+                <span class="background-workload-status__title">${uiHelpers.escapeHtml(title)}</span>
+                <span class="background-workload-status__detail">${uiHelpers.escapeHtml(detail)}</span>
+            </div>
+            ${titles ? `<p class="background-workload-status__titles">${uiHelpers.escapeHtml(titles)}</p>` : ''}
+        `;
+        this.backgroundWorkloadStatus.classList.remove('hidden');
+        uiHelpers.reinitializeIcons(this.backgroundWorkloadStatus);
     }
 
     renderWorkloadCard(workload) {
@@ -5147,10 +5246,16 @@ class ChatApp {
         const session = sessionManager.getCurrentSession();
         if (session) {
             const messageCount = sessionManager.getMessages(session.id)?.length || 0;
+            const backgroundSnapshot = this.getCurrentBackgroundWorkloadSnapshot();
+            const backgroundStatus = backgroundSnapshot.running > 0
+                ? ` | ${this.formatBackgroundTaskCount(backgroundSnapshot.running)} running`
+                : (backgroundSnapshot.queued > 0
+                    ? ` | ${this.formatBackgroundTaskCount(backgroundSnapshot.queued)} queued`
+                    : '');
             if (uiHelpers.isMinimalistMode()) {
-                this.currentSessionInfo.textContent = `${session.title || 'Conversation'} | ${messageCount} message${messageCount !== 1 ? 's' : ''}`;
+                this.currentSessionInfo.textContent = `${session.title || 'Conversation'} | ${messageCount} message${messageCount !== 1 ? 's' : ''}${backgroundStatus}`;
             } else {
-                this.currentSessionInfo.textContent = `${sessionManager.getSessionModeLabel(session.mode)} | ${sessionManager.formatTimestamp(session.updatedAt)} | ${messageCount} message${messageCount !== 1 ? 's' : ''}`;
+                this.currentSessionInfo.textContent = `${sessionManager.getSessionModeLabel(session.mode)} | ${sessionManager.formatTimestamp(session.updatedAt)} | ${messageCount} message${messageCount !== 1 ? 's' : ''}${backgroundStatus}`;
             }
             return;
         }

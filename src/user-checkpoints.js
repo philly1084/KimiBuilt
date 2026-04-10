@@ -135,7 +135,7 @@ function normalizeCheckpointOptions(options = []) {
             seen.add(option.id);
             return true;
         })
-        .slice(0, 5);
+        .slice(0, 4);
 }
 
 function normalizeCheckpointStep(step = {}, index = 0) {
@@ -398,6 +398,10 @@ function parseUserCheckpointResponseMessage(text = '') {
     };
 }
 
+function isUserCheckpointResponseText(text = '') {
+    return Boolean(parseUserCheckpointResponseMessage(text));
+}
+
 function buildUserCheckpointAnsweredPatch(session = null, response = null) {
     const state = getUserCheckpointState(session);
     if (!response?.checkpointId) {
@@ -474,6 +478,9 @@ function buildUserCheckpointInstructions(policy = {}) {
         'If there are no checkpoint questions remaining, do not output a prose questionnaire, numbered list of questions, or pseudo-survey.',
         'If more user input is truly required after no checkpoint cards remain, do not say the quota or budget is exhausted; ask at most one concise plain-text question or proceed with the best reasonable assumption and state that assumption briefly.',
         'When the user sends a message starting with `Survey response (` treat it as the answer to the checkpoint and continue the work.',
+        'After a checkpoint answer, do not ask a fresh checkpoint unless the user explicitly asks for more intake or a new high-impact blocker appears.',
+        'For research, web-search, web-fetch, or web-scrape work, avoid multi-step intake forms and example-heavy scrape surveys.',
+        'If research or scraping truly needs clarification, use one short choice checkpoint with 2 to 4 concrete options as a quick hotlist, then continue the work after the answer.',
     ];
 
     return lines.join('\n');
@@ -496,6 +503,7 @@ module.exports = {
     extractPendingUserCheckpoint,
     getUserCheckpointState,
     isUserCheckpointSurface,
+    isUserCheckpointResponseText,
     normalizeCheckpointRequest,
     normalizePendingCheckpoint,
     parseUserCheckpointResponseMessage,

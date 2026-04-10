@@ -28,6 +28,7 @@ const {
     USER_CHECKPOINT_TOOL_ID,
     buildUserCheckpointMessage,
     normalizeCheckpointRequest,
+    parseUserCheckpointResponseMessage,
 } = require('./user-checkpoints');
 const { parseLenientJson } = require('./utils/lenient-json');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
@@ -978,6 +979,9 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
 
     if (toolId === USER_CHECKPOINT_TOOL_ID) {
         const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
+        if (parseUserCheckpointResponseMessage(prompt)) {
+            return false;
+        }
         return checkpointPolicy.enabled === true
             && Number(checkpointPolicy.remaining || 0) > 0
             && !checkpointPolicy.pending;
@@ -1983,10 +1987,12 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const shouldPreferRemoteWebsiteSource = Boolean(remoteToolId && remoteWebsiteUpdateIntent && !explicitLocalArtifact);
     const shouldSuppressWebFetchForRemoteWebsite = shouldPreferRemoteWebsiteSource && internalArtifactReference;
     const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
+    const isSurveyResponseTurn = Boolean(parseUserCheckpointResponseMessage(prompt));
     const shouldOfferUserCheckpoint = availableToolIds.has(USER_CHECKPOINT_TOOL_ID)
         && checkpointPolicy.enabled === true
         && Number(checkpointPolicy.remaining || 0) > 0
-        && !checkpointPolicy.pending;
+        && !checkpointPolicy.pending
+        && !isSurveyResponseTurn;
 
     if (hasWorkloadSetupIntent && availableToolIds.has('agent-workload')) {
         selectedIds.add('agent-workload');
@@ -2383,6 +2389,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Keep `user-checkpoint` to one card with one visible step at a time. Prefer a single question by default, or a short 2 to 4 step questionnaire when the user explicitly wants structured intake or back-and-forth.');
         guidance.push('- Supported step types are choice, multi-choice, text, date, time, and datetime. For choice steps, use 2 to 4 strong options and keep the built-in free-text path available when helpful.');
         guidance.push('- Do not turn `user-checkpoint` into long forms, sprawling questionnaires, or more than 6 steps.');
+        guidance.push('- When the latest user turn starts with `Survey response (`, treat that as a resolved checkpoint answer and continue the work instead of asking another survey.');
+        guidance.push('- For research, web-search, web-fetch, or web-scrape work, avoid long scrape questionnaires and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.');
         guidance.push('- If the user explicitly asks to test the questionnaire or survey tool, use exactly one `user-checkpoint` question. Do not write a multi-question quiz or personality test as assistant text.');
         guidance.push('- If no checkpoint cards remain, do not say the quota is exhausted. Ask at most one concise plain-text question or proceed with a reasonable assumption.');
     }
@@ -2707,12 +2715,12 @@ function extractQuestionnaireCheckpointFromText(text = '') {
         if (options.length >= 2) {
             const hasLaterQuestion = lines.slice(index + 1).some((line) => Boolean(extractQuestionnaireQuestion(line)));
             return normalizeCheckpointRequest({
-                title: 'Decision checkpoint',
+                title: hasLaterQuestion ? 'Quick choice' : 'Decision checkpoint',
                 preamble: hasLaterQuestion
-                    ? 'Web chat supports one inline checkpoint card at a time, so starting with the first decision.'
+                    ? 'Pick the closest fit below and I will continue from there.'
                     : 'Choose an option below.',
                 question,
-                options: options.slice(0, 5),
+                options: options.slice(0, 4),
                 allowFreeText: true,
             });
         }

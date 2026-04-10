@@ -3415,6 +3415,38 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('suppresses user-checkpoint on survey response turns so planning continues', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'user-checkpoint'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Survey response (checkpoint-1): chose "Pricing tables" [pricing-tables].',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            toolContext: {
+                userCheckpointPolicy: {
+                    enabled: true,
+                    remaining: 1,
+                    pending: null,
+                },
+            },
+        });
+
+        expect(toolPolicy.candidateToolIds).not.toContain('user-checkpoint');
+        expect(toolPolicy.userCheckpointPolicy.surveyResponseTurn).toBe(true);
+    });
+
     test('forces a direct Perplexity-backed web-search action for explicit research requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
