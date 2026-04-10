@@ -1687,13 +1687,16 @@ class OpenAIAPIClient extends EventTarget {
     // ============================================
 
     async checkHealth() {
-        try {
-            // Extract base URL without /v1
-            const baseUrl = API_BASE_URL.replace('/v1', '');
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            const response = await fetch(`${baseUrl}/health`, {
+        try {
+            const baseUrl = API_BASE_URL.replace('/v1', '');
+            const sessionsParams = new URLSearchParams({
+                taskType: WEB_CHAT_API_TASK_TYPE,
+                clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
+            });
+            const response = await fetch(`${baseUrl}/api/sessions?${sessionsParams.toString()}`, {
                 signal: controller.signal
             });
 
@@ -1703,7 +1706,16 @@ class OpenAIAPIClient extends EventTarget {
                 const data = await response.json();
                 return { connected: true, data };
             }
-            return { connected: false, error: 'Health check failed' };
+        } catch (error) {
+            clearTimeout(timeoutId);
+            return { connected: false, error: error.message };
+        }
+
+        try {
+            const baseUrl = API_BASE_URL.replace('/v1', '');
+            const response = await fetch(`${baseUrl}/health`);
+            const data = await response.json().catch(() => ({}));
+            return { connected: response.status < 500, data, degraded: !response.ok };
         } catch (error) {
             return { connected: false, error: error.message };
         }

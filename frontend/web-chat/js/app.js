@@ -176,8 +176,15 @@ class ChatApp {
         
         // Check connection status
         this.updateConnectionStatus('checking');
-        const health = await apiClient.checkHealth();
-        this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
+        const healthPromise = apiClient.checkHealth()
+            .then((health) => {
+                this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
+                return health;
+            })
+            .catch(() => {
+                this.updateConnectionStatus('disconnected');
+                return { connected: false };
+            });
         
         // Start periodic health checks
         this.startHealthCheckInterval();
@@ -191,6 +198,7 @@ class ChatApp {
         
         // Load sessions
         await this.loadSessions();
+        await healthPromise;
 
         this.connectWorkloadSocket();
         
@@ -602,6 +610,8 @@ class ChatApp {
     async loadSessions() {
         try {
             await sessionManager.loadSessions();
+            this.updateConnectionStatus('connected');
+            uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
             apiClient.setSessionId(sessionManager.currentSessionId || null);
             
             // If we have a current session, load its messages
