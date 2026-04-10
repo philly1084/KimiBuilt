@@ -154,6 +154,10 @@ canvas {
     max-width: 100%;
 }
 
+svg.lucide {
+    flex-shrink: 0;
+}
+
 a {
     color: inherit;
     text-decoration: none;
@@ -201,6 +205,8 @@ a {
 .w-full { width: 100%; }
 .w-3 { width: 0.75rem; }
 .h-3 { height: 0.75rem; }
+.w-3\.5 { width: 0.875rem; }
+.h-3\.5 { height: 0.875rem; }
 .w-4 { width: 1rem; }
 .h-4 { height: 1rem; }
 .w-5 { width: 1.25rem; }
@@ -224,6 +230,7 @@ a {
 .mb-2 { margin-bottom: 0.5rem; }
 .mb-3 { margin-bottom: 0.75rem; }
 .mb-4 { margin-bottom: 1rem; }
+.mr-2 { margin-right: 0.5rem; }
 .ml-2 { margin-left: 0.5rem; }
 .p-2 { padding: 0.5rem; }
 .p-3 { padding: 0.75rem; }
@@ -254,11 +261,15 @@ a {
 .rounded { border-radius: 0.25rem; }
 .rounded-lg { border-radius: 0.75rem; }
 .rounded-xl { border-radius: 1rem; }
+.rounded-full { border-radius: 999px; }
 .border { border-width: 1px; border-style: solid; }
+.border-2 { border-width: 2px; border-style: solid; }
 .border-0 { border-width: 0; }
 .border-r { border-right-width: 1px; border-right-style: solid; }
 .border-b { border-bottom-width: 1px; border-bottom-style: solid; }
 .border-t { border-top-width: 1px; border-top-style: solid; }
+.border-white\/30 { border-color: rgba(255, 255, 255, 0.3); }
+.border-t-white { border-top-color: #ffffff; }
 .bg-transparent { background-color: transparent; }
 .bg-black\/50 { background-color: rgba(0, 0, 0, 0.5); }
 .bg-bg-secondary\/60 { background-color: color-mix(in srgb, var(--bg-secondary) 60%, transparent); }
@@ -283,6 +294,15 @@ a {
 .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
 .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
 .text-white { color: #ffffff; }
+.text-blue-500 { color: #3b82f6; }
+.text-emerald-500 { color: #10b981; }
+.text-amber-500 { color: #f59e0b; }
+.text-orange-500 { color: #f97316; }
+.text-purple-500 { color: var(--purple); }
+.text-green-500 { color: #22c55e; }
+.text-gray-500 { color: #6b7280; }
+.text-indigo-500 { color: #6366f1; }
+.text-red-500 { color: #ef4444; }
 .text-accent { color: var(--accent); }
 .text-success { color: var(--success); }
 .text-error { color: var(--error); }
@@ -292,6 +312,7 @@ a {
 .shadow-lg { box-shadow: var(--shadow-lg); }
 .shadow-blue-500\/20 { box-shadow: 0 14px 36px rgba(59, 130, 246, 0.2); }
 .scroll-smooth { scroll-behavior: smooth; }
+.animate-spin { animation: spin 1s linear infinite; }
 .backdrop-blur {
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
@@ -310,6 +331,16 @@ a {
 }
 .placeholder-text-secondary::placeholder { color: var(--text-secondary); }
 .focus\:outline-none:focus { outline: none; }
+.focus\:not-sr-only:focus {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: inherit;
+    margin: inherit;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+}
 .focus\:border-accent:focus { border-color: var(--accent); }
 .focus\:ring-2:focus {
     box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
@@ -390,11 +421,18 @@ body {
 }
 
 .app-shell {
+    display: flex;
+    min-height: 100%;
     gap: 1rem;
     padding: 1rem;
 }
 
 .main-shell {
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
     border: 1px solid var(--border);
     border-radius: 1.75rem;
     overflow: hidden;
@@ -488,6 +526,15 @@ body {
 
 .sidebar-primary-btn {
     min-height: 48px;
+}
+
+.sidebar-footer {
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-btn-text {
+    white-space: nowrap;
 }
 
 /* ============================================
@@ -1768,7 +1815,15 @@ body.mobile-chat-menu-open {
         rgba(12, 17, 25, 0.82);
 }
 
+.chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
 .chat-header-brand {
+    display: flex;
+    align-items: center;
     min-width: 0;
 }
 
@@ -1817,6 +1872,8 @@ body.mobile-chat-menu-open {
 }
 
 .chat-header-actions {
+    display: flex;
+    align-items: center;
     flex-shrink: 0;
     margin-left: 1rem;
 }
@@ -4399,6 +4456,10 @@ code[class*="language-"] {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+.workloads-empty {
+    padding: 0.5rem 0;
 }
 
 .workloads-list {
