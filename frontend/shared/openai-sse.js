@@ -81,6 +81,31 @@
     return DEFAULT_CODEX_MODEL_ID;
   }
 
+  function resolvePreferredChatModel(models = [], preferredModel = '', fallbackModel = DEFAULT_CODEX_MODEL_ID) {
+    const availableModels = Array.isArray(models) ? models : [];
+    const availableIds = new Set(
+      availableModels
+        .map((model) => normalizeModelId(model))
+        .filter(Boolean),
+    );
+    const preferredId = normalizeModelId(preferredModel);
+    const fallbackId = normalizeModelId(fallbackModel) || DEFAULT_CODEX_MODEL_ID;
+
+    if (preferredId && (availableIds.size === 0 || availableIds.has(preferredId))) {
+      return preferredId;
+    }
+
+    if (fallbackId && availableIds.has(fallbackId)) {
+      return fallbackId;
+    }
+
+    if (availableModels.length > 0) {
+      return normalizeModelId(availableModels[0]);
+    }
+
+    return fallbackId;
+  }
+
   function buildGatewayHeaders(headers = {}, options = {}) {
     const normalizedHeaders = {
       ...(headers && typeof headers === 'object' ? headers : {}),
@@ -687,6 +712,7 @@
     isTerminalFinishReason,
     normalizeGatewayEventPayload,
     normalizeModelId,
+    resolvePreferredChatModel,
     selectPreferredCodexModel,
     splitSSEFrames,
     streamGatewayResponse,

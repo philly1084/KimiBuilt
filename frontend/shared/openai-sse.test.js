@@ -3,6 +3,7 @@ const {
   extractSSEData,
   filterCodexBackedModels,
   normalizeGatewayEventPayload,
+  resolvePreferredChatModel,
   selectPreferredCodexModel,
   splitSSEFrames,
 } = require('./openai-sse');
@@ -108,5 +109,17 @@ describe('openai-sse helpers', () => {
     ]);
     expect(selectPreferredCodexModel(models, 'claude-3-sonnet')).toBe('gpt-5.4-mini');
     expect(selectPreferredCodexModel([], '')).toBe(DEFAULT_CODEX_MODEL_ID);
+  });
+
+  test('preserves non-Codex chat models when explicitly selected', () => {
+    const models = [
+      { id: 'gpt-5.4-mini' },
+      { id: 'claude-3-sonnet' },
+      { id: 'gemini-2.5-pro' },
+    ];
+
+    expect(resolvePreferredChatModel(models, 'claude-3-sonnet')).toBe('claude-3-sonnet');
+    expect(resolvePreferredChatModel([], 'claude-3-sonnet')).toBe('claude-3-sonnet');
+    expect(resolvePreferredChatModel(models, 'missing-model')).toBe(DEFAULT_CODEX_MODEL_ID);
   });
 });

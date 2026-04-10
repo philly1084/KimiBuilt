@@ -20,15 +20,26 @@ const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
 const DEFAULT_CHAT_MODEL = gatewayStreamHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
 const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers) => headers);
-const filterCodexBackedModels = gatewayStreamHelpers.filterCodexBackedModels || ((models) => models);
-const isCodexBackedModel = gatewayStreamHelpers.isCodexBackedModel || ((modelId) => String(modelId || '').trim() === DEFAULT_CHAT_MODEL);
-const selectPreferredCodexModel = gatewayStreamHelpers.selectPreferredCodexModel
-    || ((models, preferredModel = '') => {
+const resolvePreferredChatModel = gatewayStreamHelpers.resolvePreferredChatModel
+    || ((models, preferredModel = '', fallbackModel = DEFAULT_CHAT_MODEL) => {
+        const availableModels = Array.isArray(models) ? models : [];
+        const availableIds = new Set(
+            availableModels
+                .map((entry) => String(entry?.id || '').trim())
+                .filter(Boolean),
+        );
         const preferredId = String(preferredModel || '').trim();
-        if (preferredId && isCodexBackedModel(preferredId)) {
+        const fallbackId = String(fallbackModel || '').trim() || DEFAULT_CHAT_MODEL;
+
+        if (preferredId && (availableIds.size === 0 || availableIds.has(preferredId))) {
             return preferredId;
         }
-        return DEFAULT_CHAT_MODEL;
+
+        if (fallbackId && availableIds.has(fallbackId)) {
+            return fallbackId;
+        }
+
+        return String(availableModels[0]?.id || fallbackId).trim() || fallbackId;
     });
 const streamGatewayResponse = gatewayStreamHelpers.streamGatewayResponse || null;
 
@@ -639,7 +650,7 @@ class OpenAIAPIClient extends EventTarget {
      * @returns {AsyncGenerator} - Yields delta content
      */
     async *streamChat(messages, model = DEFAULT_CHAT_MODEL, signal = null, reasoningEffort = '', requestOptions = {}) {
-        const selectedModel = selectPreferredCodexModel([], model);
+        const selectedModel = resolvePreferredChatModel(this.modelsCache?.data || [], model, DEFAULT_CHAT_MODEL);
         const params = {
             model: selectedModel,
             messages,
@@ -966,7 +977,7 @@ class OpenAIAPIClient extends EventTarget {
      * @returns {Object} - Response with content and sessionId
      */
     async chat(messages, model = DEFAULT_CHAT_MODEL, reasoningEffort = '', requestOptions = {}) {
-        const selectedModel = selectPreferredCodexModel([], model);
+        const selectedModel = resolvePreferredChatModel(this.modelsCache?.data || [], model, DEFAULT_CHAT_MODEL);
         const params = {
             model: selectedModel,
             messages,

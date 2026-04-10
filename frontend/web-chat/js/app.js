@@ -360,7 +360,15 @@ class ChatApp {
         
         // Handle model change event
         window.addEventListener('modelChanged', (e) => {
-            console.log('Model changed to:', e.detail.modelId);
+            const modelId = String(e.detail?.modelId || '').trim();
+            if (!modelId) {
+                return;
+            }
+
+            if (sessionManager.currentSessionId) {
+                sessionManager.setSessionModel(sessionManager.currentSessionId, modelId);
+                uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+            }
         });
         
         // Handle visibility change for resuming
@@ -394,6 +402,9 @@ class ChatApp {
         
         sessionManager.addEventListener('sessionCreated', (e) => {
             apiClient.setSessionId(e.detail.session.id);
+            if (e.detail.session?.model) {
+                uiHelpers.setCurrentModel(e.detail.session.model);
+            }
             uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
             this.loadSessionMessages(e.detail.session.id);
             this.subscribeToSessionUpdates(e.detail.session.id);
@@ -403,6 +414,10 @@ class ChatApp {
         
         sessionManager.addEventListener('sessionSwitched', (e) => {
             apiClient.setSessionId(e.detail.sessionId);
+            const session = sessionManager.getCurrentSession();
+            if (session?.model) {
+                uiHelpers.setCurrentModel(session.model);
+            }
             this.loadSessionMessages(e.detail.sessionId)
                 .finally(() => {
                     this.subscribeToSessionUpdates(e.detail.sessionId);
@@ -415,6 +430,10 @@ class ChatApp {
         sessionManager.addEventListener('sessionDeleted', (e) => {
             apiClient.setSessionId(e.detail.newCurrentSessionId || null);
             if (e.detail.newCurrentSessionId) {
+                const session = sessionManager.getCurrentSession();
+                if (session?.model) {
+                    uiHelpers.setCurrentModel(session.model);
+                }
                 this.loadSessionMessages(e.detail.newCurrentSessionId);
                 this.subscribeToSessionUpdates(e.detail.newCurrentSessionId);
                 this.loadSessionWorkloads(e.detail.newCurrentSessionId);

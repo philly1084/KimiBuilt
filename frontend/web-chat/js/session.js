@@ -8,7 +8,31 @@ const SESSION_MANAGER_TASK_TYPE = 'chat';
 const SESSION_MANAGER_CLIENT_SURFACE = 'web-chat';
 const sessionGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const SESSION_DEFAULT_MODEL = sessionGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
-const sessionIsCodexBackedModel = sessionGatewayHelpers.isCodexBackedModel || ((modelId) => String(modelId || '').trim() === SESSION_DEFAULT_MODEL);
+const resolvePreferredChatModel = sessionGatewayHelpers.resolvePreferredChatModel
+    || ((models, preferredModel = '', fallbackModel = SESSION_DEFAULT_MODEL) => {
+        const availableModels = Array.isArray(models) ? models : [];
+        const availableIds = new Set(
+            availableModels
+                .map((entry) => String(entry?.id || '').trim())
+                .filter(Boolean),
+        );
+        const preferredId = String(preferredModel || '').trim();
+        const fallbackId = String(fallbackModel || '').trim() || SESSION_DEFAULT_MODEL;
+
+        if (preferredId && (availableIds.size === 0 || availableIds.has(preferredId))) {
+            return preferredId;
+        }
+
+        if (fallbackId && availableIds.has(fallbackId)) {
+            return fallbackId;
+        }
+
+        return String(availableModels[0]?.id || fallbackId).trim() || fallbackId;
+    });
+
+function normalizeSessionModel(model, fallbackModel = SESSION_DEFAULT_MODEL) {
+    return resolvePreferredChatModel([], model, fallbackModel);
+}
 
 class SessionManager extends EventTarget {
     constructor() {
@@ -128,11 +152,14 @@ class SessionManager extends EventTarget {
                     
                     // Safely get default model
                     try {
-                        model = stored?.model || this.safeStorageGet('kimibuilt_default_model') || SESSION_DEFAULT_MODEL;
+                        model = session.metadata?.model
+                            || stored?.model
+                            || this.safeStorageGet('kimibuilt_default_model')
+                            || SESSION_DEFAULT_MODEL;
                     } catch (e) {
-                        model = stored?.model || SESSION_DEFAULT_MODEL;
+                        model = session.metadata?.model || stored?.model || SESSION_DEFAULT_MODEL;
                     }
-                    model = sessionIsCodexBackedModel(model) ? model : SESSION_DEFAULT_MODEL;
+                    model = normalizeSessionModel(model, SESSION_DEFAULT_MODEL);
                     
                     return {
                         id: session.id,
@@ -390,7 +417,10 @@ class SessionManager extends EventTarget {
     async createSession(mode = 'chat', options = {}) {
         let defaultModel;
         try {
-            defaultModel = this.safeStorageGet('kimibuilt_default_model') || SESSION_DEFAULT_MODEL;
+            defaultModel = normalizeSessionModel(
+                this.safeStorageGet('kimibuilt_default_model'),
+                SESSION_DEFAULT_MODEL,
+            );
         } catch (e) {
             defaultModel = SESSION_DEFAULT_MODEL;
         }
@@ -432,7 +462,7 @@ class SessionManager extends EventTarget {
         const localSession = {
             id: sessionId,
             mode,
-            model: sessionIsCodexBackedModel(options.model) ? options.model : defaultModel,
+            model: normalizeSessionModel(options.model, defaultModel),
             title: 'New Chat',
             createdAt,
             updatedAt,
@@ -578,11 +608,20 @@ class SessionManager extends EventTarget {
                 previousSession.isLocal = false;
             }
         } else if (!existingSession) {
-                this.sessions.unshift({
-                    id: newSessionId,
-                    mode: 'chat',
-                    model: SESSION_DEFAULT_MODEL,
-                    title: 'New Chat',
+            let defaultModel = SESSION_DEFAULT_MODEL;
+            try {
+                defaultModel = normalizeSessionModel(
+                    this.safeStorageGet('kimibuilt_default_model'),
+                    SESSION_DEFAULT_MODEL,
+                );
+            } catch (_error) {
+                defaultModel = SESSION_DEFAULT_MODEL;
+            }
+            this.sessions.unshift({
+                id: newSessionId,
+                mode: 'chat',
+                model: defaultModel,
+                title: 'New Chat',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
                 workloadSummary: {
@@ -920,9 +959,7 @@ class SessionManager extends EventTarget {
                                 s.model = SESSION_DEFAULT_MODEL;
                             }
                         }
-                        if (!sessionIsCodexBackedModel(s.model)) {
-                            s.model = SESSION_DEFAULT_MODEL;
-                        }
+                        s.model = normalizeSessionModel(s.model, SESSION_DEFAULT_MODEL);
                         if (!s.version) {
                             s.version = this.version;
                         }
