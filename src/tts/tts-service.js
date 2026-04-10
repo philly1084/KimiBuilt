@@ -44,6 +44,49 @@ class TtsService {
         return this.getProvider(order[0]) || this.getProvider(order[1]) || null;
     }
 
+    getProviderCandidates(voiceId = '') {
+        const explicitProvider = this.resolveProviderForVoice(voiceId);
+        if (explicitProvider) {
+            return [explicitProvider];
+        }
+
+        const orderedProviders = this.getPreferredProviderOrder()
+            .map((providerId) => this.getProvider(providerId))
+            .filter(Boolean);
+        const readyProviders = orderedProviders.filter((provider) => provider?.getDiagnostics?.().status === 'ready');
+        const candidates = [];
+        const seen = new Set();
+
+        [...readyProviders, ...orderedProviders].forEach((provider) => {
+            if (!provider || seen.has(provider)) {
+                return;
+            }
+            seen.add(provider);
+            candidates.push(provider);
+        });
+
+        return candidates;
+    }
+
+    shouldFallbackAfterError(error = null) {
+        const statusCode = Number(error?.statusCode || error?.status || 0);
+        if (!statusCode) {
+            return true;
+        }
+
+        if (statusCode >= 500 || statusCode === 429) {
+            return true;
+        }
+
+        return [
+            'tts_unavailable',
+            'tts_failed',
+            'tts_timeout',
+            'tts_binary_missing',
+            'tts_empty_audio',
+        ].includes(String(error?.code || '').trim());
+    }
+
     resolveProviderForVoice(voiceId = '') {
         const normalizedVoiceId = String(voiceId || '').trim();
         if (!normalizedVoiceId) {
@@ -78,18 +121,32 @@ class TtsService {
     }
 
     async synthesize({ text = '', voiceId = '' } = {}) {
-        const provider = this.resolveProviderForVoice(voiceId) || this.getActiveProvider();
-        if (!provider) {
+        const providers = this.getProviderCandidates(voiceId);
+        if (providers.length === 0) {
             const error = new Error('No TTS providers are configured.');
             error.statusCode = 503;
             error.code = 'tts_unavailable';
             throw error;
         }
 
-        return provider.synthesize({
-            text,
-            voiceId,
-        });
+        const hasExplicitVoice = Boolean(String(voiceId || '').trim());
+        let lastError = null;
+
+        for (const provider of providers) {
+            try {
+                return await provider.synthesize({
+                    text,
+                    voiceId,
+                });
+            } catch (error) {
+                lastError = error;
+                if (hasExplicitVoice || !this.shouldFallbackAfterError(error)) {
+                    throw error;
+                }
+            }
+        }
+
+        throw lastError;
     }
 }
 

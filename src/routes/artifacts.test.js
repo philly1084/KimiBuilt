@@ -128,9 +128,12 @@ describe('/api/artifacts route', () => {
 
         expect(previewResponse.status).toBe(200);
         expect(previewResponse.text).toContain('Front Page');
+        expect(previewResponse.headers['cross-origin-resource-policy']).toBe('cross-origin');
+        expect(previewResponse.headers['origin-agent-cluster']).toBe('?0');
         expect(assetResponse.status).toBe(200);
         expect(assetResponse.text).toContain('color: #111');
         expect(assetResponse.headers['content-type']).toContain('text/css');
+        expect(assetResponse.headers['cross-origin-resource-policy']).toBe('cross-origin');
     });
 
     test('downloads a bundled html artifact as a zip archive', async () => {
@@ -281,10 +284,13 @@ describe('/api/artifacts route', () => {
         expect(previewResponse.text).toContain('<base href="/api/artifacts/artifact-1/preview/">');
         expect(previewResponse.text).toContain('href="/api/artifacts/artifact-1/preview/styles/site.css"');
         expect(previewResponse.text).toContain('href="world.html"');
+        expect(previewResponse.headers['cross-origin-resource-policy']).toBe('cross-origin');
+        expect(previewResponse.headers['origin-agent-cluster']).toBe('?0');
 
         const cssResponse = await request(buildApp()).get('/api/artifacts/artifact-1/preview/styles/site.css');
         expect(cssResponse.status).toBe(200);
         expect(cssResponse.text).toContain('url(/api/artifacts/artifact-1/preview/images/paper.png)');
+        expect(cssResponse.headers['cross-origin-resource-policy']).toBe('cross-origin');
     });
 
     test('downloads a generated site bundle as zip', async () => {

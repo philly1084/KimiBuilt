@@ -3938,9 +3938,17 @@ class UIHelpers {
     }
 
     getTtsFeatureLabel() {
-        return this.getTtsProviderLabel() === 'Browser voice'
-            ? 'Browser voice'
-            : 'Piper voice';
+        const providerId = this.ttsManager?.getProvider?.() || '';
+        if (providerId === 'browser') {
+            return 'Browser voice';
+        }
+        if (providerId === 'openai') {
+            return 'OpenAI voice';
+        }
+        if (providerId === 'piper') {
+            return 'Piper voice';
+        }
+        return 'Voice';
     }
 
     getTtsVoiceLabel() {

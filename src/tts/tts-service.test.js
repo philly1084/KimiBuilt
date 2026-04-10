@@ -1,52 +1,36 @@
 const { TtsService } = require('./tts-service');
 
-function buildProvider({
-    provider = 'piper',
-    status = 'ready',
-    defaultVoiceId = 'voice-1',
-} = {}) {
+function createProvider(id, diagnosticsStatus = 'ready', synthesizeImpl = async () => ({
+    provider: id,
+    audioBuffer: Buffer.from(`${id}-audio`),
+})) {
     return {
         getDiagnostics: jest.fn(() => ({
-            status,
+            status: diagnosticsStatus,
         })),
         getPublicConfig: jest.fn(() => ({
-            configured: status === 'ready',
-            provider,
-            defaultVoiceId,
-            voices: [{ id: defaultVoiceId, provider }],
-            diagnostics: { status },
+            configured: diagnosticsStatus === 'ready',
+            provider: id,
+            voices: [],
+            diagnostics: {
+                status: diagnosticsStatus,
+            },
         })),
-        resolveVoiceProfile: jest.fn((voiceId = '') => (
-            voiceId === defaultVoiceId ? { id: defaultVoiceId, provider } : null
-        )),
-        synthesize: jest.fn(async ({ text = '', voiceId = '' } = {}) => ({
-            provider,
-            audioBuffer: Buffer.from(text || voiceId || provider),
-            voice: { id: voiceId || defaultVoiceId, provider },
-        })),
+        resolveVoiceProfile: jest.fn(() => null),
+        synthesize: jest.fn(synthesizeImpl),
     };
 }
 
 describe('TtsService', () => {
-    test('prefers local Piper when provider is auto', () => {
-        const piper = buildProvider({ provider: 'piper', status: 'ready', defaultVoiceId: 'hfc-female-rich' });
-        const openai = buildProvider({ provider: 'openai', status: 'ready', defaultVoiceId: 'openai-marin-natural' });
-        const service = new TtsService({
-            provider: 'auto',
-        }, {
-            piper,
-            openai,
+    test('falls back to the next provider when the preferred provider fails with a retriable error', async () => {
+        const piperError = new Error('Piper failed');
+        piperError.statusCode = 502;
+        piperError.code = 'tts_failed';
+
+        const piper = createProvider('piper', 'ready', async () => {
+            throw piperError;
         });
-
-        const config = service.getPublicConfig();
-
-        expect(config.provider).toBe('piper');
-        expect(config.defaultVoiceId).toBe('hfc-female-rich');
-    });
-
-    test('routes synthesis to the provider that owns the selected voice', async () => {
-        const piper = buildProvider({ provider: 'piper', status: 'ready', defaultVoiceId: 'hfc-female-rich' });
-        const openai = buildProvider({ provider: 'openai', status: 'ready', defaultVoiceId: 'openai-marin-natural' });
+        const openai = createProvider('openai');
         const service = new TtsService({
             provider: 'piper',
         }, {
@@ -54,15 +38,40 @@ describe('TtsService', () => {
             openai,
         });
 
-        await service.synthesize({
+        const result = await service.synthesize({
             text: 'Hello there.',
-            voiceId: 'openai-marin-natural',
         });
 
-        expect(openai.synthesize).toHaveBeenCalledWith(expect.objectContaining({
+        expect(piper.synthesize).toHaveBeenCalledTimes(1);
+        expect(openai.synthesize).toHaveBeenCalledTimes(1);
+        expect(result.provider).toBe('openai');
+    });
+
+    test('does not fall back when the request explicitly targets a provider voice', async () => {
+        const piperError = new Error('Piper failed');
+        piperError.statusCode = 502;
+        piperError.code = 'tts_failed';
+
+        const piper = createProvider('piper', 'ready', async () => {
+            throw piperError;
+        });
+        piper.resolveVoiceProfile.mockImplementation((voiceId = '') => (
+            voiceId === 'piper-female-natural' ? { id: voiceId } : null
+        ));
+        const openai = createProvider('openai');
+        const service = new TtsService({
+            provider: 'piper',
+        }, {
+            piper,
+            openai,
+        });
+
+        await expect(service.synthesize({
             text: 'Hello there.',
-            voiceId: 'openai-marin-natural',
-        }));
-        expect(piper.synthesize).not.toHaveBeenCalled();
+            voiceId: 'piper-female-natural',
+        })).rejects.toThrow('Piper failed');
+
+        expect(piper.synthesize).toHaveBeenCalledTimes(1);
+        expect(openai.synthesize).not.toHaveBeenCalled();
     });
 });

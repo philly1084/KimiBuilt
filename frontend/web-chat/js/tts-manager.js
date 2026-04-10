@@ -119,7 +119,17 @@ class WebChatTtsManager extends EventTarget {
     }
 
     getProviderLabel() {
-        return this.getProvider() === 'browser' ? 'Browser voice' : 'Piper';
+        const provider = this.getProvider();
+        if (provider === 'browser') {
+            return 'Browser voice';
+        }
+        if (provider === 'openai') {
+            return 'OpenAI';
+        }
+        if (provider === 'piper') {
+            return 'Piper';
+        }
+        return 'Voice';
     }
 
     getStatus() {
@@ -180,7 +190,19 @@ class WebChatTtsManager extends EventTarget {
     }
 
     getVoiceLabel() {
-        return this.getSelectedVoice()?.label || (this.provider === 'browser' ? 'System voice' : 'Piper voice');
+        if (this.getSelectedVoice()?.label) {
+            return this.getSelectedVoice().label;
+        }
+
+        if (this.provider === 'browser') {
+            return 'System voice';
+        }
+
+        if (this.provider === 'openai') {
+            return 'OpenAI voice';
+        }
+
+        return 'Piper voice';
     }
 
     isLoadingMessage(messageId = '') {
@@ -296,6 +318,13 @@ class WebChatTtsManager extends EventTarget {
             const manifest = await window.apiClient?.getTtsVoices?.();
             const manifestConfigured = manifest?.configured === true;
             const manifestVoices = Array.isArray(manifest?.voices) ? manifest.voices : [];
+            const manifestProvider = String(manifest?.provider || 'piper').trim() || 'piper';
+            const manifestProviderLabel = manifestProvider === 'openai'
+                ? 'OpenAI'
+                : (manifestProvider === 'browser' ? 'Browser voice' : 'Piper');
+            const manifestUnavailableMessage = manifestProvider === 'openai'
+                ? 'OpenAI voice playback is unavailable.'
+                : 'Piper voice playback is unavailable.';
             const manifestDiagnostics = manifest?.diagnostics && typeof manifest.diagnostics === 'object'
                 ? {
                     status: String(manifest.diagnostics.status || '').trim() || (manifestConfigured ? 'ready' : 'unavailable'),
@@ -303,16 +332,16 @@ class WebChatTtsManager extends EventTarget {
                     voicesLoaded: manifest.diagnostics.voicesLoaded === true,
                     message: String(manifest.diagnostics.message || '').trim()
                         || (manifestConfigured
-                            ? 'Piper is ready.'
-                            : 'Piper voice playback is unavailable.'),
+                            ? `${manifestProviderLabel} is ready.`
+                            : manifestUnavailableMessage),
                 }
                 : {
                     status: manifestConfigured ? 'ready' : 'unavailable',
                     binaryReachable: manifestConfigured,
                     voicesLoaded: manifestVoices.length > 0,
                     message: manifestConfigured
-                        ? 'Piper is ready.'
-                        : 'Piper voice playback is unavailable.',
+                        ? `${manifestProviderLabel} is ready.`
+                        : manifestUnavailableMessage,
                 };
 
             if (manifestConfigured && manifestVoices.length > 0) {

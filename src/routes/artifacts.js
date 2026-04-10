@@ -25,6 +25,15 @@ const {
 
 const router = Router();
 
+function applyPreviewResponseHeaders(res) {
+    res.setHeader('Cache-Control', 'no-store');
+    // Generated previews are commonly embedded in sandboxed iframes, which
+    // appear cross-origin to the browser and would otherwise trip Helmet's
+    // default CORP protection for same-origin assets.
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Origin-Agent-Cluster', '?0');
+}
+
 function getRequestOwnerId(req) {
     return String(req.user?.username || '').trim() || null;
 }
@@ -266,7 +275,7 @@ router.get('/:id/preview', async (req, res, next) => {
         const zipPreview = resolveArtifactFrontendBundleFile(artifact, '');
         if (zipPreview) {
             res.setHeader('Content-Type', zipPreview.contentType);
-            res.setHeader('Cache-Control', 'no-store');
+            applyPreviewResponseHeaders(res);
             res.send(zipPreview.contentBuffer);
             return;
         }
@@ -274,7 +283,7 @@ router.get('/:id/preview', async (req, res, next) => {
         const previewFile = resolveMetadataBundlePreviewFile(artifact);
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-store');
+        applyPreviewResponseHeaders(res);
         res.send(previewFile?.contentBuffer || artifact.contentBuffer);
     } catch (err) {
         next(err);
@@ -291,7 +300,7 @@ router.get('/:id/preview/*', async (req, res, next) => {
         const zipPreview = resolveArtifactFrontendBundleFile(artifact, String(req.params[0] || '').trim());
         if (zipPreview) {
             res.setHeader('Content-Type', zipPreview.contentType);
-            res.setHeader('Cache-Control', 'no-store');
+            applyPreviewResponseHeaders(res);
             res.send(zipPreview.contentBuffer);
             return;
         }
@@ -303,7 +312,7 @@ router.get('/:id/preview/*', async (req, res, next) => {
         }
 
         res.setHeader('Content-Type', previewFile.contentType);
-        res.setHeader('Cache-Control', 'no-store');
+        applyPreviewResponseHeaders(res);
         res.send(previewFile.contentBuffer);
     } catch (err) {
         next(err);
@@ -373,7 +382,7 @@ router.get('/:id/site/*', async (req, res, next) => {
         }
 
         res.setHeader('Content-Type', resolved.contentType);
-        res.setHeader('Cache-Control', 'no-store');
+        applyPreviewResponseHeaders(res);
         res.send(resolved.contentBuffer);
     } catch (err) {
         next(err);
