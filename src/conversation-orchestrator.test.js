@@ -4400,6 +4400,56 @@ describe('ConversationOrchestrator', () => {
         ]);
     });
 
+    test('repairs planner params for architecture-design steps', async () => {
+        const llmClient = {
+            createResponse: jest.fn(),
+            complete: jest.fn().mockResolvedValue(JSON.stringify({
+                steps: [
+                    {
+                        tool: 'architecture-design',
+                        reason: 'Design the requested prototype architecture.',
+                        params: {
+                            request: 'Create a small architecture mock/demo for an OpenCode-driven software builder.',
+                        },
+                    },
+                ],
+            })),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'architecture-design'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Create a small architecture mock/demo for an OpenCode-driven software builder.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+
+        const plan = await orchestrator.planToolUse({
+            objective,
+            executionProfile: 'default',
+            toolPolicy,
+        });
+
+        expect(plan).toEqual([
+            expect.objectContaining({
+                tool: 'architecture-design',
+                params: expect.objectContaining({
+                    requirements: objective,
+                    request: objective,
+                }),
+            }),
+        ]);
+    });
+
     test('does not shortcut multi-job scheduling requests into a single direct workload action', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {

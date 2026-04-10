@@ -1152,6 +1152,26 @@ function normalizeUserCheckpointPlanParams(step = {}) {
     }
 }
 
+function normalizeArchitectureDesignPlanParams(step = {}, { objective = '' } = {}) {
+    const params = step?.params && typeof step.params === 'object'
+        ? { ...step.params }
+        : {};
+    const requirements = [
+        params.requirements,
+        params.request,
+        params.prompt,
+        params.description,
+        params.brief,
+        objective,
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    if (requirements) {
+        params.requirements = requirements.trim();
+    }
+
+    return params;
+}
+
 function inferRecallProfileFromText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -6479,6 +6499,11 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (normalizedStep.tool === USER_CHECKPOINT_TOOL_ID) {
             normalizedStep.params = normalizeUserCheckpointPlanParams(step);
+            return normalizedStep;
+        }
+
+        if (normalizedStep.tool === 'architecture-design') {
+            normalizedStep.params = normalizeArchitectureDesignPlanParams(step, { objective });
             return normalizedStep;
         }
 
