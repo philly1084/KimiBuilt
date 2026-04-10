@@ -118,6 +118,19 @@ app.get('/ready', (_req, res) => {
 
 const frontendPath = process.env.FRONTEND_PATH || path.join(__dirname, '../frontend');
 
+function buildFrontendStaticOptions() {
+    return {
+        setHeaders(res, filePath) {
+            if (String(filePath || '').toLowerCase().endsWith('.html')) {
+                res.setHeader('Cache-Control', 'no-store');
+                return;
+            }
+
+            res.setHeader('Cache-Control', 'no-cache');
+        },
+    };
+}
+
 app.get('/login', (req, res) => {
     const authState = getAuthenticatedUser(req);
     if (authState.authenticated) {
@@ -130,11 +143,11 @@ app.use('/api/auth', authRouter);
 app.use(requireAuth);
 
 // Serve only the 4 active frontends
-app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat')));
-app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli')));
-app.use('/notes', express.static(path.join(frontendPath, 'notes-notion')));
-app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw')));
-app.use('/admin', express.static(path.join(frontendPath, 'agent-dashboard')));
+app.use('/web-chat', express.static(path.join(frontendPath, 'web-chat'), buildFrontendStaticOptions()));
+app.use('/web-cli', express.static(path.join(frontendPath, 'web-cli'), buildFrontendStaticOptions()));
+app.use('/notes', express.static(path.join(frontendPath, 'notes-notion'), buildFrontendStaticOptions()));
+app.use('/canvas', express.static(path.join(frontendPath, 'canvas-excalidraw'), buildFrontendStaticOptions()));
+app.use('/admin', express.static(path.join(frontendPath, 'agent-dashboard'), buildFrontendStaticOptions()));
 
 app.get('/', (_req, res) => {
     res.send(`
@@ -227,7 +240,7 @@ app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', opencodeRouter);
 
-app.use(express.static(path.join(__dirname, '../frontend')));
+app.use(express.static(path.join(__dirname, '../frontend'), buildFrontendStaticOptions()));
 
 app.use((_req, res) => {
     res.status(404).json({ error: { message: 'Not found' } });

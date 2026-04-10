@@ -614,8 +614,10 @@ class ChatApp {
             // If we have a current session, load its messages
             if (sessionManager.currentSessionId) {
                 await this.loadSessionMessages(sessionManager.currentSessionId);
-                await this.loadSessionWorkloads(sessionManager.currentSessionId);
                 this.subscribeToSessionUpdates(sessionManager.currentSessionId);
+                void this.loadSessionWorkloads(sessionManager.currentSessionId).catch((error) => {
+                    console.warn('Failed to load initial session workloads:', error);
+                });
             } else {
                 this.renderWorkloadsPanel();
             }
