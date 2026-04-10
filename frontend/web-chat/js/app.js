@@ -176,14 +176,12 @@ class ChatApp {
         
         // Check connection status
         this.updateConnectionStatus('checking');
-        const healthPromise = apiClient.checkHealth()
+        void apiClient.checkHealth()
             .then((health) => {
                 this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
-                return health;
             })
             .catch(() => {
                 this.updateConnectionStatus('disconnected');
-                return { connected: false };
             });
         
         // Start periodic health checks
@@ -198,7 +196,6 @@ class ChatApp {
         
         // Load sessions
         await this.loadSessions();
-        await healthPromise;
 
         this.connectWorkloadSocket();
         
@@ -626,6 +623,7 @@ class ChatApp {
             this.updateSessionInfo();
         } catch (error) {
             console.error('Failed to load sessions:', error);
+            this.updateConnectionStatus('disconnected');
             // Show empty state
             uiHelpers.renderSessionsList([], null);
             this.renderWorkloadsPanel();

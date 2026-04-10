@@ -1706,17 +1706,9 @@ class OpenAIAPIClient extends EventTarget {
                 const data = await response.json();
                 return { connected: true, data };
             }
+            return { connected: false, error: `Health check failed: HTTP ${response.status}` };
         } catch (error) {
             clearTimeout(timeoutId);
-            return { connected: false, error: error.message };
-        }
-
-        try {
-            const baseUrl = API_BASE_URL.replace('/v1', '');
-            const response = await fetch(`${baseUrl}/health`);
-            const data = await response.json().catch(() => ({}));
-            return { connected: response.status < 500, data, degraded: !response.ok };
-        } catch (error) {
             return { connected: false, error: error.message };
         }
     }
