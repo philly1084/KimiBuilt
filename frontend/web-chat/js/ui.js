@@ -6089,7 +6089,7 @@ class UIHelpers {
             { category: 'Navigation', icon: 'sidebar', title: 'Toggle Sidebar', description: 'Show or hide the sidebar', action: 'toggle-sidebar', shortcut: 'Ctrl+B' },
             { category: 'View', icon: 'minimize-2', title: this.isMinimalistMode() ? 'Return to Full Interface' : 'Enter Minimalist Mode', description: 'Switch between the full workspace and a chat-first view', action: 'toggle-minimalist-mode', shortcut: 'Ctrl+Shift+M' },
             { category: 'View', icon: 'minimize-2', title: 'Toggle Input Area', description: 'Show or hide the message input', action: 'toggle-input-area', shortcut: 'Ctrl+Shift+H' },
-            { category: 'View', icon: 'swatches', title: 'Open Theme Gallery', description: 'Browse curated wallpaper and color presets', action: 'open-theme-gallery' },
+            { category: 'View', icon: 'palette', title: 'Open Theme Gallery', description: 'Browse curated wallpaper and color presets', action: 'open-theme-gallery' },
             ...(hasMessages ? [
                 { category: 'Export', icon: 'download', title: 'Export as Markdown', description: 'Download conversation as .md file', action: 'export-md' },
                 { category: 'Export', icon: 'download', title: 'Export as JSON', description: 'Download conversation as .json file', action: 'export-json' },

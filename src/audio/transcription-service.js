@@ -64,6 +64,34 @@ function shouldRetryWithFallbackModel(error) {
     return modelIssuePattern.test(message);
 }
 
+function shouldRetryWithFallbackProvider(error) {
+    const statusCode = Number(error?.statusCode || error?.status || 0) || 0;
+    const errorCode = String(error?.code || error?.type || '').trim().toLowerCase();
+    const message = String(error?.message || '').trim().toLowerCase();
+    const providerIssuePattern = /(api key|authentication|auth|permission|access|forbidden|unauthorized|endpoint|route|path|method not allowed|not found|unsupported|not available|does not exist)/i;
+    const fileIssuePattern = /(file format|audio format|upload(ed)? file|mime type|unsupported audio)/i;
+
+    if (fileIssuePattern.test(message)) {
+        return false;
+    }
+
+    if ([
+        'invalid_api_key',
+        'authentication_error',
+        'permission_error',
+        'access_denied',
+        'not_found_error',
+    ].includes(errorCode)) {
+        return true;
+    }
+
+    if ([401, 403, 404, 405, 501].includes(statusCode)) {
+        return true;
+    }
+
+    return providerIssuePattern.test(message);
+}
+
 function wrapTranscriptionError(error) {
     if (error?.statusCode) {
         return error;
@@ -80,22 +108,59 @@ class TranscriptionService {
         this.audioConfig = {
             ...audioConfig,
         };
-        this.client = null;
+        this.clientCache = new Map();
     }
 
-    getClient() {
-        if (!this.client) {
-            this.client = new OpenAI({
+    getProviderCandidates() {
+        const configuredCandidates = Array.isArray(this.audioConfig.providerCandidates)
+            ? this.audioConfig.providerCandidates
+            : [];
+        const candidates = configuredCandidates.length > 0
+            ? configuredCandidates
+            : [{
+                id: 'primary',
                 apiKey: this.audioConfig.apiKey,
                 baseURL: this.audioConfig.baseURL,
+            }];
+        const seen = new Set();
+
+        return candidates
+            .map((candidate, index) => ({
+                id: String(candidate?.id || `provider-${index + 1}`).trim() || `provider-${index + 1}`,
+                apiKey: String(candidate?.apiKey || '').trim(),
+                baseURL: String(candidate?.baseURL || this.audioConfig.baseURL || '').trim() || 'https://api.openai.com/v1',
+            }))
+            .filter((candidate) => {
+                if (!candidate.apiKey) {
+                    return false;
+                }
+
+                const cacheKey = `${candidate.apiKey}::${candidate.baseURL}`;
+                if (seen.has(cacheKey)) {
+                    return false;
+                }
+                seen.add(cacheKey);
+                return true;
             });
+    }
+
+    getClient(providerConfig = {}) {
+        const apiKey = String(providerConfig.apiKey || this.audioConfig.apiKey || '').trim();
+        const baseURL = String(providerConfig.baseURL || this.audioConfig.baseURL || '').trim();
+        const cacheKey = `${apiKey}::${baseURL}`;
+
+        if (!this.clientCache.has(cacheKey)) {
+            this.clientCache.set(cacheKey, new OpenAI({
+                apiKey,
+                baseURL,
+            }));
         }
 
-        return this.client;
+        return this.clientCache.get(cacheKey);
     }
 
     assertConfigured() {
-        if (String(this.audioConfig.apiKey || '').trim()) {
+        if (this.getProviderCandidates().length > 0) {
             return;
         }
 
@@ -127,47 +192,58 @@ class TranscriptionService {
             this.audioConfig.transcriptionModel,
             this.audioConfig.fallbackModels,
         );
+        const providerCandidates = this.getProviderCandidates();
         const effectiveMimeType = String(mimeType || 'audio/webm').trim() || 'audio/webm';
         const extension = effectiveMimeType.includes('/')
             ? effectiveMimeType.split('/')[1].split(';')[0].trim() || 'webm'
             : 'webm';
         let lastError = null;
 
-        for (let index = 0; index < candidateModels.length; index += 1) {
-            const candidateModel = candidateModels[index];
+        providerLoop:
+        for (let providerIndex = 0; providerIndex < providerCandidates.length; providerIndex += 1) {
+            const providerCandidate = providerCandidates[providerIndex];
 
-            try {
-                const upload = await toFile(
-                    audioBuffer,
-                    sanitizeUploadFilename(filename, extension),
-                    { type: effectiveMimeType },
-                );
+            for (let modelIndex = 0; modelIndex < candidateModels.length; modelIndex += 1) {
+                const candidateModel = candidateModels[modelIndex];
+                const hasFallbackModel = modelIndex < (candidateModels.length - 1);
+                const hasFallbackProvider = providerIndex < (providerCandidates.length - 1);
 
-                const response = await this.getClient().audio.transcriptions.create({
-                    file: upload,
-                    model: candidateModel,
-                    response_format: 'json',
-                    ...(String(language || '').trim() ? { language: String(language).trim() } : {}),
-                    ...(String(prompt || '').trim() ? { prompt: String(prompt).trim() } : {}),
-                });
+                try {
+                    const upload = await toFile(
+                        audioBuffer,
+                        sanitizeUploadFilename(filename, extension),
+                        { type: effectiveMimeType },
+                    );
 
-                return {
-                    text: String(response?.text || '').trim(),
-                    model: candidateModel,
-                    language: String(response?.language || language || '').trim(),
-                    duration: Number.isFinite(response?.duration) ? response.duration : null,
-                    provider: 'openai',
-                };
-            } catch (error) {
-                const wrappedError = wrapTranscriptionError(error);
-                const hasFallbackCandidate = index < (candidateModels.length - 1);
+                    const response = await this.getClient(providerCandidate).audio.transcriptions.create({
+                        file: upload,
+                        model: candidateModel,
+                        response_format: 'json',
+                        ...(String(language || '').trim() ? { language: String(language).trim() } : {}),
+                        ...(String(prompt || '').trim() ? { prompt: String(prompt).trim() } : {}),
+                    });
 
-                if (hasFallbackCandidate && shouldRetryWithFallbackModel(wrappedError)) {
+                    return {
+                        text: String(response?.text || '').trim(),
+                        model: candidateModel,
+                        language: String(response?.language || language || '').trim(),
+                        duration: Number.isFinite(response?.duration) ? response.duration : null,
+                        provider: 'openai',
+                    };
+                } catch (error) {
+                    const wrappedError = wrapTranscriptionError(error);
                     lastError = wrappedError;
-                    continue;
-                }
 
-                throw wrappedError;
+                    if (hasFallbackModel && shouldRetryWithFallbackModel(wrappedError)) {
+                        continue;
+                    }
+
+                    if (hasFallbackProvider && (shouldRetryWithFallbackProvider(wrappedError) || shouldRetryWithFallbackModel(wrappedError))) {
+                        continue providerLoop;
+                    }
+
+                    throw wrappedError;
+                }
             }
         }
 
@@ -184,5 +260,6 @@ module.exports = {
     buildCandidateModels,
     transcriptionService,
     sanitizeUploadFilename,
+    shouldRetryWithFallbackProvider,
     shouldRetryWithFallbackModel,
 };

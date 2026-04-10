@@ -1,5 +1,174 @@
 const DEFAULT_TTS_CACHE_LIMIT = 24;
 const DEFAULT_BROWSER_VOICE_ID = 'browser:default';
+const DEFAULT_PIPER_CHUNK_TARGET_CHARS = 360;
+const DEFAULT_TTS_MAX_TEXT_CHARS = 2400;
+
+function normalizeSpeechSentence(line = '') {
+    const trimmed = String(line || '').trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (/[.!?]$/.test(trimmed)) {
+        return trimmed;
+    }
+
+    if (/[:;]$/.test(trimmed)) {
+        return `${trimmed.slice(0, -1)}.`;
+    }
+
+    return `${trimmed}.`;
+}
+
+function stripHtmlForSpeech(input = '') {
+    return String(input || '').replace(/<[^>]+>/g, ' ');
+}
+
+function stripMarkdownForSpeech(input = '') {
+    const markdown = String(input || '')
+        .replace(/\0/g, '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/```[\s\S]*?```/g, '\nCode example omitted.\n')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/^#{1,6}\s*/gm, '')
+        .replace(/^\s{0,3}>\s?/gm, '')
+        .replace(/^\s*[-*+]\s+/gm, '')
+        .replace(/^\s*\d+\.\s+/gm, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/_([^_]+)_/g, '$1')
+        .replace(/\|/g, ' ')
+        .replace(/^\s*[-=]{3,}\s*$/gm, '')
+        .replace(/\n{3,}/g, '\n\n');
+
+    return stripHtmlForSpeech(markdown);
+}
+
+function normalizeTextForSpeech(input = '') {
+    return stripMarkdownForSpeech(input)
+        .replace(/[ \t\f\v]+/g, ' ')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map(normalizeSpeechSentence)
+        .join(' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+function splitWordsIntoSpeechChunks(text = '', maxChars = DEFAULT_TTS_MAX_TEXT_CHARS) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) {
+        return [];
+    }
+
+    const chunks = [];
+    let currentChunk = '';
+    const words = normalizedText.split(/\s+/).filter(Boolean);
+
+    words.forEach((word) => {
+        const nextChunk = currentChunk ? `${currentChunk} ${word}` : word;
+        if (nextChunk.length <= maxChars) {
+            currentChunk = nextChunk;
+            return;
+        }
+
+        if (currentChunk) {
+            chunks.push(currentChunk.trim());
+            currentChunk = '';
+        }
+
+        if (word.length <= maxChars) {
+            currentChunk = word;
+            return;
+        }
+
+        for (let index = 0; index < word.length; index += maxChars) {
+            chunks.push(word.slice(index, index + maxChars).trim());
+        }
+    });
+
+    if (currentChunk) {
+        chunks.push(currentChunk.trim());
+    }
+
+    return chunks.filter(Boolean);
+}
+
+function splitSpeechChunkByClauses(text = '', maxChars = DEFAULT_TTS_MAX_TEXT_CHARS) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) {
+        return [];
+    }
+
+    if (normalizedText.length <= maxChars) {
+        return [normalizedText];
+    }
+
+    const clauses = (normalizedText.match(/[^,;:]+(?:[,;:]+|$)/g) || [normalizedText])
+        .map((clause) => String(clause || '').trim())
+        .filter(Boolean);
+
+    if (clauses.length <= 1) {
+        return splitWordsIntoSpeechChunks(normalizedText, maxChars);
+    }
+
+    const chunks = [];
+    let currentChunk = '';
+
+    clauses.forEach((clause) => {
+        const nextChunk = currentChunk ? `${currentChunk} ${clause}` : clause;
+        if (nextChunk.length <= maxChars) {
+            currentChunk = nextChunk;
+            return;
+        }
+
+        if (currentChunk) {
+            chunks.push(currentChunk.trim());
+            currentChunk = '';
+        }
+
+        if (clause.length <= maxChars) {
+            currentChunk = clause;
+            return;
+        }
+
+        splitWordsIntoSpeechChunks(clause, maxChars).forEach((chunk) => chunks.push(chunk));
+    });
+
+    if (currentChunk) {
+        chunks.push(currentChunk.trim());
+    }
+
+    return chunks.filter(Boolean);
+}
+
+function splitTextIntoSpeechChunks(input = '', options = {}) {
+    const normalizedText = normalizeTextForSpeech(input);
+    if (!normalizedText) {
+        return [];
+    }
+
+    const absoluteMaxChars = Math.max(120, Number(options.absoluteMaxChars) || DEFAULT_TTS_MAX_TEXT_CHARS);
+    const targetChunkChars = Math.max(
+        120,
+        Math.min(
+            absoluteMaxChars,
+            Number(options.targetChunkChars) || DEFAULT_PIPER_CHUNK_TARGET_CHARS,
+        ),
+    );
+
+    const sentences = (normalizedText.match(/[^.!?]+(?:[.!?]+|$)/g) || [normalizedText])
+        .map((sentence) => String(sentence || '').trim())
+        .filter(Boolean);
+
+    return sentences.flatMap((sentence) => (
+        splitSpeechChunkByClauses(sentence, targetChunkChars)
+            .flatMap((chunk) => splitWordsIntoSpeechChunks(chunk, absoluteMaxChars))
+    )).filter(Boolean);
+}
 
 class WebChatTtsManager extends EventTarget {
     constructor() {
@@ -25,9 +194,12 @@ class WebChatTtsManager extends EventTarget {
         this.currentSourceNode = null;
         this.currentGainNode = null;
         this.currentUtterance = null;
+        this.currentPlaybackWaiter = null;
         this.cachedAudioBlobs = new Map();
         this.audioContext = null;
         this.pendingConfigPromise = null;
+        this.maxTextChars = DEFAULT_TTS_MAX_TEXT_CHARS;
+        this.playbackToken = 0;
         this.browserSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
         this.handleBrowserVoicesChanged = this.handleBrowserVoicesChanged.bind(this);
 
@@ -345,6 +517,10 @@ class WebChatTtsManager extends EventTarget {
             const manifestVoices = Array.isArray(manifest?.voices) && manifest.voices.length > 0
                 ? manifest.voices
                 : providerVoices;
+            this.maxTextChars = Math.max(
+                120,
+                Number(manifest?.maxTextChars) || DEFAULT_TTS_MAX_TEXT_CHARS,
+            );
             const manifestProvider = String(manifest?.provider || 'piper').trim() || 'piper';
             const manifestProviderLabel = manifestProvider === 'openai'
                 ? 'OpenAI'
@@ -414,6 +590,7 @@ class WebChatTtsManager extends EventTarget {
                 this.provider = 'piper';
                 this.voices = [];
                 this.selectedVoiceId = '';
+                this.maxTextChars = DEFAULT_TTS_MAX_TEXT_CHARS;
                 this.diagnostics = {
                     status: 'unavailable',
                     binaryReachable: false,
@@ -429,6 +606,21 @@ class WebChatTtsManager extends EventTarget {
     }
 
     stop() {
+        this.playbackToken += 1;
+        this.resetPlaybackState();
+    }
+
+    resetPlaybackState() {
+        const activeWaiter = this.currentPlaybackWaiter;
+        this.currentPlaybackWaiter = null;
+        if (activeWaiter?.resolve) {
+            try {
+                activeWaiter.resolve(false);
+            } catch (_error) {
+                // Ignore promise settlement failures during cleanup.
+            }
+        }
+
         if (this.currentAudio) {
             try {
                 this.currentAudio.pause();
@@ -474,6 +666,16 @@ class WebChatTtsManager extends EventTarget {
         this.emitStateChange();
     }
 
+    beginPlaybackRequest() {
+        this.playbackToken += 1;
+        this.resetPlaybackState();
+        return this.playbackToken;
+    }
+
+    isPlaybackRequestActive(token) {
+        return Number(token) > 0 && this.playbackToken === token;
+    }
+
     cleanupAudio(audio) {
         if (this.currentAudio === audio) {
             this.currentAudio = null;
@@ -484,7 +686,7 @@ class WebChatTtsManager extends EventTarget {
         this.emitStateChange();
     }
 
-    cleanupAudioPlayback(sourceNode) {
+    cleanupAudioPlayback(sourceNode, options = {}) {
         if (this.currentSourceNode === sourceNode) {
             try {
                 this.currentSourceNode.disconnect();
@@ -498,7 +700,9 @@ class WebChatTtsManager extends EventTarget {
             }
             this.currentSourceNode = null;
             this.currentGainNode = null;
-            this.currentMessageId = '';
+            if (options.preserveMessageId !== true) {
+                this.currentMessageId = '';
+            }
         }
 
         this.loadingMessageId = '';
@@ -599,14 +803,14 @@ class WebChatTtsManager extends EventTarget {
         return context;
     }
 
-    async playAudioBlob(audioBlob, messageId = '') {
+    async playAudioBlob(audioBlob, messageId = '', options = {}) {
         if (!(audioBlob instanceof Blob) || audioBlob.size === 0) {
             throw new Error('No audio was returned for playback.');
         }
 
         const context = await this.preparePlayback();
         if (this.currentAudio || this.currentSourceNode || this.currentUtterance) {
-            this.stop();
+            this.resetPlaybackState();
         }
 
         let decodedBuffer = null;
@@ -623,7 +827,6 @@ class WebChatTtsManager extends EventTarget {
         sourceNode.buffer = decodedBuffer;
         sourceNode.connect(gainNode);
         gainNode.connect(context.destination);
-        sourceNode.onended = () => this.cleanupAudioPlayback(sourceNode);
 
         this.currentSourceNode = sourceNode;
         this.currentGainNode = gainNode;
@@ -631,13 +834,47 @@ class WebChatTtsManager extends EventTarget {
         this.loadingMessageId = '';
         this.emitStateChange();
 
+        let resolvePlayback;
+        let rejectPlayback;
+        const playbackPromise = new Promise((resolve, reject) => {
+            resolvePlayback = resolve;
+            rejectPlayback = reject;
+        });
+
+        sourceNode.onended = () => {
+            if (this.currentPlaybackWaiter?.sourceNode === sourceNode) {
+                this.currentPlaybackWaiter = null;
+            }
+            this.cleanupAudioPlayback(sourceNode, {
+                preserveMessageId: options.keepMessageActiveOnEnd === true,
+            });
+            resolvePlayback(true);
+        };
+
+        if (options.awaitEnd === true) {
+            this.currentPlaybackWaiter = {
+                sourceNode,
+                resolve: resolvePlayback,
+            };
+        }
+
         try {
             sourceNode.start();
-            return true;
         } catch (error) {
+            if (this.currentPlaybackWaiter?.sourceNode === sourceNode) {
+                this.currentPlaybackWaiter = null;
+            }
             this.cleanupAudioPlayback(sourceNode);
+            rejectPlayback(error);
             throw error;
         }
+
+        if (options.awaitEnd === true) {
+            return playbackPromise;
+        }
+
+        playbackPromise.catch(() => null);
+        return true;
     }
 
     speakWithBrowserVoice({ messageId = '', text = '' } = {}) {
@@ -651,7 +888,7 @@ class WebChatTtsManager extends EventTarget {
         }
 
         if (this.currentAudio || this.currentSourceNode || this.currentUtterance) {
-            this.stop();
+            this.resetPlaybackState();
         }
 
         const utterance = new window.SpeechSynthesisUtterance(normalizedText);
@@ -676,6 +913,105 @@ class WebChatTtsManager extends EventTarget {
         return true;
     }
 
+    async synthesizeMessageAudio(text, messageId = '', options = {}) {
+        const normalizedText = String(text || '').trim();
+        if (!normalizedText) {
+            throw new Error('No text is available to read aloud.');
+        }
+
+        const cacheKey = this.buildCacheKey(messageId, normalizedText);
+        const cachedAudioBlob = this.cachedAudioBlobs.get(cacheKey);
+        if (cachedAudioBlob) {
+            return {
+                blob: cachedAudioBlob,
+                cached: true,
+            };
+        }
+
+        if (options.showLoading === true) {
+            this.loadingMessageId = String(messageId || '').trim();
+            if (options.resetCurrentMessage === true) {
+                this.currentMessageId = '';
+            }
+            this.emitStateChange();
+        }
+
+        try {
+            const result = await window.apiClient?.synthesizeSpeech?.(normalizedText, {
+                voiceId: this.getSelectedVoiceId(),
+            });
+            this.cachedAudioBlobs.set(cacheKey, result.blob);
+            this.trimCache();
+            return {
+                ...result,
+                cached: false,
+            };
+        } catch (error) {
+            if (options.showLoading === true) {
+                this.loadingMessageId = '';
+                this.emitStateChange();
+            }
+            throw error;
+        }
+    }
+
+    getPiperSpeechChunks(text = '') {
+        return splitTextIntoSpeechChunks(text, {
+            absoluteMaxChars: this.maxTextChars,
+            targetChunkChars: Math.min(this.maxTextChars, DEFAULT_PIPER_CHUNK_TARGET_CHARS),
+        });
+    }
+
+    async speakPiperChunks({ messageId = '', text = '', playbackToken = 0 } = {}) {
+        const normalizedMessageId = String(messageId || '').trim();
+        const chunks = this.getPiperSpeechChunks(text);
+        if (chunks.length === 0) {
+            throw new Error('No text is available to read aloud.');
+        }
+
+        if (chunks.length === 1) {
+            const result = await this.synthesizeMessageAudio(chunks[0], normalizedMessageId, {
+                showLoading: true,
+                resetCurrentMessage: true,
+            });
+            if (!this.isPlaybackRequestActive(playbackToken)) {
+                return false;
+            }
+
+            return this.playAudioBlob(result.blob, normalizedMessageId);
+        }
+
+        let nextChunkPromise = this.synthesizeMessageAudio(chunks[0], normalizedMessageId, {
+            showLoading: true,
+            resetCurrentMessage: true,
+        });
+
+        for (let index = 0; index < chunks.length; index += 1) {
+            const chunkResult = await nextChunkPromise;
+            if (!this.isPlaybackRequestActive(playbackToken)) {
+                return false;
+            }
+
+            const hasNextChunk = index < (chunks.length - 1);
+            if (hasNextChunk) {
+                nextChunkPromise = this.synthesizeMessageAudio(chunks[index + 1], normalizedMessageId, {
+                    showLoading: false,
+                });
+            }
+
+            const didFinishPlayback = await this.playAudioBlob(chunkResult.blob, normalizedMessageId, {
+                awaitEnd: true,
+                keepMessageActiveOnEnd: hasNextChunk,
+            });
+
+            if (didFinishPlayback === false || !this.isPlaybackRequestActive(playbackToken)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     async speakMessage({ messageId = '', text = '' } = {}) {
         const normalizedText = String(text || '').trim();
         if (!normalizedText) {
@@ -688,6 +1024,7 @@ class WebChatTtsManager extends EventTarget {
         }
 
         const normalizedMessageId = String(messageId || '').trim();
+        const playbackToken = this.beginPlaybackRequest();
         if (this.provider === 'browser') {
             return this.speakWithBrowserVoice({
                 messageId: normalizedMessageId,
@@ -697,27 +1034,30 @@ class WebChatTtsManager extends EventTarget {
 
         await this.preparePlayback();
 
-        const cacheKey = this.buildCacheKey(normalizedMessageId, normalizedText);
-        const cachedAudioBlob = this.cachedAudioBlobs.get(cacheKey);
-        if (cachedAudioBlob) {
-            return this.playAudioBlob(cachedAudioBlob, normalizedMessageId);
-        }
-
-        this.loadingMessageId = normalizedMessageId;
-        this.currentMessageId = '';
-        this.emitStateChange();
-
         try {
-            const result = await window.apiClient?.synthesizeSpeech?.(normalizedText, {
-                voiceId: this.getSelectedVoiceId(),
+            if (this.getProvider() === 'piper') {
+                return await this.speakPiperChunks({
+                    messageId: normalizedMessageId,
+                    text: normalizedText,
+                    playbackToken,
+                });
+            }
+
+            const result = await this.synthesizeMessageAudio(normalizedText, normalizedMessageId, {
+                showLoading: true,
+                resetCurrentMessage: true,
             });
-            this.cachedAudioBlobs.set(cacheKey, result.blob);
-            this.trimCache();
+            if (!this.isPlaybackRequestActive(playbackToken)) {
+                return false;
+            }
+
             return this.playAudioBlob(result.blob, normalizedMessageId);
         } catch (error) {
-            this.loadingMessageId = '';
-            this.currentMessageId = '';
-            this.emitStateChange();
+            if (this.isPlaybackRequestActive(playbackToken)) {
+                this.loadingMessageId = '';
+                this.currentMessageId = '';
+                this.emitStateChange();
+            }
             throw error;
         }
     }

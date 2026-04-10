@@ -53,6 +53,37 @@ function parseOptionalStringList(value) {
         .filter(Boolean);
 }
 
+function buildAudioProviderCandidates() {
+    const defaultBaseURL = 'https://api.openai.com/v1';
+    const candidates = [
+        {
+            id: 'transcription',
+            apiKey: String(process.env.OPENAI_TRANSCRIPTION_API_KEY || '').trim(),
+            baseURL: String(process.env.OPENAI_TRANSCRIPTION_BASE_URL || process.env.OPENAI_BASE_URL || defaultBaseURL).trim() || defaultBaseURL,
+        },
+        {
+            id: 'media',
+            apiKey: String(process.env.OPENAI_MEDIA_API_KEY || '').trim(),
+            baseURL: String(process.env.OPENAI_MEDIA_BASE_URL || defaultBaseURL).trim() || defaultBaseURL,
+        },
+        {
+            id: 'openai',
+            apiKey: String(process.env.OPENAI_API_KEY || '').trim(),
+            baseURL: String(process.env.OPENAI_BASE_URL || defaultBaseURL).trim() || defaultBaseURL,
+        },
+    ].filter((candidate) => candidate.apiKey);
+
+    const seen = new Set();
+    return candidates.filter((candidate) => {
+        const cacheKey = `${candidate.apiKey}::${candidate.baseURL}`;
+        if (seen.has(cacheKey)) {
+            return false;
+        }
+        seen.add(cacheKey);
+        return true;
+    });
+}
+
 function normalizePiperVoiceDefinition(value = {}, defaults = {}) {
     if (!value || typeof value !== 'object') {
         return null;
@@ -187,6 +218,7 @@ const piperVoiceDefaults = {
     sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
 };
 const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
+const configuredAudioProviders = buildAudioProviderCandidates();
 
 const config = {
     // Server
@@ -291,14 +323,9 @@ const config = {
     },
 
     audio: {
-        apiKey: process.env.OPENAI_TRANSCRIPTION_API_KEY
-            || process.env.OPENAI_MEDIA_API_KEY
-            || process.env.OPENAI_API_KEY
-            || '',
-        baseURL: process.env.OPENAI_TRANSCRIPTION_BASE_URL
-            || process.env.OPENAI_MEDIA_BASE_URL
-            || process.env.OPENAI_BASE_URL
-            || 'https://api.openai.com/v1',
+        apiKey: configuredAudioProviders[0]?.apiKey || '',
+        baseURL: configuredAudioProviders[0]?.baseURL || 'https://api.openai.com/v1',
+        providerCandidates: configuredAudioProviders,
         transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
         fallbackModels: parseOptionalStringList(process.env.OPENAI_TRANSCRIPTION_FALLBACK_MODELS),
         maxUploadBytes: Math.max(
