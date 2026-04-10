@@ -3696,6 +3696,98 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('judgment v2 uses the active task frame for abbreviated follow-ups and traces isolation failures', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Updated the notes page summary.', 'resp_active_frame_v2')),
+            complete: jest.fn(),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({
+                id: 'session-active-frame-v2',
+                metadata: {
+                    controlState: {
+                        activeTaskFrame: {
+                            objective: 'Update the Alpha notes page summary',
+                            projectKey: 'alpha-notes',
+                            clientSurface: 'notes',
+                            nextSensibleStep: 'Refresh the status block',
+                        },
+                    },
+                },
+            }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue({
+                contextMessages: [],
+                bundles: { fact: [], artifact: [], skill: [], research: [] },
+                trace: {
+                    query: 'Update the Alpha notes page summary. continue',
+                    matchedKeywords: ['alpha', 'notes', 'page'],
+                    counts: { fact: 0, artifact: 0, skill: 0, research: 0 },
+                    bundles: { fact: 0, artifact: 0, skill: 0, research: 0 },
+                    selected: [
+                        {
+                            id: 'foreign-project-memory',
+                            projectKey: 'beta-notes',
+                            memoryNamespace: 'project_shared',
+                            sourceSurface: 'notes',
+                            summary: 'Beta project notes summary',
+                        },
+                    ],
+                    routing: {
+                        projectKey: 'alpha-notes',
+                        memoryNamespace: 'surface_local',
+                        sourceSurface: 'notes',
+                    },
+                },
+            }),
+            rememberResponse: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'continue',
+            sessionId: 'session-active-frame-v2',
+            metadata: {
+                clientSurface: 'notes',
+                memoryScope: 'alpha-notes',
+            },
+            stream: false,
+        });
+
+        expect(memoryService.process).toHaveBeenCalledWith(
+            'session-active-frame-v2',
+            'continue',
+            expect.objectContaining({
+                projectKey: 'alpha-notes',
+                recallQuery: 'Update the Alpha notes page summary. continue',
+                objective: 'Update the Alpha notes page summary. continue',
+                sourceSurface: 'notes',
+            }),
+        );
+        expect(result.trace.activeTaskFrame).toEqual(expect.objectContaining({
+            objective: 'Update the Alpha notes page summary. continue',
+            clientSurface: 'notes',
+            projectKey: 'alpha-notes',
+        }));
+        expect(result.trace.surfaceFinisher).toBe('notes_page');
+        expect(result.trace.failureTags).toContain('cross_project_recall');
+        expect(result.trace.projectKey).toBe('alpha-notes');
+    });
+
     test('prefers document-workflow once verified research pages exist for a requested slide deck', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
@@ -5205,7 +5297,7 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
-    test('runs the repo-to-deploy workflow through opencode, git-safe, k3s-deploy, and remote verification', async () => {
+    test('runs the repo-to-deploy workflow through opencode and git-safe, leaving deployment for follow-up', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
             host: '10.0.0.5',
@@ -5226,7 +5318,7 @@ describe('ConversationOrchestrator', () => {
         });
 
         const llmClient = {
-            createResponse: jest.fn().mockResolvedValue(buildResponse('Implemented, pushed, deployed, and verified the requested change.', 'resp_repo_deploy')),
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Implemented the requested change and pushed it to GitHub. Deploy it in a follow-up when ready.', 'resp_repo_deploy')),
             complete: jest.fn(),
         };
         const toolManager = {
@@ -5261,24 +5353,6 @@ describe('ConversationOrchestrator', () => {
                         action: 'save-and-push',
                         branch: 'main',
                         stdout: 'pushed to origin/main',
-                    },
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    toolId: 'k3s-deploy',
-                    data: {
-                        action: 'sync-and-apply',
-                        stdout: 'deployment.apps/backend configured',
-                        host: '10.0.0.5:22',
-                    },
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    toolId: 'remote-command',
-                    data: {
-                        stdout: 'deployment "backend" successfully rolled out',
-                        stderr: '',
-                        host: '10.0.0.5:22',
                     },
                 }),
         };
@@ -5315,8 +5389,6 @@ describe('ConversationOrchestrator', () => {
             'opencode-run',
             'git-safe',
             'git-safe',
-            'k3s-deploy',
-            'remote-command',
         ]);
         expect(toolManager.executeTool.mock.calls[0][1]).toEqual(expect.objectContaining({
             target: 'local',
@@ -5328,15 +5400,9 @@ describe('ConversationOrchestrator', () => {
         expect(toolManager.executeTool.mock.calls[2][1]).toEqual(expect.objectContaining({
             action: 'save-and-push',
         }));
-        expect(toolManager.executeTool.mock.calls[3][1]).toEqual(expect.objectContaining({
-            action: 'sync-and-apply',
-        }));
-        expect(toolManager.executeTool.mock.calls[4][1]).toEqual(expect.objectContaining({
-            command: expect.stringContaining('kubectl rollout status deployment/'),
-        }));
         expect(result.trace.executionTrace.map((entry) => entry.name)).toEqual(expect.arrayContaining([
             'End-to-end builder workflow',
-            'Workflow completed after round 5',
+            'Workflow completed after round 3',
         ]));
         expect(sessionStore.update).toHaveBeenCalledWith('session-repo-deploy', expect.objectContaining({
             metadata: expect.objectContaining({
@@ -5348,14 +5414,12 @@ describe('ConversationOrchestrator', () => {
                         progress: expect.objectContaining({
                             implemented: true,
                             saved: true,
-                            deployed: true,
-                            verified: true,
                         }),
                     }),
                 }),
             }),
         }));
-        expect(result.output).toBe('Implemented, pushed, deployed, and verified the requested change.');
+        expect(result.output).toBe('Implemented the requested change and pushed it to GitHub. Deploy it in a follow-up when ready.');
     });
 
     test('runs the repo-only workflow through opencode-run and stops after implementation', async () => {

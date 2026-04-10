@@ -313,8 +313,8 @@ function buildProjectMemoryInstructions(session = null) {
     }
 
     const lines = [
-        '[Project working memory]',
-        'Reuse these verified session references, outputs, and completed tasks when the user refers to earlier work, images, research, URLs, or generated files.',
+        '[Project carryover memory]',
+        'Reuse these verified project-scoped references, outputs, and completed tasks when the user refers to earlier work, images, research, URLs, or generated files from this same project.',
     ];
 
     if (Array.isArray(memory.tasks) && memory.tasks.length > 0) {

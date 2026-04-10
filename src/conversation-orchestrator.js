@@ -26,10 +26,15 @@ const {
     buildWebChatSessionMessages,
 } = require('./web-chat-message-state');
 const {
+    buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
+    resolveProjectKey,
     resolveClientSurface,
     resolveSessionScope,
+    SESSION_LOCAL_MEMORY_NAMESPACE,
+    SURFACE_LOCAL_MEMORY_NAMESPACE,
+    USER_GLOBAL_MEMORY_NAMESPACE,
 } = require('./session-scope');
 const {
     USER_CHECKPOINT_TOOL_ID,
@@ -58,6 +63,10 @@ const {
 const { formatProjectExecutionContext } = require('./workloads/project-plans');
 const { hasWorkloadIntent } = require('./workloads/natural-language');
 const { buildCanonicalWorkloadAction } = require('./workloads/request-builder');
+const {
+    inferSurfaceFinisher,
+    scorePerceivedIntelligence,
+} = require('./perceived-intelligence-harness');
 const SYNTHETIC_STREAM_CHUNK_SIZE = 120;
 const MAX_PLAN_STEPS = 4;
 const MAX_TOOL_RESULT_CHARS = config.memory.toolResultCharLimit;
@@ -925,6 +934,7 @@ function summarizeRecallTrace(memoryTrace = null) {
         matchedKeywords: Array.isArray(memoryTrace.matchedKeywords) ? memoryTrace.matchedKeywords.slice(0, 8) : [],
         counts: memoryTrace.counts || {},
         bundles: memoryTrace.bundles || {},
+        routing: memoryTrace.routing || null,
     };
 }
 
@@ -1796,6 +1806,127 @@ function resolveTranscriptObjectiveFromSession(rawObjective = '', recentMessages
         usedTranscriptContext: true,
         priorUserObjective,
     };
+}
+
+function normalizeActiveTaskFrame(frame = null) {
+    if (!frame || typeof frame !== 'object' || Array.isArray(frame)) {
+        return null;
+    }
+
+    const objective = String(frame.objective || '').trim();
+    if (!objective) {
+        return null;
+    }
+
+    const normalizeList = (value = [], limit = 6) => (Array.isArray(value) ? value : [])
+        .map((entry) => normalizeInlineText(entry))
+        .filter(Boolean)
+        .slice(0, limit);
+
+    return {
+        objective,
+        ...(String(frame.projectKey || '').trim() ? { projectKey: String(frame.projectKey).trim() } : {}),
+        ...(String(frame.clientSurface || frame.surface || '').trim()
+            ? { clientSurface: String(frame.clientSurface || frame.surface).trim() }
+            : {}),
+        ...(String(frame.executionProfile || '').trim() ? { executionProfile: String(frame.executionProfile).trim() } : {}),
+        ...(String(frame.lastVerifiedStep || '').trim() ? { lastVerifiedStep: String(frame.lastVerifiedStep).trim() } : {}),
+        ...(String(frame.nextSensibleStep || '').trim() ? { nextSensibleStep: String(frame.nextSensibleStep).trim() } : {}),
+        ...(normalizeList(frame.unresolvedBlockers).length > 0 ? { unresolvedBlockers: normalizeList(frame.unresolvedBlockers) } : {}),
+        ...(normalizeList(frame.recentVerifiedFacts).length > 0 ? { recentVerifiedFacts: normalizeList(frame.recentVerifiedFacts) } : {}),
+        ...(normalizeList(frame.referencedArtifacts).length > 0 ? { referencedArtifacts: normalizeList(frame.referencedArtifacts) } : {}),
+        updatedAt: String(frame.updatedAt || frame.updated_at || '').trim() || new Date().toISOString(),
+    };
+}
+
+function resolveObjectiveFromActiveTaskFrame(rawObjective = '', session = null, clientSurface = '') {
+    const objective = String(rawObjective || '').trim();
+    const activeTaskFrame = normalizeActiveTaskFrame(getSessionControlState(session).activeTaskFrame);
+    if (!activeTaskFrame || !objective) {
+        return {
+            objective,
+            usedTaskFrameContext: false,
+            activeTaskFrame,
+        };
+    }
+
+    if (!(isLikelyTranscriptDependentTurn(objective) || isRemoteApprovalOnlyTurn(objective) || hasExplicitForegroundResumeIntent(objective))) {
+        return {
+            objective,
+            usedTaskFrameContext: false,
+            activeTaskFrame,
+        };
+    }
+
+    const normalizedSurface = String(clientSurface || '').trim().toLowerCase();
+    const frameSurface = String(activeTaskFrame.clientSurface || '').trim().toLowerCase();
+    if (normalizedSurface && frameSurface && normalizedSurface !== frameSurface) {
+        return {
+            objective,
+            usedTaskFrameContext: false,
+            activeTaskFrame,
+        };
+    }
+
+    return {
+        objective: `${activeTaskFrame.objective}. ${objective}`.trim(),
+        usedTaskFrameContext: true,
+        activeTaskFrame,
+    };
+}
+
+function buildActiveTaskFrame({
+    objective = '',
+    projectKey = '',
+    clientSurface = '',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    toolEvents = [],
+    projectPlan = null,
+    workflow = null,
+    memoryTrace = null,
+} = {}) {
+    const normalizedObjective = String(objective || '').trim();
+    if (!normalizedObjective) {
+        return null;
+    }
+
+    const relevantToolEvents = (Array.isArray(toolEvents) ? toolEvents : []);
+    const successfulEvents = relevantToolEvents.filter((event) => event?.result?.success !== false);
+    const failingEvents = relevantToolEvents.filter((event) => event?.result?.success === false);
+    const lastSuccessful = successfulEvents[successfulEvents.length - 1] || null;
+    const nextPlanFocus = getActiveProjectMilestoneTitle(projectPlan)
+        || getNextWorkflowTaskTitle(workflow)
+        || '';
+    const recentVerifiedFacts = Array.isArray(memoryTrace?.selected)
+        ? memoryTrace.selected
+            .map((entry) => normalizeInlineText(entry?.summary || entry?.artifactId || ''))
+            .filter(Boolean)
+            .slice(0, 3)
+        : [];
+    const referencedArtifacts = Array.isArray(memoryTrace?.selected)
+        ? memoryTrace.selected
+            .map((entry) => normalizeInlineText(entry?.artifactId || entry?.summary || ''))
+            .filter(Boolean)
+            .slice(0, 4)
+        : [];
+
+    return normalizeActiveTaskFrame({
+        objective: normalizedObjective,
+        projectKey,
+        clientSurface,
+        executionProfile,
+        lastVerifiedStep: lastSuccessful
+            ? normalizeInlineText(lastSuccessful.reason || lastSuccessful?.toolCall?.function?.name || lastSuccessful?.result?.toolId || '')
+            : '',
+        nextSensibleStep: nextPlanFocus || (failingEvents.length > 0 ? 'Resolve the active blocker.' : 'Continue the active objective.'),
+        unresolvedBlockers: failingEvents
+            .map((event) => normalizeInlineText(event?.result?.error || event?.error || ''))
+            .filter(Boolean)
+            .slice(0, 3),
+        recentVerifiedFacts,
+        referencedArtifacts,
+        updatedAt: new Date().toISOString(),
+    });
 }
 
 function buildNotesSynthesisInstructions() {
@@ -4260,10 +4391,18 @@ class ConversationOrchestrator extends EventEmitter {
             sessionIsolation: toolContext?.sessionIsolation,
             metadata,
         }, session || null);
+        const projectKey = resolveProjectKey({
+            ...scopedSessionMetadata,
+            ...(metadata || {}),
+            ...(toolContext || {}),
+            memoryScope,
+            clientSurface,
+        }, session || null);
         toolContext = {
             ...toolContext,
             ...(clientSurface ? { clientSurface } : {}),
             ...(memoryScope ? { memoryScope } : {}),
+            ...(projectKey ? { projectKey } : {}),
             ...(sessionIsolation ? { sessionIsolation: true } : {}),
             ...(Array.isArray(toolContext?.memoryKeywords) ? { memoryKeywords: toolContext.memoryKeywords } : {}),
         };
@@ -4272,6 +4411,10 @@ class ConversationOrchestrator extends EventEmitter {
             : loadRecentMessages !== false && this.sessionStore?.getRecentMessages
                 ? await this.sessionStore.getRecentMessages(sessionId, RECENT_TRANSCRIPT_LIMIT)
                 : [];
+        const taskFrameObjective = resolveObjectiveFromActiveTaskFrame(rawObjective, session, clientSurface);
+        const preRecallObjectiveSeed = taskFrameObjective.usedTaskFrameContext
+            ? taskFrameObjective.objective
+            : rawObjective;
         const memoryKeywords = Array.isArray(toolContext?.memoryKeywords)
             ? toolContext.memoryKeywords
             : (Array.isArray(metadata?.memoryKeywords) ? metadata.memoryKeywords : []);
@@ -4279,13 +4422,15 @@ class ConversationOrchestrator extends EventEmitter {
             ? { contextMessages, trace: null }
             : loadContextMessages !== false && this.memoryService?.process
                 ? await this.memoryService.process(sessionId, memoryInput || rawObjective, {
-                    profile: inferRecallProfileFromText(memoryInput || rawObjective),
+                    profile: inferRecallProfileFromText(preRecallObjectiveSeed),
                     ownerId,
                     memoryScope,
                     sessionIsolation,
                     memoryKeywords,
                     sourceSurface: clientSurface || memoryScope || null,
-                    objective: rawObjective,
+                    projectKey: projectKey || null,
+                    recallQuery: preRecallObjectiveSeed,
+                    objective: preRecallObjectiveSeed,
                     session,
                     returnDetails: true,
                 })
@@ -4297,13 +4442,16 @@ class ConversationOrchestrator extends EventEmitter {
             : [];
         const memoryTrace = Array.isArray(memoryRecall) ? null : (memoryRecall?.trace || null);
         const remoteResolvedObjective = resolvedProfile === REMOTE_BUILD_EXECUTION_PROFILE
-            ? resolveRemoteObjectiveFromSession(rawObjective, session, resolvedRecentMessages)
-            : rawObjective;
+            ? resolveRemoteObjectiveFromSession(preRecallObjectiveSeed, session, resolvedRecentMessages)
+            : preRecallObjectiveSeed;
         const transcriptObjective = resolveTranscriptObjectiveFromSession(remoteResolvedObjective, resolvedRecentMessages);
         const objective = transcriptObjective.objective;
-        const effectiveInstructions = transcriptObjective.usedTranscriptContext
+        const effectiveInstructions = (taskFrameObjective.usedTaskFrameContext || transcriptObjective.usedTranscriptContext)
             ? [
                 instructions || '',
+                ...(taskFrameObjective.usedTaskFrameContext
+                    ? ['An active task frame already exists for this session. Prefer continuing that same project-local objective before asking the user to restate context.']
+                    : []),
                 'The current user turn may be abbreviated or cut off. Use the recent transcript to resolve the intended task and continue without asking the user to restate prior context unless the transcript is genuinely insufficient.',
             ].filter(Boolean).join('\n\n')
             : instructions;
@@ -5678,6 +5826,13 @@ class ConversationOrchestrator extends EventEmitter {
             sessionIsolation: toolContext?.sessionIsolation,
             metadata,
         }, session || null);
+        const projectKey = resolveProjectKey({
+            ...metadata,
+            ...toolContext,
+            clientSurface: toolContext?.clientSurface || metadata?.clientSurface || metadata?.client_surface || '',
+            memoryScope: toolContext?.memoryScope || metadata?.memoryScope || metadata?.memory_scope || '',
+        }, session || null);
+        const activeTaskFrame = normalizeActiveTaskFrame(getSessionControlState(session).activeTaskFrame);
         const userCheckpointPolicy = toolContext?.userCheckpointPolicy && typeof toolContext.userCheckpointPolicy === 'object'
             ? toolContext.userCheckpointPolicy
             : {};
@@ -6048,6 +6203,8 @@ class ConversationOrchestrator extends EventEmitter {
             },
             preferredRemoteToolId: remoteToolId,
             sessionIsolation,
+            projectKey,
+            activeTaskFrame,
             classification,
             workflow: effectiveWorkflowSeed,
             projectPlan: effectiveProjectPlanSeed,
@@ -6676,8 +6833,9 @@ class ConversationOrchestrator extends EventEmitter {
                 ? ['Do not use `agent-notes-write` in this isolated session.']
                 : [
                     'Use `agent-notes-write` only for concise, durable carryover notes that should help future sessions.',
-                    'Good `agent-notes-write` candidates include stable project facts, Phil-specific collaboration preferences, and future-useful ideas or decisions.',
+                    'Good `agent-notes-write` candidates include Phil-specific collaboration preferences, long-lived defaults, and durable user-wide workflow preferences.',
                     'Every `agent-notes-write` step must include the full replacement notes file as `params.content`.',
+                    'Keep project-specific facts, current task state, and frontend-specific continuity in project/session memory instead of `agent-notes-write`.',
                     'Do not store secrets, code dumps, verbose logs, or temporary scratch notes in `agent-notes-write`.',
                 ]),
             ...(executionProfile === REMOTE_BUILD_EXECUTION_PROFILE && hasRemoteWebsiteUpdateIntent(planningPrompt)
@@ -7252,6 +7410,15 @@ class ConversationOrchestrator extends EventEmitter {
                 parts.push('The foreground session project plan is blocked. Focus on resolving the active blocker or asking the user for the one decision that can unblock it.');
             }
         }
+        if (toolPolicy?.activeTaskFrame?.objective) {
+            parts.push(`Active task frame: ${toolPolicy.activeTaskFrame.objective}`);
+            if (toolPolicy.activeTaskFrame.nextSensibleStep) {
+                parts.push(`Next sensible step: ${toolPolicy.activeTaskFrame.nextSensibleStep}`);
+            }
+            if (Array.isArray(toolPolicy.activeTaskFrame.unresolvedBlockers) && toolPolicy.activeTaskFrame.unresolvedBlockers.length > 0) {
+                parts.push(`Known blockers: ${toolPolicy.activeTaskFrame.unresolvedBlockers.join('; ')}`);
+            }
+        }
 
         if (allowedToolIds.includes('architecture-design')) {
             parts.push('Use `architecture-design` when the user asks for architecture recommendations, system design, or deployment/component overviews.');
@@ -7375,6 +7542,7 @@ class ConversationOrchestrator extends EventEmitter {
         startedAt = Date.now(),
         metadata = {},
         clientSurface = '',
+        memoryScope = null,
         memoryKeywords = [],
         memoryTrace = null,
         autonomyApproved = false,
@@ -7382,12 +7550,62 @@ class ConversationOrchestrator extends EventEmitter {
         stream = false,
         controlStatePatch = {},
     } = {}) {
-        const tracedResponse = memoryTrace && config.memory.debugTrace
-            ? this.withResponseMetadata(finalResponse, {
+        const activeTaskFrame = normalizeActiveTaskFrame(controlStatePatch?.activeTaskFrame) || buildActiveTaskFrame({
+            objective,
+            projectKey: toolPolicy?.projectKey || '',
+            clientSurface,
+            executionProfile,
+            toolEvents,
+            projectPlan: toolPolicy?.projectPlan || null,
+            workflow: toolPolicy?.workflow || null,
+            memoryTrace,
+        });
+        const intelligenceSummary = scorePerceivedIntelligence({
+            memoryTrace,
+            executionTrace,
+            toolEvents,
+            projectKey: toolPolicy?.projectKey || '',
+            clientSurface,
+        });
+        const surfaceFinisher = inferSurfaceFinisher({
+            taskType,
+            clientSurface,
+            executionProfile,
+        });
+        const memoryWriteTargets = {
+            conversation: buildScopedMemoryMetadata({
+                ...(ownerId ? { ownerId } : {}),
+                ...(memoryScope ? { memoryScope } : {}),
+                ...(toolPolicy?.projectKey ? { projectKey: toolPolicy.projectKey } : {}),
+                sourceSurface: clientSurface || memoryScope || taskType || null,
+                memoryClass: 'conversation',
+            }),
+            projectMemory: toolPolicy?.projectKey
+                ? { projectKey: toolPolicy.projectKey, sourceSurface: clientSurface || null }
+                : { sessionId },
+        };
+        let tracedResponse = this.withResponseMetadata(finalResponse, {
+            projectKey: toolPolicy?.projectKey || null,
+            memoryNamespace: memoryTrace?.routing?.memoryNamespace || memoryWriteTargets.conversation?.memoryNamespace || null,
+            memoryReadSetSummary: intelligenceSummary.memoryReadSetSummary,
+            memoryWriteTargets,
+            crossScopeReuse: intelligenceSummary.crossScopeReuse,
+            initiativeReview: intelligenceSummary.initiativeReview,
+            activeTaskFrame,
+            surfaceFinisher,
+            perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
+            failureTags: intelligenceSummary.failureTags,
+        });
+        if (memoryTrace && config.memory.debugTrace) {
+            tracedResponse = this.withResponseMetadata(tracedResponse, {
                 memoryTrace,
                 runtimeDiagnostics: this.memoryService?.getDiagnostics?.() || null,
-            })
-            : finalResponse;
+            });
+        }
+        const finalControlStatePatch = mergeControlState(
+            controlStatePatch,
+            activeTaskFrame ? { activeTaskFrame } : {},
+        );
         await this.persistConversationState({
             sessionId,
             ownerId,
@@ -7399,9 +7617,10 @@ class ConversationOrchestrator extends EventEmitter {
             toolEvents,
             executionProfile,
             clientSurface,
+            memoryScope,
             memoryKeywords,
             autonomyApproved,
-            controlStatePatch,
+            controlStatePatch: finalControlStatePatch,
             assistantMetadata: tracedResponse?.metadata || null,
         });
 
@@ -7411,6 +7630,7 @@ class ConversationOrchestrator extends EventEmitter {
             executionProfile,
             runtimeMode,
             classification: toolPolicy?.classification || null,
+            projectKey: toolPolicy?.projectKey || null,
             candidateToolScores: toolPolicy?.candidateToolScores || null,
             replanReason: extractLatestReplanReason(executionTrace),
             recallSummary: summarizeRecallTrace(memoryTrace),
@@ -7419,6 +7639,15 @@ class ConversationOrchestrator extends EventEmitter {
                 toolEvents,
                 assistantMetadata: tracedResponse?.metadata || null,
             }),
+            activeTaskFrame,
+            memoryNamespace: tracedResponse?.metadata?.memoryNamespace || null,
+            memoryReadSetSummary: intelligenceSummary.memoryReadSetSummary,
+            memoryWriteTargets,
+            crossScopeReuse: intelligenceSummary.crossScopeReuse,
+            initiativeReview: intelligenceSummary.initiativeReview,
+            surfaceFinisher,
+            perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
+            failureTags: intelligenceSummary.failureTags,
             toolCount: toolEvents.length,
             tools: toolPolicy.candidateToolIds,
             duration: Date.now() - startedAt,
@@ -7493,6 +7722,12 @@ class ConversationOrchestrator extends EventEmitter {
             clientSurface: currentSession?.metadata?.clientSurface || currentSession?.metadata?.client_surface || '',
             memoryScope,
         }, currentSession || null);
+        const scopedMemoryMetadata = buildScopedMemoryMetadata({
+            ...(ownerId ? { ownerId } : {}),
+            ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
+            ...(clientSurface ? { sourceSurface: clientSurface } : {}),
+            ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
+        }, currentSession || null);
 
         if (this.sessionStore?.recordResponse) {
             if (promptState) {
@@ -7507,12 +7742,7 @@ class ConversationOrchestrator extends EventEmitter {
         }
 
         if (this.memoryService?.rememberResponse) {
-            this.memoryService.rememberResponse(sessionId, assistantText, {
-                ...(ownerId ? { ownerId } : {}),
-                ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
-                ...(clientSurface ? { sourceSurface: clientSurface } : {}),
-                ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
-            });
+            this.memoryService.rememberResponse(sessionId, assistantText, scopedMemoryMetadata);
         }
 
         if (this.memoryService?.rememberResearchNote) {
@@ -7523,12 +7753,7 @@ class ConversationOrchestrator extends EventEmitter {
             await Promise.all(researchNotes.map((note) => this.memoryService.rememberResearchNote(
                 sessionId,
                 note,
-                {
-                    ...(ownerId ? { ownerId } : {}),
-                    ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
-                    ...(clientSurface ? { sourceSurface: clientSurface } : {}),
-                    ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
-                },
+                scopedMemoryMetadata,
             )));
         }
 
@@ -7537,12 +7762,7 @@ class ConversationOrchestrator extends EventEmitter {
                 objective,
                 assistantText,
                 toolEvents,
-                metadata: {
-                    ...(ownerId ? { ownerId } : {}),
-                    ...(resolvedMemoryScope ? { memoryScope: resolvedMemoryScope } : {}),
-                    ...(clientSurface ? { sourceSurface: clientSurface } : {}),
-                    ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
-                },
+                metadata: scopedMemoryMetadata,
             });
         }
 

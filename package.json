@@ -7,6 +7,7 @@
         "start": "node src/server.js",
         "dev": "nodemon src/server.js",
         "test": "jest --coverage",
+        "test:intelligence": "jest --runInBand src/session-scope.test.js src/perceived-intelligence-harness.test.js src/memory/memory-service.test.js src/conversation-orchestrator.test.js",
         "test:watch": "jest --watch",
         "lint": "eslint src/",
         "docker:build": "docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/philly1084/kimibuilt:latest .",

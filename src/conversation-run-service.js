@@ -16,7 +16,7 @@ const {
 const { extractResponseText } = require('./artifacts/artifact-service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('./project-memory');
 const { buildContinuityInstructions } = require('./runtime-prompts');
-const { isSessionIsolationEnabled, resolveSessionScope } = require('./session-scope');
+const { buildScopedMemoryMetadata, isSessionIsolationEnabled, resolveSessionScope } = require('./session-scope');
 
 class ConversationRunService {
     constructor({
@@ -38,12 +38,12 @@ class ConversationRunService {
             metadata,
         }, session || null);
 
-        return {
+        return buildScopedMemoryMetadata({
             ...(ownerId ? { ownerId } : {}),
             ...(memoryScope ? { memoryScope } : {}),
             ...(metadata?.memoryKeywords ? { memoryKeywords: metadata.memoryKeywords } : {}),
             ...(metadata?.clientSurface ? { sourceSurface: metadata.clientSurface } : {}),
-        };
+        }, session || null);
     }
 
     async runChatTurn({

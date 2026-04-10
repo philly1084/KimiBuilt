@@ -163,11 +163,12 @@ function buildAgentNotesInstructions(settings = {}) {
 
     return [
         '[Carryover notes memory]',
-        'Treat this as durable cross-session notes for stable project facts, longer-term ideas, and collaboration details that help future sessions.',
+        'Treat this as durable user-wide carryover memory for stable preferences, collaboration details, and longer-term defaults that should apply across projects.',
         `The notes file lives at ${effective.filePath} and has a hard limit of ${AGENT_NOTES_CHAR_LIMIT} characters.`,
         'When the `agent-notes-write` tool is available, you may update these notes without a separate confirmation if the new information is genuinely useful to carry forward.',
         'Keep the notes compact and factual. Prefer distilled bullets over prose.',
-        'Good candidates: project direction, durable constraints, recurring preferences, facts about working with Phil, and decisions likely to matter later.',
+        'Good candidates: recurring preferences, facts about working with Phil, stable collaboration defaults, and long-lived tool or workflow preferences.',
+        'Do not use this file for project-specific working memory, current task state, transient research, or frontend-specific continuity. Keep those in project/session memory instead.',
         'Do not store secrets, credentials, temporary scratch notes, verbose logs, or code dumps.',
         'Rewrite the full notes file when you update it, preserving useful existing context while removing stale noise.',
         'Current notes:',

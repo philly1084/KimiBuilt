@@ -168,18 +168,6 @@ function hasDeployIntent(text = '') {
     ].some(Boolean);
 }
 
-function hasVerificationIntent(text = '') {
-    const normalized = normalizeText(text).toLowerCase();
-    if (!normalized) {
-        return false;
-    }
-
-    return [
-        /\b(verify|verification|confirm|check|inspect|health|healthy|status|working|works|rollout|smoke test)\b/,
-        /\b(make sure|ensure)\b[\s\S]{0,30}\b(live|healthy|running|working)\b/,
-    ].some((pattern) => pattern.test(normalized));
-}
-
 function hasInspectOnlyIntent(text = '') {
     const normalized = normalizeText(text).toLowerCase();
     if (!normalized) {
@@ -271,16 +259,6 @@ function buildWorkflowTaskTemplates({ lane = '', deliveryMode = 'gitops', requir
                 id: 'save-and-push-repository',
                 title: 'Inspect, save, and push repository changes',
             },
-            {
-                id: 'deploy-release',
-                title: 'Deploy requested release',
-            },
-            ...(requiresVerification
-                ? [{
-                    id: 'verify-release',
-                    title: 'Verify deployed result',
-                }]
-                : []),
         ];
     case 'inspect-only':
         return [
@@ -464,6 +442,22 @@ function isRemoteWorkspaceDeployWorkflow(workflow = null) {
         }) === 'remote-workspace';
 }
 
+function resolveWorkflowRequiresVerification({
+    lane = '',
+    deliveryMode = 'gitops',
+    explicitValue,
+} = {}) {
+    if (lane === 'inspect-only' || lane === 'deploy-only') {
+        return explicitValue !== false;
+    }
+
+    if (lane === 'repo-then-deploy' && deliveryMode === 'remote-workspace') {
+        return explicitValue !== false;
+    }
+
+    return false;
+}
+
 function buildCompletionCriteria({ lane = '', deliveryMode = 'gitops' } = {}) {
     switch (lane) {
     case 'repo-only':
@@ -474,7 +468,7 @@ function buildCompletionCriteria({ lane = '', deliveryMode = 'gitops' } = {}) {
         if (deliveryMode === 'remote-workspace') {
             return ['Repository implementation completed', 'Remote workspace built and deployed', 'Deployment verified'];
         }
-        return ['Repository implementation completed', 'Changes pushed', 'Deployment applied', 'Deployment verified'];
+        return ['Repository implementation completed', 'Changes pushed'];
     case 'inspect-only':
         return ['Inspection completed'];
     default:
@@ -493,6 +487,10 @@ function buildVerificationCriteria({ lane = '', deliveryMode = 'gitops' } = {}) 
 
     if (lane === 'repo-then-deploy' && deliveryMode === 'remote-workspace') {
         return ['Remote workspace build completed', 'Kubernetes apply completed', 'Post-deploy remote verification captured'];
+    }
+
+    if (lane === 'repo-then-deploy') {
+        return [];
     }
 
     return ['Rollout status confirmed', 'Post-deploy remote verification captured'];
@@ -528,6 +526,11 @@ function normalizeWorkflowState(workflow = null) {
             lane: workflow.lane,
             opencodeTarget: workflow.opencodeTarget,
         });
+    const requiresVerification = resolveWorkflowRequiresVerification({
+        lane: workflow.lane,
+        deliveryMode,
+        explicitValue: workflow.requiresVerification,
+    });
 
     const normalized = {
         kind: END_TO_END_WORKFLOW_KIND,
@@ -549,7 +552,7 @@ function normalizeWorkflowState(workflow = null) {
             : null,
         deploy,
         progress,
-        requiresVerification: workflow.requiresVerification !== false,
+        requiresVerification,
         completionCriteria: Array.isArray(workflow.completionCriteria)
             ? workflow.completionCriteria.map((entry) => normalizeText(entry)).filter(Boolean)
             : buildCompletionCriteria({
@@ -613,7 +616,10 @@ function inferEndToEndBuilderWorkflow({
         remoteTarget,
         deploy: buildDeployState(),
         progress: normalizeProgress(),
-        requiresVerification: lane !== 'repo-only' || hasVerificationIntent(objective),
+        requiresVerification: resolveWorkflowRequiresVerification({
+            lane,
+            deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
+        }),
         completionCriteria: buildCompletionCriteria({
             lane,
             deliveryMode: inferDeliveryMode({ lane, opencodeTarget }),
@@ -657,7 +663,7 @@ function buildImplementationPrompt(workflow = null) {
         workflow?.lane === 'repo-then-deploy'
             ? (isRemoteWorkspaceDeployWorkflow(workflow)
                 ? 'Keep the changes ready for a later remote build and k3s deployment step on the same server. Do not perform kubectl or deployment actions from inside OpenCode.'
-                : 'Keep the changes ready for a later git-safe save/push and k3s deploy step. Do not perform git pushes or remote deployment from inside OpenCode.')
+                : 'Keep the changes ready for a later git-safe save/push step. Deployment will happen in a separate follow-up. Do not perform git pushes or remote deployment from inside OpenCode.')
             : 'Focus on the code or content changes and summarize any relevant build or test results.',
         '',
         'User objective:',
@@ -812,11 +818,11 @@ function evaluateEndToEndBuilderWorkflow({
         && !candidateToolIds.has('git-safe')) {
         return buildBlockedWorkflowState(
             currentWorkflow,
-            'The workflow needs `git-safe` to inspect, save, and push the repository changes before deployment.',
+            'The workflow needs `git-safe` to inspect, save, and push the repository changes before the workflow can complete.',
         );
     }
 
-    if ((currentWorkflow.lane === 'deploy-only' || (currentWorkflow.lane === 'repo-then-deploy' && !usesRemoteWorkspaceDeploy))
+    if (currentWorkflow.lane === 'deploy-only'
         && !currentWorkflow.progress.deployed
         && !candidateToolIds.has('k3s-deploy')) {
         return buildBlockedWorkflowState(
@@ -912,7 +918,7 @@ function buildEndToEndWorkflowPlan({
         && candidateToolIds.has('git-safe')) {
         return [{
             tool: 'git-safe',
-            reason: 'Save and push the verified repository changes before deployment.',
+            reason: 'Save and push the verified repository changes so deployment can happen in a separate follow-up.',
             params: {
                 action: 'save-and-push',
                 ...(repositoryPath ? { repositoryPath } : {}),
@@ -921,14 +927,12 @@ function buildEndToEndWorkflowPlan({
         }];
     }
 
-    if ((currentWorkflow.lane === 'deploy-only' || (currentWorkflow.lane === 'repo-then-deploy' && !usesRemoteWorkspaceDeploy))
+    if (currentWorkflow.lane === 'deploy-only'
         && !currentWorkflow.progress.deployed
         && candidateToolIds.has('k3s-deploy')) {
         return [{
             tool: 'k3s-deploy',
-            reason: currentWorkflow.lane === 'repo-then-deploy'
-                ? 'Deploy the pushed repository changes to the remote k3s cluster.'
-                : 'Run the standard k3s deployment flow for this request.',
+            reason: 'Run the standard k3s deployment flow for this request.',
             params: {
                 action: 'sync-and-apply',
                 ...(currentWorkflow.deploy.repositoryUrl ? { repositoryUrl: currentWorkflow.deploy.repositoryUrl } : {}),
@@ -1045,8 +1049,8 @@ function advanceEndToEndBuilderWorkflow({
                         repoStatusChecked: true,
                         saved: true,
                     },
-                    stage: currentWorkflow.lane === 'repo-then-deploy' ? 'deploying' : 'completed',
-                    status: currentWorkflow.lane === 'repo-then-deploy' ? ACTIVE_WORKFLOW_STATUS : COMPLETED_WORKFLOW_STATUS,
+                    stage: 'completed',
+                    status: COMPLETED_WORKFLOW_STATUS,
                 });
                 continue;
             }

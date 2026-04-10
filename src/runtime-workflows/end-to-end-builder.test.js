@@ -42,6 +42,12 @@ describe('end-to-end builder workflow', () => {
             lane: 'repo-then-deploy',
             stage: 'implementing',
             status: 'active',
+            requiresVerification: false,
+            completionCriteria: [
+                'Repository implementation completed',
+                'Changes pushed',
+            ],
+            verificationCriteria: [],
             workspacePath: '/workspace/app',
             repositoryPath: '/workspace/app',
             opencodeTarget: 'local',
@@ -95,7 +101,7 @@ describe('end-to-end builder workflow', () => {
         }));
     });
 
-    test('emits deterministic repo-then-deploy steps in order', () => {
+    test('emits deterministic repo-then-deploy steps in order and stops after save-and-push', () => {
         const workflow = inferEndToEndBuilderWorkflow({
             objective: 'Fix the build in the repo, push it to GitHub, deploy it to k3s, and verify the rollout.',
             workspacePath: '/workspace/app',
@@ -196,68 +202,19 @@ describe('end-to-end builder workflow', () => {
                 }),
             ],
         });
-        const deployPlan = buildEndToEndWorkflowPlan({
-            workflow: afterSaveAndPush,
-            toolPolicy,
-            remoteToolId: 'remote-command',
-        });
-        expect(deployPlan).toEqual([
-            expect.objectContaining({
-                tool: 'k3s-deploy',
-                params: expect.objectContaining({
-                    action: 'sync-and-apply',
-                }),
-            }),
-        ]);
-
-        const afterDeploy = advanceEndToEndBuilderWorkflow({
-            workflow: afterSaveAndPush,
-            toolEvents: [
-                buildToolEvent('k3s-deploy', { action: 'sync-and-apply' }, {
-                    data: {
-                        action: 'sync-and-apply',
-                        stdout: 'deployment applied',
-                    },
-                }),
-            ],
-        });
-        const verifyPlan = buildEndToEndWorkflowPlan({
-            workflow: afterDeploy,
-            toolPolicy,
-            remoteToolId: 'remote-command',
-        });
-        expect(verifyPlan).toEqual([
-            expect.objectContaining({
-                tool: 'remote-command',
-                params: expect.objectContaining({
-                    host: '10.0.0.5',
-                    username: 'ubuntu',
-                    port: 22,
-                    timeout: 240000,
-                    command: expect.stringContaining('kubectl rollout status deployment/'),
-                }),
-            }),
-        ]);
-
-        const completedWorkflow = advanceEndToEndBuilderWorkflow({
-            workflow: afterDeploy,
-            toolEvents: [
-                buildToolEvent('remote-command', {}, {
-                    data: {
-                        stdout: 'deployment "backend" successfully rolled out',
-                    },
-                }),
-            ],
-        });
-        expect(completedWorkflow).toEqual(expect.objectContaining({
+        expect(afterSaveAndPush).toEqual(expect.objectContaining({
             stage: 'completed',
             status: 'completed',
             progress: expect.objectContaining({
-                verified: true,
+                implemented: true,
+                repoStatusChecked: true,
+                saved: true,
+                deployed: false,
+                verified: false,
             }),
         }));
         expect(buildEndToEndWorkflowPlan({
-            workflow: completedWorkflow,
+            workflow: afterSaveAndPush,
             toolPolicy,
             remoteToolId: 'remote-command',
         })).toEqual([]);

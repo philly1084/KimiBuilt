@@ -94,6 +94,10 @@ class VectorStore {
             sessionId = null,
             ownerId = null,
             memoryScope = null,
+            projectKey = null,
+            memoryNamespace = null,
+            sourceSurface = null,
+            memoryClass = null,
             topK = config.memory.recallTopK,
             scoreThreshold = config.memory.recallScoreThreshold,
         } = options;
@@ -108,6 +112,18 @@ class VectorStore {
         }
         if (memoryScope) {
             must.push({ key: 'memoryScope', match: { value: memoryScope } });
+        }
+        if (projectKey) {
+            must.push({ key: 'projectKey', match: { value: projectKey } });
+        }
+        if (memoryNamespace) {
+            must.push({ key: 'memoryNamespace', match: { value: memoryNamespace } });
+        }
+        if (sourceSurface) {
+            must.push({ key: 'sourceSurface', match: { value: sourceSurface } });
+        }
+        if (memoryClass) {
+            must.push({ key: 'memoryClass', match: { value: memoryClass } });
         }
 
         const filter = must.length > 0 ? { must } : undefined;

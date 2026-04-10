@@ -3,7 +3,7 @@ const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
 const { getSessionControlState } = require('./runtime-control-state');
 const { config } = require('./config');
-const { isSessionIsolationEnabled, resolveSessionScope } = require('./session-scope');
+const { buildScopedMemoryMetadata, isSessionIsolationEnabled, resolveProjectKey, resolveSessionScope } = require('./session-scope');
 
 const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const DEFAULT_EXECUTION_PROFILE = 'default';
@@ -246,10 +246,17 @@ async function executeConversationRuntime(app, params = {}) {
         sessionIsolation: params.toolContext?.sessionIsolation,
         metadata: params.metadata,
     }, params.session || null);
+    const projectKey = resolveProjectKey({
+        ...(params.metadata || {}),
+        ...(params.toolContext || {}),
+        memoryScope,
+        clientSurface,
+    }, params.session || null);
     const scopedToolContext = {
         ...effectiveToolContext,
         ...(clientSurface ? { clientSurface } : {}),
         ...(memoryScope ? { memoryScope } : {}),
+        ...(projectKey ? { projectKey } : {}),
         ...(sessionIsolation ? { sessionIsolation: true } : {}),
     };
     const orchestrator = app?.locals?.conversationOrchestrator
@@ -281,6 +288,13 @@ async function executeConversationRuntime(app, params = {}) {
                 sessionIsolation,
                 memoryKeywords: params.metadata?.memoryKeywords || params.toolContext?.memoryKeywords || [],
                 sourceSurface: clientSurface || memoryScope || null,
+                projectKey: buildScopedMemoryMetadata({
+                    ownerId: params.ownerId || null,
+                    memoryScope,
+                    sourceSurface: clientSurface || memoryScope || null,
+                    ...(projectKey ? { projectKey } : {}),
+                    ...(sessionIsolation ? { sessionIsolation: true } : {}),
+                }, params.session || null).projectKey || null,
             })
     );
     const recentMessages = params.recentMessages || (

@@ -1,6 +1,25 @@
 const { config } = require('./config');
 
 const DEFAULT_SESSION_SCOPE = 'global';
+const USER_GLOBAL_MEMORY_NAMESPACE = 'user_global';
+const PROJECT_SHARED_MEMORY_NAMESPACE = 'project_shared';
+const SURFACE_LOCAL_MEMORY_NAMESPACE = 'surface_local';
+const SESSION_LOCAL_MEMORY_NAMESPACE = 'session_local';
+const DEFAULT_MEMORY_CLASS = 'conversation';
+const SURFACE_ONLY_SCOPE_KEYS = new Set([
+  DEFAULT_SESSION_SCOPE,
+  'default',
+  'shared',
+  'chat',
+  'web-chat',
+  'openai-chat',
+  'openai-responses',
+  'canvas',
+  'notation',
+  'notes',
+  'notes-app',
+  'notes-editor',
+]);
 
 function normalizeScopeValue(value = '') {
   const normalized = String(value || '')
@@ -41,6 +60,20 @@ function normalizeBooleanValue(value) {
   }
 
   return null;
+}
+
+function resolveBooleanValue(value) {
+  return normalizeBooleanValue(value);
+}
+
+function normalizeMemoryClass(value = '') {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return normalized || DEFAULT_MEMORY_CLASS;
 }
 
 function getPlainObject(value) {
@@ -138,6 +171,100 @@ function resolveClientSurface(value = {}, session = null, fallback = '') {
   ]) || '';
 }
 
+function isStrongProjectScopeCandidate(candidate = '', { clientSurface = '', taskType = '', mode = '' } = {}) {
+  const normalized = normalizeScopeValue(candidate);
+  if (!normalized) {
+    return false;
+  }
+
+  if (SURFACE_ONLY_SCOPE_KEYS.has(normalized)) {
+    return false;
+  }
+
+  const weakMatches = [
+    clientSurface,
+    taskType,
+    mode,
+  ]
+    .map((entry) => normalizeScopeValue(entry))
+    .filter(Boolean);
+
+  return !weakMatches.includes(normalized);
+}
+
+function resolveProjectKey(value = {}, session = null, fallback = '') {
+  const source = getPlainObject(value);
+  const nested = getPlainObject(source.metadata);
+  const sessionMetadata = getPlainObject(session?.metadata);
+  const context = {
+    clientSurface: resolveClientSurface(source, session),
+    taskType: firstNormalizedValue([
+      source.taskType,
+      source.task_type,
+      nested.taskType,
+      nested.task_type,
+      sessionMetadata.taskType,
+      sessionMetadata.task_type,
+    ]) || '',
+    mode: firstNormalizedValue([
+      source.mode,
+      nested.mode,
+      sessionMetadata.mode,
+    ]) || '',
+  };
+
+  const candidates = [
+    source.projectKey,
+    source.project_key,
+    source.projectId,
+    source.project_id,
+    source.workspaceKey,
+    source.workspace_key,
+    source.workspaceId,
+    source.workspace_id,
+    source.projectScope,
+    source.project_scope,
+    source.namespace,
+    nested.projectKey,
+    nested.project_key,
+    nested.projectId,
+    nested.project_id,
+    nested.workspaceKey,
+    nested.workspace_key,
+    nested.workspaceId,
+    nested.workspace_id,
+    nested.projectScope,
+    nested.project_scope,
+    nested.namespace,
+    sessionMetadata.projectKey,
+    sessionMetadata.project_key,
+    sessionMetadata.projectId,
+    sessionMetadata.project_id,
+    sessionMetadata.workspaceKey,
+    sessionMetadata.workspace_key,
+    sessionMetadata.workspaceId,
+    sessionMetadata.workspace_id,
+    sessionMetadata.projectScope,
+    sessionMetadata.project_scope,
+    sessionMetadata.namespace,
+    source.memoryScope,
+    source.memory_scope,
+    nested.memoryScope,
+    nested.memory_scope,
+    sessionMetadata.memoryScope,
+    sessionMetadata.memory_scope,
+    fallback,
+  ];
+
+  for (const candidate of candidates) {
+    if (isStrongProjectScopeCandidate(candidate, context)) {
+      return normalizeScopeValue(candidate);
+    }
+  }
+
+  return '';
+}
+
 function resolveSessionScope(value = {}, session = null) {
   const source = getPlainObject(value);
   const nested = getPlainObject(source.metadata);
@@ -196,6 +323,94 @@ function resolveSessionScope(value = {}, session = null) {
   ]) || DEFAULT_SESSION_SCOPE;
 }
 
+function defaultShareAcrossSurfaces(memoryClass = DEFAULT_MEMORY_CLASS) {
+  return [
+    'user_preference',
+    'collaboration_preference',
+    'tool_preference',
+    'reusable_skill',
+    'project_fact',
+    'project_task',
+    'artifact',
+    'artifact_summary',
+    'artifact_source',
+    'research_note',
+  ].includes(normalizeMemoryClass(memoryClass));
+}
+
+function resolveMemoryNamespace(value = {}, session = null, fallback = '') {
+  const source = getPlainObject(value);
+  const nested = getPlainObject(source.metadata);
+  const sessionIsolation = resolveSessionIsolation(source, session, false);
+  const memoryClass = normalizeMemoryClass(
+    source.memoryClass
+    || source.memory_class
+    || nested.memoryClass
+    || nested.memory_class
+    || fallback,
+  );
+  const projectKey = resolveProjectKey(source, session);
+  const shareAcrossSurfaces = resolveBooleanValue(
+    source.shareAcrossSurfaces
+    || source.share_across_surfaces
+    || nested.shareAcrossSurfaces
+    || nested.share_across_surfaces,
+  );
+  const shouldShareAcrossSurfaces = shareAcrossSurfaces != null
+    ? shareAcrossSurfaces
+    : defaultShareAcrossSurfaces(memoryClass);
+
+  if (['user_preference', 'collaboration_preference', 'tool_preference', 'reusable_skill'].includes(memoryClass)) {
+    return USER_GLOBAL_MEMORY_NAMESPACE;
+  }
+
+  if (sessionIsolation || !projectKey) {
+    return SESSION_LOCAL_MEMORY_NAMESPACE;
+  }
+
+  return shouldShareAcrossSurfaces
+    ? PROJECT_SHARED_MEMORY_NAMESPACE
+    : SURFACE_LOCAL_MEMORY_NAMESPACE;
+}
+
+function buildScopedMemoryMetadata(metadata = {}, session = null) {
+  const source = getPlainObject(metadata);
+  const clientSurface = resolveClientSurface(source, session, source.sourceSurface || source.source_surface || '');
+  const memoryScope = firstNormalizedValue([
+    source.memoryScope,
+    source.memory_scope,
+    resolveSessionScope(source, session),
+  ]) || DEFAULT_SESSION_SCOPE;
+  const projectKey = resolveProjectKey(source, session);
+  const memoryClass = normalizeMemoryClass(source.memoryClass || source.memory_class);
+  const shareAcrossSurfaces = resolveBooleanValue(source.shareAcrossSurfaces || source.share_across_surfaces);
+  const sessionIsolation = resolveSessionIsolation(source, session, false);
+  const sourceSurface = firstNormalizedValue([
+    source.sourceSurface,
+    source.source_surface,
+    clientSurface,
+  ]) || null;
+
+  return {
+    ...source,
+    ...(clientSurface ? { clientSurface } : {}),
+    ...(sourceSurface ? { sourceSurface } : {}),
+    memoryScope,
+    ...(projectKey ? { projectKey } : {}),
+    memoryNamespace: resolveMemoryNamespace({
+      ...source,
+      clientSurface,
+      memoryClass,
+      ...(shareAcrossSurfaces != null ? { shareAcrossSurfaces } : {}),
+    }, session),
+    memoryClass,
+    shareAcrossSurfaces: shareAcrossSurfaces != null
+      ? shareAcrossSurfaces
+      : defaultShareAcrossSurfaces(memoryClass),
+    ...(sessionIsolation != null ? { sessionIsolation } : {}),
+  };
+}
+
 function buildScopedSessionMetadata(metadata = {}, session = null) {
   const source = getPlainObject(metadata);
   const clientSurface = resolveClientSurface(source, session);
@@ -203,13 +418,15 @@ function buildScopedSessionMetadata(metadata = {}, session = null) {
   const sessionIsolation = resolveSessionIsolation(
     source,
     session,
-    config.memory.sessionIsolationDefault,
+    false,
   );
+  const projectKey = resolveProjectKey(source, session);
 
   return {
     ...source,
     ...(clientSurface ? { clientSurface } : {}),
     memoryScope,
+    ...(projectKey ? { projectKey } : {}),
     ...(sessionIsolation != null ? { sessionIsolation } : {}),
   };
 }
@@ -228,11 +445,21 @@ function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
 
 module.exports = {
   DEFAULT_SESSION_SCOPE,
+  DEFAULT_MEMORY_CLASS,
+  USER_GLOBAL_MEMORY_NAMESPACE,
+  PROJECT_SHARED_MEMORY_NAMESPACE,
+  SURFACE_LOCAL_MEMORY_NAMESPACE,
+  SESSION_LOCAL_MEMORY_NAMESPACE,
+  buildScopedMemoryMetadata,
   buildScopedSessionMetadata,
+  defaultShareAcrossSurfaces,
   hasSessionScopeHints,
   isSessionIsolationEnabled,
+  normalizeMemoryClass,
   normalizeSessionScopeKey,
   resolveClientSurface,
+  resolveMemoryNamespace,
+  resolveProjectKey,
   resolveSessionIsolation,
   resolveSessionScope,
   sessionMatchesScope,

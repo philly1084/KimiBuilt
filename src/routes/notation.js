@@ -9,6 +9,7 @@ const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../a
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
+    buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
     resolveClientSurface,
@@ -32,11 +33,11 @@ function getRequestOwnerId(req) {
 }
 
 function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
-    return {
+    return buildScopedMemoryMetadata({
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
         ...extra,
-    };
+    });
 }
 
 const notationSchema = {

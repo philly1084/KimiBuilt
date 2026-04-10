@@ -40,6 +40,7 @@ const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const { toPublicChatModelList } = require('../model-catalog');
 const {
+    buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
     resolveSessionScope,
@@ -59,11 +60,11 @@ const FINAL_SYNTHESIS_PLACEHOLDER = 'I completed the request, but the final answ
 const WORKLOAD_PREFLIGHT_RECENT_LIMIT = config.memory.recentTranscriptLimit;
 
 function buildOwnerMemoryMetadata(ownerId = null, memoryScope = null, extra = {}) {
-    return {
+    return buildScopedMemoryMetadata({
         ...(ownerId ? { ownerId } : {}),
         ...(memoryScope ? { memoryScope } : {}),
         ...extra,
-    };
+    });
 }
 
 function normalizeClientNow(value = '') {

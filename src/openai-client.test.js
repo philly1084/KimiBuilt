@@ -643,7 +643,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
             { id: 'agent-notes-write' },
         ]);
 
-        expect(guidance).toContain('durable carryover notes file');
+        expect(guidance).toContain('durable user-wide carryover notes file');
         expect(guidance).toContain('Phil-specific collaboration facts');
         expect(guidance).toContain('under 4000 characters');
     });

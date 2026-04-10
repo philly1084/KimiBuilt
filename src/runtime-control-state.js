@@ -84,6 +84,10 @@ function normalizeRuntimeControlState(state = {}) {
         normalized.foregroundContinuationGate = null;
     }
 
+    if ('activeTaskFrame' in normalized && !isPlainObject(normalized.activeTaskFrame)) {
+        normalized.activeTaskFrame = null;
+    }
+
     if ('autonomyApproved' in normalized) {
         normalized.autonomyApproved = Boolean(normalized.autonomyApproved);
     }

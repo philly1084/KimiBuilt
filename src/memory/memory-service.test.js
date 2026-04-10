@@ -3,6 +3,12 @@ const {
     DEFAULT_RECALL_PROFILE,
     RESEARCH_RECALL_PROFILE,
 } = require('./memory-service');
+const {
+    PROJECT_SHARED_MEMORY_NAMESPACE,
+    SESSION_LOCAL_MEMORY_NAMESPACE,
+    SURFACE_LOCAL_MEMORY_NAMESPACE,
+    USER_GLOBAL_MEMORY_NAMESPACE,
+} = require('../session-scope');
 const config = require('../config');
 
 describe('MemoryService recall profiles', () => {
@@ -47,11 +53,16 @@ describe('MemoryService recall profiles', () => {
         expect(rememberSpy).toHaveBeenCalledWith('session-1', 'hello world', 'user', {
             ownerId: 'phill',
             memoryScope: 'web-chat',
+            clientSurface: 'web-chat',
+            memoryClass: 'conversation',
+            memoryNamespace: 'session_local',
+            shareAcrossSurfaces: false,
+            sessionIsolation: false,
             sourceSurface: 'web-chat',
         });
         expect(recallSpy).toHaveBeenCalledWith('hello world', expect.objectContaining({
-            sessionId: null,
-            ownerId: 'phill',
+            sessionId: 'session-1',
+            ownerId: null,
             memoryScope: 'web-chat',
             profile: DEFAULT_RECALL_PROFILE,
         }));
@@ -89,6 +100,7 @@ describe('MemoryService recall profiles', () => {
                     sessionId: 'session-1',
                     ownerId: 'phill',
                     memoryScope: 'web-chat',
+                    memoryNamespace: 'session_local',
                     text: 'Previous HTML artifact for the chat frontend',
                     keywords: ['html', 'landing-page'],
                     memoryType: 'artifact',
@@ -103,6 +115,7 @@ describe('MemoryService recall profiles', () => {
                     sessionId: 'session-2',
                     ownerId: 'phill',
                     memoryScope: 'canvas',
+                    memoryNamespace: 'session_local',
                     text: 'Canvas-only HTML artifact memory',
                     keywords: ['html', 'landing-page'],
                     memoryType: 'artifact',
@@ -114,6 +127,7 @@ describe('MemoryService recall profiles', () => {
         ]);
 
         const recall = await service.recall('revise the html landing page', {
+            sessionId: 'session-1',
             ownerId: 'phill',
             memoryScope: 'web-chat',
             memoryKeywords: ['html', 'landing-page'],
@@ -123,6 +137,184 @@ describe('MemoryService recall profiles', () => {
         expect(recall.contextMessages).toHaveLength(1);
         expect(recall.contextMessages[0]).toContain('chat-landing.html');
         expect(recall.contextMessages[0]).not.toContain('canvas-landing.html');
+    });
+
+    test('does not recall another project for the same owner', async () => {
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'artifact-alpha',
+                score: 0.86,
+                text: 'Artifact for the Alpha storefront.',
+                sessionId: 'session-alpha',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    ownerId: 'phill',
+                    memoryScope: 'alpha-store',
+                    projectKey: 'alpha-store',
+                    memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
+                    memoryClass: 'artifact',
+                    sourceSurface: 'web-chat',
+                    memoryType: 'artifact',
+                    artifactFilename: 'alpha-storefront.html',
+                    artifactFormat: 'html',
+                    keywords: ['storefront', 'landing-page'],
+                },
+            },
+            {
+                id: 'artifact-beta',
+                score: 0.91,
+                text: 'Artifact for the Beta storefront.',
+                sessionId: 'session-beta',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    ownerId: 'phill',
+                    memoryScope: 'beta-store',
+                    projectKey: 'beta-store',
+                    memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
+                    memoryClass: 'artifact',
+                    sourceSurface: 'web-chat',
+                    memoryType: 'artifact',
+                    artifactFilename: 'beta-storefront.html',
+                    artifactFormat: 'html',
+                    keywords: ['storefront', 'landing-page'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('revise the storefront landing page', {
+            ownerId: 'phill',
+            memoryScope: 'alpha-store',
+            projectKey: 'alpha-store',
+            sourceSurface: 'web-chat',
+            returnDetails: true,
+        });
+
+        expect(recall.contextMessages).toHaveLength(1);
+        expect(recall.contextMessages[0]).toContain('alpha-storefront.html');
+        expect(recall.contextMessages[0]).not.toContain('beta-storefront.html');
+        expect(recall.trace.selected).toHaveLength(1);
+        expect(recall.trace.selected[0]).toEqual(expect.objectContaining({
+            projectKey: 'alpha-store',
+            memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
+        }));
+    });
+
+    test('allows same-project project-shared artifact recall across frontends', async () => {
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'artifact-cross-surface',
+                score: 0.87,
+                text: 'Artifact summary for the shared project brief.',
+                sessionId: 'session-canvas',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    ownerId: 'phill',
+                    memoryScope: 'alpha-store',
+                    projectKey: 'alpha-store',
+                    memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
+                    memoryClass: 'artifact',
+                    sourceSurface: 'canvas',
+                    memoryType: 'artifact',
+                    artifactFilename: 'brief.html',
+                    artifactFormat: 'html',
+                    keywords: ['brief', 'html'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('continue the shared html brief', {
+            ownerId: 'phill',
+            memoryScope: 'alpha-store',
+            projectKey: 'alpha-store',
+            sourceSurface: 'web-chat',
+            returnDetails: true,
+        });
+
+        expect(recall.contextMessages).toHaveLength(1);
+        expect(recall.contextMessages[0]).toContain('brief.html');
+        expect(recall.trace.selected[0]).toEqual(expect.objectContaining({
+            projectKey: 'alpha-store',
+            memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
+            sourceSurface: 'canvas',
+        }));
+    });
+
+    test('blocks same-project surface-local recall from a different frontend lane', async () => {
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'surface-local-canvas',
+                score: 0.92,
+                text: 'Canvas-only working note for the Alpha storefront.',
+                sessionId: 'session-canvas',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    ownerId: 'phill',
+                    memoryScope: 'alpha-store',
+                    projectKey: 'alpha-store',
+                    memoryNamespace: SURFACE_LOCAL_MEMORY_NAMESPACE,
+                    memoryClass: 'conversation',
+                    sourceSurface: 'canvas',
+                    memoryType: 'fact',
+                    keywords: ['storefront', 'layout'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('continue the storefront layout', {
+            ownerId: 'phill',
+            memoryScope: 'alpha-store',
+            projectKey: 'alpha-store',
+            sourceSurface: 'web-chat',
+            returnDetails: true,
+        });
+
+        expect(recall.contextMessages).toEqual([]);
+        expect(recall.trace.selected).toEqual([]);
+    });
+
+    test('recalls user-global preferences across projects', async () => {
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'user-pref-1',
+                score: 0.72,
+                text: 'Phil prefers concise status updates.',
+                sessionId: 'session-other',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    ownerId: 'phill',
+                    memoryScope: 'alpha-store',
+                    projectKey: 'alpha-store',
+                    memoryNamespace: USER_GLOBAL_MEMORY_NAMESPACE,
+                    memoryClass: 'user_preference',
+                    sourceSurface: 'web-chat',
+                    memoryType: 'fact',
+                    keywords: ['concise', 'status', 'updates'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('give me a concise status update', {
+            ownerId: 'phill',
+            memoryScope: 'beta-store',
+            projectKey: 'beta-store',
+            sourceSurface: 'canvas',
+            returnDetails: true,
+        });
+
+        expect(recall.contextMessages).toHaveLength(1);
+        expect(recall.contextMessages[0]).toContain('Phil prefers concise status updates.');
+        expect(recall.trace.selected[0]).toEqual(expect.objectContaining({
+            memoryNamespace: USER_GLOBAL_MEMORY_NAMESPACE,
+            memoryClass: 'user_preference',
+        }));
     });
 
     test('rememberArtifactResult stores both a summary and chunked source memories', async () => {
@@ -168,7 +360,9 @@ describe('MemoryService recall profiles', () => {
                 sessionId: 'session-1',
                 timestamp: '2026-04-08T10:00:00.000Z',
                 metadata: {
+                    sessionId: 'session-1',
                     memoryType: 'artifact',
+                    memoryNamespace: SESSION_LOCAL_MEMORY_NAMESPACE,
                     artifactId: 'artifact-1',
                     artifactFilename: 'pricing-report.html',
                     artifactFormat: 'html',
@@ -204,7 +398,9 @@ describe('MemoryService recall profiles', () => {
                 sessionId: 'session-1',
                 timestamp: '2026-04-08T10:00:00.000Z',
                 metadata: {
+                    sessionId: 'session-1',
                     memoryType: 'skill',
+                    memoryNamespace: SESSION_LOCAL_MEMORY_NAMESPACE,
                     skillKind: 'workflow-summary',
                     toolFamily: 'remote',
                     toolIds: ['remote-command', 'k3s-deploy'],
@@ -223,6 +419,53 @@ describe('MemoryService recall profiles', () => {
         expect(recall.bundles.skill).toHaveLength(1);
         expect(recall.trace.selected[0]).toEqual(expect.objectContaining({
             typeGroup: 'skill',
+            rationale: expect.arrayContaining([
+                'workflow family match: remote',
+                'matches preferred tools',
+            ]),
+        }));
+    });
+
+    test('generic reusable skills can transfer across projects when the tool family matches', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+        const service = new MemoryService();
+        jest.spyOn(service.store, 'search').mockResolvedValue([
+            {
+                id: 'skill-global-remote',
+                score: 0.33,
+                text: 'Reusable workflow: Repair a remote rollout by checking pods, rollout status, and logs.',
+                sessionId: 'session-alpha',
+                timestamp: '2026-04-08T10:00:00.000Z',
+                metadata: {
+                    ownerId: 'phill',
+                    memoryScope: 'alpha-store',
+                    projectKey: 'alpha-store',
+                    memoryNamespace: USER_GLOBAL_MEMORY_NAMESPACE,
+                    memoryClass: 'reusable_skill',
+                    memoryType: 'skill',
+                    skillKind: 'workflow-summary',
+                    toolFamily: 'remote',
+                    toolIds: ['remote-command'],
+                    keywords: ['remote', 'rollout', 'pods', 'logs'],
+                },
+            },
+        ]);
+        jest.spyOn(service.store, 'scroll').mockResolvedValue([]);
+
+        const recall = await service.recall('continue the remote rollout fix', {
+            ownerId: 'phill',
+            memoryScope: 'beta-store',
+            projectKey: 'beta-store',
+            sourceSurface: 'web-chat',
+            preferredToolIds: ['remote-command'],
+            objective: 'Continue the remote k3s rollout fix',
+            returnDetails: true,
+        });
+
+        expect(recall.bundles.skill).toHaveLength(1);
+        expect(recall.trace.selected[0]).toEqual(expect.objectContaining({
+            memoryNamespace: USER_GLOBAL_MEMORY_NAMESPACE,
+            memoryClass: 'reusable_skill',
             rationale: expect.arrayContaining([
                 'workflow family match: remote',
                 'matches preferred tools',

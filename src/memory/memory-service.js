@@ -3,7 +3,14 @@ const { vectorStore } = require('./vector-store');
 const { stripNullCharacters, chunkText } = require('../utils/text');
 const { mergeMemoryKeywords, normalizeMemoryKeywords } = require('./memory-keywords');
 const { runtimeDiagnostics } = require('../runtime-diagnostics');
-const { isSessionIsolationEnabled } = require('../session-scope');
+const {
+    buildScopedMemoryMetadata,
+    isSessionIsolationEnabled,
+    PROJECT_SHARED_MEMORY_NAMESPACE,
+    SESSION_LOCAL_MEMORY_NAMESPACE,
+    SURFACE_LOCAL_MEMORY_NAMESPACE,
+    USER_GLOBAL_MEMORY_NAMESPACE,
+} = require('../session-scope');
 
 const DEFAULT_RECALL_PROFILE = 'default';
 const RESEARCH_RECALL_PROFILE = 'research';
@@ -19,6 +26,12 @@ const DEFAULT_MEMORY_SCAN_LIMIT = 400;
 const DEFAULT_FACT_IMPORTANCE = 0.6;
 const DEFAULT_ARTIFACT_IMPORTANCE = 0.8;
 const DEFAULT_SKILL_IMPORTANCE = 0.9;
+const USER_GLOBAL_MEMORY_CLASSES = new Set([
+    'user_preference',
+    'collaboration_preference',
+    'tool_preference',
+    'reusable_skill',
+]);
 
 function normalizeMemoryType(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
@@ -207,6 +220,36 @@ function buildRecallBundles(entries = []) {
     };
 }
 
+function isGenericReusableSkill({
+    objective = '',
+    assistantText = '',
+    artifact = null,
+    metadata = {},
+} = {}) {
+    if (artifact?.id || artifact?.filename) {
+        return false;
+    }
+
+    const combined = [
+        objective,
+        assistantText,
+        metadata?.sourcePrompt || '',
+        metadata?.projectKey || '',
+        metadata?.memoryScope || '',
+    ].join('\n');
+    if (!combined.trim()) {
+        return false;
+    }
+
+    return !(
+        /https?:\/\//i.test(combined)
+        || /\/api\/artifacts\//i.test(combined)
+        || /\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+/.test(combined)
+        || /[A-Za-z]:\\/.test(combined)
+        || /\b\d{1,3}(?:\.\d{1,3}){3}\b/.test(combined)
+    );
+}
+
 function isArtifactFollowupQuery(query = '') {
     const normalized = String(query || '').trim().toLowerCase();
     if (!normalized) {
@@ -230,12 +273,13 @@ class MemoryService {
     }
 
     normalizeMetadata(role = 'user', text = '', metadata = {}) {
+        const scopedMetadata = buildScopedMemoryMetadata(metadata);
         const memoryType = normalizeMemoryType(
-            metadata?.memoryType
+            scopedMetadata?.memoryType
             || (role === 'research-note' ? RESEARCH_MEMORY_TYPE : FACT_MEMORY_TYPE),
         );
         const importance = normalizeImportance(
-            metadata?.importance,
+            scopedMetadata?.importance,
             memoryType === SKILL_MEMORY_TYPE
                 ? DEFAULT_SKILL_IMPORTANCE
                 : (memoryType === ARTIFACT_MEMORY_TYPE ? DEFAULT_ARTIFACT_IMPORTANCE : DEFAULT_FACT_IMPORTANCE),
@@ -244,32 +288,38 @@ class MemoryService {
         return {
             role,
             memoryType,
-            keywords: mergeMemoryKeywords(metadata?.memoryKeywords || metadata?.keywords || [], text),
+            keywords: mergeMemoryKeywords(scopedMetadata?.memoryKeywords || scopedMetadata?.keywords || [], text),
             visibility: normalizeVisibility(
-                metadata?.visibility
+                scopedMetadata?.visibility
                 || (memoryType === SKILL_MEMORY_TYPE ? 'frontend-shared' : 'private'),
             ),
             importance,
-            timestamp: coerceTimestamp(metadata?.timestamp),
-            sourceSurface: normalizeSourceSurface(metadata),
-            ...(metadata?.ownerId ? { ownerId: String(metadata.ownerId).trim() } : {}),
-            ...(metadata?.memoryScope ? { memoryScope: String(metadata.memoryScope).trim() } : {}),
-            ...(metadata?.artifactId ? { artifactId: String(metadata.artifactId).trim() } : {}),
-            ...(metadata?.artifactFilename ? { artifactFilename: String(metadata.artifactFilename).trim() } : {}),
-            ...(metadata?.artifactFormat ? { artifactFormat: String(metadata.artifactFormat).trim().toLowerCase() } : {}),
-            ...(metadata?.skillId ? { skillId: String(metadata.skillId).trim() } : {}),
-            ...(metadata?.skillKind ? { skillKind: String(metadata.skillKind).trim().toLowerCase() } : {}),
-            ...(metadata?.toolFamily ? { toolFamily: normalizeToolFamily(metadata.toolFamily) } : {}),
-            ...(Array.isArray(metadata?.toolIds) && metadata.toolIds.length > 0
+            timestamp: coerceTimestamp(scopedMetadata?.timestamp),
+            sourceSurface: normalizeSourceSurface(scopedMetadata),
+            ...(scopedMetadata?.ownerId ? { ownerId: String(scopedMetadata.ownerId).trim() } : {}),
+            ...(scopedMetadata?.memoryScope ? { memoryScope: String(scopedMetadata.memoryScope).trim() } : {}),
+            ...(scopedMetadata?.projectKey ? { projectKey: String(scopedMetadata.projectKey).trim() } : {}),
+            ...(scopedMetadata?.memoryNamespace ? { memoryNamespace: String(scopedMetadata.memoryNamespace).trim() } : {}),
+            ...(scopedMetadata?.memoryClass ? { memoryClass: String(scopedMetadata.memoryClass).trim() } : {}),
+            ...(typeof scopedMetadata?.shareAcrossSurfaces === 'boolean'
+                ? { shareAcrossSurfaces: scopedMetadata.shareAcrossSurfaces }
+                : {}),
+            ...(scopedMetadata?.artifactId ? { artifactId: String(scopedMetadata.artifactId).trim() } : {}),
+            ...(scopedMetadata?.artifactFilename ? { artifactFilename: String(scopedMetadata.artifactFilename).trim() } : {}),
+            ...(scopedMetadata?.artifactFormat ? { artifactFormat: String(scopedMetadata.artifactFormat).trim().toLowerCase() } : {}),
+            ...(scopedMetadata?.skillId ? { skillId: String(scopedMetadata.skillId).trim() } : {}),
+            ...(scopedMetadata?.skillKind ? { skillKind: String(scopedMetadata.skillKind).trim().toLowerCase() } : {}),
+            ...(scopedMetadata?.toolFamily ? { toolFamily: normalizeToolFamily(scopedMetadata.toolFamily) } : {}),
+            ...(Array.isArray(scopedMetadata?.toolIds) && scopedMetadata.toolIds.length > 0
                 ? {
-                    toolIds: metadata.toolIds
+                    toolIds: scopedMetadata.toolIds
                         .map((toolId) => String(toolId || '').trim())
                         .filter(Boolean)
                         .slice(0, 8),
                 }
                 : {}),
-            ...(metadata?.summary ? { summary: summarizeLine(metadata.summary, 280) } : {}),
-            ...(metadata?.chunkIndex != null ? { chunkIndex: Number(metadata.chunkIndex) } : {}),
+            ...(scopedMetadata?.summary ? { summary: summarizeLine(scopedMetadata.summary, 280) } : {}),
+            ...(scopedMetadata?.chunkIndex != null ? { chunkIndex: Number(scopedMetadata.chunkIndex) } : {}),
         };
     }
 
@@ -296,6 +346,8 @@ class MemoryService {
         const baseMetadata = {
             ...metadata,
             memoryType: ARTIFACT_MEMORY_TYPE,
+            memoryClass: 'artifact',
+            shareAcrossSurfaces: true,
             artifactId,
             artifactFilename,
             artifactFormat,
@@ -363,12 +415,20 @@ class MemoryService {
             .map((event) => String(event?.toolCall?.function?.name || event?.result?.toolId || '').trim())
             .filter(Boolean)));
         const toolFamily = deriveToolFamilyFromToolEvents(relevantToolEvents);
+        const genericReusableSkill = isGenericReusableSkill({
+            objective,
+            assistantText,
+            artifact,
+            metadata,
+        });
 
         return this.remember(sessionId, skillText, 'skill', {
             ...metadata,
             memoryType: SKILL_MEMORY_TYPE,
             visibility: metadata?.visibility || 'frontend-shared',
             skillKind: WORKFLOW_SUMMARY_SKILL_KIND,
+            memoryClass: genericReusableSkill ? 'reusable_skill' : 'task_specific_skill',
+            shareAcrossSurfaces: genericReusableSkill,
             toolFamily,
             toolIds: relevantToolIds,
             importance: normalizeImportance(metadata?.importance, DEFAULT_SKILL_IMPORTANCE),
@@ -400,7 +460,15 @@ class MemoryService {
         };
     }
 
-    entryMatchesScope(entry = {}, { sessionId = null, ownerId = null, memoryScope = null } = {}) {
+    entryMatchesScope(entry = {}, {
+        sessionId = null,
+        ownerId = null,
+        memoryScope = null,
+        projectKey = null,
+        memoryNamespace = null,
+        sourceSurface = null,
+        memoryClass = null,
+    } = {}) {
         const metadata = entry?.metadata || {};
         if (sessionId && metadata.sessionId !== sessionId) {
             return false;
@@ -411,8 +479,75 @@ class MemoryService {
         if (memoryScope && metadata.memoryScope !== memoryScope) {
             return false;
         }
+        if (projectKey && metadata.projectKey !== projectKey) {
+            return false;
+        }
+        if (memoryNamespace && metadata.memoryNamespace !== memoryNamespace) {
+            return false;
+        }
+        if (sourceSurface && metadata.memoryNamespace === SURFACE_LOCAL_MEMORY_NAMESPACE && metadata.sourceSurface !== sourceSurface) {
+            return false;
+        }
+        if (memoryClass && metadata.memoryClass !== memoryClass) {
+            return false;
+        }
 
         return true;
+    }
+
+    entryMatchesAnyScope(entry = {}, searchScopes = []) {
+        return (Array.isArray(searchScopes) ? searchScopes : [])
+            .some((scope) => this.entryMatchesScope(entry, scope));
+    }
+
+    buildRecallSearchScopes({
+        sessionId = null,
+        ownerId = null,
+        routing = {},
+    } = {}) {
+        const scopes = [];
+        const seen = new Set();
+        const addScope = (scope = {}) => {
+            const normalized = Object.fromEntries(
+                Object.entries(scope).filter(([, value]) => value != null && value !== ''),
+            );
+            const signature = JSON.stringify(normalized);
+            if (!signature || seen.has(signature)) {
+                return;
+            }
+            seen.add(signature);
+            scopes.push(normalized);
+        };
+
+        if (sessionId) {
+            addScope({
+                sessionId,
+                memoryNamespace: SESSION_LOCAL_MEMORY_NAMESPACE,
+            });
+        }
+
+        if (routing?.projectKey && ownerId) {
+            addScope({
+                ownerId,
+                projectKey: routing.projectKey,
+                memoryNamespace: SURFACE_LOCAL_MEMORY_NAMESPACE,
+                sourceSurface: routing.sourceSurface || null,
+            });
+            addScope({
+                ownerId,
+                projectKey: routing.projectKey,
+                memoryNamespace: PROJECT_SHARED_MEMORY_NAMESPACE,
+            });
+        }
+
+        if (ownerId) {
+            addScope({
+                ownerId,
+                memoryNamespace: USER_GLOBAL_MEMORY_NAMESPACE,
+            });
+        }
+
+        return scopes;
     }
 
     getMemoryTypeGroup(entry = {}) {
@@ -434,6 +569,7 @@ class MemoryService {
         if (normalizedKeywords.length === 0) {
             return [];
         }
+        const searchScopes = Array.isArray(options.searchScopes) ? options.searchScopes : [];
 
         const rows = await this.store.scroll(this.store.collection, {
             limit: options.scanLimit || DEFAULT_MEMORY_SCAN_LIMIT,
@@ -450,7 +586,11 @@ class MemoryService {
                 timestamp: row?.payload?.timestamp || null,
                 metadata: row?.payload || {},
             }))
-            .filter((entry) => this.entryMatchesScope(entry, options))
+            .filter((entry) => (
+                searchScopes.length > 0
+                    ? this.entryMatchesAnyScope(entry, searchScopes)
+                    : this.entryMatchesScope(entry, options)
+            ))
             .map((entry) => {
                 const entryKeywords = normalizeKeywordOverlap(entry?.metadata?.keywords || []);
                 const keywordOverlap = normalizedKeywords.filter((keyword) => entryKeywords.includes(keyword));
@@ -718,6 +858,8 @@ class MemoryService {
         session = null,
         projectPlan = null,
         preferredToolIds = [],
+        sourceSurface = null,
+        projectKey = null,
     } = {}) {
         const recallOptions = this.getRecallOptions({
             profile,
@@ -726,17 +868,26 @@ class MemoryService {
         });
         const queryKeywords = mergeMemoryKeywords(memoryKeywords, query);
         const artifactFollowup = isArtifactFollowupQuery(query);
-        const semanticResults = await this.store.search(query, {
-            sessionId,
+        const routing = buildScopedMemoryMetadata({
             ownerId,
             memoryScope: String(memoryScope || '').trim() || null,
+            sourceSurface: sourceSurface || null,
+            projectKey: projectKey || null,
+            memoryClass: 'conversation',
+            ...(sessionId ? { sessionIsolation: true } : {}),
+        }, session || null);
+        const searchScopes = this.buildRecallSearchScopes({
+            sessionId,
+            ownerId,
+            routing,
+        });
+        const semanticResults = (await Promise.all(searchScopes.map((scope) => this.store.search(query, {
+            ...scope,
             topK: recallOptions.topK,
             scoreThreshold: recallOptions.scoreThreshold,
-        });
+        })))).flat().filter((entry) => this.entryMatchesAnyScope(entry, searchScopes));
         const keywordResults = await this.keywordRecall(queryKeywords, {
-            sessionId,
-            ownerId,
-            memoryScope: String(memoryScope || '').trim() || null,
+            searchScopes,
         });
         const mergedResults = this.mergeRecallResults(semanticResults, keywordResults, {
             queryKeywords,
@@ -763,12 +914,24 @@ class MemoryService {
                 semanticScore: Number(entry.semanticScore || 0),
                 keywordOverlap: entry.keywordOverlap || [],
                 artifactId: entry?.metadata?.artifactId || null,
+                projectKey: entry?.metadata?.projectKey || null,
+                memoryNamespace: entry?.metadata?.memoryNamespace || null,
+                memoryClass: entry?.metadata?.memoryClass || null,
+                sourceSurface: entry?.metadata?.sourceSurface || null,
+                shareAcrossSurfaces: entry?.metadata?.shareAcrossSurfaces === true,
+                summary: summarizeLine(entry?.metadata?.summary || entry?.text || '', 120),
                 rationale: entry?.rationale || [],
             })),
             counts,
             bundles: Object.fromEntries(
                 Object.entries(bundles).map(([key, entries]) => [key, entries.length]),
             ),
+            routing: {
+                projectKey: routing.projectKey || null,
+                memoryNamespace: routing.memoryNamespace || null,
+                sourceSurface: routing.sourceSurface || null,
+            },
+            searchScopes,
         };
 
         runtimeDiagnostics.recordMemoryHitMix({
@@ -802,6 +965,8 @@ class MemoryService {
         session = null,
         projectPlan = null,
         preferredToolIds = [],
+        sourceSurface = null,
+        projectKey = null,
     } = {}) {
         const details = await this.recallDetailed(query, {
             sessionId,
@@ -815,6 +980,8 @@ class MemoryService {
             session,
             projectPlan,
             preferredToolIds,
+            sourceSurface,
+            projectKey,
         });
 
         return returnDetails ? details : details.contextMessages;
@@ -825,23 +992,30 @@ class MemoryService {
         const memoryScope = String(options?.memoryScope || '').trim() || null;
         const memoryKeywords = normalizeMemoryKeywords(options?.memoryKeywords || []);
         const sessionIsolation = isSessionIsolationEnabled(options);
-        this.remember(sessionId, message, 'user', {
+        const routing = buildScopedMemoryMetadata({
             ...(ownerId ? { ownerId } : {}),
             ...(memoryScope ? { memoryScope } : {}),
             ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
             sourceSurface: options?.sourceSurface || memoryScope || null,
-        }).catch((err) => {
+            memoryClass: options?.memoryClass || 'conversation',
+            ...(sessionIsolation ? { sessionIsolation: true } : {}),
+        }, options?.session || null);
+        const recallQuery = String(options?.recallQuery || message || '').trim() || String(message || '');
+        this.remember(sessionId, message, 'user', routing).catch((err) => {
             console.error('[Memory] Failed to store message:', err.message);
         });
 
         try {
-            return await this.recall(message, {
+            const shouldLockToCurrentSession = sessionIsolation || !ownerId || !routing.projectKey;
+            return await this.recall(recallQuery, {
                 ...options,
-                sessionId: sessionIsolation || !ownerId ? sessionId : null,
-                ownerId: sessionIsolation ? null : ownerId,
+                sessionId: shouldLockToCurrentSession ? sessionId : null,
+                ownerId: shouldLockToCurrentSession ? null : ownerId,
                 memoryScope,
                 memoryKeywords,
-                objective: options?.objective || message,
+                sourceSurface: routing.sourceSurface || null,
+                projectKey: routing.projectKey || null,
+                objective: options?.objective || recallQuery,
                 session: options?.session || null,
                 projectPlan: options?.projectPlan || null,
                 preferredToolIds: options?.preferredToolIds || [],
@@ -872,6 +1046,8 @@ class MemoryService {
             return await this.store.store(sessionId, normalizedNote, this.normalizeMetadata('research-note', normalizedNote, {
                 ...metadata,
                 memoryType: RESEARCH_MEMORY_TYPE,
+                memoryClass: 'research_note',
+                shareAcrossSurfaces: true,
             }));
         } catch (err) {
             console.error('[Memory] Failed to store research note:', err.message);
