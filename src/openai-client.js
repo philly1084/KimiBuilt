@@ -3839,11 +3839,12 @@ async function* normalizeStreamResponse(stream, metadata = {}) {
     }
 }
 
-async function* synthesizeStreamResponse(response, metadata = {}) {
+async function* synthesizeStreamResponse(response, metadata = {}, streamMode = 'synthetic') {
     attachKimibuiltMetadata(response, metadata);
     const responseId = response?.id || `resp_${Date.now()}`;
     const model = response?.model || null;
     const text = getModelResponseText(response);
+    console.warn(`[OpenAI] Stream mode=${streamMode}`);
 
     if (text) {
         for (let index = 0; index < text.length; index += SYNTHETIC_STREAM_CHUNK_SIZE) {
@@ -3979,7 +3980,16 @@ async function createResponse({
                 if (directToolResponse) {
                     console.log(`[OpenAI] Direct required tool execution completed for '${requiredToolId}'`);
                     attachKimibuiltMetadata(directToolResponse, kimibuiltMetadata);
-                    return stream ? synthesizeStreamResponse(directToolResponse, kimibuiltMetadata) : normalizeModelResponse(directToolResponse);
+                    if (stream) {
+                        const syntheticStream = synthesizeStreamResponse(
+                            directToolResponse,
+                            kimibuiltMetadata,
+                            `synthetic-direct-tool:${requiredToolId}`,
+                        );
+                        syntheticStream.kimibuiltStreamMode = 'synthetic-direct-tool';
+                        return syntheticStream;
+                    }
+                    return normalizeModelResponse(directToolResponse);
                 }
 
                 const toolResponse = await runAutomaticToolLoop(openai, {
@@ -3993,7 +4003,16 @@ async function createResponse({
                 if (toolResponse) {
                     console.log('[OpenAI] Automatic tool orchestration completed');
                     attachKimibuiltMetadata(toolResponse, kimibuiltMetadata);
-                    return stream ? synthesizeStreamResponse(toolResponse, kimibuiltMetadata) : normalizeModelResponse(toolResponse);
+                    if (stream) {
+                        const syntheticStream = synthesizeStreamResponse(
+                            toolResponse,
+                            kimibuiltMetadata,
+                            'synthetic-automatic-tool-loop',
+                        );
+                        syntheticStream.kimibuiltStreamMode = 'synthetic-automatic-tool-loop';
+                        return syntheticStream;
+                    }
+                    return normalizeModelResponse(toolResponse);
                 }
             } catch (toolError) {
                 console.error('[OpenAI] Automatic tool orchestration failed:', toolError.message);
@@ -4013,7 +4032,13 @@ async function createResponse({
         if (apiMode === 'responses') {
             const response = await openai.responses.create(params);
             attachKimibuiltMetadata(response, kimibuiltMetadata);
-            return stream ? normalizeStreamResponse(response, kimibuiltMetadata) : normalizeModelResponse(response);
+            if (stream) {
+                console.log('[OpenAI] Stream mode=native-responses');
+                const normalizedStream = normalizeStreamResponse(response, kimibuiltMetadata);
+                normalizedStream.kimibuiltStreamMode = 'native-responses';
+                return normalizedStream;
+            }
+            return normalizeModelResponse(response);
         }
 
         const chatParams = {
@@ -4029,7 +4054,13 @@ async function createResponse({
         }
         const response = await openai.chat.completions.create(chatParams);
         attachKimibuiltMetadata(response, kimibuiltMetadata);
-        return stream ? normalizeChatCompletionsStream(response, kimibuiltMetadata) : normalizeChatResponse(response);
+        if (stream) {
+            console.log('[OpenAI] Stream mode=native-chat-completions');
+            const normalizedStream = normalizeChatCompletionsStream(response, kimibuiltMetadata);
+            normalizedStream.kimibuiltStreamMode = 'native-chat-completions';
+            return normalizedStream;
+        }
+        return normalizeChatResponse(response);
     } catch (error) {
         console.error('[OpenAI] Error creating response:', error.message);
         console.error('[OpenAI] Error type:', error.type);

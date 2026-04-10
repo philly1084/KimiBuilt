@@ -440,6 +440,17 @@ function setSessionHeaders(res, sessionId) {
     res.setHeader('X-Thread-Id', sessionId);
 }
 
+function openSseStream(res, sessionId = null, route = 'unknown') {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    setSessionHeaders(res, sessionId);
+    res.flushHeaders?.();
+    res.write(': stream-open\n\n');
+    console.log(`[OpenAICompat] SSE stream opened route=${route} sessionId=${sessionId || 'unknown'}`);
+}
+
 function isNotesSurfaceValue(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
     return [
@@ -724,9 +735,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 : session;
 
             if (stream) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
+                openSseStream(res, sessionId, '/v1/chat/completions#artifact');
             }
 
             const generation = await generateOutputArtifactFromPrompt({
@@ -872,11 +881,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const input = effectiveMessages;
 
         if (stream) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            setSessionHeaders(res, sessionId);
-
+            openSseStream(res, sessionId, '/v1/chat/completions');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: messages.map((message) => (
@@ -920,6 +925,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 ownerId,
             });
             const response = execution.response;
+            console.log(`[OpenAICompat] chat/completions stream mode=${response?.kimibuiltStreamMode || 'unknown'} runtime=${execution.runtimeMode || 'unknown'} sessionId=${sessionId}`);
 
             let fullText = '';
             let chunkIndex = 0;
@@ -1444,9 +1450,7 @@ router.post('/responses', async (req, res, next) => {
                 : session;
 
             if (stream) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
+                openSseStream(res, sessionId, '/v1/responses#artifact');
             }
 
             const generation = await generateOutputArtifactFromPrompt({
@@ -1587,11 +1591,7 @@ router.post('/responses', async (req, res, next) => {
         console.log(`[OpenAICompat] responses routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(responsesControlState?.lastToolIntent || responsesControlState?.lastSshTarget?.host || responsesControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(responsesControlState?.lastRemoteObjective || '')}`);
 
         if (stream) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            setSessionHeaders(res, sessionId);
-
+            openSseStream(res, sessionId, '/v1/responses');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: runtimeInput,
@@ -1630,6 +1630,7 @@ router.post('/responses', async (req, res, next) => {
                 ownerId,
             });
             const response = execution.response;
+            console.log(`[OpenAICompat] responses stream mode=${response?.kimibuiltStreamMode || 'unknown'} runtime=${execution.runtimeMode || 'unknown'} sessionId=${sessionId}`);
 
             let fullText = '';
             for await (const event of response) {

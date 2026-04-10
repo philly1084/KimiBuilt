@@ -7676,10 +7676,13 @@ class ConversationOrchestrator extends EventEmitter {
         });
 
         if (stream) {
+            const syntheticStream = createSyntheticStream(tracedResponse);
+            syntheticStream.kimibuiltStreamMode = 'synthetic-orchestrator';
+            console.warn(`[ConversationOrchestrator] Stream mode=synthetic-orchestrator sessionId=${sessionId} taskType=${taskType} executionProfile=${executionProfile}`);
             return {
                 success: true,
                 sessionId,
-                response: createSyntheticStream(tracedResponse),
+                response: syntheticStream,
                 output,
                 trace,
             };
