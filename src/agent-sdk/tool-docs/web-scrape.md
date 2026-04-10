@@ -11,6 +11,9 @@ Key params:
 - `selectors`
 - `browser`
 - `javascript`
+- `researchSafe`
+- `approvedDomains`
+- `respectRobotsTxt`
 - `waitForSelector`
 - `actions`
 - `captureScreenshot`
@@ -31,3 +34,4 @@ Selector format:
 Notes:
 - Selector support is intentionally basic.
 - Good for tags, ids, classes, and repeated simple fields.
+- For search-follow-up research, use `researchSafe: true` and `approvedDomains` so the backend can skip pages that are outside the approved source set or explicitly disallow bots in `robots.txt`.

@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { config } = require('../config');
-const { transcribeAudio } = require('../openai-client');
+const { transcriptionService } = require('../audio/transcription-service');
 const { parseMultipartRequest } = require('../utils/multipart');
 
 const router = Router();
@@ -76,7 +76,7 @@ router.post('/transcribe', async (req, res, next) => {
 
         const normalizedMimeType = normalizeTranscriptionMimeType(mimeType, file.filename || '');
 
-        const transcript = await transcribeAudio({
+        const transcript = await transcriptionService.transcribe({
             audioBuffer: file.buffer,
             filename: file.filename || 'recording.webm',
             mimeType: normalizedMimeType || 'audio/webm',

@@ -24,7 +24,7 @@ function registerWebTools() {
       skill: {
         triggerPatterns: getTriggerPatterns(tool.id),
         autoApply: false,
-        requiresConfirmation: tool.id !== 'web-fetch'
+        requiresConfirmation: false
       },
       // Frontend configuration
       frontend: {

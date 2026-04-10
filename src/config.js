@@ -241,6 +241,14 @@ const config = {
     },
 
     audio: {
+        apiKey: process.env.OPENAI_TRANSCRIPTION_API_KEY
+            || process.env.OPENAI_MEDIA_API_KEY
+            || process.env.OPENAI_API_KEY
+            || '',
+        baseURL: process.env.OPENAI_TRANSCRIPTION_BASE_URL
+            || process.env.OPENAI_MEDIA_BASE_URL
+            || process.env.OPENAI_BASE_URL
+            || 'https://api.openai.com/v1',
         transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
         maxUploadBytes: Math.max(
             1024 * 1024,
@@ -274,6 +282,11 @@ const config = {
         contentCharLimit: Math.max(
             500,
             parseInt(process.env.WEB_SCRAPE_CONTENT_CHAR_LIMIT, 10) || 12000,
+        ),
+        respectRobotsTxt: process.env.WEB_SCRAPE_RESPECT_ROBOTS_TXT !== 'false',
+        robotsTimeoutMs: Math.max(
+            1000,
+            parseInt(process.env.WEB_SCRAPE_ROBOTS_TIMEOUT_MS, 10) || 8000,
         ),
     },
 

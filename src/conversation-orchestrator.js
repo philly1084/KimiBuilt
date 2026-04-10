@@ -7466,6 +7466,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes('web-scrape')) {
             parts.push('Use `web-scrape` for structured extraction from URLs. Prefer `browser: true` for JS-heavy pages or certificate/TLS problems.');
+            parts.push('For search-follow-up research, treat the selected search-result host as approved by default and use `researchSafe: true` plus `approvedDomains` so bot-blocked pages are skipped automatically instead of turning source selection back into a user task.');
             parts.push('When browser rendering is enabled, `web-scrape` can execute `actions` such as click, fill, type, press, wait_for_selector, wait_for_timeout, hover, scroll, and select_option before extracting the final page state.');
             parts.push('Use `captureScreenshot: true` in browser mode when a visual snapshot of the rendered page would help later review or UI verification.');
             parts.push('When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores opaque binary artifacts and only returns safe metadata.');

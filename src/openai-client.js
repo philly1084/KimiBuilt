@@ -2291,7 +2291,10 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === 'web-search')) {
         guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
         guidance.push('- When the user explicitly asks for research, call `web-search` first. This backend routes it through the configured Perplexity provider.');
+        guidance.push('- Treat strong `web-search` results as approved candidate sources for routine research, best-practice lookups, and news gathering. Do not stop to ask the user to pre-approve normal public domains unless they explicitly want a specific source list.');
+        guidance.push('- Use `domains` on `web-search` when the user wants official docs, a known publisher family, or a tighter authoritative source set.');
         guidance.push('- For explicit research requests, do not stop at search snippets. Verify the strongest search results with `web-fetch` or `web-scrape` and ground the answer in those source pages.');
+        guidance.push('- For deep research, prefer broader Perplexity passes over single-source synthesis so the answer is grounded in multiple current sources.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'web-fetch')) {
@@ -2300,6 +2303,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
         guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+        guidance.push('- For search-follow-up research, use `researchSafe: true` and set `approvedDomains` from the chosen result host so the backend can skip pages that are outside the approved set or explicitly disallow bots.');
         guidance.push('- When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores binary artifacts and returns only safe metadata.');
     }
 

@@ -3,12 +3,30 @@ jest.mock('./browser-runtime', () => ({
     normalizeBrowserUrl: jest.fn((url) => String(url || '')),
 }));
 
+jest.mock('./research-site-policy', () => {
+    const actual = jest.requireActual('./research-site-policy');
+    return {
+        ...actual,
+        evaluateResearchSitePolicy: jest.fn(),
+    };
+});
+
 const { WebScrapeTool } = require('./WebScrapeTool');
 const { browsePage } = require('./browser-runtime');
+const { evaluateResearchSitePolicy } = require('./research-site-policy');
 
 describe('WebScrapeTool content extraction', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        evaluateResearchSitePolicy.mockResolvedValue({
+            url: 'https://example.com/article',
+            hostname: 'example.com',
+            approved: true,
+            approvedDomains: [],
+            allowed: true,
+            reason: 'approved-by-default',
+            robots: null,
+        });
     });
 
     test('returns cleaned page text even when no selectors are provided', async () => {
@@ -118,5 +136,84 @@ describe('WebScrapeTool content extraction', () => {
         expect(result.method).toBe('playwright-css-selectors');
         expect(result.stats.linksCaptured).toBe(1);
         expect(result.stats.headingsCaptured).toBe(1);
+    });
+
+    test('includes research site policy metadata when research-safe scraping is allowed', async () => {
+        const tool = new WebScrapeTool();
+        const fetchTool = {
+            execute: jest.fn().mockResolvedValue({
+                success: true,
+                data: {
+                    url: 'https://example.com/article',
+                    body: '<html><body><article><h1>Approved Source</h1><p>Verified content.</p></article></body></html>',
+                },
+            }),
+        };
+        const context = {
+            tools: {
+                get: jest.fn().mockReturnValue(fetchTool),
+            },
+        };
+        const tracker = {
+            recordRead: jest.fn(),
+        };
+
+        const result = await tool.handler({
+            url: 'https://example.com/article',
+            researchSafe: true,
+            approvedDomains: ['example.com'],
+        }, context, tracker);
+
+        expect(evaluateResearchSitePolicy).toHaveBeenCalledWith('https://example.com/article', expect.objectContaining({
+            approvedDomains: ['example.com'],
+            respectRobotsTxt: true,
+        }));
+        expect(result.sitePolicy).toEqual(expect.objectContaining({
+            hostname: 'example.com',
+            allowed: true,
+        }));
+        expect(fetchTool.execute).toHaveBeenCalled();
+    });
+
+    test('skips research-safe scraping when robots.txt disallows bots', async () => {
+        evaluateResearchSitePolicy.mockResolvedValue({
+            url: 'https://example.com/article',
+            hostname: 'example.com',
+            approved: true,
+            approvedDomains: ['example.com'],
+            allowed: false,
+            reason: 'robots-disallow',
+            robots: {
+                url: 'https://example.com/robots.txt',
+                found: true,
+                allowed: false,
+                matchedUserAgent: '*',
+                matchedRule: {
+                    type: 'disallow',
+                    path: '/',
+                },
+            },
+        });
+
+        const tool = new WebScrapeTool();
+        const fetchTool = {
+            execute: jest.fn(),
+        };
+        const context = {
+            tools: {
+                get: jest.fn().mockReturnValue(fetchTool),
+            },
+        };
+        const tracker = {
+            recordRead: jest.fn(),
+        };
+
+        await expect(tool.handler({
+            url: 'https://example.com/article',
+            researchSafe: true,
+            approvedDomains: ['example.com'],
+        }, context, tracker)).rejects.toThrow('robots.txt disallows automated access');
+
+        expect(fetchTool.execute).not.toHaveBeenCalled();
     });
 });

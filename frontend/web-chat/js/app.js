@@ -2047,9 +2047,14 @@ class ChatApp {
             recorder.start();
             this.updateAudioControls();
         } catch (error) {
-            const message = error?.name === 'NotAllowedError'
-                ? 'Microphone access was blocked.'
-                : (error?.message || 'Unable to start voice input.');
+            const errorName = String(error?.name || '').trim();
+            const message = errorName === 'NotAllowedError'
+                ? 'Microphone access was blocked. Allow microphone access for this site and try again.'
+                : (errorName === 'NotFoundError'
+                    ? 'No microphone was found for voice input.'
+                    : (errorName === 'NotReadableError'
+                        ? 'The microphone is busy or unavailable right now.'
+                        : (error?.message || 'Unable to start voice input.')));
             uiHelpers.showToast(message, 'error', 'Voice input');
             this.teardownVoiceRecordingStream();
             this.voiceInputState = {
@@ -2143,6 +2148,7 @@ class ChatApp {
         }
 
         uiHelpers.stopSpeechPlayback();
+        void uiHelpers.ttsManager?.preparePlayback?.({ quiet: true });
 
         // Check if we need to create a session
         if (!sessionManager.currentSessionId) {
@@ -2220,6 +2226,9 @@ class ChatApp {
                 }
 
                 switch (chunk.type) {
+                    case 'stream_open':
+                        console.debug('[ChatApp] Gateway SSE stream opened.');
+                        break;
                     case 'status':
                         this.handleStreamStatus(chunk);
                         break;
@@ -3678,7 +3687,7 @@ class ChatApp {
             });
             return true;
         } catch (error) {
-            console.warn('Piper voice autoplay failed:', error);
+            console.warn('Voice autoplay failed:', error);
             return false;
         }
     }
@@ -4301,6 +4310,7 @@ class ChatApp {
     beginAssistantStream(options = {}) {
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
+        const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
         this.liveResponseState = {
             phase: 'thinking',
             detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
@@ -4317,12 +4327,12 @@ class ChatApp {
                 detail: this.liveResponseState.detail,
             },
             reasoningSummary: '',
-            reasoningDisplaySource: '',
-            reasoningDisplayText: '',
-            reasoningDisplayFullText: '',
-            reasoningDisplayTitle: '',
-            reasoningDisplayIcon: '',
-            reasoningDisplayAnimated: false,
+            reasoningDisplaySource: 'synthetic',
+            reasoningDisplayText: initialAmbientFrame.visibleText,
+            reasoningDisplayFullText: initialAmbientFrame.fullText,
+            reasoningDisplayTitle: 'Thinking',
+            reasoningDisplayIcon: 'sparkles',
+            reasoningDisplayAnimated: initialAmbientFrame.isTyping,
             reasoningAvailable: false,
             isStreaming: true,
         }, {
@@ -4844,6 +4854,9 @@ class ChatApp {
                 }
 
                 switch (chunk.type) {
+                    case 'stream_open':
+                        console.debug('[ChatApp] Gateway SSE stream opened.');
+                        break;
                     case 'status':
                         this.handleStreamStatus(chunk);
                         break;

@@ -138,6 +138,16 @@
     return dataLines.join('\n').trim();
   }
 
+  function extractSSEComment(frame = '') {
+    const commentLines = String(frame || '')
+      .split('\n')
+      .filter((line) => line.startsWith(':'))
+      .map((line) => line.slice(1).trim())
+      .filter(Boolean);
+
+    return commentLines.join('\n').trim();
+  }
+
   function isTerminalFinishReason(finishReason = '') {
     return TERMINAL_FINISH_REASONS.has(String(finishReason || '').trim().toLowerCase());
   }
@@ -715,6 +725,15 @@
         buffer = remainder;
 
         for (const frame of frames) {
+          const commentText = extractSSEComment(frame);
+          if (commentText) {
+            yield {
+              type: commentText === 'stream-open' ? 'stream_open' : 'comment',
+              comment: commentText,
+            };
+            continue;
+          }
+
           const payloadText = extractSSEData(frame);
           if (!payloadText) {
             continue;
@@ -742,6 +761,15 @@
 
       buffer += decoder.decode();
       if (buffer.trim()) {
+        const commentText = extractSSEComment(buffer);
+        if (commentText) {
+          yield {
+            type: commentText === 'stream-open' ? 'stream_open' : 'comment',
+            comment: commentText,
+          };
+          return;
+        }
+
         const payloadText = extractSSEData(buffer);
         if (payloadText === '[DONE]') {
           sawDone = true;
@@ -778,6 +806,7 @@
     buildGatewayHeaders,
     extractAssistantMetadata,
     extractAssistantText,
+    extractSSEComment,
     extractSSEData,
     extractStreamMetadata,
     extractToolEvents,

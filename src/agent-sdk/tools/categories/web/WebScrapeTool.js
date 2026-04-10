@@ -7,6 +7,7 @@ const { ToolBase } = require('../../ToolBase');
 const { config } = require('../../../../config');
 const { artifactService } = require('../../../../artifacts/artifact-service');
 const { browsePage, normalizeBrowserUrl } = require('./browser-runtime');
+const { evaluateResearchSitePolicy, normalizeDomainList } = require('./research-site-policy');
 
 class WebScrapeTool extends ToolBase {
   constructor() {
@@ -90,6 +91,23 @@ class WebScrapeTool extends ToolBase {
             description: 'Force backend headless-browser rendering, useful for dynamic pages and certificate/TLS fetch failures',
             default: false
           },
+          approvedDomains: {
+            type: 'array',
+            description: 'Optional approved hosts or domains for research-safe scraping. Matching subdomains are allowed.',
+            items: {
+              type: 'string',
+            },
+          },
+          researchSafe: {
+            type: 'boolean',
+            description: 'Treat the scrape as search-follow-up research: skip pages that are outside the approved domains or explicitly disallow bots.',
+            default: false,
+          },
+          respectRobotsTxt: {
+            type: 'boolean',
+            description: 'Check robots.txt before research-safe scraping and skip pages that explicitly disallow automated access.',
+            default: false,
+          },
           actions: {
             type: 'array',
             description: 'Optional browser actions to execute before extracting content, such as click, fill, type, press, wait_for_selector, wait_for_timeout, hover, scroll, or select_option',
@@ -123,6 +141,7 @@ class WebScrapeTool extends ToolBase {
           data: { type: 'object' },
           links: { type: 'array' },
           headings: { type: 'array' },
+          sitePolicy: { type: ['object', 'null'] },
           screenshot: { type: ['object', 'null'] },
           extractedAt: { type: 'string' },
           method: { type: 'string' }
@@ -143,11 +162,36 @@ class WebScrapeTool extends ToolBase {
       imageLimit = 12,
       javascript = false,
       browser = false,
+      approvedDomains = [],
+      researchSafe = false,
       actions = [],
       captureScreenshot = false,
       fullPageScreenshot = true,
       timeout = 30000
     } = params;
+    const effectiveApprovedDomains = normalizeDomainList(approvedDomains);
+    const respectRobotsTxt = Object.prototype.hasOwnProperty.call(params || {}, 'respectRobotsTxt')
+      ? params.respectRobotsTxt !== false
+      : (researchSafe ? config.scrape.respectRobotsTxt : false);
+    let sitePolicy = null;
+
+    if (researchSafe || effectiveApprovedDomains.length > 0 || respectRobotsTxt) {
+      sitePolicy = await evaluateResearchSitePolicy(url, {
+        approvedDomains: effectiveApprovedDomains,
+        respectRobotsTxt,
+        timeout: config.scrape.robotsTimeoutMs,
+      });
+      if (researchSafe && sitePolicy.allowed === false) {
+        if (sitePolicy.reason === 'host-not-approved') {
+          throw new Error(`Research-safe scraping skipped ${url}: host is not in the approved domain set.`);
+        }
+        if (sitePolicy.reason === 'robots-disallow') {
+          const robotsUrl = sitePolicy.robots?.url ? ` (${sitePolicy.robots.url})` : '';
+          throw new Error(`Research-safe scraping skipped ${url}: robots.txt disallows automated access${robotsUrl}.`);
+        }
+        throw new Error(`Research-safe scraping skipped ${url}: site policy check failed.`);
+      }
+    }
 
     let html;
     let finalUrl = url;
@@ -268,6 +312,7 @@ class WebScrapeTool extends ToolBase {
       data: extractedData,
       links,
       headings,
+      sitePolicy,
       browser: browserData
         ? {
           engine: browserData.engine,

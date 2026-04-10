@@ -2,7 +2,7 @@
 
 A premium Node.js CLI client for the KimiBuilt AI backend featuring an interactive REPL, real-time streaming responses, session persistence, beautiful terminal UI, model selection, image generation, and support for multiple interaction modes.
 
-> **Note:** v2.2+ uses the official OpenAI SDK to connect to KimiBuilt's OpenAI-compatible endpoints at `/v1/*`.
+> **Note:** v2.2+ uses the official OpenAI SDK for `/v1/*` chat/image calls and the provider-session admin surface for backend CLI access (`codex-cli`, `gemini-cli`, `kimi-cli`).
 
 ![Version](https://img.shields.io/badge/version-2.1.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen)
@@ -109,6 +109,12 @@ git diff | kimibuilt "Review these changes"
 | `/clear` | Clear the screen |
 | `/url [url]` | Show or set API base URL |
 | `/config` | Show current configuration |
+| `/providers` | List session-capable backend CLI providers |
+| `/attach <provider> [cwd]` | Open a backend CLI session in the chosen working directory |
+| `/provider-status` | Show the active backend CLI session |
+| `/.help` | Show local escape commands while attached |
+| `/.interrupt` | Send `SIGINT` to the attached backend CLI |
+| `/.detach` | Close the attached backend CLI session |
 | `/theme [name]` | Show or set theme |
 | `/help` | Show help message |
 | `/quit` or `/exit` | Exit the CLI |
@@ -117,7 +123,7 @@ git diff | kimibuilt "Review these changes"
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+C` | Cancel current operation (once) / Exit (twice) |
+| `Ctrl+C` | Cancel the current operation, or send `SIGINT` when attached to a backend CLI |
 | `Ctrl+L` | Clear screen |
 | `Tab` | Auto-complete commands |
 | `↑/↓` | Navigate command history |
@@ -294,6 +300,8 @@ Configuration is stored in `~/.kimibuilt/config.json`:
 | Variable | Description |
 |----------|-------------|
 | `KIMIBUILT_API_URL` | Override the API base URL |
+| `KIMIBUILT_FRONTEND_API_KEY` | Auth for `/admin/provider-capabilities` and `/admin/provider-sessions/*` |
+| `FRONTEND_API_KEY` | Alternate auth env var for provider-session access |
 
 ### Changing Settings
 
@@ -368,6 +376,16 @@ The CLI uses the OpenAI SDK to communicate with KimiBuilt's OpenAI-compatible en
 | `/v1/models` | GET | List available models |
 | `/v1/chat/completions` | POST | Chat with streaming/non-streaming |
 | `/v1/images/generations` | POST | Generate images |
+
+### Provider Session Admin Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/admin/provider-capabilities` | GET | List providers and whether they support provider sessions |
+| `/admin/provider-sessions` | POST | Create an interactive backend CLI session |
+| `/admin/provider-sessions/:id/input` | POST | Send raw stdin to the backend CLI |
+| `/admin/provider-sessions/:id/signal` | POST | Send signals like `SIGINT` |
+| `/admin/provider-sessions/:id` | DELETE | Close the backend CLI session |
 
 ### KimiBuilt Custom Endpoints
 

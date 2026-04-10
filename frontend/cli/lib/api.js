@@ -1,10 +1,11 @@
 const OpenAI = require('openai');
-const { getApiBaseUrl } = require('./config');
+const { getApiBaseUrl, get } = require('./config');
 const {
   buildGatewayHeaders,
   extractAssistantText,
   filterCodexBackedModels,
   selectPreferredCodexModel,
+  splitSSEFrames,
   streamGatewayResponse,
   DEFAULT_CODEX_MODEL_ID,
 } = require('../../shared/openai-sse');
@@ -15,6 +16,42 @@ const CLI_TASK_TYPE = 'chat';
 const CLI_CLIENT_SURFACE = 'cli';
 const CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
 const DEFAULT_CHAT_MODEL = DEFAULT_CODEX_MODEL_ID;
+const PROVIDER_SESSION_MODE = 'interactive';
+
+function stripGatewaySuffix(baseURL = '') {
+  return String(baseURL || '').replace(/\/v1\/?$/i, '');
+}
+
+function parseProviderSessionFrame(frame = '') {
+  const lines = String(frame || '').split('\n');
+  let event = 'message';
+  const dataLines = [];
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || '').trimEnd();
+    if (!line || line.startsWith(':')) {
+      continue;
+    }
+
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim() || event;
+      continue;
+    }
+
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).replace(/^\s/, ''));
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  return {
+    event,
+    data: dataLines.join('\n'),
+  };
+}
 
 /**
  * Custom API Error class with additional context.
@@ -51,6 +88,74 @@ class OpenAIClient {
       apiKey: 'any-key',
       timeout: DEFAULT_TIMEOUT,
     });
+  }
+
+  getGatewayBaseUrl() {
+    return stripGatewaySuffix(this.baseURL);
+  }
+
+  getFrontendApiKey() {
+    return String(
+      process.env.KIMIBUILT_FRONTEND_API_KEY
+      || process.env.FRONTEND_API_KEY
+      || process.env.KIMIBUILT_GATEWAY_API_KEY
+      || get('frontendApiKey', '')
+      || ''
+    ).trim();
+  }
+
+  buildFrontendAuthHeaders(headers = {}) {
+    const authToken = this.getFrontendApiKey();
+    if (!authToken) {
+      throw new APIError(
+        'Provider CLI access requires a frontend API key. Set KIMIBUILT_FRONTEND_API_KEY or FRONTEND_API_KEY before using /providers or /attach.',
+      );
+    }
+
+    return buildGatewayHeaders(headers, { authToken });
+  }
+
+  async adminRequest(routePath, options = {}) {
+    this.refreshClient();
+
+    const method = options.method || 'GET';
+    const headers = this.buildFrontendAuthHeaders({
+      Accept: 'application/json',
+      ...(options.headers || {}),
+    });
+    const requestInit = {
+      method,
+      headers,
+      timeout: options.timeout || DEFAULT_TIMEOUT,
+    };
+
+    if (options.body !== undefined) {
+      requestInit.body = JSON.stringify(options.body);
+      if (!Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+        requestInit.headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    try {
+      const response = await fetch(`${this.getGatewayBaseUrl()}${routePath}`, requestInit);
+      if (!response.ok) {
+        const responseBody = await this._parseFetchResponseBody(response);
+        const errorMessage = responseBody?.error?.message
+          || responseBody?.message
+          || `HTTP ${response.status}`;
+        throw new APIError(errorMessage, response.status, responseBody);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return response.json();
+      }
+
+      const text = await response.text();
+      return text ? { message: text } : {};
+    } catch (err) {
+      throw this._handleError(err);
+    }
   }
 
   /**
@@ -478,6 +583,149 @@ class OpenAIClient {
     }
   }
 
+  async getProviderCapabilities() {
+    const response = await this.adminRequest('/admin/provider-capabilities', {
+      method: 'GET',
+      timeout: 15000,
+    });
+    return Array.isArray(response?.data) ? response.data : [];
+  }
+
+  async createProviderSession(options = {}) {
+    const body = {
+      providerId: options.providerId,
+      mode: options.mode || PROVIDER_SESSION_MODE,
+      cwd: options.cwd,
+      cols: options.cols,
+      rows: options.rows,
+    };
+
+    if (options.model) {
+      body.model = options.model;
+    }
+
+    return this.adminRequest('/admin/provider-sessions', {
+      method: 'POST',
+      body,
+      timeout: 30000,
+    });
+  }
+
+  async sendProviderSessionInput(sessionId, data) {
+    return this.adminRequest(`/admin/provider-sessions/${encodeURIComponent(sessionId)}/input`, {
+      method: 'POST',
+      body: { data },
+      timeout: 15000,
+    });
+  }
+
+  async sendProviderSessionSignal(sessionId, signalName = 'SIGINT') {
+    return this.adminRequest(`/admin/provider-sessions/${encodeURIComponent(sessionId)}/signal`, {
+      method: 'POST',
+      body: { signal: signalName },
+      timeout: 15000,
+    });
+  }
+
+  async deleteProviderSession(sessionId) {
+    return this.adminRequest(`/admin/provider-sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      timeout: 15000,
+    });
+  }
+
+  async resizeProviderSession(sessionId, cols, rows) {
+    return this.adminRequest(`/admin/provider-sessions/${encodeURIComponent(sessionId)}/resize`, {
+      method: 'POST',
+      body: { cols, rows },
+      timeout: 15000,
+    });
+  }
+
+  async *streamProviderSession(streamUrl, options = {}) {
+    this.refreshClient();
+
+    const streamBase = `${this.getGatewayBaseUrl().replace(/\/$/, '')}/`;
+    const targetUrl = new URL(String(streamUrl || ''), streamBase);
+    if (options.after !== undefined && options.after !== null) {
+      targetUrl.searchParams.set('after', String(options.after));
+    }
+
+    const response = await fetch(targetUrl.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      const responseBody = await this._parseFetchResponseBody(response);
+      const errorMessage = responseBody?.error?.message
+        || responseBody?.message
+        || `HTTP ${response.status}`;
+      throw new APIError(errorMessage, response.status, responseBody);
+    }
+
+    const reader = response?.body?.getReader?.();
+    if (!reader) {
+      throw new APIError('Provider stream body is unavailable');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const split = splitSSEFrames(buffer);
+        buffer = split.remainder;
+
+        for (const frame of split.frames) {
+          const parsedFrame = parseProviderSessionFrame(frame);
+          if (!parsedFrame) {
+            continue;
+          }
+
+          let payload;
+          try {
+            payload = JSON.parse(parsedFrame.data);
+          } catch {
+            payload = { raw: parsedFrame.data };
+          }
+
+          yield {
+            type: parsedFrame.event,
+            ...payload,
+          };
+        }
+      }
+
+      buffer += decoder.decode();
+      const trailingFrame = parseProviderSessionFrame(buffer);
+      if (trailingFrame) {
+        let payload;
+        try {
+          payload = JSON.parse(trailingFrame.data);
+        } catch {
+          payload = { raw: trailingFrame.data };
+        }
+
+        yield {
+          type: trailingFrame.event,
+          ...payload,
+        };
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   /**
    * Handle errors from OpenAI SDK.
    * @private
@@ -783,7 +1031,14 @@ module.exports = {
   generateArtifact,
   downloadArtifact,
   downloadImage,
+  createProviderSession: (options) => client.createProviderSession(options),
+  deleteProviderSession: (sessionId) => client.deleteProviderSession(sessionId),
+  getProviderCapabilities: () => client.getProviderCapabilities(),
   parseSSE: (chunk) => [], // Deprecated: OpenAI SDK handles streaming internally
+  resizeProviderSession: (sessionId, cols, rows) => client.resizeProviderSession(sessionId, cols, rows),
+  sendProviderSessionInput: (sessionId, data) => client.sendProviderSessionInput(sessionId, data),
+  sendProviderSessionSignal: (sessionId, signalName) => client.sendProviderSessionSignal(sessionId, signalName),
+  streamProviderSession: (streamUrl, options) => client.streamProviderSession(streamUrl, options),
   OpenAIClient,
 };
 

@@ -4,6 +4,7 @@
 
 const { ToolBase } = require('../../ToolBase');
 const { config } = require('../../../../config');
+const { normalizeDomainList } = require('./research-site-policy');
 
 const DEFAULT_SEARCH_LIMIT = Math.min(config.search.defaultLimit, config.search.maxLimit);
 
@@ -64,6 +65,13 @@ class WebSearchTool extends ToolBase {
             type: 'boolean',
             default: true,
           },
+          domains: {
+            type: 'array',
+            description: 'Optional domain filters for authoritative or approved search targets.',
+            items: {
+              type: 'string',
+            },
+          },
         },
       },
       outputSchema: {
@@ -71,6 +79,10 @@ class WebSearchTool extends ToolBase {
         properties: {
           query: { type: 'string' },
           engine: { type: 'string' },
+          domainFilter: {
+            type: 'array',
+            items: { type: 'string' },
+          },
           results: {
             type: 'array',
             items: {
@@ -101,12 +113,14 @@ class WebSearchTool extends ToolBase {
       timeRange = 'all',
       includeSnippets = true,
       includeUrls = true,
+      domains = [],
     } = params;
 
     if (engine !== 'perplexity') {
       throw new Error(`Search engine '${engine}' is not supported by this backend`);
     }
 
+    const domainFilter = normalizeDomainList(domains);
     const startTime = Date.now();
     const results = await this.searchPerplexity({
       query,
@@ -116,6 +130,7 @@ class WebSearchTool extends ToolBase {
       timeRange,
       includeSnippets,
       includeUrls,
+      domains: domainFilter,
     });
     const searchTime = (Date.now() - startTime) / 1000;
 
@@ -128,6 +143,7 @@ class WebSearchTool extends ToolBase {
     return {
       query,
       engine,
+      domainFilter,
       results,
       totalResults: results.length,
       searchTime,
@@ -141,6 +157,7 @@ class WebSearchTool extends ToolBase {
     timeRange,
     includeSnippets,
     includeUrls,
+    domains,
   }) {
     if (!config.search.perplexityApiKey) {
       throw new Error('Perplexity search is not configured. Set PERPLEXITY_API_KEY in the backend environment.');
@@ -156,7 +173,7 @@ class WebSearchTool extends ToolBase {
       body: JSON.stringify({
         query,
         max_results: Math.max(1, Math.min(Number(limit) || DEFAULT_SEARCH_LIMIT, config.search.maxLimit)),
-        search_domain_filter: [],
+        search_domain_filter: normalizeDomainList(domains),
         country: this.mapRegionToCountry(region),
         search_recency_filter: this.mapTimeRange(timeRange),
       }),

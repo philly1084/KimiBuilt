@@ -37,6 +37,7 @@ const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
+const { config } = require('../../config');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -716,6 +717,12 @@ describe('ToolManager image tools', () => {
       'image-from-url',
       'document-workflow',
     ]);
+
+    const webSearchCall = nestedToolManager.executeTool.mock.calls.find(([id]) => id === 'web-search');
+    expect(webSearchCall?.[1]).toEqual(expect.objectContaining({
+      limit: Math.min(config.memory.researchSearchLimit, config.search.maxLimit),
+      engine: 'perplexity',
+    }));
 
     const finalGenerateCall = nestedToolManager.executeTool.mock.calls.find(([id, params]) => (
       id === 'document-workflow' && params.action === 'generate'

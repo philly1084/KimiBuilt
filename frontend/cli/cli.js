@@ -37,17 +37,30 @@ let historyIndex = -1;
 let availableModels = [];
 let availableImageModels = [];
 let lastImageUrls = [];
+let providerCapabilities = [];
+let activeProviderSession = null;
+let providerStreamAbortController = null;
+let providerStreamTask = null;
+let readlineInterface = null;
 
 // Command definitions for auto-completion
 const COMMANDS = [
   '/new', '/mode', '/history', '/sessions', '/clear', '/help', '/quit', '/exit',
   '/url', '/config', '/theme', '/export', '/import', '/rename', '/delete',
   '/copy', '/paste', '/undo', '/redo', '/search', '/settings', '/download-image',
-  '/models', '/model', '/image', '/img', '/imgmodels'
+  '/models', '/model', '/image', '/img', '/imgmodels', '/providers', '/attach',
+  '/provider-status', '/.help', '/.status', '/.interrupt', '/.detach'
 ];
 
 const MODES = ['chat', 'canvas', 'notation'];
 const THEMES = ['default', 'minimal', 'colorful', 'dark'];
+const DEFAULT_PROMPT = chalk.green.bold('You> ');
+const PROVIDER_LOCAL_COMMAND_PREFIX = '/.';
+const PROVIDER_ALIASES = {
+  codex: 'codex-cli',
+  gemini: 'gemini-cli',
+  kimi: 'kimi-cli',
+};
 
 // Configure marked for terminal output
 marked.setOptions({
@@ -129,6 +142,9 @@ function printHelp() {
     ['/clear', 'Clear the screen'],
     ['/url <url>', 'Set API base URL'],
     ['/config', 'Show current configuration'],
+    ['/providers', 'List session-capable backend CLI providers'],
+    ['/attach <provider> [cwd]', 'Attach to codex-cli, gemini-cli, or kimi-cli'],
+    ['/provider-status', 'Show the active backend CLI session'],
     ['/theme <name>', 'Set theme (default|minimal|colorful|dark)'],
     ['/export <file>', 'Export current session to file'],
     ['/import <file>', 'Import session from file'],
@@ -150,6 +166,8 @@ function printHelp() {
   });
   
   console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
+  console.log(chalk.gray('Attached backend CLI sessions pass input through verbatim.'));
+  console.log(chalk.gray('Use /.help for local escape commands while attached.\n'));
 }
 
 /**
@@ -159,12 +177,61 @@ function printConfig() {
   const cfg = config.list();
   console.log(chalk.cyan.bold('\n┌─ Configuration ───────────────────────┐'));
   Object.entries(cfg).forEach(([key, value]) => {
+    const normalizedValue = key.toLowerCase().includes('key') && value
+      ? `${String(value).slice(0, 4)}••••${String(value).slice(-2)}`
+      : value;
     const displayValue = typeof value === 'boolean' 
       ? (value ? chalk.green('true') : chalk.red('false'))
-      : chalk.yellow(String(value));
+      : chalk.yellow(String(normalizedValue));
     console.log(chalk.gray(`  ${key.padEnd(20)}: ${displayValue}`));
   });
   console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
+}
+
+function getPromptValue() {
+  return activeProviderSession ? '' : DEFAULT_PROMPT;
+}
+
+function updatePrompt() {
+  if (!readlineInterface) {
+    return;
+  }
+
+  readlineInterface.setPrompt(getPromptValue());
+}
+
+function redrawPrompt() {
+  if (!readlineInterface) {
+    return;
+  }
+
+  readlineInterface.prompt(true);
+}
+
+function writeAsyncOutput(text) {
+  const content = String(text || '');
+  if (!content) {
+    return;
+  }
+
+  if (!readlineInterface) {
+    process.stdout.write(content);
+    return;
+  }
+
+  readline.clearLine(process.stdout, 0);
+  readline.cursorTo(process.stdout, 0);
+  process.stdout.write(content);
+  redrawPrompt();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeProviderId(providerId) {
+  const normalized = String(providerId || '').trim().toLowerCase();
+  return PROVIDER_ALIASES[normalized] || normalized;
 }
 
 /**
@@ -792,6 +859,298 @@ async function handleDelete(sessionId) {
   }
 }
 
+async function getSessionCapableProviders(forceReload = false) {
+  if (!forceReload && providerCapabilities.length > 0) {
+    return providerCapabilities.filter((provider) => provider.supportsSessions === true);
+  }
+
+  providerCapabilities = await api.getProviderCapabilities();
+  return providerCapabilities.filter((provider) => provider.supportsSessions === true);
+}
+
+function printAttachedProviderHelp() {
+  console.log(chalk.cyan.bold('\n┌─ Attached Provider Session ───────────┐'));
+  console.log(chalk.gray(`  ${chalk.cyan('/.status'.padEnd(16))} Show session details`));
+  console.log(chalk.gray(`  ${chalk.cyan('/.interrupt'.padEnd(16))} Send SIGINT to the backend CLI`));
+  console.log(chalk.gray(`  ${chalk.cyan('/.detach'.padEnd(16))} Close the backend CLI session`));
+  console.log(chalk.gray(`  ${chalk.cyan('/.help'.padEnd(16))} Show these local escape commands`));
+  console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
+}
+
+function printProviderSessionStatus() {
+  if (!activeProviderSession) {
+    console.log(chalk.yellow('⚠ No backend CLI session is attached'));
+    return;
+  }
+
+  console.log(chalk.cyan.bold('\n┌─ Backend CLI Session ─────────────────┐'));
+  console.log(chalk.gray(`  Provider:  ${chalk.cyan(activeProviderSession.providerId)}`));
+  console.log(chalk.gray(`  Status:    ${chalk.cyan(activeProviderSession.status || 'unknown')}`));
+  console.log(chalk.gray(`  CWD:       ${chalk.white(activeProviderSession.cwd || process.cwd())}`));
+  console.log(chalk.gray(`  Session:   ${chalk.white(activeProviderSession.id)}`));
+  console.log(chalk.gray(`  Cursor:    ${chalk.white(String(activeProviderSession.lastCursor || 0))}`));
+  console.log(chalk.gray(`  Resize:    ${activeProviderSession.supportsResize ? chalk.green('supported') : chalk.yellow('not wired')}`));
+  console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
+}
+
+async function handleProviders() {
+  const spinner = createSpinner('Loading provider capabilities...');
+  spinner.start();
+
+  try {
+    const providers = await getSessionCapableProviders(true);
+    spinner.stop();
+
+    if (providers.length === 0) {
+      console.log(chalk.yellow('\nNo session-capable backend CLI providers are available.\n'));
+      return;
+    }
+
+    console.log(chalk.cyan.bold('\n┌─ Backend CLI Providers ───────────────┐'));
+    providers.forEach((provider, index) => {
+      const providerId = provider.providerId || provider.id || `provider-${index + 1}`;
+      const resizeLabel = provider.supportsResize ? 'resize' : 'fixed-size';
+      const modelLabel = provider.supportsModelSelection ? 'model-selectable' : 'default-model';
+      console.log(chalk.gray(`  ${index + 1}. ${chalk.cyan(providerId)} ${chalk.gray(`(${resizeLabel}, ${modelLabel})`)}`));
+    });
+    console.log(chalk.gray('\n  Use /attach <providerId> [cwd] to open a backend CLI session.'));
+    console.log(chalk.cyan.bold('└───────────────────────────────────────┘\n'));
+  } catch (err) {
+    spinner.fail(chalk.red(`Failed to load provider capabilities: ${err.message}`));
+  }
+}
+
+async function detachProviderSession(options = {}) {
+  const existingSession = activeProviderSession;
+  if (!existingSession) {
+    if (!options.silent) {
+      console.log(chalk.yellow('⚠ No backend CLI session is attached'));
+    }
+    return;
+  }
+
+  activeProviderSession = null;
+  const abortController = providerStreamAbortController;
+  providerStreamAbortController = null;
+  providerStreamTask = null;
+  if (abortController) {
+    abortController.abort();
+  }
+  updatePrompt();
+
+  if (options.deleteRemote !== false) {
+    try {
+      await api.deleteProviderSession(existingSession.id);
+    } catch (err) {
+      if (!options.silent) {
+        console.log(chalk.yellow(`⚠ Backend session cleanup returned: ${err.message}`));
+      }
+    }
+  }
+
+  if (!options.silent) {
+    console.log(chalk.green(`Detached from ${existingSession.providerId}`));
+  }
+  redrawPrompt();
+}
+
+function startProviderSessionStream(sessionRecord) {
+  const streamAbortController = new AbortController();
+  providerStreamAbortController = streamAbortController;
+
+  providerStreamTask = (async () => {
+    let reconnectAttempts = 0;
+
+    while (
+      activeProviderSession
+      && activeProviderSession.id === sessionRecord.id
+      && !streamAbortController.signal.aborted
+    ) {
+      try {
+        const afterCursor = activeProviderSession.lastCursor || undefined;
+
+        for await (const event of api.streamProviderSession(sessionRecord.streamUrl, {
+          after: afterCursor,
+          signal: streamAbortController.signal,
+        })) {
+          if (
+            !activeProviderSession
+            || activeProviderSession.id !== sessionRecord.id
+            || streamAbortController.signal.aborted
+          ) {
+            return;
+          }
+
+          if (Number.isFinite(Number(event.cursor))) {
+            activeProviderSession.lastCursor = Number(event.cursor);
+          }
+
+          if (event.type === 'output' && typeof event.data === 'string') {
+            writeAsyncOutput(event.data);
+            reconnectAttempts = 0;
+            continue;
+          }
+
+          if (event.type === 'status') {
+            activeProviderSession.status = event.status || activeProviderSession.status;
+            if (event.message || event.status) {
+              writeAsyncOutput(chalk.gray(`\n[${activeProviderSession.providerId}] ${event.status || 'status'}${event.message ? `: ${event.message}` : ''}\n`));
+            }
+            reconnectAttempts = 0;
+            continue;
+          }
+
+          if (event.type === 'exit') {
+            activeProviderSession.status = 'exited';
+            writeAsyncOutput(chalk.yellow(`\n[${activeProviderSession.providerId}] exited with code ${event.exitCode ?? 'unknown'}\n`));
+            await detachProviderSession({ deleteRemote: false, silent: true });
+            return;
+          }
+        }
+
+        if (!activeProviderSession || activeProviderSession.id !== sessionRecord.id || streamAbortController.signal.aborted) {
+          return;
+        }
+
+        reconnectAttempts += 1;
+        if (reconnectAttempts > 3) {
+          writeAsyncOutput(chalk.red(`\n[${sessionRecord.providerId}] stream disconnected and could not be resumed.\n`));
+          await detachProviderSession({ deleteRemote: false, silent: true });
+          return;
+        }
+
+        writeAsyncOutput(chalk.gray(`\n[${sessionRecord.providerId}] reconnecting from cursor ${activeProviderSession.lastCursor || 0}...\n`));
+        await delay(Math.min(1000 * reconnectAttempts, 3000));
+      } catch (err) {
+        if (streamAbortController.signal.aborted) {
+          return;
+        }
+
+        reconnectAttempts += 1;
+        if (reconnectAttempts > 3) {
+          writeAsyncOutput(chalk.red(`\n[${sessionRecord.providerId}] stream failed: ${err.message}\n`));
+          await detachProviderSession({ deleteRemote: false, silent: true });
+          return;
+        }
+
+        writeAsyncOutput(chalk.gray(`\n[${sessionRecord.providerId}] stream error: ${err.message}. Reconnecting...\n`));
+        await delay(Math.min(1000 * reconnectAttempts, 3000));
+      }
+    }
+  })();
+
+  providerStreamTask.catch((err) => {
+    if (!streamAbortController.signal.aborted) {
+      writeAsyncOutput(chalk.red(`\n[${sessionRecord.providerId}] unexpected stream failure: ${err.message}\n`));
+    }
+  });
+}
+
+async function handleAttach(argString) {
+  if (activeProviderSession) {
+    console.log(chalk.yellow(`⚠ Already attached to ${activeProviderSession.providerId}. Use /.detach first.`));
+    return;
+  }
+
+  const match = String(argString || '').trim().match(/^(\S+)(?:\s+(.+))?$/);
+  if (!match) {
+    console.log(chalk.yellow('Usage: /attach <providerId> [cwd]'));
+    console.log(chalk.gray('Examples: /attach codex-cli'));
+    console.log(chalk.gray('          /attach gemini-cli C:\\repos\\my-app'));
+    return;
+  }
+
+  const requestedProviderId = normalizeProviderId(match[1]);
+  const requestedCwd = String(match[2] || process.cwd()).trim();
+  const spinner = createSpinner(`Opening ${requestedProviderId} session...`);
+  spinner.start();
+
+  try {
+    const providers = await getSessionCapableProviders(providerCapabilities.length === 0);
+    const selectedProvider = providers.find((provider) => normalizeProviderId(provider.providerId || provider.id) === requestedProviderId);
+    if (!selectedProvider) {
+      throw new Error(`Provider "${requestedProviderId}" is not available for provider sessions`);
+    }
+
+    const created = await api.createProviderSession({
+      providerId: selectedProvider.providerId || requestedProviderId,
+      cwd: requestedCwd,
+      cols: process.stdout.columns || 120,
+      rows: process.stdout.rows || 40,
+    });
+    if (!created?.session?.id || !created?.streamUrl) {
+      throw new Error('The gateway did not return a provider session id and stream URL');
+    }
+
+    activeProviderSession = {
+      ...(created.session || {}),
+      id: created.session?.id,
+      providerId: created.session?.providerId || selectedProvider.providerId || requestedProviderId,
+      cwd: created.session?.cwd || requestedCwd,
+      status: created.session?.status || 'starting',
+      streamUrl: created.streamUrl,
+      lastCursor: 0,
+      supportsResize: created.session?.supportsResize === true,
+    };
+
+    updatePrompt();
+    spinner.succeed(chalk.green(`Attached to ${activeProviderSession.providerId} in ${activeProviderSession.cwd}`));
+    console.log(chalk.gray('Backend CLI input is now passthrough. Use /.help for local escape commands.\n'));
+    startProviderSessionStream(activeProviderSession);
+  } catch (err) {
+    spinner.fail(chalk.red(`Failed to attach provider session: ${err.message}`));
+  }
+}
+
+async function handleProviderSignal(signalName = 'SIGINT') {
+  if (!activeProviderSession) {
+    console.log(chalk.yellow('⚠ No backend CLI session is attached'));
+    return;
+  }
+
+  try {
+    await api.sendProviderSessionSignal(activeProviderSession.id, signalName);
+    console.log(chalk.gray(`[${activeProviderSession.providerId}] sent ${signalName}`));
+  } catch (err) {
+    console.log(chalk.red(`Failed to send ${signalName}: ${err.message}`));
+  }
+}
+
+async function handleAttachedProviderCommand(input) {
+  const trimmed = String(input || '').trim().toLowerCase();
+
+  switch (trimmed) {
+    case '/.help':
+      printAttachedProviderHelp();
+      return true;
+    case '/.status':
+      printProviderSessionStatus();
+      return true;
+    case '/.interrupt':
+      await handleProviderSignal('SIGINT');
+      return true;
+    case '/.detach':
+      await detachProviderSession();
+      return true;
+    default:
+      console.log(chalk.yellow(`Unknown local provider command: ${input}`));
+      console.log(chalk.gray('Use /.help to list local escape commands.'));
+      return true;
+  }
+}
+
+async function sendInputToProviderSession(input) {
+  if (!activeProviderSession) {
+    return;
+  }
+
+  try {
+    await api.sendProviderSessionInput(activeProviderSession.id, `${input}\n`);
+  } catch (err) {
+    console.log(chalk.red(`Failed to send provider input: ${err.message}`));
+  }
+}
+
 /**
  * Send a message in chat mode.
  * @param {string} message - Message to send
@@ -1028,13 +1387,22 @@ function printVersion() {
  * @returns {boolean} Whether to continue
  */
 async function processInput(input) {
-  const trimmed = input.trim();
-  
+  const rawInput = String(input || '');
+  const trimmed = rawInput.trim();
+
+  if (activeProviderSession) {
+    if (trimmed.startsWith(PROVIDER_LOCAL_COMMAND_PREFIX)) {
+      return handleAttachedProviderCommand(trimmed);
+    }
+
+    await sendInputToProviderSession(rawInput);
+    return true;
+  }
+
   if (!trimmed) {
     return true;
   }
-  
-  // Add to history
+
   if (trimmed && !commandHistory.includes(trimmed)) {
     commandHistory.push(trimmed);
     if (commandHistory.length > 100) {
@@ -1073,6 +1441,15 @@ async function processInput(input) {
         return true;
       case 'config':
         printConfig();
+        return true;
+      case 'providers':
+        await handleProviders();
+        return true;
+      case 'attach':
+        await handleAttach(args.trim());
+        return true;
+      case 'provider-status':
+        printProviderSessionStatus();
         return true;
       case 'export':
         await handleExport(args.trim() || null);
@@ -1151,19 +1528,27 @@ function startREPL() {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: chalk.green.bold('You> '),
+    prompt: getPromptValue(),
     completer: completer,
     history: commandHistory,
     historySize: 100,
   });
+  readlineInterface = rl;
+  updatePrompt();
   
   // Custom key handling for better UX
   rl.input.on('keypress', (char, key) => {
     if (key && key.ctrl && key.name === 'c') {
+      if (activeProviderSession) {
+        void handleProviderSignal('SIGINT');
+        redrawPrompt();
+        return;
+      }
+
       if (isProcessing) {
         console.log(chalk.yellow('\n\n⚠ Cancelling... (press Ctrl+C again to exit)'));
         isProcessing = false;
-        rl.prompt();
+        redrawPrompt();
       } else {
         console.log(chalk.green('\n👋 Goodbye!\n'));
         process.exit(0);
@@ -1171,7 +1556,7 @@ function startREPL() {
     }
     if (key && key.ctrl && key.name === 'l') {
       handleClear();
-      rl.prompt();
+      redrawPrompt();
     }
   });
   
@@ -1180,7 +1565,7 @@ function startREPL() {
   rl.on('line', async (input) => {
     const shouldContinue = await processInput(input);
     if (shouldContinue) {
-      rl.prompt();
+      redrawPrompt();
     } else {
       rl.close();
       process.exit(0);
@@ -1188,13 +1573,26 @@ function startREPL() {
   });
   
   rl.on('close', () => {
+    if (activeProviderSession) {
+      void detachProviderSession({ silent: true });
+    }
     console.log(chalk.green('\n👋 Goodbye!\n'));
     process.exit(0);
   });
   
   // Handle resize
   process.stdout.on('resize', () => {
-    // Terminal was resized
+    if (!activeProviderSession) {
+      return;
+    }
+
+    void api.resizeProviderSession(
+      activeProviderSession.id,
+      process.stdout.columns || 120,
+      process.stdout.rows || 40,
+    ).catch(() => {
+      // The backend reports whether resize actually applied; ignore unsupported responses.
+    });
   });
 }
 
@@ -1247,12 +1645,20 @@ Options:
 
 Environment Variables:
   KIMIBUILT_API_URL             Override API base URL
+  KIMIBUILT_FRONTEND_API_KEY    Auth for /admin/provider-sessions gateway calls
+  FRONTEND_API_KEY              Alternate auth env var for provider sessions
+
+Provider Session Commands:
+  /providers                    List codex-cli, gemini-cli, kimi-cli when enabled
+  /attach <provider> [cwd]      Open a backend CLI session in the chosen cwd
+  /.help                        Local escape commands while attached
 
 Examples:
   kimibuilt
   kimibuilt --api-url http://localhost:3000
   kimibuilt --model gpt-5.4-mini
   echo "Hello AI" | kimibuilt
+  /attach codex-cli
 `);
 }
 
@@ -1459,7 +1865,10 @@ async function handleMakeFileCommand(args) {
 
 const originalProcessInput = processInput;
 processInput = async function(input) {
-  const trimmed = input.trim();
+  const trimmed = String(input || '').trim();
+  if (activeProviderSession) {
+    return originalProcessInput(input);
+  }
   if (trimmed.startsWith('/upload')) {
     return handleArtifactUploadCommand(trimmed.replace('/upload', '').trim());
   }

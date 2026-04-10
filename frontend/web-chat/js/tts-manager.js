@@ -22,8 +22,11 @@ class WebChatTtsManager extends EventTarget {
         this.loadingMessageId = '';
         this.currentMessageId = '';
         this.currentAudio = null;
+        this.currentSourceNode = null;
+        this.currentGainNode = null;
         this.currentUtterance = null;
-        this.cachedAudioUrls = new Map();
+        this.cachedAudioBlobs = new Map();
+        this.audioContext = null;
         this.pendingConfigPromise = null;
         this.browserSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
         this.handleBrowserVoicesChanged = this.handleBrowserVoicesChanged.bind(this);
@@ -435,6 +438,25 @@ class WebChatTtsManager extends EventTarget {
             }
         }
 
+        if (this.currentSourceNode) {
+            try {
+                this.currentSourceNode.onended = null;
+                this.currentSourceNode.stop();
+            } catch (_error) {
+                // Ignore Web Audio cleanup errors.
+            }
+        }
+        try {
+            this.currentSourceNode?.disconnect?.();
+        } catch (_error) {
+            // Ignore disconnect failures during cleanup.
+        }
+        try {
+            this.currentGainNode?.disconnect?.();
+        } catch (_error) {
+            // Ignore disconnect failures during cleanup.
+        }
+
         if (this.browserSpeechSupported && window.speechSynthesis) {
             try {
                 window.speechSynthesis.cancel();
@@ -444,6 +466,8 @@ class WebChatTtsManager extends EventTarget {
         }
 
         this.currentAudio = null;
+        this.currentSourceNode = null;
+        this.currentGainNode = null;
         this.currentUtterance = null;
         this.currentMessageId = '';
         this.loadingMessageId = '';
@@ -453,6 +477,27 @@ class WebChatTtsManager extends EventTarget {
     cleanupAudio(audio) {
         if (this.currentAudio === audio) {
             this.currentAudio = null;
+            this.currentMessageId = '';
+        }
+
+        this.loadingMessageId = '';
+        this.emitStateChange();
+    }
+
+    cleanupAudioPlayback(sourceNode) {
+        if (this.currentSourceNode === sourceNode) {
+            try {
+                this.currentSourceNode.disconnect();
+            } catch (_error) {
+                // Ignore disconnect failures during cleanup.
+            }
+            try {
+                this.currentGainNode?.disconnect?.();
+            } catch (_error) {
+                // Ignore disconnect failures during cleanup.
+            }
+            this.currentSourceNode = null;
+            this.currentGainNode = null;
             this.currentMessageId = '';
         }
 
@@ -490,39 +535,107 @@ class WebChatTtsManager extends EventTarget {
     }
 
     trimCache() {
-        while (this.cachedAudioUrls.size > DEFAULT_TTS_CACHE_LIMIT) {
-            const oldest = this.cachedAudioUrls.keys().next().value;
-            const objectUrl = this.cachedAudioUrls.get(oldest);
-            if (objectUrl) {
-                URL.revokeObjectURL(objectUrl);
-            }
-            this.cachedAudioUrls.delete(oldest);
+        while (this.cachedAudioBlobs.size > DEFAULT_TTS_CACHE_LIMIT) {
+            const oldest = this.cachedAudioBlobs.keys().next().value;
+            this.cachedAudioBlobs.delete(oldest);
         }
     }
 
-    async playAudioUrl(audioUrl, messageId = '') {
-        if (!audioUrl) {
+    ensureAudioContext() {
+        if (this.audioContext) {
+            return this.audioContext;
+        }
+
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextCtor) {
+            return null;
+        }
+
+        try {
+            this.audioContext = new AudioContextCtor();
+            return this.audioContext;
+        } catch (_error) {
+            this.audioContext = null;
+            return null;
+        }
+    }
+
+    buildPlaybackBlockedError(message = 'Audio playback is blocked until you interact with the page.') {
+        const error = new Error(String(message || '').trim() || 'Audio playback is blocked until you interact with the page.');
+        error.code = 'tts_playback_blocked';
+        return error;
+    }
+
+    async preparePlayback(options = {}) {
+        const context = this.ensureAudioContext();
+        if (!context) {
+            if (options.quiet === true) {
+                return null;
+            }
+
+            throw new Error('Audio playback is unavailable in this browser.');
+        }
+
+        if (context.state === 'suspended') {
+            try {
+                await context.resume();
+            } catch (_error) {
+                if (options.quiet === true) {
+                    return null;
+                }
+
+                throw this.buildPlaybackBlockedError();
+            }
+        }
+
+        if (context.state !== 'running') {
+            if (options.quiet === true) {
+                return null;
+            }
+
+            throw this.buildPlaybackBlockedError();
+        }
+
+        return context;
+    }
+
+    async playAudioBlob(audioBlob, messageId = '') {
+        if (!(audioBlob instanceof Blob) || audioBlob.size === 0) {
             throw new Error('No audio was returned for playback.');
         }
 
-        if (this.currentAudio || this.currentUtterance) {
+        const context = await this.preparePlayback();
+        if (this.currentAudio || this.currentSourceNode || this.currentUtterance) {
             this.stop();
         }
 
-        const audio = new Audio(audioUrl);
-        audio.preload = 'auto';
-        audio.onended = () => this.cleanupAudio(audio);
-        audio.onerror = () => this.cleanupAudio(audio);
-        this.currentAudio = audio;
+        let decodedBuffer = null;
+        try {
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            decodedBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+        } catch (_error) {
+            throw new Error('The generated voice audio could not be decoded for playback.');
+        }
+
+        const sourceNode = context.createBufferSource();
+        const gainNode = context.createGain();
+        gainNode.gain.value = 1;
+        sourceNode.buffer = decodedBuffer;
+        sourceNode.connect(gainNode);
+        gainNode.connect(context.destination);
+        sourceNode.onended = () => this.cleanupAudioPlayback(sourceNode);
+
+        this.currentSourceNode = sourceNode;
+        this.currentGainNode = gainNode;
         this.currentMessageId = String(messageId || '').trim();
         this.loadingMessageId = '';
         this.emitStateChange();
 
         try {
-            await audio.play();
+            sourceNode.start();
             return true;
         } catch (error) {
-            this.cleanupAudio(audio);
+            this.cleanupAudioPlayback(sourceNode);
             throw error;
         }
     }
@@ -537,7 +650,7 @@ class WebChatTtsManager extends EventTarget {
             throw new Error('No text is available to read aloud.');
         }
 
-        if (this.currentAudio || this.currentUtterance) {
+        if (this.currentAudio || this.currentSourceNode || this.currentUtterance) {
             this.stop();
         }
 
@@ -582,10 +695,12 @@ class WebChatTtsManager extends EventTarget {
             });
         }
 
+        await this.preparePlayback();
+
         const cacheKey = this.buildCacheKey(normalizedMessageId, normalizedText);
-        const cachedAudioUrl = this.cachedAudioUrls.get(cacheKey);
-        if (cachedAudioUrl) {
-            return this.playAudioUrl(cachedAudioUrl, normalizedMessageId);
+        const cachedAudioBlob = this.cachedAudioBlobs.get(cacheKey);
+        if (cachedAudioBlob) {
+            return this.playAudioBlob(cachedAudioBlob, normalizedMessageId);
         }
 
         this.loadingMessageId = normalizedMessageId;
@@ -596,18 +711,10 @@ class WebChatTtsManager extends EventTarget {
             const result = await window.apiClient?.synthesizeSpeech?.(normalizedText, {
                 voiceId: this.getSelectedVoiceId(),
             });
-            const audioUrl = URL.createObjectURL(result.blob);
-            this.cachedAudioUrls.set(cacheKey, audioUrl);
+            this.cachedAudioBlobs.set(cacheKey, result.blob);
             this.trimCache();
-            return this.playAudioUrl(audioUrl, normalizedMessageId);
+            return this.playAudioBlob(result.blob, normalizedMessageId);
         } catch (error) {
-            if (this.browserSpeechSupported) {
-                return this.speakWithBrowserVoice({
-                    messageId: normalizedMessageId,
-                    text: normalizedText,
-                });
-            }
-
             this.loadingMessageId = '';
             this.currentMessageId = '';
             this.emitStateChange();

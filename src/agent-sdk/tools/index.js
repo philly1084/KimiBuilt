@@ -13,6 +13,7 @@ const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
+const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const { normalizeWhitespace, stripHtml } = require('../../utils/text');
 const {
@@ -32,6 +33,7 @@ const {
   normalizeCheckpointRequest,
   buildUserCheckpointMessage,
 } = require('../../user-checkpoints');
+const { getHostnameFromUrl, normalizeDomainList } = require('./categories/web/research-site-policy');
 
 const MAX_VERIFIED_REFERENCE_IMAGES = 20;
 const IMAGE_REFERENCE_VERIFY_TIMEOUT_MS = 15000;
@@ -41,9 +43,19 @@ const MAX_DOCUMENT_SOURCES = 8;
 const MAX_DOCUMENT_SOURCE_CHARS = 4000;
 const DEFAULT_DEEP_RESEARCH_PASSES = 3;
 const MAX_DEEP_RESEARCH_PASSES = 6;
-const DEFAULT_DEEP_RESEARCH_SEARCH_LIMIT = 6;
-const DEFAULT_DEEP_RESEARCH_PAGES_PER_PASS = 2;
-const MAX_DEEP_RESEARCH_PAGES_PER_PASS = 4;
+const MAX_DEEP_RESEARCH_SEARCH_LIMIT = Math.max(
+  8,
+  Number(config.search?.maxLimit || MAX_VERIFIED_REFERENCE_IMAGES),
+);
+const DEFAULT_DEEP_RESEARCH_SEARCH_LIMIT = Math.min(
+  MAX_DEEP_RESEARCH_SEARCH_LIMIT,
+  Math.max(1, Number(config.memory?.researchSearchLimit || 16)),
+);
+const DEFAULT_DEEP_RESEARCH_PAGES_PER_PASS = Math.min(
+  8,
+  Math.max(1, Number(config.memory?.researchFollowupPages || 6)),
+);
+const MAX_DEEP_RESEARCH_PAGES_PER_PASS = 8;
 const DEFAULT_DEEP_RESEARCH_IMAGE_LIMIT = 4;
 const MAX_DEEP_RESEARCH_IMAGE_LIMIT = 6;
 const DEFAULT_IMAGE_SETTLE_DELAY_MS = 1500;
@@ -1531,7 +1543,7 @@ class ToolManager {
             const tone = String(params.tone || 'professional').trim() || 'professional';
             const length = String(params.length || 'medium').trim() || 'medium';
             const passCount = normalizePositiveInteger(params.researchPasses, DEFAULT_DEEP_RESEARCH_PASSES, MAX_DEEP_RESEARCH_PASSES);
-            const searchLimit = normalizePositiveInteger(params.searchLimit, DEFAULT_DEEP_RESEARCH_SEARCH_LIMIT, MAX_VERIFIED_REFERENCE_IMAGES);
+            const searchLimit = normalizePositiveInteger(params.searchLimit, DEFAULT_DEEP_RESEARCH_SEARCH_LIMIT, MAX_DEEP_RESEARCH_SEARCH_LIMIT);
             const pagesPerPass = normalizePositiveInteger(params.pagesPerPass, DEFAULT_DEEP_RESEARCH_PAGES_PER_PASS, MAX_DEEP_RESEARCH_PAGES_PER_PASS);
             const imageLimit = normalizePositiveInteger(params.imageLimit, DEFAULT_DEEP_RESEARCH_IMAGE_LIMIT, MAX_DEEP_RESEARCH_IMAGE_LIMIT);
             const imageSettleDelayMs = normalizePositiveInteger(
@@ -1540,6 +1552,8 @@ class ToolManager {
               10000,
             );
             const imageMode = String(params.imageMode || 'auto').trim().toLowerCase() || 'auto';
+            const searchDomains = normalizeDomainList(params.searchDomains || params.domains || []);
+            const researchSafeScrape = params.researchSafeScrape !== false;
 
             const recommendationData = await executeNestedTool(context, DOCUMENT_WORKFLOW_TOOL_ID, {
               action: 'recommend',
@@ -1586,6 +1600,7 @@ class ToolManager {
                   timeRange: String(params.timeRange || 'all').trim().toLowerCase() || 'all',
                   includeSnippets: true,
                   includeUrls: true,
+                  domains: searchDomains,
                 });
               } catch (error) {
                 researchPasses.push({
@@ -1628,9 +1643,13 @@ class ToolManager {
                 } catch (error) {
                   fetchError = error;
                   try {
+                    const approvedHost = getHostnameFromUrl(url);
                     fetched = await executeNestedTool(context, 'web-scrape', {
                       url,
                       browser: true,
+                      researchSafe: researchSafeScrape,
+                      approvedDomains: approvedHost ? [approvedHost] : [],
+                      respectRobotsTxt: researchSafeScrape,
                       timeout: 20000,
                     });
                     kind = 'web-scrape';
@@ -1876,10 +1895,15 @@ class ToolManager {
             researchPasses: { type: 'integer' },
             researchQueries: { type: 'array' },
             searchLimit: { type: 'integer' },
+            searchDomains: {
+              type: 'array',
+              items: { type: 'string' },
+            },
             pagesPerPass: { type: 'integer' },
             imageLimit: { type: 'integer' },
             imageMode: { type: 'string', enum: ['auto', 'stock', 'generated'] },
             imageSettleDelayMs: { type: 'integer' },
+            researchSafeScrape: { type: 'boolean' },
             timeRange: { type: 'string', enum: ['day', 'week', 'month', 'year', 'all'] },
           },
           additionalProperties: false,

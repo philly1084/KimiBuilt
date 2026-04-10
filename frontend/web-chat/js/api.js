@@ -834,6 +834,15 @@ class OpenAIAPIClient extends EventTarget {
                         throw new Error(errorMessage);
                     }
 
+                    if (event.type === 'stream_open') {
+                        console.debug('[WebChatAPI] Received stream_open from gateway SSE.');
+                        yield {
+                            type: 'stream_open',
+                            source: 'gateway-sse',
+                        };
+                        continue;
+                    }
+
                     if (event.sessionId) {
                         this.currentSessionId = event.sessionId;
                         pendingDone.sessionId = event.sessionId;
@@ -1493,6 +1502,7 @@ class OpenAIAPIClient extends EventTarget {
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/tts/voices`, {
             method: 'GET',
             headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
             cache: 'no-store',
         });
 
@@ -1521,6 +1531,7 @@ class OpenAIAPIClient extends EventTarget {
                 'Accept': 'audio/wav, application/json',
                 'Content-Type': 'application/json',
             },
+            credentials: 'same-origin',
             body: JSON.stringify(payload),
         });
 
@@ -1562,6 +1573,7 @@ class OpenAIAPIClient extends EventTarget {
 
         const response = await fetch(`${BASE_URL_WITHOUT_API}/api/audio/transcribe`, {
             method: 'POST',
+            credentials: 'same-origin',
             body: formData,
         });
 

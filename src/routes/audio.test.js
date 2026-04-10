@@ -5,12 +5,14 @@ jest.mock('../utils/multipart', () => ({
     parseMultipartRequest: jest.fn(),
 }));
 
-jest.mock('../openai-client', () => ({
-    transcribeAudio: jest.fn(),
+jest.mock('../audio/transcription-service', () => ({
+    transcriptionService: {
+        transcribe: jest.fn(),
+    },
 }));
 
 const { parseMultipartRequest } = require('../utils/multipart');
-const { transcribeAudio } = require('../openai-client');
+const { transcriptionService } = require('../audio/transcription-service');
 const audioRouter = require('./audio');
 
 describe('/api/audio', () => {
@@ -30,7 +32,7 @@ describe('/api/audio', () => {
                 buffer: Buffer.from('audio-bytes'),
             },
         });
-        transcribeAudio.mockResolvedValue({
+        transcriptionService.transcribe.mockResolvedValue({
             text: 'Hello from audio.',
             model: 'gpt-4o-mini-transcribe',
             language: 'en',
@@ -54,7 +56,7 @@ describe('/api/audio', () => {
             duration: 1.2,
             provider: 'openai',
         });
-        expect(transcribeAudio).toHaveBeenCalledWith(expect.objectContaining({
+        expect(transcriptionService.transcribe).toHaveBeenCalledWith(expect.objectContaining({
             filename: 'recording.webm',
             mimeType: 'audio/webm',
             language: 'en',
@@ -116,7 +118,7 @@ describe('/api/audio', () => {
                 buffer: Buffer.from('audio-bytes'),
             },
         });
-        transcribeAudio.mockResolvedValue({
+        transcriptionService.transcribe.mockResolvedValue({
             text: 'Recovered transcript.',
             model: 'gpt-4o-mini-transcribe',
             language: 'en',
@@ -133,7 +135,7 @@ describe('/api/audio', () => {
             .send('ignored');
 
         expect(response.status).toBe(200);
-        expect(transcribeAudio).toHaveBeenCalledWith(expect.objectContaining({
+        expect(transcriptionService.transcribe).toHaveBeenCalledWith(expect.objectContaining({
             filename: 'recording.webm',
             mimeType: 'audio/webm',
         }));

@@ -208,6 +208,118 @@ const WEB_CHAT_THEME_PRESETS = Object.freeze([
             accent: '#2563eb',
         },
     },
+    {
+        id: 'mosaic',
+        name: 'Mosaic',
+        mode: 'dark',
+        description: 'Dense paper-like tessellation with jewel-toned edges and warm highlights.',
+        metaColor: '#0d0f1e',
+        preview: {
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(59, 130, 246, 0.18) 35%, rgba(139, 92, 246, 0.14) 100%), repeating-linear-gradient(45deg, rgba(236, 72, 153, 0.12) 0 2px, transparent 2px 14px), radial-gradient(circle at 72% 16%, rgba(250, 204, 21, 0.1), transparent 22%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(56, 189, 248, 0.015)), rgba(20, 20, 40, 0.86)',
+            userBubble: 'linear-gradient(135deg, #7dd3fc, #a78bfa)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(236, 72, 153, 0.01)), rgba(28, 21, 46, 0.92)',
+            accent: '#38bdf8',
+        },
+    },
+    {
+        id: 'inkwash',
+        name: 'Inkwash',
+        mode: 'dark',
+        description: 'Painted ink washes with random pools of violet and cobalt.',
+        metaColor: '#10121d',
+        preview: {
+            background: 'radial-gradient(circle at 20% 20%, rgba(15, 23, 42, 0.18), transparent 30%), radial-gradient(circle at 80% 14%, rgba(168, 85, 247, 0.22), transparent 24%), repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.08) 0 1px, transparent 1px 20px), linear-gradient(180deg, #090b16 0%, #10121d 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(168, 85, 247, 0.015)), rgba(18, 20, 34, 0.86)',
+            userBubble: 'linear-gradient(135deg, #a78bfa, #6366f1)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(99, 102, 241, 0.012)), rgba(24, 27, 49, 0.92)',
+            accent: '#a78bfa',
+        },
+    },
+    {
+        id: 'topographic',
+        name: 'Topographic',
+        mode: 'dark',
+        description: 'Undulating contour bands like layered topo maps in moody cyan.',
+        metaColor: '#091019',
+        preview: {
+            background: 'radial-gradient(circle at 24% 18%, rgba(45, 212, 191, 0.25), transparent 28%), repeating-radial-gradient(circle at center, rgba(14, 165, 233, 0.08) 0 1px, transparent 1px 22px), repeating-linear-gradient(120deg, rgba(14, 165, 233, 0.06) 0 1px, transparent 1px 12px), linear-gradient(180deg, #070d15 0%, #0a1622 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(14, 165, 233, 0.012)), rgba(16, 27, 40, 0.86)',
+            userBubble: 'linear-gradient(135deg, #67e8f9, #22d3ee)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(14, 165, 233, 0.01)), rgba(16, 30, 45, 0.9)',
+            accent: '#67e8f9',
+        },
+    },
+    {
+        id: 'lattice',
+        name: 'Lattice',
+        mode: 'dark',
+        description: 'Fine wireframe lattice with smoky shadows and electric edges.',
+        metaColor: '#0c1724',
+        preview: {
+            background: 'radial-gradient(circle at 18% 16%, rgba(56, 189, 248, 0.24), transparent 30%), repeating-linear-gradient(60deg, rgba(59, 130, 246, 0.06) 0 1px, transparent 1px 12px), repeating-linear-gradient(150deg, rgba(45, 212, 191, 0.06) 0 1px, transparent 1px 12px), linear-gradient(180deg, #080f18 0%, #0f1f33 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(59, 130, 246, 0.012)), rgba(17, 28, 44, 0.86)',
+            userBubble: 'linear-gradient(135deg, #60a5fa, #22d3ee)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(56, 189, 248, 0.01)), rgba(17, 30, 47, 0.9)',
+            accent: '#60a5fa',
+        },
+    },
+    {
+        id: 'chalk',
+        name: 'Chalk',
+        mode: 'light',
+        description: 'Hand-drawn chalk texture with soft gray dust and slate strokes.',
+        metaColor: '#f4f6fb',
+        preview: {
+            background: 'linear-gradient(120deg, rgba(148, 163, 184, 0.08), rgba(226, 232, 240, 0.12)), repeating-linear-gradient(0deg, rgba(226, 232, 240, 0.08) 0 1px, transparent 1px 10px), repeating-linear-gradient(90deg, rgba(203, 213, 225, 0.08) 0 1px, transparent 1px 12px), linear-gradient(180deg, #f8fafc 0%, #eef2f8 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 251, 253, 0.94)), rgba(248, 252, 255, 0.94)',
+            userBubble: 'linear-gradient(135deg, #64748b, #475569)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(247, 250, 252, 0.97)), rgba(244, 248, 252, 0.96)',
+            accent: '#64748b',
+        },
+    },
+    {
+        id: 'origami',
+        name: 'Origami',
+        mode: 'light',
+        description: 'Folded-page geometry with pastel planes and gentle paper shadows.',
+        metaColor: '#f9f6ef',
+        preview: {
+            background: 'linear-gradient(135deg, rgba(209, 213, 219, 0.35), rgba(241, 245, 249, 0.9)), repeating-linear-gradient(45deg, rgba(148, 163, 184, 0.12) 0 2px, transparent 2px 22px), linear-gradient(180deg, #f9fafc 0%, #f1f5f9 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 250, 252, 0.94)), rgba(251, 253, 255, 0.94)',
+            userBubble: 'linear-gradient(135deg, #64748b, #334155)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(249, 251, 253, 0.96)), rgba(251, 253, 255, 0.96)',
+            accent: '#64748b',
+        },
+    },
+    {
+        id: 'sun-kiss',
+        name: 'Sun Kiss',
+        mode: 'light',
+        description: 'Warm sunlight wash with paper grain and amber grainy streaks.',
+        metaColor: '#f6efe7',
+        preview: {
+            background: 'radial-gradient(circle at 18% 14%, rgba(251, 191, 36, 0.22), transparent 30%), radial-gradient(circle at 82% 14%, rgba(251, 146, 60, 0.12), transparent 22%), repeating-linear-gradient(0deg, rgba(180, 83, 9, 0.06) 0 1px, transparent 1px 14px), linear-gradient(180deg, #fdf8f0 0%, #f4ebe0 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(252, 244, 235, 0.94)), rgba(252, 245, 237, 0.94)',
+            userBubble: 'linear-gradient(135deg, #f59e0b, #ea580c)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(251, 246, 239, 0.96)), rgba(253, 246, 236, 0.96)',
+            accent: '#f59e0b',
+        },
+    },
+    {
+        id: 'marble-veil',
+        name: 'Marble Veil',
+        mode: 'light',
+        description: 'Soft marble veining with cool veils and brushed contrast.',
+        metaColor: '#edf2f7',
+        preview: {
+            background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(226, 232, 240, 0.95)), radial-gradient(circle at 78% 18%, rgba(56, 189, 248, 0.1), transparent 28%), repeating-linear-gradient(35deg, rgba(203, 213, 225, 0.09) 0 2px, transparent 2px 16px), linear-gradient(180deg, #f8fafc 0%, #e5eaf2 100%)',
+            surface: 'linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(237, 242, 247, 0.94)), rgba(245, 248, 251, 0.94)',
+            userBubble: 'linear-gradient(135deg, #64748b, #334155)',
+            assistantBubble: 'linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(236, 240, 246, 0.96)), rgba(243, 247, 251, 0.96)',
+            accent: '#64748b',
+        },
+    },
 ]);
 const WEB_CHAT_THEME_PRESET_MAP = new Map(WEB_CHAT_THEME_PRESETS.map((preset) => [preset.id, preset]));
 
@@ -2177,39 +2289,33 @@ class UIHelpers {
             return '';
         }
 
-        const messageId = String(message?.id || '').trim();
-        const expanded = Boolean(messageId) && this.expandedReasoningMessageIds.has(messageId);
-        const previewHtml = `${this.escapeHtml(reasoningState.previewText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
-        const body = expanded && reasoningState.bodyText
-            ? `<div class="assistant-reasoning-ribbon__body${reasoningState.source === 'synthetic' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${this.escapeHtml(reasoningState.bodyText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}</div>`
-            : '';
+        const visibleText = String(
+            reasoningState.animated
+                ? (reasoningState.previewText || reasoningState.bodyText || '')
+                : (reasoningState.bodyText || reasoningState.previewText || '')
+        ).trim();
+        const bodyHtml = `${this.escapeHtml(visibleText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
 
         return `
-            <div class="assistant-reasoning-ribbon${expanded ? ' is-expanded' : ''}${isStreaming ? ' is-live' : ''}${reasoningState.source === 'synthetic' ? ' is-synthetic' : ''}">
-                <button
-                    class="assistant-reasoning-ribbon__toggle"
-                    type="button"
-                    onclick="uiHelpers.toggleReasoningSummary('${this.escapeHtmlAttr(messageId)}')"
-                    aria-expanded="${expanded ? 'true' : 'false'}"
-                    aria-label="${expanded ? `Collapse ${reasoningState.title.toLowerCase()} summary` : `Expand ${reasoningState.title.toLowerCase()} summary`}"
-                >
+            <div class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'synthetic' ? ' is-synthetic' : ''}">
+                <div class="assistant-reasoning-ribbon__surface" aria-live="polite">
+                    <div class="assistant-reasoning-ribbon__header">
                     <span class="assistant-reasoning-ribbon__main">
                         <span class="assistant-reasoning-ribbon__icon" aria-hidden="true">
                             <i data-lucide="${reasoningState.icon}" class="w-3.5 h-3.5"></i>
                         </span>
                         <span class="assistant-reasoning-ribbon__copy">
                             <span class="assistant-reasoning-ribbon__title">${this.escapeHtml(reasoningState.title)}</span>
-                            <span class="assistant-reasoning-ribbon__preview${reasoningState.source === 'synthetic' ? ' assistant-reasoning-ribbon__preview--synthetic' : ''}">${previewHtml}</span>
                         </span>
                     </span>
                     <span class="assistant-reasoning-ribbon__meta">
                         <span class="assistant-reasoning-ribbon__badge${reasoningState.live ? ' assistant-reasoning-ribbon__badge--live' : ''}">
                             ${reasoningState.live ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'Summary'}
                         </span>
-                        <i data-lucide="${expanded ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4" aria-hidden="true"></i>
                     </span>
-                </button>
-                ${body}
+                    </div>
+                    <div class="assistant-reasoning-ribbon__body assistant-reasoning-ribbon__body--inline${reasoningState.source === 'synthetic' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${bodyHtml}</div>
+                </div>
             </div>
         `;
     }
@@ -2247,7 +2353,7 @@ class UIHelpers {
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
             return {
-                html: `${reasoningRibbon}${effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : ''}`,
+                html: reasoningRibbon,
                 variant: 'default',
             };
         }
