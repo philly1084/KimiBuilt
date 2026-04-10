@@ -2242,6 +2242,11 @@ body.layout-minimal #input-meta-row {
     white-space: nowrap;
 }
 
+.assistant-reasoning-ribbon__preview--synthetic {
+    white-space: normal;
+    text-overflow: clip;
+}
+
 .assistant-reasoning-ribbon__badge {
     display: inline-flex;
     align-items: center;
@@ -2270,6 +2275,10 @@ body.layout-minimal #input-meta-row {
     font-size: 0.84rem;
     line-height: 1.6;
     color: var(--text-secondary);
+}
+
+.assistant-reasoning-ribbon__body--synthetic {
+    color: var(--text-primary);
 }
 
 .assistant-stream-placeholder {

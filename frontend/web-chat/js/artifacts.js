@@ -8,8 +8,8 @@
     const API_BASE = LOCAL_HOSTNAMES.has(window.location.hostname)
         ? 'http://localhost:3000'
         : `${window.location.protocol}//${window.location.host}`;
-    const V1_BASE = `${API_BASE}/v1`;
-    const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+    const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
+    const DEFAULT_CHAT_MODEL = gatewayStreamHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
     const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 
     function isRemoteBuildAutonomyApproved() {
@@ -35,14 +35,6 @@
         outputFormat: '',
         lastDone: null,
     };
-
-    function isTerminalFinishReason(finishReason) {
-        if (!finishReason) {
-            return false;
-        }
-
-        return TERMINAL_FINISH_REASONS.has(String(finishReason).toLowerCase());
-    }
 
     function injectStyles() {
         const style = document.createElement('style');
@@ -722,169 +714,54 @@
 
     function overrideApiClient() {
         if (!window.apiClient) return;
+        if (window.apiClient.__artifactStreamingPatched) return;
 
         window.apiClient.uploadArtifact = uploadArtifact;
         window.apiClient.listArtifacts = fetchArtifacts;
+        const originalStreamChat = typeof window.apiClient.streamChat === 'function'
+            ? window.apiClient.streamChat.bind(window.apiClient)
+            : null;
 
-        window.apiClient.streamChat = async function*(messages, model = 'gpt-4o', signal = null, reasoningEffort = '') {
-            const params = {
-                model,
-                messages,
-                stream: true,
-                enableConversationExecutor: true,
-                taskType: 'chat',
-                clientSurface: 'web-chat',
-                metadata: {
-                    clientSurface: 'web-chat',
-                    enableConversationExecutor: true,
-                },
+        if (!originalStreamChat) {
+            return;
+        }
+
+        window.apiClient.streamChat = async function*(messages, model = DEFAULT_CHAT_MODEL, signal = null, reasoningEffort = '', requestOptions = {}) {
+            const nextRequestOptions = {
+                ...(requestOptions && typeof requestOptions === 'object' ? requestOptions : {}),
             };
+
             if (isRemoteBuildAutonomyApproved()) {
-                params.metadata.remoteBuildAutonomyApproved = true;
+                nextRequestOptions.metadata = {
+                    ...(nextRequestOptions.metadata && typeof nextRequestOptions.metadata === 'object'
+                        ? nextRequestOptions.metadata
+                        : {}),
+                    remoteBuildAutonomyApproved: true,
+                };
             }
-            if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
-                params.session_id = this.currentSessionId;
-            }
+
             if (state.selectedArtifactIds.length > 0) {
-                params.artifact_ids = state.selectedArtifactIds;
+                nextRequestOptions.artifactIds = [...state.selectedArtifactIds];
             }
+
             const inferredOutputFormat = state.outputFormat || inferRequestedOutputFormat(messages);
             if (inferredOutputFormat) {
-                params.output_format = inferredOutputFormat;
-            }
-            if (reasoningEffort) {
-                params.reasoning_effort = reasoningEffort;
+                nextRequestOptions.outputFormat = inferredOutputFormat;
             }
 
-            const controller = new AbortController();
-            
-            // Combine with external signal if provided
-            if (signal) {
-                signal.addEventListener('abort', () => controller.abort());
-            }
-
-            try {
-                const response = await fetch(`${V1_BASE}/chat/completions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-                    body: JSON.stringify(params),
-                    signal: controller.signal,
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    yield { type: 'error', error: `HTTP ${response.status}: ${errorText}`, status: response.status };
-                    return;
+            for await (const chunk of originalStreamChat(messages, model, signal, reasoningEffort, nextRequestOptions)) {
+                if (chunk.type === 'done') {
+                    state.lastDone = {
+                        sessionId: chunk.sessionId || window.apiClient.currentSessionId || null,
+                        artifacts: Array.isArray(chunk.artifacts) ? chunk.artifacts : [],
+                    };
                 }
 
-                const responseSessionId = response.headers.get('X-Session-Id');
-                if (responseSessionId) {
-                    this.currentSessionId = responseSessionId;
-                }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let pendingDone = {
-                    sessionId: this.currentSessionId,
-                    artifacts: [],
-                };
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                        state.lastDone = {
-                            sessionId: pendingDone.sessionId || this.currentSessionId,
-                            artifacts: pendingDone.artifacts || [],
-                        };
-                        yield {
-                            type: 'done',
-                            sessionId: pendingDone.sessionId || this.currentSessionId,
-                            artifacts: pendingDone.artifacts || [],
-                        };
-                        break;
-                    }
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        const payload = line.slice(6);
-                        if (payload === '[DONE]') {
-                            state.lastDone = {
-                                sessionId: pendingDone.sessionId || this.currentSessionId,
-                                artifacts: pendingDone.artifacts || [],
-                            };
-                            yield {
-                                type: 'done',
-                                sessionId: pendingDone.sessionId || this.currentSessionId,
-                                artifacts: pendingDone.artifacts || [],
-                            };
-                            return;
-                        }
-                        
-                        try {
-                            const parsed = JSON.parse(payload);
-                            if (parsed.error) {
-                                throw new Error(parsed.error.message || 'Stream error');
-                            }
-
-                            if (parsed.session_id || parsed.sessionId) {
-                                this.currentSessionId = parsed.session_id || parsed.sessionId;
-                                pendingDone.sessionId = this.currentSessionId;
-                            }
-
-                            if (Array.isArray(parsed.artifacts)) {
-                                pendingDone.artifacts = parsed.artifacts;
-                            }
-
-                            if (parsed.type === 'done') {
-                                state.lastDone = {
-                                    sessionId: pendingDone.sessionId || this.currentSessionId,
-                                    artifacts: pendingDone.artifacts || [],
-                                };
-                                yield {
-                                    type: 'done',
-                                    sessionId: pendingDone.sessionId || this.currentSessionId,
-                                    artifacts: pendingDone.artifacts || [],
-                                };
-                                return;
-                            }
-
-                            const content = parsed.choices?.[0]?.delta?.content || '';
-                            if (content) {
-                                yield { type: 'delta', content };
-                            }
-                            if (isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
-                                state.lastDone = {
-                                    sessionId: pendingDone.sessionId || this.currentSessionId,
-                                    artifacts: pendingDone.artifacts || [],
-                                };
-                                yield {
-                                    type: 'done',
-                                    sessionId: pendingDone.sessionId || this.currentSessionId,
-                                    artifacts: pendingDone.artifacts || [],
-                                };
-                                return;
-                            }
-                        } catch (error) {
-                            if (error.message === 'Stream error') {
-                                throw error;
-                            }
-                            // ignore malformed chunks
-                        }
-                    }
-                }
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    yield { type: 'error', error: 'Request cancelled', cancelled: true };
-                } else {
-                    yield { type: 'error', error: error.message, status: 0 };
-                }
+                yield chunk;
             }
         };
+
+        window.apiClient.__artifactStreamingPatched = true;
     }
 
     function patchApp() {

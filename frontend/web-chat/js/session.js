@@ -6,6 +6,9 @@
 
 const SESSION_MANAGER_TASK_TYPE = 'chat';
 const SESSION_MANAGER_CLIENT_SURFACE = 'web-chat';
+const sessionGatewayHelpers = window.KimiBuiltGatewaySSE || {};
+const SESSION_DEFAULT_MODEL = sessionGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
+const sessionIsCodexBackedModel = sessionGatewayHelpers.isCodexBackedModel || ((modelId) => String(modelId || '').trim() === SESSION_DEFAULT_MODEL);
 
 class SessionManager extends EventTarget {
     constructor() {
@@ -125,10 +128,11 @@ class SessionManager extends EventTarget {
                     
                     // Safely get default model
                     try {
-                        model = stored?.model || this.safeStorageGet('kimibuilt_default_model') || 'gpt-4o';
+                        model = stored?.model || this.safeStorageGet('kimibuilt_default_model') || SESSION_DEFAULT_MODEL;
                     } catch (e) {
-                        model = stored?.model || 'gpt-4o';
+                        model = stored?.model || SESSION_DEFAULT_MODEL;
                     }
+                    model = sessionIsCodexBackedModel(model) ? model : SESSION_DEFAULT_MODEL;
                     
                     return {
                         id: session.id,
@@ -386,9 +390,9 @@ class SessionManager extends EventTarget {
     async createSession(mode = 'chat', options = {}) {
         let defaultModel;
         try {
-            defaultModel = this.safeStorageGet('kimibuilt_default_model') || 'gpt-4o';
+            defaultModel = this.safeStorageGet('kimibuilt_default_model') || SESSION_DEFAULT_MODEL;
         } catch (e) {
-            defaultModel = 'gpt-4o';
+            defaultModel = SESSION_DEFAULT_MODEL;
         }
         
         let sessionId = this.generateLocalId();
@@ -428,7 +432,7 @@ class SessionManager extends EventTarget {
         const localSession = {
             id: sessionId,
             mode,
-            model: options.model || defaultModel,
+            model: sessionIsCodexBackedModel(options.model) ? options.model : defaultModel,
             title: 'New Chat',
             createdAt,
             updatedAt,
@@ -574,11 +578,11 @@ class SessionManager extends EventTarget {
                 previousSession.isLocal = false;
             }
         } else if (!existingSession) {
-            this.sessions.unshift({
-                id: newSessionId,
-                mode: 'chat',
-                model: 'gpt-4o',
-                title: 'New Chat',
+                this.sessions.unshift({
+                    id: newSessionId,
+                    mode: 'chat',
+                    model: SESSION_DEFAULT_MODEL,
+                    title: 'New Chat',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
                 workloadSummary: {
@@ -911,10 +915,13 @@ class SessionManager extends EventTarget {
                     this.sessions.forEach(s => {
                         if (!s.model) {
                             try {
-                                s.model = this.safeStorageGet('kimibuilt_default_model') || 'gpt-4o';
+                                s.model = this.safeStorageGet('kimibuilt_default_model') || SESSION_DEFAULT_MODEL;
                             } catch (e) {
-                                s.model = 'gpt-4o';
+                                s.model = SESSION_DEFAULT_MODEL;
                             }
+                        }
+                        if (!sessionIsCodexBackedModel(s.model)) {
+                            s.model = SESSION_DEFAULT_MODEL;
                         }
                         if (!s.version) {
                             s.version = this.version;

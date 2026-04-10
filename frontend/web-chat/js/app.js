@@ -4,6 +4,64 @@
  * Now using OpenAI SDK for API communication
  */
 
+const AMBIENT_REASONING_ROTATE_MIN_MS = 20000;
+const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
+const AMBIENT_REASONING_TYPE_TICK_MS = 120;
+const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 10000;
+const AMBIENT_REASONING_STARTS = [
+    'Just milking the moose',
+    'Running with a fowl',
+    'Kicking beavers with eagles',
+    'Untangling the lobster antennae',
+    'Polishing moon boots for the raccoon brigade',
+    'Borrowing thunder from the gull patrol',
+    'Tuning the otter orchestra',
+    'Stacking pebbles for the badger council',
+    'Whispering directions to the marmot express',
+    'Juggling lanterns with the fox mechanics',
+    'Warming the maple reactor',
+    'Threading starlight through the goose gears',
+    'Convincing the loon committee to stay on topic',
+    'Measuring fog with the harbor crows',
+    'Stitching sparks into the salmon net',
+    'Calibrating the beehive semaphore',
+    'Sorting clues in the porcupine pantry',
+    'Teaching the heron engine to pirouette',
+    'Sharpening pencils for the midnight beaver shift',
+    'Coaching the moondust pigeons through customs',
+];
+const AMBIENT_REASONING_ENDINGS = [
+    'while the answer sharpens',
+    'under a politely unreasonable amount of chaos',
+    'before the next clue clicks',
+    'with maple-syrup precision',
+    'between static and daylight',
+    'so the gears stop arguing',
+    'while the idea stack settles',
+    'in case the useful bit arrives sideways',
+    'to keep the thread from tangling',
+    'while the final sentence lines up',
+];
+
+function shuffleArray(items = []) {
+    const nextItems = Array.isArray(items) ? [...items] : [];
+    for (let index = nextItems.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [nextItems[index], nextItems[swapIndex]] = [nextItems[swapIndex], nextItems[index]];
+    }
+    return nextItems;
+}
+
+function buildAmbientReasoningLines() {
+    const lines = [];
+    AMBIENT_REASONING_STARTS.forEach((start) => {
+        AMBIENT_REASONING_ENDINGS.forEach((ending) => {
+            lines.push(`${start} ${ending}.`);
+        });
+    });
+    return shuffleArray(lines);
+}
+
 class ChatApp {
     constructor() {
         this.messageInput = document.getElementById('message-input');
@@ -54,6 +112,11 @@ class ChatApp {
             detail: '',
             reasoningSummary: '',
         };
+        this.ambientReasoningDeck = buildAmbientReasoningLines();
+        this.ambientReasoningDeckIndex = 0;
+        this.ambientReasoningCycle = null;
+        this.ambientReasoningTimer = null;
+        this.lastReasoningDeltaAt = 0;
         this.autoResize = null;
         this.searchResults = [];
         this.currentSearchIndex = -1;
@@ -3661,8 +3724,148 @@ class ChatApp {
         this.liveIndicatorHideTimer = null;
     }
 
+    clearAmbientReasoningTimer() {
+        if (!this.ambientReasoningTimer) {
+            return;
+        }
+
+        window.clearTimeout(this.ambientReasoningTimer);
+        this.ambientReasoningTimer = null;
+    }
+
+    resetAmbientReasoningState() {
+        this.clearAmbientReasoningTimer();
+        this.ambientReasoningCycle = null;
+        this.lastReasoningDeltaAt = 0;
+    }
+
+    getNextAmbientReasoningLine() {
+        if (!Array.isArray(this.ambientReasoningDeck) || this.ambientReasoningDeck.length === 0) {
+            this.ambientReasoningDeck = buildAmbientReasoningLines();
+            this.ambientReasoningDeckIndex = 0;
+        }
+
+        if (this.ambientReasoningDeckIndex >= this.ambientReasoningDeck.length) {
+            this.ambientReasoningDeck = buildAmbientReasoningLines();
+            this.ambientReasoningDeckIndex = 0;
+        }
+
+        const nextLine = this.ambientReasoningDeck[this.ambientReasoningDeckIndex];
+        this.ambientReasoningDeckIndex += 1;
+        return String(nextLine || 'Coaxing the thought machine back into rhythm.').trim();
+    }
+
+    createAmbientReasoningCycle(now = Date.now()) {
+        const fullText = this.getNextAmbientReasoningLine();
+        const rotateWindowMs = AMBIENT_REASONING_ROTATE_MAX_MS - AMBIENT_REASONING_ROTATE_MIN_MS;
+        const rotateMs = AMBIENT_REASONING_ROTATE_MIN_MS + Math.floor(Math.random() * (rotateWindowMs + 1));
+        const typeMs = Math.max(2200, Math.min(5800, fullText.length * 60));
+
+        return {
+            fullText,
+            startedAt: now,
+            nextChangeAt: now + rotateMs,
+            typeMs,
+        };
+    }
+
+    getAmbientReasoningFrame(now = Date.now()) {
+        if (!this.ambientReasoningCycle || now >= this.ambientReasoningCycle.nextChangeAt) {
+            this.ambientReasoningCycle = this.createAmbientReasoningCycle(now);
+        }
+
+        const elapsedMs = Math.max(0, now - this.ambientReasoningCycle.startedAt);
+        const progress = Math.min(1, elapsedMs / Math.max(1, this.ambientReasoningCycle.typeMs));
+        const visibleLength = Math.max(1, Math.ceil(this.ambientReasoningCycle.fullText.length * progress));
+
+        return {
+            fullText: this.ambientReasoningCycle.fullText,
+            visibleText: this.ambientReasoningCycle.fullText.slice(0, visibleLength),
+            isTyping: progress < 1,
+            msUntilChange: Math.max(0, this.ambientReasoningCycle.nextChangeAt - now),
+        };
+    }
+
+    hasRecentReasoningStream(now = Date.now()) {
+        return this.lastReasoningDeltaAt > 0
+            && (now - this.lastReasoningDeltaAt) < AMBIENT_REASONING_IDLE_THRESHOLD_MS;
+    }
+
+    startAmbientReasoningLoop() {
+        this.clearAmbientReasoningTimer();
+
+        const tick = () => {
+            if (!this.currentStreamingMessageId || !this.isProcessing) {
+                this.clearAmbientReasoningTimer();
+                return;
+            }
+
+            const sessionId = sessionManager.currentSessionId;
+            const message = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
+            if (!message || message.isStreaming !== true) {
+                this.clearAmbientReasoningTimer();
+                return;
+            }
+
+            const now = Date.now();
+            if (this.hasRecentReasoningStream(now)) {
+                const liveSummary = String(
+                    message.reasoningSummary
+                    || message.metadata?.reasoningSummary
+                    || '',
+                ).trim();
+                if (liveSummary && message.reasoningDisplaySource !== 'stream') {
+                    this.updateStreamingMessageState({
+                        reasoningDisplaySource: 'stream',
+                        reasoningDisplayText: liveSummary,
+                        reasoningDisplayFullText: liveSummary,
+                        reasoningDisplayTitle: 'Reasoning',
+                        reasoningDisplayIcon: 'brain',
+                        reasoningDisplayAnimated: false,
+                    }, {
+                        render: true,
+                        scroll: false,
+                    });
+                }
+
+                this.ambientReasoningTimer = window.setTimeout(tick, 1000);
+                return;
+            }
+
+            const frame = this.getAmbientReasoningFrame(now);
+            const needsUpdate = message.reasoningDisplaySource !== 'synthetic'
+                || String(message.reasoningDisplayText || '') !== frame.visibleText
+                || String(message.reasoningDisplayFullText || '') !== frame.fullText
+                || Boolean(message.reasoningDisplayAnimated) !== frame.isTyping;
+
+            if (needsUpdate) {
+                this.updateStreamingMessageState({
+                    reasoningDisplaySource: 'synthetic',
+                    reasoningDisplayText: frame.visibleText,
+                    reasoningDisplayFullText: frame.fullText,
+                    reasoningDisplayTitle: 'Thinking',
+                    reasoningDisplayIcon: 'sparkles',
+                    reasoningDisplayAnimated: frame.isTyping,
+                }, {
+                    render: true,
+                    scroll: false,
+                });
+            }
+
+            this.ambientReasoningTimer = window.setTimeout(
+                tick,
+                frame.isTyping
+                    ? AMBIENT_REASONING_TYPE_TICK_MS
+                    : Math.max(700, Math.min(1200, frame.msUntilChange || 900)),
+            );
+        };
+
+        tick();
+    }
+
     beginAssistantStream(options = {}) {
         this.clearLiveIndicatorTimer();
+        this.resetAmbientReasoningState();
         this.liveResponseState = {
             phase: 'thinking',
             detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
@@ -3679,12 +3882,19 @@ class ChatApp {
                 detail: this.liveResponseState.detail,
             },
             reasoningSummary: '',
+            reasoningDisplaySource: '',
+            reasoningDisplayText: '',
+            reasoningDisplayFullText: '',
+            reasoningDisplayTitle: '',
+            reasoningDisplayIcon: '',
+            reasoningDisplayAnimated: false,
             reasoningAvailable: false,
             isStreaming: true,
         }, {
             render: true,
             scroll: false,
         });
+        this.startAmbientReasoningLoop();
     }
 
     scheduleLiveIndicatorHide(delayMs = 900) {
@@ -3790,6 +4000,7 @@ class ChatApp {
         const summary = String(chunk.summary || '').trim();
         const currentSummary = String(this.liveResponseState.reasoningSummary || '').trim();
         const nextSummary = summary || `${currentSummary}${delta}`.trim();
+        this.lastReasoningDeltaAt = Date.now();
 
         this.liveResponseState = {
             ...this.liveResponseState,
@@ -3798,6 +4009,12 @@ class ChatApp {
         this.updateLiveResponsePhase('reasoning', 'Working through the answer');
         this.updateStreamingMessageState({
             reasoningSummary: nextSummary,
+            reasoningDisplaySource: 'stream',
+            reasoningDisplayText: nextSummary,
+            reasoningDisplayFullText: nextSummary,
+            reasoningDisplayTitle: 'Reasoning',
+            reasoningDisplayIcon: 'brain',
+            reasoningDisplayAnimated: false,
             reasoningAvailable: true,
             isStreaming: true,
         }, {
@@ -3832,6 +4049,8 @@ class ChatApp {
 
     handleDone(chunk = {}) {
         if (!this.currentStreamingMessageId) return;
+
+        this.clearAmbientReasoningTimer();
         
         // Reset retry counter on success
         this.retryAttempt = 0;
@@ -3907,6 +4126,12 @@ class ChatApp {
         this.updateStreamingMessageState({
             liveState: null,
             isStreaming: false,
+            reasoningDisplaySource: streamedReasoningSummary ? 'final' : '',
+            reasoningDisplayText: streamedReasoningSummary,
+            reasoningDisplayFullText: streamedReasoningSummary,
+            reasoningDisplayTitle: streamedReasoningSummary ? 'Reasoning' : '',
+            reasoningDisplayIcon: streamedReasoningSummary ? 'brain' : '',
+            reasoningDisplayAnimated: false,
         }, {
             render: false,
             scroll: false,
@@ -3943,6 +4168,7 @@ class ChatApp {
             detail: '',
             reasoningSummary: '',
         };
+        this.resetAmbientReasoningState();
         this.updateSendButton();
         this.scheduleLiveIndicatorHide();
 
@@ -4010,6 +4236,7 @@ class ChatApp {
         // Max retries exceeded or non-network error - show the error
         this.retryAttempt = 0;
         this.clearLiveIndicatorTimer();
+        this.resetAmbientReasoningState();
         uiHelpers.hideTypingIndicator();
         
         // Remove the streaming message placeholder
@@ -4077,6 +4304,7 @@ class ChatApp {
 
     handleCancelled() {
         this.clearLiveIndicatorTimer();
+        this.resetAmbientReasoningState();
         uiHelpers.hideTypingIndicator();
         
         // Remove the streaming message placeholder

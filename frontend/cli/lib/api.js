@@ -1,11 +1,20 @@
 const OpenAI = require('openai');
 const { getApiBaseUrl } = require('./config');
+const {
+  buildGatewayHeaders,
+  extractAssistantText,
+  filterCodexBackedModels,
+  selectPreferredCodexModel,
+  streamGatewayResponse,
+  DEFAULT_CODEX_MODEL_ID,
+} = require('../../shared/openai-sse');
 
 // Default timeout for requests (60 seconds)
 const DEFAULT_TIMEOUT = 60000;
 const CLI_TASK_TYPE = 'chat';
 const CLI_CLIENT_SURFACE = 'cli';
 const CLI_REMOTE_BUILD_AUTONOMY_APPROVED = true;
+const DEFAULT_CHAT_MODEL = DEFAULT_CODEX_MODEL_ID;
 
 /**
  * Custom API Error class with additional context.
@@ -53,12 +62,13 @@ class OpenAIClient {
    * @param {string|null} model - Optional model ID
    * @returns {Promise<Object>} Final response data
    */
-  async chat(message, sessionId, onDelta, onDone, model = null, outputFormat = null) {
+  async chat(message, sessionId, onDelta, onDone, model = null, outputFormat = null, onReasoning = null) {
     this.refreshClient();
     
     const messages = [{ role: 'user', content: message }];
+    const selectedModel = selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL);
     const params = {
-      model: model || 'gpt-4o',
+      model: selectedModel,
       messages,
       stream: true,
       taskType: CLI_TASK_TYPE,
@@ -77,34 +87,87 @@ class OpenAIClient {
     }
 
     try {
-      const stream = await this.client.chat.completions.create(params);
-      
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: buildGatewayHeaders({
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        }),
+        body: JSON.stringify(params),
+      });
+
+      if (!response.ok) {
+        const responseBody = await this._parseFetchResponseBody(response);
+        const errorMessage = responseBody?.error?.message
+          || responseBody?.message
+          || `HTTP ${response.status}`;
+        throw new APIError(errorMessage, response.status, responseBody);
+      }
+
+      const responseSessionId = response.headers.get('X-Session-Id');
       let finalSessionId = sessionId;
       let finalResponseId = null;
       let finalArtifacts = [];
-      
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content || '';
-        if (delta && onDelta) {
-          onDelta(delta);
+      let finalToolEvents = [];
+      let finalAssistantMetadata = null;
+
+      if (responseSessionId) {
+        finalSessionId = responseSessionId;
+      }
+
+      for await (const event of streamGatewayResponse(response)) {
+        if (event.type === 'error') {
+          const errorMessage = event.error?.message || event.error?.error?.message || 'Stream error';
+          throw new APIError(errorMessage, 502, event.error);
         }
-        
-        if (chunk.session_id) {
-          finalSessionId = chunk.session_id;
+
+        if (event.sessionId) {
+          finalSessionId = event.sessionId;
         }
-        if (chunk.id) {
-          finalResponseId = chunk.id;
+        if (event.responseId) {
+          finalResponseId = event.responseId;
         }
-        if (Array.isArray(chunk.artifacts) && chunk.artifacts.length > 0) {
-          finalArtifacts = chunk.artifacts;
+        if (Array.isArray(event.artifacts) && event.artifacts.length > 0) {
+          finalArtifacts = event.artifacts;
+        }
+        if (Array.isArray(event.toolEvents) && event.toolEvents.length > 0) {
+          finalToolEvents = event.toolEvents;
+        }
+        if (event.assistantMetadata && typeof event.assistantMetadata === 'object') {
+          finalAssistantMetadata = {
+            ...(finalAssistantMetadata || {}),
+            ...event.assistantMetadata,
+          };
+        }
+
+        if (event.type === 'text_delta' && event.content && onDelta) {
+          onDelta(event.content);
+        }
+
+        if (event.type === 'reasoning_delta' && event.content && onReasoning) {
+          onReasoning(event.content, {
+            summary: event.summary || event.content,
+          });
         }
       }
       
       if (onDone) {
-        onDone({ sessionId: finalSessionId, responseId: finalResponseId, artifacts: finalArtifacts });
+        onDone({
+          sessionId: finalSessionId,
+          responseId: finalResponseId,
+          artifacts: finalArtifacts,
+          toolEvents: finalToolEvents,
+          assistantMetadata: finalAssistantMetadata,
+        });
       }
       
-      return { sessionId: finalSessionId, responseId: finalResponseId, artifacts: finalArtifacts };
+      return {
+        sessionId: finalSessionId,
+        responseId: finalResponseId,
+        artifacts: finalArtifacts,
+        toolEvents: finalToolEvents,
+        assistantMetadata: finalAssistantMetadata,
+      };
     } catch (err) {
       throw this._handleError(err);
     }
@@ -121,8 +184,9 @@ class OpenAIClient {
     this.refreshClient();
     
     const messages = [{ role: 'user', content: message }];
+    const selectedModel = selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL);
     const params = {
-      model: model || 'gpt-4o',
+      model: selectedModel,
       messages,
       stream: false,
       taskType: CLI_TASK_TYPE,
@@ -140,7 +204,12 @@ class OpenAIClient {
     try {
       const response = await this.client.chat.completions.create(params);
       
-      const content = response.choices[0]?.message?.content || '';
+      const content = extractAssistantText(
+        response?.choices?.[0]?.message?.content
+        ?? response?.choices?.[0]?.message
+        ?? response?.output_text
+        ?? response
+      );
       
       return {
         message: content,
@@ -180,7 +249,7 @@ class OpenAIClient {
     }
     
     const params = {
-      model: model || 'gpt-4o',
+      model: selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL),
       messages,
       stream: false,
     };
@@ -224,7 +293,7 @@ class OpenAIClient {
     ];
     
     const params = {
-      model: model || 'gpt-4o',
+      model: selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL),
       messages,
       stream: false,
     };
@@ -311,9 +380,16 @@ class OpenAIClient {
    */
   async healthCheck() {
     try {
-      this.refreshClient();
-      // Use models.list as a health check
-      await this.client.models.list();
+      const response = await fetch(`${this.baseURL}/models`, {
+        method: 'GET',
+        headers: buildGatewayHeaders({
+          'Accept': 'application/json',
+        }),
+      });
+      if (!response.ok) {
+        return false;
+      }
+      await response.json();
       return true;
     } catch {
       return false;
@@ -325,11 +401,24 @@ class OpenAIClient {
    * @returns {Promise<Array>} Array of model objects
    */
   async getModels() {
-    this.refreshClient();
-    
     try {
-      const response = await this.client.models.list();
-      return response.data || [];
+      const response = await fetch(`${this.baseURL}/models`, {
+        method: 'GET',
+        headers: buildGatewayHeaders({
+          'Accept': 'application/json',
+        }),
+      });
+
+      if (!response.ok) {
+        const responseBody = await this._parseFetchResponseBody(response);
+        const errorMessage = responseBody?.error?.message
+          || responseBody?.message
+          || `HTTP ${response.status}`;
+        throw new APIError(errorMessage, response.status, responseBody);
+      }
+
+      const data = await response.json();
+      return filterCodexBackedModels(data?.data || []);
     } catch (err) {
       throw this._handleError(err);
     }
@@ -502,6 +591,24 @@ class OpenAIClient {
       req.end();
     });
   }
+
+  async _parseFetchResponseBody(response) {
+    if (!response) {
+      return null;
+    }
+
+    try {
+      const contentType = response.headers?.get?.('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return await response.json();
+      }
+
+      const text = await response.text();
+      return text ? { message: text } : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 // Create singleton instance
@@ -657,7 +764,7 @@ function downloadImage(imageUrl, outputPath) {
 module.exports = {
   APIError,
   request: (path, options) => client._legacyRequest(path, options),
-  chat: (message, sessionId, onDelta, onDone, model, outputFormat) => client.chat(message, sessionId, onDelta, onDone, model, outputFormat),
+  chat: (message, sessionId, onDelta, onDone, model, outputFormat, onReasoning) => client.chat(message, sessionId, onDelta, onDone, model, outputFormat, onReasoning),
   chatNonStreaming: (message, sessionId, model) => client.chatNonStreaming(message, sessionId, model),
   canvas: (message, sessionId, canvasType, existingContent, model) => 
     client.canvas(message, sessionId, canvasType, existingContent, model),

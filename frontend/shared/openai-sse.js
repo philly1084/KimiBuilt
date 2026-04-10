@@ -1,0 +1,695 @@
+(function attachGatewayStreamHelpers(root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+    return;
+  }
+
+  root.KimiBuiltGatewaySSE = factory();
+})(typeof globalThis !== 'undefined' ? globalThis : this, function buildGatewayStreamHelpers() {
+  'use strict';
+
+  const DEFAULT_GATEWAY_AUTH_TOKEN = 'any-key';
+  const DEFAULT_CODEX_MODEL_IDS = [
+    'gpt-5.4-mini',
+    'gpt-5.4',
+    'gpt-5.3-instant',
+    'gpt-5.3',
+    'gpt-5-codex',
+    'codex-mini-latest',
+  ];
+  const DEFAULT_CODEX_MODEL_ID = DEFAULT_CODEX_MODEL_IDS[0];
+  const TERMINAL_FINISH_REASONS = new Set(['stop', 'length', 'content_filter']);
+
+  function stripNullCharacters(value = '') {
+    return String(value || '').replace(/\u0000/g, '');
+  }
+
+  function normalizeModelId(modelOrId = '') {
+    if (modelOrId && typeof modelOrId === 'object') {
+      return String(modelOrId.id || '').trim();
+    }
+
+    return String(modelOrId || '').trim();
+  }
+
+  function isCodexBackedModel(modelOrId = '') {
+    const normalizedId = normalizeModelId(modelOrId).toLowerCase();
+    if (!normalizedId) {
+      return false;
+    }
+
+    return normalizedId.includes('codex') || normalizedId.includes('gpt-5');
+  }
+
+  function filterCodexBackedModels(models = []) {
+    const seen = new Set();
+
+    return (Array.isArray(models) ? models : []).filter((model) => {
+      const id = normalizeModelId(model);
+      if (!id || seen.has(id) || !isCodexBackedModel(id)) {
+        return false;
+      }
+
+      seen.add(id);
+      return true;
+    });
+  }
+
+  function selectPreferredCodexModel(models = [], preferredModel = '') {
+    const codexModels = filterCodexBackedModels(models);
+    const availableIds = new Set(codexModels.map((model) => normalizeModelId(model)));
+    const preferredId = normalizeModelId(preferredModel);
+
+    if (preferredId && availableIds.has(preferredId)) {
+      return preferredId;
+    }
+
+    for (const candidate of DEFAULT_CODEX_MODEL_IDS) {
+      if (availableIds.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    if (codexModels.length > 0) {
+      return normalizeModelId(codexModels[0]);
+    }
+
+    if (preferredId && isCodexBackedModel(preferredId)) {
+      return preferredId;
+    }
+
+    return DEFAULT_CODEX_MODEL_ID;
+  }
+
+  function buildGatewayHeaders(headers = {}, options = {}) {
+    const normalizedHeaders = {
+      ...(headers && typeof headers === 'object' ? headers : {}),
+    };
+    const authToken = String(options.authToken || DEFAULT_GATEWAY_AUTH_TOKEN).trim() || DEFAULT_GATEWAY_AUTH_TOKEN;
+
+    if (!Object.keys(normalizedHeaders).some((key) => key.toLowerCase() === 'authorization')) {
+      normalizedHeaders.Authorization = `Bearer ${authToken}`;
+    }
+
+    return normalizedHeaders;
+  }
+
+  function splitSSEFrames(buffer = '') {
+    const normalizedBuffer = String(buffer || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const frames = normalizedBuffer.split('\n\n');
+
+    return {
+      frames: frames.slice(0, -1),
+      remainder: frames.length > 0 ? frames[frames.length - 1] : '',
+    };
+  }
+
+  function extractSSEData(frame = '') {
+    const dataLines = String(frame || '')
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).replace(/^\s/, ''));
+
+    return dataLines.join('\n').trim();
+  }
+
+  function isTerminalFinishReason(finishReason = '') {
+    return TERMINAL_FINISH_REASONS.has(String(finishReason || '').trim().toLowerCase());
+  }
+
+  function isFunctionCallItem(item = {}) {
+    const itemType = String(item?.type || '').trim();
+    return itemType === 'function_call' || itemType === 'custom_tool_call';
+  }
+
+  function extractAssistantText(value) {
+    if (typeof value === 'string') {
+      const trimmed = stripNullCharacters(value).trim();
+      if (!trimmed) {
+        return '';
+      }
+
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const extracted = extractAssistantText(parsed);
+          if (extracted) {
+            return extracted;
+          }
+        } catch (_error) {
+          // Fall back to the raw string when it is not valid JSON.
+        }
+      }
+
+      return trimmed;
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => extractAssistantText(entry))
+        .filter(Boolean)
+        .join('');
+    }
+
+    if (!value || typeof value !== 'object') {
+      return '';
+    }
+
+    const functionPayloadSources = [
+      value.parameters,
+      value.arguments,
+      value.function?.arguments,
+      value.function?.parameters,
+    ];
+    for (const source of functionPayloadSources) {
+      const parsed = typeof source === 'string'
+        ? (() => {
+          try {
+            return JSON.parse(stripNullCharacters(source));
+          } catch (_error) {
+            return null;
+          }
+        })()
+        : source;
+      if (!parsed || typeof parsed !== 'object') {
+        continue;
+      }
+
+      const functionText = [
+        parsed.notes_page_update,
+        parsed.assistant_reply,
+        parsed.assistantReply,
+        parsed.message,
+        parsed.content,
+        parsed.text,
+        parsed.result,
+        parsed.response,
+        parsed.output_text,
+        parsed.outputText,
+      ].find((entry) => typeof entry === 'string' && entry.trim());
+
+      if (functionText) {
+        return stripNullCharacters(functionText).trim();
+      }
+    }
+
+    const directKeys = ['output_text', 'text', 'content', 'message', 'response', 'output'];
+    for (const key of directKeys) {
+      const extracted = extractAssistantText(value[key]);
+      if (extracted) {
+        return extracted;
+      }
+    }
+
+    if (value.role === 'assistant' && Array.isArray(value.content)) {
+      const extracted = extractAssistantText(value.content);
+      if (extracted) {
+        return extracted;
+      }
+    }
+
+    const nestedKeys = ['content', 'output', 'payload', 'data', 'item', 'items', 'value', 'result'];
+    for (const key of nestedKeys) {
+      const extracted = extractAssistantText(value[key]);
+      if (extracted) {
+        return extracted;
+      }
+    }
+
+    return '';
+  }
+
+  function normalizeAssistantMetadata(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const nextMetadata = {};
+
+    if (value.agentExecutor === true) {
+      nextMetadata.agentExecutor = true;
+    }
+
+    if (typeof value.taskType === 'string' && value.taskType.trim()) {
+      nextMetadata.taskType = value.taskType.trim();
+    }
+
+    const reasoningSummary = typeof value.reasoningSummary === 'string' && value.reasoningSummary.trim()
+      ? value.reasoningSummary.trim()
+      : (typeof value.reasoning_summary === 'string' && value.reasoning_summary.trim()
+        ? value.reasoning_summary.trim()
+        : '');
+    if (reasoningSummary) {
+      nextMetadata.reasoningSummary = reasoningSummary;
+      nextMetadata.reasoningAvailable = true;
+    } else if (value.reasoningAvailable === true || value.reasoning_available === true) {
+      nextMetadata.reasoningAvailable = true;
+    }
+
+    const displayContent = typeof value.displayContent === 'string' && value.displayContent.trim()
+      ? value.displayContent.trim()
+      : (typeof value.display_content === 'string' && value.display_content.trim()
+        ? value.display_content.trim()
+        : '');
+    if (displayContent) {
+      nextMetadata.displayContent = displayContent;
+    }
+
+    return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+  }
+
+  function extractAssistantMetadata(value) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+
+    const sources = [
+      value.assistantMetadata,
+      value.assistant_metadata,
+      value.response?.assistantMetadata,
+      value.response?.assistant_metadata,
+      value.response?.metadata,
+      value.metadata,
+    ];
+
+    for (const source of sources) {
+      const normalized = normalizeAssistantMetadata(source);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return null;
+  }
+
+  function extractToolEvents(payload = {}) {
+    if (!payload || typeof payload !== 'object') {
+      return [];
+    }
+
+    if (Array.isArray(payload.toolEvents)) {
+      return payload.toolEvents;
+    }
+
+    if (Array.isArray(payload.tool_events)) {
+      return payload.tool_events;
+    }
+
+    const message = payload.choices?.[0]?.message || {};
+    if (Array.isArray(message.toolEvents)) {
+      return message.toolEvents;
+    }
+
+    if (Array.isArray(message.tool_events)) {
+      return message.tool_events;
+    }
+
+    if (Array.isArray(payload.response?.metadata?.toolEvents)) {
+      return payload.response.metadata.toolEvents;
+    }
+
+    if (Array.isArray(payload.response?.metadata?.tool_events)) {
+      return payload.response.metadata.tool_events;
+    }
+
+    return [];
+  }
+
+  function extractArtifacts(payload = {}) {
+    if (!payload || typeof payload !== 'object') {
+      return [];
+    }
+
+    if (Array.isArray(payload.artifacts)) {
+      return payload.artifacts;
+    }
+
+    if (Array.isArray(payload.choices?.[0]?.message?.artifacts)) {
+      return payload.choices[0].message.artifacts;
+    }
+
+    if (Array.isArray(payload.response?.artifacts)) {
+      return payload.response.artifacts;
+    }
+
+    return [];
+  }
+
+  function extractStreamMetadata(payload = {}) {
+    const sessionId = payload.session_id
+      || payload.sessionId
+      || payload.response?.session_id
+      || payload.response?.sessionId
+      || null;
+    const responseId = payload.response?.id || payload.id || null;
+
+    return {
+      sessionId,
+      responseId,
+      artifacts: extractArtifacts(payload),
+      toolEvents: extractToolEvents(payload),
+      assistantMetadata: extractAssistantMetadata(payload),
+      model: payload.response?.model || payload.model || null,
+    };
+  }
+
+  function normalizeGatewayEventPayload(payload = {}, options = {}) {
+    if (!payload || typeof payload !== 'object') {
+      return [];
+    }
+
+    const allowFinalText = options.allowFinalText === true;
+    const metadata = extractStreamMetadata(payload);
+    const events = [];
+
+    if (payload.error) {
+      events.push({
+        type: 'error',
+        error: payload.error,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if (payload.object === 'chat.completion.chunk') {
+      const choice = payload.choices?.[0] || {};
+      const delta = choice.delta || {};
+
+      if (delta.content) {
+        events.push({
+          type: 'text_delta',
+          content: stripNullCharacters(delta.content),
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      if (delta.reasoning) {
+        const reasoning = stripNullCharacters(delta.reasoning);
+        events.push({
+          type: 'reasoning_delta',
+          content: reasoning,
+          summary: reasoning,
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
+        events.push({
+          type: 'tool_calls',
+          toolCalls: delta.tool_calls,
+          stage: 'started',
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      if (choice.finish_reason) {
+        events.push({
+          type: 'finish',
+          finishReason: choice.finish_reason,
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      return events;
+    }
+
+    if (payload.object === 'response.chunk') {
+      if (payload.output_text_delta) {
+        events.push({
+          type: 'text_delta',
+          content: stripNullCharacters(payload.output_text_delta),
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      if (payload.reasoning_delta) {
+        const reasoning = stripNullCharacters(payload.reasoning_delta);
+        events.push({
+          type: 'reasoning_delta',
+          content: reasoning,
+          summary: reasoning,
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      const functionCalls = (Array.isArray(payload.output) ? payload.output : []).filter(isFunctionCallItem);
+      if (functionCalls.length > 0) {
+        events.push({
+          type: 'tool_calls',
+          toolCalls: functionCalls,
+          stage: 'started',
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      return events;
+    }
+
+    if (payload.type === 'response.output_text.delta') {
+      events.push({
+        type: 'text_delta',
+        content: stripNullCharacters(payload.delta || ''),
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if (payload.type === 'response.reasoning_summary_text.delta') {
+      const reasoning = stripNullCharacters(payload.delta || '');
+      const summary = stripNullCharacters(payload.summary || payload.reasoningSummary || payload.reasoning_summary || reasoning);
+      events.push({
+        type: 'reasoning_delta',
+        content: reasoning,
+        summary,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if ((payload.type === 'response.output_item.added' || payload.type === 'response.output_item.done') && isFunctionCallItem(payload.item)) {
+      events.push({
+        type: 'tool_calls',
+        toolCalls: [payload.item],
+        stage: payload.type.endsWith('.done') ? 'done' : 'started',
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if (payload.type === 'response.completed') {
+      events.push({
+        type: 'final',
+        response: payload.response || null,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    if (payload.type === 'done') {
+      events.push({
+        type: 'finish',
+        finishReason: 'stop',
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    const looksLikeChatCompletion = payload.object === 'chat.completion' || Array.isArray(payload.choices);
+    if (looksLikeChatCompletion) {
+      if (allowFinalText) {
+        const content = extractAssistantText(payload?.choices?.[0]?.message?.content ?? payload?.choices?.[0]?.message ?? payload);
+        if (content) {
+          events.push({
+            type: 'text_delta',
+            content,
+            finalChunk: true,
+            raw: payload,
+            ...metadata,
+          });
+        }
+      }
+
+      if (payload.choices?.[0]?.finish_reason) {
+        events.push({
+          type: 'finish',
+          finishReason: payload.choices[0].finish_reason,
+          raw: payload,
+          ...metadata,
+        });
+      }
+
+      events.push({
+        type: 'final',
+        response: payload,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    const looksLikeResponseObject = payload.object === 'response'
+      || Object.prototype.hasOwnProperty.call(payload, 'output_text')
+      || Array.isArray(payload.output);
+    if (looksLikeResponseObject) {
+      if (allowFinalText) {
+        const content = extractAssistantText(payload.output_text || payload.output || payload);
+        if (content) {
+          events.push({
+            type: 'text_delta',
+            content,
+            finalChunk: true,
+            raw: payload,
+            ...metadata,
+          });
+        }
+
+        const reasoningSummary = extractAssistantMetadata(payload)?.reasoningSummary || '';
+        if (reasoningSummary) {
+          events.push({
+            type: 'reasoning_delta',
+            content: reasoningSummary,
+            summary: reasoningSummary,
+            finalChunk: true,
+            raw: payload,
+            ...metadata,
+          });
+        }
+      }
+
+      events.push({
+        type: 'final',
+        response: payload,
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
+    return events;
+  }
+
+  async function* streamGatewayResponse(response, options = {}) {
+    const contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
+
+    if (contentType.includes('application/json')) {
+      const payload = await response.json();
+      const events = normalizeGatewayEventPayload(payload, { allowFinalText: true });
+      for (const event of events) {
+        yield event;
+      }
+      yield { type: 'done', response: payload };
+      return;
+    }
+
+    const reader = response?.body?.getReader?.();
+    if (!reader) {
+      throw new Error('Streaming response body is unavailable');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let sawDone = false;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const { frames, remainder } = splitSSEFrames(buffer);
+        buffer = remainder;
+
+        for (const frame of frames) {
+          const payloadText = extractSSEData(frame);
+          if (!payloadText) {
+            continue;
+          }
+
+          if (payloadText === '[DONE]') {
+            sawDone = true;
+            yield { type: 'done' };
+            return;
+          }
+
+          let payload;
+          try {
+            payload = JSON.parse(payloadText);
+          } catch (_error) {
+            continue;
+          }
+
+          const events = normalizeGatewayEventPayload(payload, { allowFinalText: false });
+          for (const event of events) {
+            yield event;
+          }
+        }
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        const payloadText = extractSSEData(buffer);
+        if (payloadText === '[DONE]') {
+          sawDone = true;
+          yield { type: 'done' };
+          return;
+        }
+
+        if (payloadText) {
+          try {
+            const payload = JSON.parse(payloadText);
+            const events = normalizeGatewayEventPayload(payload, { allowFinalText: false });
+            for (const event of events) {
+              yield event;
+            }
+          } catch (_error) {
+            // Ignore malformed trailing payloads.
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (!sawDone || options.emitImplicitDone !== false) {
+      yield { type: 'done', implicit: true };
+    }
+  }
+
+  return {
+    DEFAULT_GATEWAY_AUTH_TOKEN,
+    DEFAULT_CODEX_MODEL_ID,
+    DEFAULT_CODEX_MODEL_IDS,
+    TERMINAL_FINISH_REASONS,
+    buildGatewayHeaders,
+    extractAssistantMetadata,
+    extractAssistantText,
+    extractSSEData,
+    extractStreamMetadata,
+    extractToolEvents,
+    filterCodexBackedModels,
+    isCodexBackedModel,
+    isFunctionCallItem,
+    isTerminalFinishReason,
+    normalizeGatewayEventPayload,
+    normalizeModelId,
+    selectPreferredCodexModel,
+    splitSSEFrames,
+    streamGatewayResponse,
+    stripNullCharacters,
+  };
+});

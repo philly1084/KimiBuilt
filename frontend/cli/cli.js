@@ -201,8 +201,13 @@ async function fetchModels() {
   
   // Load default model from config
   const savedModel = config.getDefaultModel();
-  if (savedModel) {
+  if (savedModel && availableModels.some((model) => model.id === savedModel)) {
     currentModel = savedModel;
+  } else {
+    currentModel = availableModels[0]?.id || config.DEFAULT_MODELS[0]?.id || currentModel;
+    if (currentModel) {
+      config.setDefaultModel(currentModel);
+    }
   }
 }
 
@@ -819,19 +824,37 @@ async function sendChatMessage(message) {
     : '';
   
   try {
-    process.stdout.write('\n' + timestamp + aiGradient.bold('\nAI: '));
-    
     let hasStarted = false;
+    let hasReasoning = false;
     const startTime = Date.now();
+    const ensureAnswerPrefix = () => {
+      if (hasStarted) {
+        return;
+      }
+
+      process.stdout.write('\n' + timestamp + aiGradient.bold('\nAI: '));
+      hasStarted = true;
+    };
+    const appendReasoning = (delta) => {
+      const content = String(delta || '');
+      if (!content) {
+        return;
+      }
+
+      if (!hasReasoning) {
+        process.stdout.write(chalk.gray('\n\nReasoning: '));
+        hasReasoning = true;
+      }
+
+      process.stdout.write(chalk.gray(content));
+    };
     
     const outputFormat = inferRequestedOutputFormat(message);
     const result = await api.chat(
       message,
       currentSessionId,
       (delta) => {
-        if (!hasStarted) {
-          hasStarted = true;
-        }
+        ensureAnswerPrefix();
         accumulatedResponse += delta;
         process.stdout.write(delta);
       },
@@ -848,7 +871,8 @@ async function sendChatMessage(message) {
         }
       },
       currentModel,
-      outputFormat
+      outputFormat,
+      appendReasoning
     );
     
     if (result.sessionId && result.sessionId !== currentSessionId) {
@@ -1227,7 +1251,7 @@ Environment Variables:
 Examples:
   kimibuilt
   kimibuilt --api-url http://localhost:3000
-  kimibuilt --model gpt-4o-mini
+  kimibuilt --model gpt-5.4-mini
   echo "Hello AI" | kimibuilt
 `);
 }

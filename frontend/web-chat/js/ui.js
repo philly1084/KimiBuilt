@@ -3,6 +3,18 @@
  * Handles rendering, markdown parsing, code highlighting, and UI utilities
  */
 
+const webChatGatewayHelpers = window.KimiBuiltGatewaySSE || {};
+const WEB_CHAT_DEFAULT_MODEL = webChatGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
+const webChatIsCodexBackedModel = webChatGatewayHelpers.isCodexBackedModel || ((modelId) => String(modelId || '').trim() === WEB_CHAT_DEFAULT_MODEL);
+const webChatSelectPreferredCodexModel = webChatGatewayHelpers.selectPreferredCodexModel
+    || ((models, preferredModel = '') => {
+        const preferredId = String(preferredModel || '').trim();
+        if (preferredId && webChatIsCodexBackedModel(preferredId)) {
+            return preferredId;
+        }
+        return WEB_CHAT_DEFAULT_MODEL;
+    });
+
 class UIHelpers {
     constructor() {
         this.storageAvailable = this.checkStorageAvailability();
@@ -28,7 +40,7 @@ class UIHelpers {
         const savedModel = window.sessionManager?.safeStorageGet?.('kimibuilt_default_model');
         const savedReasoningEffort = window.sessionManager?.safeStorageGet?.('kimibuilt_reasoning_effort');
         const savedRemoteAutonomy = window.sessionManager?.safeStorageGet?.('kimibuilt_remote_build_autonomy');
-        this.currentModel = savedModel || 'gpt-4o';
+        this.currentModel = webChatIsCodexBackedModel(savedModel) ? savedModel : WEB_CHAT_DEFAULT_MODEL;
         this.currentReasoningEffort = this.normalizeReasoningEffort(savedReasoningEffort);
         this.remoteBuildAutonomyApproved = this.parseRemoteBuildAutonomyPreference(savedRemoteAutonomy);
         this.soundManager = window.WebChatSoundManager
@@ -157,7 +169,7 @@ class UIHelpers {
         wrapper.innerHTML = `
             <label for="assistant-model-select" class="model-selector-setting__label">AI model</label>
             <select id="assistant-model-select" class="reasoning-select reasoning-select--panel assistant-model-select" title="AI model" aria-label="AI model">
-                <option value="gpt-4o">GPT-4o</option>
+                <option value="${this.escapeHtmlAttr(WEB_CHAT_DEFAULT_MODEL)}">${this.escapeHtml(this.getModelDisplayName({ id: WEB_CHAT_DEFAULT_MODEL }))}</option>
             </select>
             <p class="model-selector-setting__hint">Choose the model for the next messages in this chat.</p>
         `;
@@ -1784,10 +1796,57 @@ class UIHelpers {
         ).trim();
     }
 
-    hasMessageReasoning(message = null) {
-        return Boolean(this.getMessageReasoningSummary(message))
-            || message?.reasoningAvailable === true
-            || message?.metadata?.reasoningAvailable === true;
+    getMessageReasoningDisplayState(message = null, isStreaming = false) {
+        const summary = this.getMessageReasoningSummary(message);
+        const displaySource = String(message?.reasoningDisplaySource || '').trim();
+        const displayText = String(message?.reasoningDisplayText || '').trim();
+        const displayFullText = String(message?.reasoningDisplayFullText || '').trim();
+        const displayTitle = String(message?.reasoningDisplayTitle || '').trim();
+        const displayIcon = String(message?.reasoningDisplayIcon || '').trim();
+        const displayAnimated = message?.reasoningDisplayAnimated === true;
+
+        if (isStreaming && displaySource === 'synthetic' && displayText) {
+            return {
+                source: 'synthetic',
+                title: displayTitle || 'Thinking',
+                icon: displayIcon || 'sparkles',
+                previewText: displayText,
+                bodyText: displayAnimated ? displayText : (displayFullText || displayText),
+                animated: displayAnimated,
+                live: true,
+            };
+        }
+
+        if (displayText && (displaySource === 'stream' || displaySource === 'final')) {
+            const fullText = displayFullText || summary || displayText;
+            return {
+                source: 'reasoning',
+                title: displayTitle || 'Reasoning',
+                icon: displayIcon || 'brain',
+                previewText: this.buildReasoningSummaryPreview(displayText, isStreaming ? 168 : 132),
+                bodyText: fullText,
+                animated: false,
+                live: isStreaming,
+            };
+        }
+
+        if (summary || message?.reasoningAvailable === true || message?.metadata?.reasoningAvailable === true) {
+            return {
+                source: 'reasoning',
+                title: 'Reasoning',
+                icon: 'brain',
+                previewText: this.buildReasoningSummaryPreview(summary, isStreaming ? 168 : 132),
+                bodyText: summary,
+                animated: false,
+                live: isStreaming,
+            };
+        }
+
+        return null;
+    }
+
+    hasMessageReasoning(message = null, isStreaming = false) {
+        return Boolean(this.getMessageReasoningDisplayState(message, isStreaming));
     }
 
     buildReasoningSummaryPreview(summary = '', maxLength = 140) {
@@ -1804,39 +1863,39 @@ class UIHelpers {
     }
 
     buildReasoningRibbonMarkup(message = null, isStreaming = false) {
-        if (!this.hasMessageReasoning(message)) {
+        const reasoningState = this.getMessageReasoningDisplayState(message, isStreaming);
+        if (!reasoningState) {
             return '';
         }
 
         const messageId = String(message?.id || '').trim();
-        const summary = this.getMessageReasoningSummary(message);
         const expanded = Boolean(messageId) && this.expandedReasoningMessageIds.has(messageId);
-        const preview = this.buildReasoningSummaryPreview(summary, isStreaming ? 168 : 132);
-        const body = expanded && summary
-            ? `<div class="assistant-reasoning-ribbon__body">${this.escapeHtml(summary).replace(/\n/g, '<br>')}</div>`
+        const previewHtml = `${this.escapeHtml(reasoningState.previewText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
+        const body = expanded && reasoningState.bodyText
+            ? `<div class="assistant-reasoning-ribbon__body${reasoningState.source === 'synthetic' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${this.escapeHtml(reasoningState.bodyText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}</div>`
             : '';
 
         return `
-            <div class="assistant-reasoning-ribbon${expanded ? ' is-expanded' : ''}${isStreaming ? ' is-live' : ''}">
+            <div class="assistant-reasoning-ribbon${expanded ? ' is-expanded' : ''}${isStreaming ? ' is-live' : ''}${reasoningState.source === 'synthetic' ? ' is-synthetic' : ''}">
                 <button
                     class="assistant-reasoning-ribbon__toggle"
                     type="button"
                     onclick="uiHelpers.toggleReasoningSummary('${this.escapeHtmlAttr(messageId)}')"
                     aria-expanded="${expanded ? 'true' : 'false'}"
-                    aria-label="${expanded ? 'Collapse reasoning summary' : 'Expand reasoning summary'}"
+                    aria-label="${expanded ? `Collapse ${reasoningState.title.toLowerCase()} summary` : `Expand ${reasoningState.title.toLowerCase()} summary`}"
                 >
                     <span class="assistant-reasoning-ribbon__main">
                         <span class="assistant-reasoning-ribbon__icon" aria-hidden="true">
-                            <i data-lucide="brain" class="w-3.5 h-3.5"></i>
+                            <i data-lucide="${reasoningState.icon}" class="w-3.5 h-3.5"></i>
                         </span>
                         <span class="assistant-reasoning-ribbon__copy">
-                            <span class="assistant-reasoning-ribbon__title">Reasoning</span>
-                            <span class="assistant-reasoning-ribbon__preview">${this.escapeHtml(preview)}</span>
+                            <span class="assistant-reasoning-ribbon__title">${this.escapeHtml(reasoningState.title)}</span>
+                            <span class="assistant-reasoning-ribbon__preview${reasoningState.source === 'synthetic' ? ' assistant-reasoning-ribbon__preview--synthetic' : ''}">${previewHtml}</span>
                         </span>
                     </span>
                     <span class="assistant-reasoning-ribbon__meta">
-                        <span class="assistant-reasoning-ribbon__badge${isStreaming ? ' assistant-reasoning-ribbon__badge--live' : ''}">
-                            ${isStreaming ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'Summary'}
+                        <span class="assistant-reasoning-ribbon__badge${reasoningState.live ? ' assistant-reasoning-ribbon__badge--live' : ''}">
+                            ${reasoningState.live ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'Summary'}
                         </span>
                         <i data-lucide="${expanded ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4" aria-hidden="true"></i>
                     </span>
@@ -3205,6 +3264,12 @@ class UIHelpers {
             this.availableModels = typeof apiClient.filterChatModels === 'function'
                 ? apiClient.filterChatModels(models)
                 : models;
+            const preferredModel = webChatSelectPreferredCodexModel(this.availableModels, this.currentModel);
+            if (preferredModel !== this.currentModel) {
+                this.currentModel = preferredModel;
+                window.sessionManager?.safeStorageSet?.('kimibuilt_default_model', preferredModel);
+                this.updateModelUI();
+            }
             
             // Remove loading state
             if (modelBtn) modelBtn.classList.remove('loading');
@@ -3391,6 +3456,12 @@ class UIHelpers {
         // Convert model ID to readable name
         const id = model.id;
         const names = {
+            'gpt-5.4-mini': 'GPT-5.4 Mini',
+            'gpt-5.4': 'GPT-5.4',
+            'gpt-5.3-instant': 'GPT-5.3 Instant',
+            'gpt-5.3': 'GPT-5.3',
+            'gpt-5-codex': 'GPT-5 Codex',
+            'codex-mini-latest': 'Codex Mini Latest',
             'gpt-4o': 'GPT-4o',
             'gpt-4o-mini': 'GPT-4o Mini',
             'gpt-4-turbo': 'GPT-4 Turbo',
@@ -3407,6 +3478,12 @@ class UIHelpers {
 
     getModelDescription(model) {
         const descriptions = {
+            'gpt-5.4-mini': 'Recommended Codex-backed streaming model',
+            'gpt-5.4': 'High-capability Codex-backed model',
+            'gpt-5.3-instant': 'Fast Codex-backed model',
+            'gpt-5.3': 'Balanced Codex-backed model',
+            'gpt-5-codex': 'Codex-focused model',
+            'codex-mini-latest': 'Compact Codex model',
             'gpt-4o': 'Most capable multimodal model',
             'gpt-4o-mini': 'Fast and affordable',
             'gpt-4-turbo': 'Advanced reasoning',

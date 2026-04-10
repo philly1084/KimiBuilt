@@ -8,7 +8,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const DEFAULT_CONFIG = {
   apiBaseUrl: process.env.KIMIBUILT_API_URL || 'http://localhost:3000/v1',
   defaultMode: 'chat',
-  defaultModel: null,
+  defaultModel: 'gpt-5.4-mini',
   theme: 'default',
   autoSave: true,
   showTimestamps: false,
@@ -23,11 +23,10 @@ const VALID_MODES = ['chat', 'canvas', 'notation'];
 const VALID_THEMES = ['default', 'minimal', 'colorful', 'dark'];
 
 const DEFAULT_MODELS = [
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI' },
-  { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'Anthropic' },
-  { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', provider: 'Anthropic' },
-  { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', provider: 'Anthropic' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', provider: 'OpenAI' },
+  { id: 'gpt-5.4', name: 'GPT-5.4', provider: 'OpenAI' },
+  { id: 'gpt-5.3-instant', name: 'GPT-5.3 Instant', provider: 'OpenAI' },
+  { id: 'gpt-5.3', name: 'GPT-5.3', provider: 'OpenAI' },
 ];
 
 /**

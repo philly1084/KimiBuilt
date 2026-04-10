@@ -63,7 +63,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260410a">
+    <link rel="stylesheet" href="css/styles.css?v=20260410b">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
@@ -373,7 +373,7 @@
                 <div class="model-selector-setting">
                     <label for="assistant-model-select" class="model-selector-setting__label">AI model</label>
                     <select id="assistant-model-select" class="reasoning-select reasoning-select--panel assistant-model-select" title="AI model" aria-label="AI model">
-                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
                     </select>
                     <p class="model-selector-setting__hint">Choose the model for the next messages in this chat.</p>
                 </div>
@@ -616,7 +616,7 @@
                         <div class="model-selector-wrapper full-shell-control">
                             <button id="model-selector-btn" class="model-selector-btn" onclick="uiHelpers.toggleModelSelector()" title="Assistant settings" aria-label="Assistant settings" aria-haspopup="listbox" aria-expanded="false" aria-controls="model-list">
                                 <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
-                                <span id="current-model-label">GPT-4o</span>
+                                <span id="current-model-label">GPT-5.4 Mini</span>
                                 <i data-lucide="chevron-down" class="w-3 h-3" aria-hidden="true"></i>
                             </button>
                         </div>
@@ -770,7 +770,7 @@
                                 <!-- Quick Model Indicator -->
                                 <button id="input-model-indicator" class="text-xs text-text-tertiary hover:text-accent transition-colors flex items-center gap-1" onclick="uiHelpers.toggleModelSelector()" aria-label="Current model">
                                     <i data-lucide="cpu" class="w-3 h-3" aria-hidden="true"></i>
-                                    <span id="input-model-label">GPT-4o</span>
+                                    <span id="input-model-label">GPT-5.4 Mini</span>
                                 </button>
                                 <span class="text-xs text-text-tertiary hidden sm:flex items-center gap-1" id="input-reasoning-indicator">
                                     <i data-lucide="brain" class="w-3 h-3" aria-hidden="true"></i>
@@ -812,7 +812,7 @@
                         <i data-lucide="cpu" class="w-4 h-4" aria-hidden="true"></i>
                         <span>Assistant</span>
                     </span>
-                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-model-value">GPT-4o</span>
+                    <span class="mobile-chat-menu__action-value" id="mobile-chat-menu-model-value">GPT-5.4 Mini</span>
                 </button>
                 <button class="mobile-chat-menu__action" data-mobile-menu-action="workloads">
                     <span class="mobile-chat-menu__action-main">
@@ -994,15 +994,16 @@
     </div>
     
     <!-- Scripts -->
-    <script src="js/api.js?v=20260406d"></script>
+    <script src="/shared/openai-sse.js?v=20260410a"></script>
+    <script src="js/api.js?v=20260410b"></script>
     <script src="js/session.js?v=20260406a"></script>
     <script src="js/sound-manager.js?v=20260409a"></script>
     <script src="js/tts-manager.js?v=20260409a"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260410a"></script>
-    <script src="js/app.js?v=20260409a"></script>
+    <script src="js/ui.js?v=20260410b"></script>
+    <script src="js/app.js?v=20260410b"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>
 </html>

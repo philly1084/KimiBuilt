@@ -1,6 +1,6 @@
 /**
- * API Client for LillyBuilt AI Chat using OpenAI SDK
- * Handles API communication with the LillyBuilt backend
+ * API client for LillyBuilt AI Chat.
+ * Uses fetch-based POST streaming against the gateway's SSE endpoints.
  */
 
 // Configuration
@@ -17,6 +17,20 @@ const WEB_CHAT_API_TASK_TYPE = 'chat';
 const WEB_CHAT_API_CLIENT_SURFACE = 'web-chat';
 const USER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
+const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
+const DEFAULT_CHAT_MODEL = gatewayStreamHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
+const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers) => headers);
+const filterCodexBackedModels = gatewayStreamHelpers.filterCodexBackedModels || ((models) => models);
+const isCodexBackedModel = gatewayStreamHelpers.isCodexBackedModel || ((modelId) => String(modelId || '').trim() === DEFAULT_CHAT_MODEL);
+const selectPreferredCodexModel = gatewayStreamHelpers.selectPreferredCodexModel
+    || ((models, preferredModel = '') => {
+        const preferredId = String(preferredModel || '').trim();
+        if (preferredId && isCodexBackedModel(preferredId)) {
+            return preferredId;
+        }
+        return DEFAULT_CHAT_MODEL;
+    });
+const streamGatewayResponse = gatewayStreamHelpers.streamGatewayResponse || null;
 
 function getClientNowIso() {
     return new Date().toISOString();
@@ -624,9 +638,10 @@ class OpenAIAPIClient extends EventTarget {
      * @param {AbortSignal} signal - Optional abort signal for cancellation
      * @returns {AsyncGenerator} - Yields delta content
      */
-    async *streamChat(messages, model = 'gpt-4o', signal = null, reasoningEffort = '') {
+    async *streamChat(messages, model = DEFAULT_CHAT_MODEL, signal = null, reasoningEffort = '', requestOptions = {}) {
+        const selectedModel = selectPreferredCodexModel([], model);
         const params = {
-            model,
+            model: selectedModel,
             messages,
             stream: true,
             enableConversationExecutor: true,
@@ -636,6 +651,9 @@ class OpenAIAPIClient extends EventTarget {
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
+                ...(requestOptions?.metadata && typeof requestOptions.metadata === 'object'
+                    ? requestOptions.metadata
+                    : {}),
             },
         };
 
@@ -645,6 +663,14 @@ class OpenAIAPIClient extends EventTarget {
 
         if (reasoningEffort) {
             params.reasoning_effort = reasoningEffort;
+        }
+
+        if (Array.isArray(requestOptions?.artifactIds) && requestOptions.artifactIds.length > 0) {
+            params.artifact_ids = requestOptions.artifactIds;
+        }
+
+        if (requestOptions?.outputFormat) {
+            params.output_format = requestOptions.outputFormat;
         }
         
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
@@ -662,13 +688,7 @@ class OpenAIAPIClient extends EventTarget {
         }
 
         try {
-            // Use fetch if SDK not available
-            if (!this.client) {
-                yield* this.streamChatWithFetch(params, controller.signal, requestId);
-                return;
-            }
-
-            yield* this.streamChatWithSDK(params, controller.signal, requestId);
+            yield* this.streamChatWithFetch(params, controller.signal, requestId);
         } finally {
             this.abortControllers.delete(requestId);
         }
@@ -691,12 +711,12 @@ class OpenAIAPIClient extends EventTarget {
 
                 const response = await fetch(`${API_BASE_URL}/chat/completions`, {
                     method: 'POST',
-                    headers: { 
+                    headers: buildGatewayHeaders({ 
                         'Content-Type': 'application/json',
-                        'Accept': 'text/event-stream'
-                    },
+                        'Accept': 'text/event-stream',
+                    }),
                     body: JSON.stringify(params),
-                    signal: signal
+                    signal: signal,
                 });
                 
                 if (!response.ok) {
@@ -715,71 +735,107 @@ class OpenAIAPIClient extends EventTarget {
                     this.currentSessionId = responseSessionId;
                 }
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
                 let pendingDone = {
                     sessionId: this.currentSessionId,
                     artifacts: [],
                     toolEvents: [],
                     assistantMetadata: null,
                 };
+                let doneEmitted = false;
 
                 yield this.buildStatusEvent('thinking', 'Preparing the reply');
                 
-                try {
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        
-                        buffer += decoder.decode(value, { stream: true });
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-                        
-                        for (const line of lines) {
-                            if (line.startsWith('data: ')) {
-                                const data = line.slice(6);
-                                if (data === '[DONE]') {
-                                    yield this.buildDonePayload(pendingDone);
-                                    return;
-                                }
-                                try {
-                                    const parsed = JSON.parse(data);
-                                    
-                                    // Check for error in stream
-                                    if (parsed.error) {
-                                        throw new Error(parsed.error.message || 'Stream error');
-                                    }
-                                    
-                                    const normalizedEvents = this.normalizeStreamPayload(parsed, pendingDone);
-                                    for (const event of normalizedEvents) {
-                                        yield event;
-                                        if (event.type === 'done') {
-                                            return;
-                                        }
-                                    }
-                                    
-                                    if (parsed.type === 'done' || this.isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
-                                        return;
-                                    }
-                                } catch (e) {
-                                    if (e.message !== 'Stream error') {
-                                        // Ignore JSON parse errors for malformed chunks
-                                        console.warn('Failed to parse stream chunk:', e);
-                                    } else {
-                                        throw e;
-                                    }
-                                }
-                            }
-                        }
+                if (!streamGatewayResponse) {
+                    throw new Error('Gateway SSE helpers are unavailable');
+                }
+
+                for await (const event of streamGatewayResponse(response)) {
+                    if (event.type === 'error') {
+                        const errorMessage = event.error?.message || event.error?.error?.message || 'Stream error';
+                        throw new Error(errorMessage);
                     }
-                } finally {
-                    reader.releaseLock();
+
+                    if (event.sessionId) {
+                        this.currentSessionId = event.sessionId;
+                        pendingDone.sessionId = event.sessionId;
+                    }
+
+                    if (Array.isArray(event.artifacts) && event.artifacts.length > 0) {
+                        pendingDone.artifacts = event.artifacts;
+                    }
+
+                    if (Array.isArray(event.toolEvents) && event.toolEvents.length > 0) {
+                        pendingDone.toolEvents = event.toolEvents;
+                    }
+
+                    if (event.assistantMetadata) {
+                        pendingDone.assistantMetadata = mergeAssistantMetadata(
+                            pendingDone.assistantMetadata,
+                            event.assistantMetadata,
+                        );
+                    }
+
+                    switch (event.type) {
+                        case 'text_delta':
+                            if (event.content) {
+                                yield this.buildStatusEvent('writing', 'Writing the reply');
+                                yield {
+                                    type: 'text_delta',
+                                    content: event.content,
+                                };
+                            }
+                            break;
+                        case 'reasoning_delta': {
+                            const summary = String(event.summary || event.content || '').trim();
+                            pendingDone.assistantMetadata = mergeAssistantMetadata(
+                                pendingDone.assistantMetadata,
+                                {
+                                    reasoningSummary: summary,
+                                    reasoningAvailable: true,
+                                },
+                            );
+                            if (event.content) {
+                                yield this.buildStatusEvent('reasoning', 'Working through the answer');
+                                yield {
+                                    type: 'reasoning_summary_delta',
+                                    content: String(event.content || ''),
+                                    summary,
+                                };
+                            }
+                            break;
+                        }
+                        case 'tool_calls':
+                            for (const toolCall of (Array.isArray(event.toolCalls) ? event.toolCalls : [])) {
+                                const toolEvent = this.buildToolEventDetail(
+                                    toolCall,
+                                    event.stage === 'done' ? 'response.output_item.done' : 'response.output_item.added',
+                                );
+                                yield this.buildStatusEvent('checking-tools', toolEvent.detail);
+                                yield {
+                                    type: 'tool_event',
+                                    stage: toolEvent.stage,
+                                    toolName: toolEvent.toolName,
+                                    detail: toolEvent.detail,
+                                    item: toolCall,
+                                };
+                            }
+                            break;
+                        case 'done':
+                            doneEmitted = true;
+                            yield this.buildStatusEvent('ready', 'Reply complete');
+                            yield this.buildDonePayload(pendingDone);
+                            return;
+                        default:
+                            break;
+                    }
                 }
                 
                 // Success - reset retry count
                 this.retryCount = 0;
-                yield this.buildDonePayload(pendingDone);
+                if (!doneEmitted) {
+                    yield this.buildStatusEvent('ready', 'Reply complete');
+                    yield this.buildDonePayload(pendingDone);
+                }
                 return;
                 
             } catch (error) {
@@ -909,9 +965,10 @@ class OpenAIAPIClient extends EventTarget {
      * @param {string} model - Model ID to use
      * @returns {Object} - Response with content and sessionId
      */
-    async chat(messages, model = 'gpt-4o', reasoningEffort = '') {
+    async chat(messages, model = DEFAULT_CHAT_MODEL, reasoningEffort = '', requestOptions = {}) {
+        const selectedModel = selectPreferredCodexModel([], model);
         const params = {
-            model,
+            model: selectedModel,
             messages,
             stream: false,
             enableConversationExecutor: true,
@@ -921,6 +978,9 @@ class OpenAIAPIClient extends EventTarget {
                 clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
                 enableConversationExecutor: true,
                 ...buildClientClockMetadata(),
+                ...(requestOptions?.metadata && typeof requestOptions.metadata === 'object'
+                    ? requestOptions.metadata
+                    : {}),
             },
         };
 
@@ -930,6 +990,14 @@ class OpenAIAPIClient extends EventTarget {
 
         if (reasoningEffort) {
             params.reasoning_effort = reasoningEffort;
+        }
+
+        if (Array.isArray(requestOptions?.artifactIds) && requestOptions.artifactIds.length > 0) {
+            params.artifact_ids = requestOptions.artifactIds;
+        }
+
+        if (requestOptions?.outputFormat) {
+            params.output_format = requestOptions.outputFormat;
         }
         
         if (this.currentSessionId && !String(this.currentSessionId).startsWith('local_')) {
@@ -985,7 +1053,10 @@ class OpenAIAPIClient extends EventTarget {
 
                 const response = await fetch(`${API_BASE_URL}/chat/completions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: buildGatewayHeaders({
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                    }),
                     body: JSON.stringify(params),
                 });
                 
@@ -1056,7 +1127,11 @@ class OpenAIAPIClient extends EventTarget {
         // Try fetch first if SDK not available
         if (!this.client) {
             try {
-                const response = await fetch(`${API_BASE_URL}/models`);
+                const response = await fetch(`${API_BASE_URL}/models`, {
+                    headers: buildGatewayHeaders({
+                        'Accept': 'application/json',
+                    }),
+                });
                 if (response.ok) {
                     const data = await response.json();
                     this.modelsCache = data;
@@ -1102,26 +1177,16 @@ class OpenAIAPIClient extends EventTarget {
         return {
             object: 'list',
             data: [
-                { id: 'gpt-4o', object: 'model', created: Date.now(), owned_by: 'openai' },
-                { id: 'gpt-4o-mini', object: 'model', created: Date.now(), owned_by: 'openai' },
-                { id: 'claude-3-opus', object: 'model', created: Date.now(), owned_by: 'anthropic' },
-                { id: 'claude-3-sonnet', object: 'model', created: Date.now(), owned_by: 'anthropic' }
-            ]
+                { id: 'gpt-5.4-mini', object: 'model', created: Date.now(), owned_by: 'openai' },
+                { id: 'gpt-5.4', object: 'model', created: Date.now(), owned_by: 'openai' },
+                { id: 'gpt-5.3-instant', object: 'model', created: Date.now(), owned_by: 'openai' },
+                { id: 'gpt-5.3', object: 'model', created: Date.now(), owned_by: 'openai' },
+            ],
         };
     }
 
     filterChatModels(models = []) {
-        const seen = new Set();
-
-        return models.filter((model) => {
-            const id = String(model?.id || '').trim();
-            if (!id || seen.has(id)) {
-                return false;
-            }
-
-            seen.add(id);
-            return true;
-        });
+        return filterCodexBackedModels(models);
     }
 
     async getImageModels() {
