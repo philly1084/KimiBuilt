@@ -23,6 +23,17 @@ class TtsService {
             return ['piper', 'openai'];
         }
 
+        const openAiReady = this.getProvider('openai')?.getDiagnostics?.().status === 'ready';
+        const piperReady = this.getProvider('piper')?.getDiagnostics?.().status === 'ready';
+
+        if (openAiReady) {
+            return ['openai', 'piper'];
+        }
+
+        if (piperReady) {
+            return ['piper', 'openai'];
+        }
+
         return ['piper', 'openai'];
     }
 

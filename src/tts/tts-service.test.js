@@ -48,6 +48,25 @@ describe('TtsService', () => {
         expect(result.provider).toBe('openai');
     });
 
+    test('auto mode prefers OpenAI when the OpenAI provider is ready', async () => {
+        const piper = createProvider('piper', 'ready');
+        const openai = createProvider('openai', 'ready');
+        const service = new TtsService({
+            provider: 'auto',
+        }, {
+            piper,
+            openai,
+        });
+
+        const result = await service.synthesize({
+            text: 'Hello there.',
+        });
+
+        expect(openai.synthesize).toHaveBeenCalledTimes(1);
+        expect(piper.synthesize).not.toHaveBeenCalled();
+        expect(result.provider).toBe('openai');
+    });
+
     test('does not fall back when the request explicitly targets a provider voice', async () => {
         const piperError = new Error('Piper failed');
         piperError.statusCode = 502;
