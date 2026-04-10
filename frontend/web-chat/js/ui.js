@@ -4754,31 +4754,27 @@ class UIHelpers {
             return '';
         }
 
-        const inlineSource = this.normalizeMermaidSource(
+        const fetchUrl = String(element?.dataset?.mermaidUrl || '').trim();
+        if (fetchUrl) {
+            try {
+                const fetchedSource = await this.fetchMermaidSourceFromUrl(fetchUrl);
+                if (fetchedSource) {
+                    if (element?.dataset) {
+                        element.dataset.code = fetchedSource;
+                        element.dataset.mermaidSource = fetchedSource;
+                    }
+                    return fetchedSource;
+                }
+            } catch (error) {
+                console.warn('[UI] Failed to fetch Mermaid artifact source:', error);
+            }
+        }
+
+        return this.normalizeMermaidSource(
             element?.dataset?.code
             || element?.dataset?.mermaidSource
             || '',
         );
-        if (inlineSource) {
-            return inlineSource;
-        }
-
-        const fetchUrl = String(element?.dataset?.mermaidUrl || '').trim();
-        if (!fetchUrl) {
-            return '';
-        }
-
-        const fetchedSource = await this.fetchMermaidSourceFromUrl(fetchUrl);
-        if (!fetchedSource) {
-            return '';
-        }
-
-        if (element?.dataset) {
-            element.dataset.code = fetchedSource;
-            element.dataset.mermaidSource = fetchedSource;
-        }
-
-        return fetchedSource;
     }
 
     async getMermaidSourceFromButton(button) {

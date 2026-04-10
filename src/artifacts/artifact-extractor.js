@@ -188,7 +188,11 @@ function extractLegacyDoc(buffer) {
 
 function extractTextFormat(format, buffer) {
     const content = bufferToUtf8(buffer);
-    const extractedText = normalizeWhitespace(format === 'html' ? stripHtml(content) : content);
+    const extractedText = format === 'html'
+        ? normalizeWhitespace(stripHtml(content))
+        : (format === 'mermaid'
+            ? String(content || '').replace(/\r\n?/g, '\n').trim()
+            : normalizeWhitespace(content));
     const previewHtml = format === 'html' ? content : buildPreviewHtml(extractedText);
 
     return {
