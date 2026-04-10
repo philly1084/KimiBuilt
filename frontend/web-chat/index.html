@@ -402,11 +402,12 @@
                             <span id="sound-cues-label">Cute robot cues: Off</span>
                         </button>
                         <div class="assistant-sound-preview-row" role="group" aria-label="Preview sound cues">
+                            <button type="button" class="assistant-preview-btn" data-sound-preview="thinking-start">Think</button>
                             <button type="button" class="assistant-preview-btn" data-sound-preview="ack">Ack</button>
                             <button type="button" class="assistant-preview-btn" data-sound-preview="response">Reply</button>
                             <button type="button" class="assistant-preview-btn" data-sound-preview="survey">Checkpoint</button>
                         </div>
-                        <p class="model-selector-setting__hint">Reply and checkpoint cues stay distinct so you can tell whether the agent is done or needs a decision.</p>
+                        <p class="model-selector-setting__hint">Start, reply, and checkpoint cues stay distinct so you can hear whether the assistant is beginning work, answering, or waiting on a decision.</p>
                     </div>
                 </div>
                 <div class="model-selector-setting">
@@ -656,12 +657,21 @@
             
             <!-- Typing Indicator (Fixed below header) -->
             <div id="typing-indicator" class="typing-indicator-container hidden" aria-hidden="true">
-                <div class="typing-indicator-content">
-                    <div class="typing-avatar" aria-hidden="true">
-                        <i data-lucide="bot" class="w-4 h-4"></i>
+                <div class="typing-indicator-content" role="status" aria-live="polite">
+                    <div class="typing-phase-chip">
+                        <span class="typing-phase-icon" aria-hidden="true">
+                            <i data-live-icon data-lucide="sparkles" class="w-4 h-4"></i>
+                        </span>
+                        <span id="typing-phase-label" class="typing-phase-label">Thinking</span>
                     </div>
                     <div class="typing-bubble">
-                        <span class="typing-text">Assistant is thinking</span>
+                        <div class="typing-bubble__copy">
+                            <span id="typing-text" class="typing-text">Assistant is thinking</span>
+                            <span id="typing-detail" class="typing-detail">Gathering context and preparing the reply.</span>
+                        </div>
+                        <div class="typing-progress" aria-hidden="true">
+                            <span class="typing-progress__bar"></span>
+                        </div>
                         <div class="typing-dots" aria-hidden="true">
                             <span></span><span></span><span></span>
                         </div>
@@ -998,13 +1008,13 @@
     <!-- Scripts -->
     <script src="js/api.js?v=20260406d"></script>
     <script src="js/session.js?v=20260406a"></script>
-    <script src="js/sound-manager.js?v=20260406e"></script>
-    <script src="js/tts-manager.js?v=20260408b"></script>
+    <script src="js/sound-manager.js?v=20260409a"></script>
+    <script src="js/tts-manager.js?v=20260409a"></script>
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260406a"></script>
     <script src="js/sidebar-resize.js?v=20260406a"></script>
-    <script src="js/ui.js?v=20260408d"></script>
-    <script src="js/app.js?v=20260408a"></script>
+    <script src="js/ui.js?v=20260409a"></script>
+    <script src="js/app.js?v=20260409a"></script>
     <script src="js/artifacts.js?v=20260406a"></script>
 </body>
 </html>

@@ -107,4 +107,73 @@ describe('openai-client response threading', () => {
             ]),
         }));
     });
+
+    test('normalizes reasoning summary and tool item events from Responses streams', async () => {
+        const { __testUtils } = require('./openai-client');
+
+        async function* streamChunks() {
+            yield { type: 'response.reasoning_summary_text.delta', delta: 'Looking at the request. ' };
+            yield {
+                type: 'response.output_item.added',
+                item: {
+                    type: 'function_call',
+                    name: 'web_search',
+                    call_id: 'call_123',
+                },
+            };
+            yield { type: 'response.output_text.delta', delta: 'Answer' };
+            yield {
+                type: 'response.completed',
+                response: {
+                    id: 'resp_stream_1',
+                    model: 'gpt-4o',
+                    output: [{
+                        type: 'message',
+                        role: 'assistant',
+                        content: [{ type: 'output_text', text: 'Answer' }],
+                    }],
+                },
+            };
+        }
+
+        const events = [];
+        for await (const event of __testUtils.normalizeStreamResponse(streamChunks(), {
+            taskType: 'chat',
+            clientSurface: 'web-chat',
+        })) {
+            events.push(event);
+        }
+
+        expect(events).toEqual([
+            {
+                type: 'response.reasoning_summary_text.delta',
+                delta: 'Looking at the request. ',
+                summary: 'Looking at the request. ',
+            },
+            {
+                type: 'response.output_item.added',
+                item: {
+                    type: 'function_call',
+                    name: 'web_search',
+                    call_id: 'call_123',
+                },
+            },
+            {
+                type: 'response.output_text.delta',
+                delta: 'Answer',
+            },
+            expect.objectContaining({
+                type: 'response.completed',
+                response: expect.objectContaining({
+                    metadata: expect.objectContaining({
+                        taskType: 'chat',
+                        clientSurface: 'web-chat',
+                        reasoningSummary: expect.stringContaining('Looking at the request.'),
+                        reasoningAvailable: true,
+                    }),
+                    output_text: 'Answer',
+                }),
+            }),
+        ]);
+    });
 });

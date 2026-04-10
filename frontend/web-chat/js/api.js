@@ -155,6 +155,18 @@ function normalizeAssistantMetadata(value) {
         nextMetadata.taskType = value.taskType.trim();
     }
 
+    const reasoningSummary = typeof value.reasoningSummary === 'string' && value.reasoningSummary.trim()
+        ? value.reasoningSummary.trim()
+        : (typeof value.reasoning_summary === 'string' && value.reasoning_summary.trim()
+            ? value.reasoning_summary.trim()
+            : '');
+    if (reasoningSummary) {
+        nextMetadata.reasoningSummary = reasoningSummary;
+        nextMetadata.reasoningAvailable = true;
+    } else if (value.reasoningAvailable === true || value.reasoning_available === true) {
+        nextMetadata.reasoningAvailable = true;
+    }
+
     const normalizeSurveyDisplayContent = (rawValue = '') => {
         const normalized = String(rawValue || '').trim();
         if (!normalized) {
@@ -197,6 +209,22 @@ function normalizeAssistantMetadata(value) {
     }
 
     return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+}
+
+function mergeAssistantMetadata(currentValue, nextValue) {
+    const currentMetadata = currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)
+        ? currentValue
+        : {};
+    const patchMetadata = nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue)
+        ? nextValue
+        : {};
+
+    const mergedMetadata = {
+        ...currentMetadata,
+        ...patchMetadata,
+    };
+
+    return normalizeAssistantMetadata(mergedMetadata) || null;
 }
 
 function extractAssistantMetadata(value) {
@@ -399,7 +427,146 @@ class OpenAIAPIClient extends EventTarget {
             return message.tool_events;
         }
 
+        if (Array.isArray(payload.response?.metadata?.toolEvents)) {
+            return payload.response.metadata.toolEvents;
+        }
+
+        if (Array.isArray(payload.response?.metadata?.tool_events)) {
+            return payload.response.metadata.tool_events;
+        }
+
         return [];
+    }
+
+    buildDonePayload(pendingDone = {}) {
+        return {
+            type: 'done',
+            sessionId: pendingDone.sessionId || this.currentSessionId,
+            artifacts: Array.isArray(pendingDone.artifacts) ? pendingDone.artifacts : [],
+            toolEvents: Array.isArray(pendingDone.toolEvents) ? pendingDone.toolEvents : [],
+            assistantMetadata: pendingDone.assistantMetadata || null,
+        };
+    }
+
+    buildStatusEvent(phase = 'thinking', detail = '') {
+        return {
+            type: 'status',
+            phase,
+            detail: String(detail || '').trim(),
+        };
+    }
+
+    isToolOutputItem(item = {}) {
+        const itemType = String(item?.type || '').trim();
+        return itemType === 'function_call' || itemType === 'custom_tool_call';
+    }
+
+    getTextDeltaFromStreamPayload(parsed = {}) {
+        if (parsed?.type === 'response.output_text.delta') {
+            return stripNullCharacters(parsed.delta || '');
+        }
+
+        return stripNullCharacters(parsed?.choices?.[0]?.delta?.content || '');
+    }
+
+    buildToolEventDetail(item = {}, eventType = '') {
+        const rawToolName = String(
+            item?.name
+            || item?.tool_name
+            || item?.function?.name
+            || item?.call_id
+            || 'tool',
+        ).trim();
+        const toolName = rawToolName.replace(/[_-]+/g, ' ').trim() || 'tool';
+        const stage = eventType.endsWith('.done') ? 'completed' : 'started';
+        const detail = stage === 'completed'
+            ? `Finished ${toolName}`
+            : `Running ${toolName}`;
+
+        return {
+            stage,
+            toolName: rawToolName,
+            detail,
+        };
+    }
+
+    normalizeStreamPayload(parsed = {}, pendingDone = {}) {
+        if (parsed.session_id || parsed.sessionId) {
+            this.currentSessionId = parsed.session_id || parsed.sessionId;
+            pendingDone.sessionId = this.currentSessionId;
+        }
+
+        if (Array.isArray(parsed.artifacts)) {
+            pendingDone.artifacts = parsed.artifacts;
+        }
+
+        const toolEvents = this.extractToolEvents(parsed);
+        if (toolEvents.length > 0) {
+            pendingDone.toolEvents = toolEvents;
+        }
+
+        const assistantMetadata = extractAssistantMetadata(parsed);
+        if (assistantMetadata) {
+            pendingDone.assistantMetadata = mergeAssistantMetadata(
+                pendingDone.assistantMetadata,
+                assistantMetadata,
+            );
+        }
+
+        const events = [];
+
+        if (parsed.type === 'done') {
+            events.push(this.buildStatusEvent('ready', 'Reply complete'));
+            events.push(this.buildDonePayload(pendingDone));
+            return events;
+        }
+
+        if (parsed.type === 'response.reasoning_summary_text.delta' && parsed.delta) {
+            const summary = String(parsed.summary || parsed.reasoningSummary || parsed.reasoning_summary || '').trim()
+                || String(parsed.delta || '').trim();
+            pendingDone.assistantMetadata = mergeAssistantMetadata(
+                pendingDone.assistantMetadata,
+                {
+                    reasoningSummary: summary,
+                    reasoningAvailable: true,
+                },
+            );
+            events.push(this.buildStatusEvent('reasoning', 'Working through the answer'));
+            events.push({
+                type: 'reasoning_summary_delta',
+                content: String(parsed.delta || ''),
+                summary,
+            });
+        }
+
+        if ((parsed.type === 'response.output_item.added' || parsed.type === 'response.output_item.done')
+            && this.isToolOutputItem(parsed.item)) {
+            const toolEvent = this.buildToolEventDetail(parsed.item, parsed.type);
+            events.push(this.buildStatusEvent('checking-tools', toolEvent.detail));
+            events.push({
+                type: 'tool_event',
+                stage: toolEvent.stage,
+                toolName: toolEvent.toolName,
+                detail: toolEvent.detail,
+                item: parsed.item,
+            });
+        }
+
+        const content = this.getTextDeltaFromStreamPayload(parsed);
+        if (content) {
+            events.push(this.buildStatusEvent('writing', 'Writing the reply'));
+            events.push({
+                type: 'text_delta',
+                content,
+            });
+        }
+
+        if (parsed.type === 'response.completed' || this.isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
+            events.push(this.buildStatusEvent('ready', 'Reply complete'));
+            events.push(this.buildDonePayload(pendingDone));
+        }
+
+        return events;
     }
 
     /**
@@ -557,6 +724,8 @@ class OpenAIAPIClient extends EventTarget {
                     toolEvents: [],
                     assistantMetadata: null,
                 };
+
+                yield this.buildStatusEvent('thinking', 'Preparing the reply');
                 
                 try {
                     while (true) {
@@ -571,13 +740,7 @@ class OpenAIAPIClient extends EventTarget {
                             if (line.startsWith('data: ')) {
                                 const data = line.slice(6);
                                 if (data === '[DONE]') {
-                                    yield {
-                                        type: 'done',
-                                        sessionId: pendingDone.sessionId || this.currentSessionId,
-                                        artifacts: pendingDone.artifacts || [],
-                                        toolEvents: pendingDone.toolEvents || [],
-                                        assistantMetadata: pendingDone.assistantMetadata || null,
-                                    };
+                                    yield this.buildDonePayload(pendingDone);
                                     return;
                                 }
                                 try {
@@ -588,50 +751,15 @@ class OpenAIAPIClient extends EventTarget {
                                         throw new Error(parsed.error.message || 'Stream error');
                                     }
                                     
-                                    if (parsed.session_id || parsed.sessionId) {
-                                        this.currentSessionId = parsed.session_id || parsed.sessionId;
-                                        pendingDone.sessionId = this.currentSessionId;
-                                    }
-
-                                    if (Array.isArray(parsed.artifacts)) {
-                                        pendingDone.artifacts = parsed.artifacts;
-                                    }
-
-                                    const toolEvents = this.extractToolEvents(parsed);
-                                    if (toolEvents.length > 0) {
-                                        pendingDone.toolEvents = toolEvents;
-                                    }
-
-                                    const assistantMetadata = extractAssistantMetadata(parsed);
-                                    if (assistantMetadata) {
-                                        pendingDone.assistantMetadata = assistantMetadata;
-                                    }
-
-                                    if (parsed.type === 'done') {
-                                        yield {
-                                            type: 'done',
-                                            sessionId: pendingDone.sessionId || this.currentSessionId,
-                                            artifacts: pendingDone.artifacts || [],
-                                            toolEvents: pendingDone.toolEvents || [],
-                                            assistantMetadata: pendingDone.assistantMetadata || null,
-                                        };
-                                        return;
-                                    }
-
-                                    const content = stripNullCharacters(parsed.choices?.[0]?.delta?.content || '');
-                                    if (content) {
-                                        yield { type: 'delta', content };
+                                    const normalizedEvents = this.normalizeStreamPayload(parsed, pendingDone);
+                                    for (const event of normalizedEvents) {
+                                        yield event;
+                                        if (event.type === 'done') {
+                                            return;
+                                        }
                                     }
                                     
-                                    // Check finish reason
-                                    if (this.isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
-                                        yield {
-                                            type: 'done',
-                                            sessionId: pendingDone.sessionId || this.currentSessionId,
-                                            artifacts: pendingDone.artifacts || [],
-                                            toolEvents: pendingDone.toolEvents || [],
-                                            assistantMetadata: pendingDone.assistantMetadata || null,
-                                        };
+                                    if (parsed.type === 'done' || this.isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
                                         return;
                                     }
                                 } catch (e) {
@@ -651,13 +779,7 @@ class OpenAIAPIClient extends EventTarget {
                 
                 // Success - reset retry count
                 this.retryCount = 0;
-                yield {
-                    type: 'done',
-                    sessionId: pendingDone.sessionId || this.currentSessionId,
-                    artifacts: pendingDone.artifacts || [],
-                    toolEvents: pendingDone.toolEvents || [],
-                    assistantMetadata: pendingDone.assistantMetadata || null,
-                };
+                yield this.buildDonePayload(pendingDone);
                 return;
                 
             } catch (error) {
@@ -698,19 +820,25 @@ class OpenAIAPIClient extends EventTarget {
             });
 
             let pendingAssistantMetadata = null;
-            
+            yield this.buildStatusEvent('thinking', 'Preparing the reply');
+             
             for await (const chunk of stream) {
                 // Check if aborted
                 if (signal?.aborted) {
                     yield { type: 'error', error: 'Request cancelled', cancelled: true };
-                    yield { type: 'done', sessionId: this.currentSessionId };
+                    yield this.buildDonePayload({
+                        sessionId: this.currentSessionId,
+                        toolEvents: [],
+                        assistantMetadata: pendingAssistantMetadata,
+                    });
                     return;
                 }
                 
                 const content = stripNullCharacters(chunk.choices[0]?.delta?.content || '');
                 if (content) {
+                    yield this.buildStatusEvent('writing', 'Writing the reply');
                     yield {
-                        type: 'delta',
+                        type: 'text_delta',
                         content,
                     };
                 }
@@ -721,27 +849,26 @@ class OpenAIAPIClient extends EventTarget {
 
                 const assistantMetadata = extractAssistantMetadata(chunk);
                 if (assistantMetadata) {
-                    pendingAssistantMetadata = assistantMetadata;
+                    pendingAssistantMetadata = mergeAssistantMetadata(pendingAssistantMetadata, assistantMetadata);
                 }
                 
                 if (this.isTerminalFinishReason(chunk.choices[0]?.finish_reason)) {
-                    yield {
-                        type: 'done',
+                    yield this.buildStatusEvent('ready', 'Reply complete');
+                    yield this.buildDonePayload({
                         sessionId: this.currentSessionId,
                         toolEvents: this.extractToolEvents(chunk),
                         assistantMetadata: pendingAssistantMetadata,
-                    };
+                    });
                     return;
                 }
             }
-            
+             
             // Ensure we always send done
-            yield {
-                type: 'done',
+            yield this.buildDonePayload({
                 sessionId: this.currentSessionId,
                 toolEvents: [],
                 assistantMetadata: pendingAssistantMetadata,
-            };
+            });
         } catch (error) {
             if (error.name === 'AbortError') {
                 yield { type: 'error', error: 'Request cancelled', cancelled: true };
@@ -749,7 +876,7 @@ class OpenAIAPIClient extends EventTarget {
                 const message = this.parseErrorMessage(error);
                 yield { type: 'error', error: message };
             }
-            yield { type: 'done', sessionId: this.currentSessionId, toolEvents: [] };
+            yield this.buildDonePayload({ sessionId: this.currentSessionId, toolEvents: [] });
         }
     }
 

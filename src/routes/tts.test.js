@@ -22,6 +22,12 @@ describe('/api/tts', () => {
             configured: true,
             provider: 'piper',
             defaultVoiceId: 'piper-female-natural',
+            diagnostics: {
+                status: 'ready',
+                binaryReachable: true,
+                voicesLoaded: true,
+                message: 'Piper is ready.',
+            },
             voices: [{
                 id: 'piper-female-natural',
                 label: 'Female natural',
@@ -42,6 +48,11 @@ describe('/api/tts', () => {
             configured: true,
             provider: 'piper',
             defaultVoiceId: 'piper-female-natural',
+            diagnostics: expect.objectContaining({
+                status: 'ready',
+                binaryReachable: true,
+                voicesLoaded: true,
+            }),
         }));
     });
 

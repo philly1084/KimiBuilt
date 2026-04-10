@@ -106,6 +106,11 @@ function normalizeMessageText(content = '') {
     return '';
 }
 
+function isResponseToolOutputItem(item = {}) {
+    const type = String(item?.type || '').trim();
+    return type === 'function_call' || type === 'custom_tool_call';
+}
+
 function inferOutputFormatFromTranscript(messages = [], session = null) {
     const normalizedMessages = Array.isArray(messages) ? messages : [];
     const lastUserMessage = normalizedMessages.filter((message) => message?.role === 'user').pop();
@@ -932,6 +937,34 @@ router.post('/chat/completions', async (req, res, next) => {
                     chunkIndex += 1;
                 }
 
+                if (event.type === 'response.reasoning_summary_text.delta' && event.delta) {
+                    res.write(`data: ${JSON.stringify({
+                        id: `chatcmpl-${sessionId}-${chunkIndex}`,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: model || 'gpt-4o',
+                        choices: [{ index: 0, delta: {}, finish_reason: null }],
+                        type: 'response.reasoning_summary_text.delta',
+                        delta: event.delta,
+                        summary: event.summary || '',
+                    })}\n\n`);
+                    chunkIndex += 1;
+                }
+
+                if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
+                    && isResponseToolOutputItem(event.item)) {
+                    res.write(`data: ${JSON.stringify({
+                        id: `chatcmpl-${sessionId}-${chunkIndex}`,
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: model || 'gpt-4o',
+                        choices: [{ index: 0, delta: {}, finish_reason: null }],
+                        type: event.type,
+                        item: event.item,
+                    })}\n\n`);
+                    chunkIndex += 1;
+                }
+
                 if (event.type === 'response.completed') {
                     const completedText = resolveCompletedResponseText(fullText, event.response);
                     const resolvedCompletion = resolveCompatAssistantText({
@@ -1605,6 +1638,22 @@ router.post('/responses', async (req, res, next) => {
                     res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: event.delta })}\n\n`);
                 }
 
+                if (event.type === 'response.reasoning_summary_text.delta' && event.delta) {
+                    res.write(`data: ${JSON.stringify({
+                        type: 'response.reasoning_summary_text.delta',
+                        delta: event.delta,
+                        summary: event.summary || '',
+                    })}\n\n`);
+                }
+
+                if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
+                    && isResponseToolOutputItem(event.item)) {
+                    res.write(`data: ${JSON.stringify({
+                        type: event.type,
+                        item: event.item,
+                    })}\n\n`);
+                }
+
                 if (event.type === 'response.completed') {
                     const completedText = resolveCompletedResponseText(fullText, event.response);
                     const resolvedCompletion = resolveCompatAssistantText({
@@ -1681,6 +1730,8 @@ router.post('/responses', async (req, res, next) => {
                         response: resolvedCompletion.response,
                         session_id: sessionId,
                         artifacts,
+                        tool_events: resolvedCompletion.response?.metadata?.toolEvents || [],
+                        toolEvents: resolvedCompletion.response?.metadata?.toolEvents || [],
                         assistant_metadata: buildFrontendAssistantMetadata({
                             ...(resolvedCompletion.response?.metadata || {}),
                             artifacts,

@@ -48,6 +48,12 @@ class ChatApp {
         
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
+        this.liveIndicatorHideTimer = null;
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+        };
         this.autoResize = null;
         this.searchResults = [];
         this.currentSearchIndex = -1;
@@ -1668,7 +1674,6 @@ class ChatApp {
         // Show typing indicator
         this.isProcessing = true;
         this.updateSendButton();
-        uiHelpers.showTypingIndicator();
 
         // Get current model
         const model = uiHelpers.getCurrentModel();
@@ -1687,14 +1692,14 @@ class ChatApp {
         assistantMessage.id = this.currentStreamingMessageId;
 
         sessionManager.addMessage(sessionId, assistantMessage);
-
-        // Delay showing the assistant message slightly for better UX
-        setTimeout(() => {
-            const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
-            this.messagesContainer.appendChild(assistantMessageEl);
-            uiHelpers.reinitializeIcons(assistantMessageEl);
-            uiHelpers.scrollToBottom();
-        }, 300);
+        const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
+        this.messagesContainer.appendChild(assistantMessageEl);
+        uiHelpers.reinitializeIcons(assistantMessageEl);
+        uiHelpers.scrollToBottom();
+        this.beginAssistantStream({
+            messageId: this.currentStreamingMessageId,
+            detail: 'Gathering context and preparing the reply.',
+        });
         
         // Build message history for OpenAI API format
         const messages = this.buildMessageHistory(sessionId);
@@ -1718,10 +1723,19 @@ class ChatApp {
                 }
 
                 switch (chunk.type) {
-                    case 'delta':
+                    case 'status':
+                        this.handleStreamStatus(chunk);
+                        break;
+                    case 'text_delta':
                         hasReceivedContent = true;
                         this.retryAttempt = 0; // Reset retry count on successful content
                         this.handleDelta(chunk.content);
+                        break;
+                    case 'reasoning_summary_delta':
+                        this.handleReasoningSummaryDelta(chunk);
+                        break;
+                    case 'tool_event':
+                        this.handleToolEvent(chunk);
                         break;
                     case 'done':
                         this.handleDone(chunk);
@@ -3638,24 +3652,182 @@ class ChatApp {
         }
     }
 
-    handleDelta(content) {
-        if (!this.currentStreamingMessageId) return;
-        
-        // Hide typing indicator once we start receiving content
-        uiHelpers.hideTypingIndicator();
-        
+    clearLiveIndicatorTimer() {
+        if (!this.liveIndicatorHideTimer) {
+            return;
+        }
+
+        window.clearTimeout(this.liveIndicatorHideTimer);
+        this.liveIndicatorHideTimer = null;
+    }
+
+    beginAssistantStream(options = {}) {
+        this.clearLiveIndicatorTimer();
+        this.liveResponseState = {
+            phase: 'thinking',
+            detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
+            reasoningSummary: '',
+        };
+        uiHelpers.showTypingIndicator({
+            phase: 'thinking',
+            detail: this.liveResponseState.detail,
+        });
+        uiHelpers.playThinkingCue();
+        this.updateStreamingMessageState({
+            liveState: {
+                phase: 'thinking',
+                detail: this.liveResponseState.detail,
+            },
+            reasoningSummary: '',
+            reasoningAvailable: false,
+            isStreaming: true,
+        }, {
+            render: true,
+            scroll: false,
+        });
+    }
+
+    scheduleLiveIndicatorHide(delayMs = 900) {
+        this.clearLiveIndicatorTimer();
+        this.liveIndicatorHideTimer = window.setTimeout(() => {
+            uiHelpers.hideTypingIndicator();
+            this.liveIndicatorHideTimer = null;
+        }, Math.max(0, Number(delayMs) || 0));
+    }
+
+    updateLiveResponsePhase(phase = 'thinking', detail = '') {
+        const normalizedPhase = String(phase || '').trim() || 'thinking';
+        const nextDetail = String(detail || '').trim();
+        this.liveResponseState = {
+            ...this.liveResponseState,
+            phase: normalizedPhase,
+            detail: nextDetail || this.liveResponseState.detail || '',
+        };
+
+        uiHelpers.showTypingIndicator({
+            phase: normalizedPhase,
+            detail: this.liveResponseState.detail,
+        });
+
+        this.updateStreamingMessageState({
+            liveState: {
+                phase: normalizedPhase,
+                detail: this.liveResponseState.detail,
+            },
+            isStreaming: normalizedPhase !== 'ready',
+        }, {
+            render: normalizedPhase !== 'ready',
+            scroll: false,
+        });
+    }
+
+    updateStreamingMessageState(patch = {}, options = {}) {
+        const messageId = String(this.currentStreamingMessageId || patch?.id || '').trim();
         const sessionId = sessionManager.currentSessionId;
-        const messages = sessionManager.getMessages(sessionId);
-        const lastMessage = messages[messages.length - 1];
-        
-        if (lastMessage && lastMessage.role === 'assistant') {
-            // Append content
-            lastMessage.content += content;
-            
-            // Update UI
-            uiHelpers.updateMessageContent(this.currentStreamingMessageId, lastMessage.content, true);
+        if (!messageId || !sessionId) {
+            return null;
+        }
+
+        const currentMessage = this.getSessionMessage(sessionId, messageId);
+        if (!currentMessage) {
+            return null;
+        }
+
+        const nextMetadata = {
+            ...(currentMessage.metadata || {}),
+            ...(patch.metadata || {}),
+        };
+        const nextReasoningSummary = patch.reasoningSummary !== undefined
+            ? String(patch.reasoningSummary || '').trim()
+            : String(currentMessage.reasoningSummary || currentMessage.metadata?.reasoningSummary || '').trim();
+        const nextReasoningAvailable = patch.reasoningAvailable === true
+            || currentMessage.reasoningAvailable === true
+            || currentMessage.metadata?.reasoningAvailable === true
+            || Boolean(nextReasoningSummary);
+
+        if (nextReasoningSummary) {
+            nextMetadata.reasoningSummary = nextReasoningSummary;
+            nextMetadata.reasoningAvailable = true;
+        } else if (patch.reasoningSummary !== undefined) {
+            delete nextMetadata.reasoningSummary;
+        }
+        if (nextReasoningAvailable) {
+            nextMetadata.reasoningAvailable = true;
+        }
+
+        const nextMessage = {
+            ...currentMessage,
+            ...patch,
+            id: currentMessage.id,
+            metadata: nextMetadata,
+            reasoningSummary: nextReasoningSummary,
+            reasoningAvailable: nextReasoningAvailable,
+        };
+
+        if (!nextMessage.liveState) {
+            delete nextMessage.liveState;
+        }
+
+        const savedMessage = this.upsertSessionMessage(sessionId, nextMessage);
+        if ((options.render ?? true) && savedMessage) {
+            uiHelpers.updateMessageContent(messageId, savedMessage, savedMessage.isStreaming === true);
+        }
+        if (options.scroll === true) {
             uiHelpers.scrollToBottom();
         }
+
+        return savedMessage || nextMessage;
+    }
+
+    handleStreamStatus(chunk = {}) {
+        const phase = String(chunk.phase || '').trim() || 'thinking';
+        const detail = String(chunk.detail || '').trim();
+        this.updateLiveResponsePhase(phase, detail);
+    }
+
+    handleReasoningSummaryDelta(chunk = {}) {
+        const delta = String(chunk.content || '');
+        const summary = String(chunk.summary || '').trim();
+        const currentSummary = String(this.liveResponseState.reasoningSummary || '').trim();
+        const nextSummary = summary || `${currentSummary}${delta}`.trim();
+
+        this.liveResponseState = {
+            ...this.liveResponseState,
+            reasoningSummary: nextSummary,
+        };
+        this.updateLiveResponsePhase('reasoning', 'Working through the answer');
+        this.updateStreamingMessageState({
+            reasoningSummary: nextSummary,
+            reasoningAvailable: true,
+            isStreaming: true,
+        }, {
+            render: true,
+            scroll: false,
+        });
+    }
+
+    handleToolEvent(chunk = {}) {
+        const detail = String(chunk.detail || '').trim() || 'Checking tool results';
+        this.updateLiveResponsePhase('checking-tools', detail);
+    }
+
+    handleDelta(content) {
+        if (!this.currentStreamingMessageId) return;
+
+        const sessionId = sessionManager.currentSessionId;
+        const currentMessage = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
+        if (!currentMessage || currentMessage.role !== 'assistant') {
+            return;
+        }
+
+        this.updateLiveResponsePhase('writing', 'Streaming the reply');
+        this.updateStreamingMessageState({
+            content: `${currentMessage.content || ''}${content}`,
+            isStreaming: true,
+        }, {
+            render: true,
+            scroll: true,
+        });
     }
 
     handleDone(chunk = {}) {
@@ -3670,11 +3842,14 @@ class ChatApp {
         
         // Finalize message
         sessionManager.finalizeLastMessage(sessionId);
-        
-        // Hide typing indicator
-        uiHelpers.hideTypingIndicator();
 
         let currentMessage = this.getSessionMessage(sessionId, parentMessageId);
+        const streamedReasoningSummary = String(
+            this.liveResponseState.reasoningSummary
+            || currentMessage?.reasoningSummary
+            || currentMessage?.metadata?.reasoningSummary
+            || '',
+        ).trim();
         if (currentMessage && chunk.assistantMetadata && typeof chunk.assistantMetadata === 'object') {
             const updatedMessage = {
                 ...currentMessage,
@@ -3682,6 +3857,25 @@ class ChatApp {
                 metadata: {
                     ...(currentMessage.metadata || {}),
                     ...chunk.assistantMetadata,
+                },
+            };
+            if (streamedReasoningSummary && !updatedMessage.reasoningSummary) {
+                updatedMessage.reasoningSummary = streamedReasoningSummary;
+                updatedMessage.reasoningAvailable = true;
+                updatedMessage.metadata.reasoningSummary = streamedReasoningSummary;
+                updatedMessage.metadata.reasoningAvailable = true;
+            }
+            this.upsertSessionMessage(sessionId, updatedMessage);
+            currentMessage = updatedMessage;
+        } else if (currentMessage && streamedReasoningSummary) {
+            const updatedMessage = {
+                ...currentMessage,
+                reasoningSummary: streamedReasoningSummary,
+                reasoningAvailable: true,
+                metadata: {
+                    ...(currentMessage.metadata || {}),
+                    reasoningSummary: streamedReasoningSummary,
+                    reasoningAvailable: true,
                 },
             };
             this.upsertSessionMessage(sessionId, updatedMessage);
@@ -3706,6 +3900,18 @@ class ChatApp {
             }
         }
 
+        const readyDetail = uiHelpers.isTtsAutoPlayEnabled() && uiHelpers.isTtsAvailable()
+            ? 'Ready to speak'
+            : 'Reply complete';
+        this.updateLiveResponsePhase('ready', readyDetail);
+        this.updateStreamingMessageState({
+            liveState: null,
+            isStreaming: false,
+        }, {
+            render: false,
+            scroll: false,
+        });
+
         // Update UI
         const messages = this.syncAnnotatedSurveyStates(sessionId);
         const lastMessage = messages[messages.length - 1];
@@ -3726,12 +3932,19 @@ class ChatApp {
             this.presentAssistantMessage(insertedSurveyMessage, chunk.toolEvents);
         } else if (lastMessage) {
             this.renderOrReplaceMessage(lastMessage);
+            uiHelpers.markMessageSettled(lastMessage.id);
             this.presentAssistantMessage(lastMessage, chunk.toolEvents);
         }
         
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+        };
         this.updateSendButton();
+        this.scheduleLiveIndicatorHide();
 
         if (Array.isArray(chunk.toolEvents) && chunk.toolEvents.length > 0) {
             this.appendToolSelectionMessages(parentMessageId, chunk.toolEvents);
@@ -3796,8 +4009,7 @@ class ChatApp {
         
         // Max retries exceeded or non-network error - show the error
         this.retryAttempt = 0;
-        
-        // Hide typing indicator
+        this.clearLiveIndicatorTimer();
         uiHelpers.hideTypingIndicator();
         
         // Remove the streaming message placeholder
@@ -3818,6 +4030,11 @@ class ChatApp {
         
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+        };
         this.updateSendButton();
         
         // Show appropriate error message
@@ -3859,7 +4076,7 @@ class ChatApp {
     }
 
     handleCancelled() {
-        // Hide typing indicator
+        this.clearLiveIndicatorTimer();
         uiHelpers.hideTypingIndicator();
         
         // Remove the streaming message placeholder
@@ -3880,6 +4097,11 @@ class ChatApp {
         
         this.isProcessing = false;
         this.currentStreamingMessageId = null;
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+        };
         this.updateSendButton();
     }
 
@@ -3920,7 +4142,6 @@ class ChatApp {
         // Show typing indicator
         this.isProcessing = true;
         this.updateSendButton();
-        uiHelpers.showTypingIndicator();
         
         // Create new placeholder for assistant response
         const assistantMessage = {
@@ -3934,13 +4155,14 @@ class ChatApp {
         assistantMessage.id = this.currentStreamingMessageId;
         
         sessionManager.addMessage(sessionId, assistantMessage);
-        
-        setTimeout(() => {
-            const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
-            this.messagesContainer.appendChild(assistantMessageEl);
-            uiHelpers.reinitializeIcons(assistantMessageEl);
-            uiHelpers.scrollToBottom();
-        }, 300);
+        const assistantMessageEl = uiHelpers.renderMessage(assistantMessage, true);
+        this.messagesContainer.appendChild(assistantMessageEl);
+        uiHelpers.reinitializeIcons(assistantMessageEl);
+        uiHelpers.scrollToBottom();
+        this.beginAssistantStream({
+            messageId: this.currentStreamingMessageId,
+            detail: 'Gathering context and preparing the reply.',
+        });
         
         // Get current model
         const model = uiHelpers.getCurrentModel();
@@ -3959,8 +4181,17 @@ class ChatApp {
                 }
 
                 switch (chunk.type) {
-                    case 'delta':
+                    case 'status':
+                        this.handleStreamStatus(chunk);
+                        break;
+                    case 'text_delta':
                         this.handleDelta(chunk.content);
+                        break;
+                    case 'reasoning_summary_delta':
+                        this.handleReasoningSummaryDelta(chunk);
+                        break;
+                    case 'tool_event':
+                        this.handleToolEvent(chunk);
                         break;
                     case 'done':
                         this.handleDone(chunk);

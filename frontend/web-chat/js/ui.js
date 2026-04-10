@@ -10,6 +10,7 @@ class UIHelpers {
         this.sessionsList = document.getElementById('sessions-list');
         this.searchResults = [];
         this.currentSearchIndex = -1;
+        this.expandedReasoningMessageIds = new Set();
         this.setupMarked();
         this.ensureAssistantModelControls();
         this.setupEventListeners();
@@ -1730,14 +1731,155 @@ class UIHelpers {
         };
     }
 
+    getLivePhaseMeta(phase = 'thinking') {
+        switch (String(phase || '').trim().toLowerCase()) {
+            case 'reasoning':
+                return {
+                    phase: 'reasoning',
+                    label: 'Reasoning',
+                    text: 'Reasoning in progress',
+                    detail: 'Working through the answer before drafting it.',
+                    icon: 'brain',
+                };
+            case 'checking-tools':
+                return {
+                    phase: 'checking-tools',
+                    label: 'Checking tools',
+                    text: 'Checking tools',
+                    detail: 'Reviewing tool results and pulling in context.',
+                    icon: 'wrench',
+                };
+            case 'writing':
+                return {
+                    phase: 'writing',
+                    label: 'Writing',
+                    text: 'Writing the reply',
+                    detail: 'Streaming the response into the thread.',
+                    icon: 'pen-line',
+                };
+            case 'ready':
+                return {
+                    phase: 'ready',
+                    label: 'Ready',
+                    text: 'Reply ready',
+                    detail: 'The answer is complete.',
+                    icon: 'check',
+                };
+            default:
+                return {
+                    phase: 'thinking',
+                    label: 'Thinking',
+                    text: 'Assistant is thinking',
+                    detail: 'Gathering context and preparing the reply.',
+                    icon: 'sparkles',
+                };
+        }
+    }
+
+    getMessageReasoningSummary(message = null) {
+        return String(
+            message?.reasoningSummary
+            || message?.metadata?.reasoningSummary
+            || '',
+        ).trim();
+    }
+
+    hasMessageReasoning(message = null) {
+        return Boolean(this.getMessageReasoningSummary(message))
+            || message?.reasoningAvailable === true
+            || message?.metadata?.reasoningAvailable === true;
+    }
+
+    buildReasoningSummaryPreview(summary = '', maxLength = 140) {
+        const normalized = String(summary || '').replace(/\s+/g, ' ').trim();
+        if (!normalized) {
+            return 'Reasoning data is available for this reply.';
+        }
+
+        if (normalized.length <= maxLength) {
+            return normalized;
+        }
+
+        return `${normalized.slice(0, Math.max(32, maxLength - 1)).trimEnd()}…`;
+    }
+
+    buildReasoningRibbonMarkup(message = null, isStreaming = false) {
+        if (!this.hasMessageReasoning(message)) {
+            return '';
+        }
+
+        const messageId = String(message?.id || '').trim();
+        const summary = this.getMessageReasoningSummary(message);
+        const expanded = Boolean(messageId) && this.expandedReasoningMessageIds.has(messageId);
+        const preview = this.buildReasoningSummaryPreview(summary, isStreaming ? 168 : 132);
+        const body = expanded && summary
+            ? `<div class="assistant-reasoning-ribbon__body">${this.escapeHtml(summary).replace(/\n/g, '<br>')}</div>`
+            : '';
+
+        return `
+            <div class="assistant-reasoning-ribbon${expanded ? ' is-expanded' : ''}${isStreaming ? ' is-live' : ''}">
+                <button
+                    class="assistant-reasoning-ribbon__toggle"
+                    type="button"
+                    onclick="uiHelpers.toggleReasoningSummary('${this.escapeHtmlAttr(messageId)}')"
+                    aria-expanded="${expanded ? 'true' : 'false'}"
+                    aria-label="${expanded ? 'Collapse reasoning summary' : 'Expand reasoning summary'}"
+                >
+                    <span class="assistant-reasoning-ribbon__main">
+                        <span class="assistant-reasoning-ribbon__icon" aria-hidden="true">
+                            <i data-lucide="brain" class="w-3.5 h-3.5"></i>
+                        </span>
+                        <span class="assistant-reasoning-ribbon__copy">
+                            <span class="assistant-reasoning-ribbon__title">Reasoning</span>
+                            <span class="assistant-reasoning-ribbon__preview">${this.escapeHtml(preview)}</span>
+                        </span>
+                    </span>
+                    <span class="assistant-reasoning-ribbon__meta">
+                        <span class="assistant-reasoning-ribbon__badge${isStreaming ? ' assistant-reasoning-ribbon__badge--live' : ''}">
+                            ${isStreaming ? '<span class="assistant-reasoning-ribbon__pulse" aria-hidden="true"></span>Live' : 'Summary'}
+                        </span>
+                        <i data-lucide="${expanded ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4" aria-hidden="true"></i>
+                    </span>
+                </button>
+                ${body}
+            </div>
+        `;
+    }
+
+    buildStreamingPlaceholderMarkup(message = null) {
+        const meta = this.getLivePhaseMeta(message?.liveState?.phase || 'thinking');
+        const detail = String(message?.liveState?.detail || meta.detail || '').trim();
+
+        return `
+            <div class="assistant-stream-placeholder" aria-live="polite">
+                <div class="assistant-stream-placeholder__header">
+                    <span class="assistant-stream-placeholder__phase">
+                        <span class="assistant-stream-placeholder__phase-icon" aria-hidden="true">
+                            <i data-lucide="${meta.icon}" class="w-3.5 h-3.5"></i>
+                        </span>
+                        <span>${this.escapeHtml(meta.label)}</span>
+                    </span>
+                    ${detail ? `<span class="assistant-stream-placeholder__detail">${this.escapeHtml(detail)}</span>` : ''}
+                </div>
+                <div class="assistant-stream-placeholder__lines" aria-hidden="true">
+                    <span class="assistant-stream-placeholder__line assistant-stream-placeholder__line--lg"></span>
+                    <span class="assistant-stream-placeholder__line assistant-stream-placeholder__line--md"></span>
+                    <span class="assistant-stream-placeholder__line assistant-stream-placeholder__line--sm"></span>
+                </div>
+            </div>
+        `;
+    }
+
     buildAssistantRenderPlan(messageOrContent, isStreaming = false) {
         const message = messageOrContent && typeof messageOrContent === 'object'
             ? messageOrContent
             : { content: messageOrContent };
+        const effectiveStreaming = isStreaming === true || message?.isStreaming === true;
         const content = message.displayContent ?? message.content;
+        const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
             return {
-                html: isStreaming ? '<span class="streaming-cursor" aria-hidden="true"></span>' : '',
+                html: `${reasoningRibbon}${effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : ''}`,
                 variant: 'default',
             };
         }
@@ -1776,12 +1918,12 @@ class UIHelpers {
                 </div>
             `;
 
-            if (isStreaming) {
+            if (effectiveStreaming) {
                 html += '<span class="streaming-cursor" aria-hidden="true"></span>';
             }
 
             return {
-                html,
+                html: `${reasoningRibbon}${html}`,
                 variant: 'agent-brief',
             };
         }
@@ -1789,12 +1931,12 @@ class UIHelpers {
         let html = this.sanitizeAssistantHtml(marked.parse(normalizedMarkdown));
         html = this.replaceSurveyRenderTokens(html, surveyRenderPlan.surveys);
 
-        if (isStreaming) {
+        if (effectiveStreaming) {
             html += '<span class="streaming-cursor" aria-hidden="true"></span>';
         }
 
         return {
-            html,
+            html: `${reasoningRibbon}${html}`,
             variant: 'default',
         };
     }
@@ -1826,6 +1968,7 @@ class UIHelpers {
         }
         
         const isUser = message.role === 'user';
+        const effectiveStreaming = !isUser && (isStreaming === true || message?.isStreaming === true);
         const messageId = message.id || this.generateMessageId();
         
         const messageEl = document.createElement('div');
@@ -1866,7 +2009,7 @@ class UIHelpers {
             : '';
         const assistantRenderPlan = isUser
             ? null
-            : this.buildAssistantRenderPlan(message, isStreaming);
+            : this.buildAssistantRenderPlan(message, effectiveStreaming);
         const content = isUser ? 
             this.renderUserMessage(renderedContent) :
             assistantRenderPlan.html;
@@ -1876,6 +2019,16 @@ class UIHelpers {
 
         if (assistantRenderPlan?.variant === 'agent-brief') {
             messageEl.classList.add('message--agent-brief');
+        }
+
+        messageEl.classList.toggle('message--streaming', effectiveStreaming);
+        messageEl.classList.toggle('message--has-reasoning', !isUser && this.hasMessageReasoning(message));
+        if (!isUser) {
+            if (message?.liveState?.phase) {
+                messageEl.dataset.livePhase = String(message.liveState.phase).trim();
+            } else {
+                delete messageEl.dataset.livePhase;
+            }
         }
 
         const time = this.formatTime(message.timestamp);
@@ -1922,6 +2075,32 @@ class UIHelpers {
 
     renderAssistantMessage(messageOrContent, isStreaming = false) {
         return this.buildAssistantRenderPlan(messageOrContent, isStreaming).html;
+    }
+
+    toggleReasoningSummary(messageId = '') {
+        const normalizedMessageId = String(messageId || '').trim();
+        if (!normalizedMessageId) {
+            return;
+        }
+
+        if (this.expandedReasoningMessageIds.has(normalizedMessageId)) {
+            this.expandedReasoningMessageIds.delete(normalizedMessageId);
+        } else {
+            this.expandedReasoningMessageIds.add(normalizedMessageId);
+        }
+
+        const sessionId = window.sessionManager?.currentSessionId || null;
+        const message = typeof window.sessionManager?.getMessage === 'function'
+            ? window.sessionManager.getMessage(sessionId, normalizedMessageId)
+            : window.sessionManager?.getMessages?.(sessionId)?.find((entry) => entry.id === normalizedMessageId);
+        const existing = document.getElementById(normalizedMessageId);
+        if (!message || !existing) {
+            return;
+        }
+
+        const nextMessageEl = this.renderMessage(message, message.isStreaming === true);
+        existing.replaceWith(nextMessageEl);
+        this.reinitializeIcons(nextMessageEl);
     }
 
     toggleSurveyOption(button) {
@@ -2587,11 +2766,15 @@ class UIHelpers {
         if (!textEl) return false;
 
         const isUser = messageEl.classList.contains('user');
+        const nextMessage = content && typeof content === 'object'
+            ? { ...content, id: messageId }
+            : { id: messageId, content };
+        const effectiveStreaming = isStreaming === true || nextMessage?.isStreaming === true;
         
         if (isUser) {
-            textEl.textContent = content;
+            textEl.textContent = String(nextMessage.content || '');
         } else {
-            const renderPlan = this.buildAssistantRenderPlan({ id: messageId, content }, isStreaming);
+            const renderPlan = this.buildAssistantRenderPlan(nextMessage, effectiveStreaming);
             messageEl.classList.toggle('message--agent-brief', renderPlan.variant === 'agent-brief');
             textEl.classList.toggle('message-text--agent-brief', renderPlan.variant === 'agent-brief');
             textEl.innerHTML = renderPlan.html;
@@ -2601,7 +2784,32 @@ class UIHelpers {
             this.reinitializeIcons(textEl);
         }
 
+        messageEl.classList.toggle('message--streaming', !isUser && effectiveStreaming);
+        messageEl.classList.toggle('message--has-reasoning', !isUser && this.hasMessageReasoning(nextMessage));
+        if (!isUser) {
+            if (nextMessage?.liveState?.phase) {
+                messageEl.dataset.livePhase = String(nextMessage.liveState.phase).trim();
+            } else {
+                delete messageEl.dataset.livePhase;
+            }
+        }
+
         return true;
+    }
+
+    markMessageSettled(messageId = '') {
+        const messageEl = document.getElementById(messageId);
+        if (!messageEl) {
+            return;
+        }
+
+        messageEl.classList.remove('message--settled');
+        void messageEl.offsetWidth;
+        messageEl.classList.add('message--settled');
+
+        window.setTimeout(() => {
+            messageEl.classList.remove('message--settled');
+        }, 1200);
     }
 
     appendToMessage(messageId, content) {
@@ -3587,6 +3795,10 @@ class UIHelpers {
         this.soundManager?.play?.('ack');
     }
 
+    playThinkingCue() {
+        this.soundManager?.play?.('thinking-start');
+    }
+
     async initializeTts() {
         if (!this.ttsManager) {
             return;
@@ -3605,6 +3817,30 @@ class UIHelpers {
 
     isTtsAvailable() {
         return this.ttsManager?.isAvailable?.() === true;
+    }
+
+    getTtsDiagnostics() {
+        return this.ttsManager?.getDiagnostics?.() || {
+            status: 'unavailable',
+            binaryReachable: false,
+            voicesLoaded: false,
+            message: 'Piper voice is unavailable.',
+        };
+    }
+
+    getTtsStatus() {
+        return this.ttsManager?.getStatus?.() || (this.isTtsAvailable() ? 'ready' : 'unavailable');
+    }
+
+    getTtsStatusLabel(status = '') {
+        switch (String(status || '').trim().toLowerCase()) {
+            case 'ready':
+                return 'Ready';
+            case 'misconfigured':
+                return 'Misconfigured';
+            default:
+                return 'Unavailable';
+        }
     }
 
     isTtsAutoPlayEnabled() {
@@ -3659,7 +3895,10 @@ class UIHelpers {
         const hint = document.getElementById('tts-voice-hint');
         const voiceSelectWrap = document.getElementById('tts-voice-select-wrap');
         const voiceSelect = document.getElementById('tts-voice-select');
-        const available = this.isTtsAvailable();
+        const diagnostics = this.getTtsDiagnostics();
+        const status = this.getTtsStatus();
+        const statusLabel = this.getTtsStatusLabel(status);
+        const available = status === 'ready' && this.isTtsAvailable();
         const autoPlayEnabled = this.isTtsAutoPlayEnabled();
         const voices = this.getTtsVoices();
         const selectedVoiceId = this.ttsManager?.getSelectedVoiceId?.() || voices[0]?.id || '';
@@ -3670,13 +3909,13 @@ class UIHelpers {
             button.setAttribute('aria-pressed', available && autoPlayEnabled ? 'true' : 'false');
             button.title = available
                 ? (autoPlayEnabled ? 'Read replies aloud: On' : 'Read replies aloud: Off')
-                : 'Piper voice unavailable';
+                : `Piper voice ${statusLabel.toLowerCase()}`;
         }
 
         if (label) {
             label.textContent = available
                 ? `Read replies aloud: ${autoPlayEnabled ? 'On' : 'Off'}`
-                : 'Read replies aloud: Unavailable';
+                : `Read replies aloud: ${statusLabel}`;
         }
 
         if (voiceSelectWrap) {
@@ -3685,7 +3924,7 @@ class UIHelpers {
 
         if (voiceSelect) {
             if (!voices.length) {
-                voiceSelect.innerHTML = '<option value="">Piper unavailable</option>';
+                voiceSelect.innerHTML = `<option value="">Piper ${statusLabel.toLowerCase()}</option>`;
                 voiceSelect.disabled = true;
                 voiceSelect.value = '';
             } else {
@@ -3704,8 +3943,8 @@ class UIHelpers {
 
         if (hint) {
             hint.textContent = available
-                ? `${this.getTtsVoiceLabel()} is ready through Piper. Use the speaker button on any assistant reply, enable autoplay here, or preview the sample lines above.`
-                : 'Piper voice is unavailable until the server has a configured Piper binary and voice model.';
+                ? `Piper status: Ready. ${this.getTtsVoiceLabel()} is ready through Piper. Use the speaker button on any assistant reply, enable autoplay here, or preview the sample lines above.`
+                : `Piper status: ${statusLabel}. ${String(diagnostics.message || 'Piper voice is unavailable.').trim()}`;
         }
     }
 
@@ -3739,7 +3978,12 @@ class UIHelpers {
         }
 
         if (!this.isTtsAvailable()) {
-            this.showToast('Piper voice playback is not configured on the server.', 'warning', 'Piper voice');
+            const diagnostics = this.getTtsDiagnostics();
+            this.showToast(
+                String(diagnostics.message || 'Piper voice playback is not configured on the server.'),
+                'warning',
+                'Piper voice',
+            );
             return;
         }
 
@@ -3760,7 +4004,12 @@ class UIHelpers {
 
     toggleTtsAutoPlay() {
         if (!this.isTtsAvailable()) {
-            this.showToast('Piper voice playback is not configured on the server.', 'warning', 'Piper voice');
+            const diagnostics = this.getTtsDiagnostics();
+            this.showToast(
+                String(diagnostics.message || 'Piper voice playback is not configured on the server.'),
+                'warning',
+                'Piper voice',
+            );
             return;
         }
 
@@ -3824,7 +4073,7 @@ class UIHelpers {
         const normalizedMessageId = String(messageId || '').trim();
         const speakableText = this.buildSpeakableMessageText(message);
         const available = this.isTtsAvailable();
-        const visible = available && Boolean(speakableText);
+        const visible = available && Boolean(speakableText) && message?.isStreaming !== true;
         const isLoading = this.ttsManager?.isLoadingMessage?.(normalizedMessageId) === true;
         const isPlaying = this.ttsManager?.isPlayingMessage?.(normalizedMessageId) === true;
         const disabled = !visible || isLoading;
@@ -5634,16 +5883,47 @@ class UIHelpers {
     // Typing Indicator
     // ============================================
 
-    showTypingIndicator() {
+    showTypingIndicator(state = {}) {
         const indicator = document.getElementById('typing-indicator');
+        if (!indicator) {
+            return;
+        }
+
+        const phaseMeta = this.getLivePhaseMeta(state.phase || 'thinking');
+        const label = document.getElementById('typing-phase-label');
+        const text = document.getElementById('typing-text');
+        const detail = document.getElementById('typing-detail');
+        const icon = indicator.querySelector('[data-live-icon]');
+
+        indicator.dataset.livePhase = phaseMeta.phase;
         indicator.classList.remove('hidden');
         indicator.setAttribute('aria-hidden', 'false');
+
+        if (label) {
+            label.textContent = phaseMeta.label;
+        }
+        if (text) {
+            text.textContent = String(state.text || phaseMeta.text).trim() || phaseMeta.text;
+        }
+        if (detail) {
+            detail.textContent = String(state.detail || phaseMeta.detail).trim() || phaseMeta.detail;
+        }
+        if (icon) {
+            icon.setAttribute('data-lucide', phaseMeta.icon);
+        }
+
+        this.reinitializeIcons(indicator);
     }
 
     hideTypingIndicator() {
         const indicator = document.getElementById('typing-indicator');
+        if (!indicator) {
+            return;
+        }
+
         indicator.classList.add('hidden');
         indicator.setAttribute('aria-hidden', 'true');
+        delete indicator.dataset.livePhase;
     }
 
     // ============================================

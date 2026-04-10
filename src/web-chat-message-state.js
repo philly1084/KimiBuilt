@@ -156,6 +156,18 @@ function buildFrontendAssistantMetadata(metadata = null) {
         nextMetadata.taskType = metadata.taskType.trim();
     }
 
+    const reasoningSummary = String(
+        metadata.reasoningSummary
+        || metadata.reasoning_summary
+        || '',
+    ).trim();
+    if (reasoningSummary) {
+        nextMetadata.reasoningSummary = reasoningSummary;
+        nextMetadata.reasoningAvailable = true;
+    } else if (metadata.reasoningAvailable === true || metadata.reasoning_available === true) {
+        nextMetadata.reasoningAvailable = true;
+    }
+
     const artifacts = normalizeAssistantArtifacts(metadata.artifacts || []);
     if (artifacts.length > 0) {
         nextMetadata.artifacts = artifacts;

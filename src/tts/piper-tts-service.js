@@ -1,3 +1,4 @@
+const fsSync = require('fs');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
@@ -97,19 +98,24 @@ class PiperTtsService {
         };
     }
 
-    isConfigured() {
-        return this.ttsConfig.enabled !== false
-            && Boolean(String(this.ttsConfig.binaryPath || '').trim())
-            && this.getVoiceProfiles().length > 0;
-    }
+    pathExists(targetPath = '') {
+        const normalizedPath = String(targetPath || '').trim();
+        if (!normalizedPath) {
+            return false;
+        }
 
-    toPublicVoiceProfile(voice = {}) {
-        return {
-            id: String(voice.id || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID,
-            label: String(voice.label || DEFAULT_VOICE_LABEL).trim() || DEFAULT_VOICE_LABEL,
-            description: String(voice.description || DEFAULT_VOICE_DESCRIPTION).trim() || DEFAULT_VOICE_DESCRIPTION,
-            provider: 'piper',
-        };
+        const looksLikeFilesystemPath = normalizedPath.includes('/')
+            || normalizedPath.includes('\\')
+            || /^[a-zA-Z]:/.test(normalizedPath);
+        if (!looksLikeFilesystemPath) {
+            return true;
+        }
+
+        try {
+            return fsSync.existsSync(normalizedPath);
+        } catch (_error) {
+            return false;
+        }
     }
 
     getVoiceProfiles() {
@@ -119,6 +125,83 @@ class PiperTtsService {
                 ...voice,
                 ...this.toPublicVoiceProfile(voice),
             }));
+    }
+
+    getDiagnostics() {
+        const enabled = this.ttsConfig.enabled !== false;
+        const binaryPath = String(this.ttsConfig.binaryPath || '').trim();
+        const voices = this.getVoiceProfiles();
+        const binaryReachable = enabled && this.pathExists(binaryPath);
+        const voiceAssetsLoaded = voices.length > 0 && voices.every((voice) => {
+            const modelPath = String(voice.modelPath || '').trim();
+            const configPath = String(voice.configPath || '').trim();
+            return this.pathExists(modelPath) && (!configPath || this.pathExists(configPath));
+        });
+
+        if (!enabled) {
+            return {
+                status: 'unavailable',
+                binaryReachable: false,
+                voicesLoaded: voices.length > 0,
+                message: 'Piper TTS is disabled.',
+            };
+        }
+
+        if (!binaryPath) {
+            return {
+                status: 'misconfigured',
+                binaryReachable: false,
+                voicesLoaded: voices.length > 0,
+                message: 'Piper TTS is enabled, but no Piper binary path is configured.',
+            };
+        }
+
+        if (!binaryReachable) {
+            return {
+                status: 'misconfigured',
+                binaryReachable: false,
+                voicesLoaded: voices.length > 0,
+                message: `Piper binary is missing at "${binaryPath}".`,
+            };
+        }
+
+        if (voices.length === 0) {
+            return {
+                status: 'misconfigured',
+                binaryReachable: true,
+                voicesLoaded: false,
+                message: 'Piper voice manifests are not configured.',
+            };
+        }
+
+        if (!voiceAssetsLoaded) {
+            return {
+                status: 'misconfigured',
+                binaryReachable: true,
+                voicesLoaded: false,
+                message: 'One or more Piper voice model files are missing.',
+            };
+        }
+
+        return {
+            status: 'ready',
+            binaryReachable: true,
+            voicesLoaded: true,
+            message: `${voices.length} Piper voice${voices.length === 1 ? '' : 's'} ready.`,
+        };
+    }
+
+    isConfigured() {
+        return this.getDiagnostics().status === 'ready';
+    }
+
+    toPublicVoiceProfile(voice = {}) {
+        return {
+            id: String(voice.id || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID,
+            label: String(voice.label || DEFAULT_VOICE_LABEL).trim() || DEFAULT_VOICE_LABEL,
+            description: String(voice.description || DEFAULT_VOICE_DESCRIPTION).trim() || DEFAULT_VOICE_DESCRIPTION,
+            provider: 'piper',
+        };
     }
 
     resolveVoiceProfile(voiceId = '') {
@@ -141,8 +224,10 @@ class PiperTtsService {
     }
 
     getPublicConfig() {
-        const configured = this.isConfigured();
-        const voices = configured ? this.getVoiceProfiles().map((voice) => this.toPublicVoiceProfile(voice)) : [];
+        const diagnostics = this.getDiagnostics();
+        const configured = diagnostics.status === 'ready';
+        const voiceProfiles = this.getVoiceProfiles();
+        const voices = voiceProfiles.map((voice) => this.toPublicVoiceProfile(voice));
         const defaultVoice = configured ? this.resolveVoiceProfile() : null;
         return {
             configured,
@@ -150,17 +235,19 @@ class PiperTtsService {
             maxTextChars: Math.max(200, Number(this.ttsConfig.maxTextChars) || 2400),
             defaultVoiceId: configured ? (defaultVoice?.id || voices[0]?.id || null) : null,
             voices,
+            diagnostics,
         };
     }
 
     assertConfigured() {
-        if (this.isConfigured()) {
+        const diagnostics = this.getDiagnostics();
+        if (diagnostics.status === 'ready') {
             return;
         }
 
         throw createServiceError(
             503,
-            'Piper TTS is not configured. Set PIPER_TTS_MODEL_PATH or PIPER_TTS_VOICES_PATH and optionally PIPER_TTS_BINARY_PATH.',
+            diagnostics.message || 'Piper TTS is not configured.',
             'tts_unavailable',
         );
     }

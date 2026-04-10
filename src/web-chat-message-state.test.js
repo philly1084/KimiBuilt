@@ -179,4 +179,18 @@ describe('buildWebChatSessionMessages', () => {
             ],
         }));
     });
+
+    test('preserves reasoning metadata for frontend rendering', () => {
+        const metadata = buildFrontendAssistantMetadata({
+            taskType: 'chat',
+            reasoningSummary: 'Checked the request and chose the direct path.',
+            reasoningAvailable: true,
+        });
+
+        expect(metadata).toEqual(expect.objectContaining({
+            taskType: 'chat',
+            reasoningSummary: 'Checked the request and chose the direct path.',
+            reasoningAvailable: true,
+        }));
+    });
 });

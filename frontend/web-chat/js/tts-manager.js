@@ -10,6 +10,12 @@ class WebChatTtsManager extends EventTarget {
         this.available = false;
         this.provider = 'piper';
         this.voices = [];
+        this.diagnostics = {
+            status: 'unavailable',
+            binaryReachable: false,
+            voicesLoaded: false,
+            message: 'Piper voice is unavailable.',
+        };
         this.selectedVoiceId = this.storageGet(this.storageKeys.voiceId) || '';
         this.autoPlay = this.parseBoolean(this.storageGet(this.storageKeys.autoPlay), false);
         this.loadingMessageId = '';
@@ -72,6 +78,7 @@ class WebChatTtsManager extends EventTarget {
             available: this.available,
             provider: this.provider,
             voices: this.getVoices(),
+            diagnostics: this.getDiagnostics(),
             selectedVoiceId: this.getSelectedVoiceId(),
             autoPlay: this.isAutoPlayEnabled(),
             loadingMessageId: this.loadingMessageId,
@@ -83,6 +90,16 @@ class WebChatTtsManager extends EventTarget {
         return Array.isArray(this.voices)
             ? this.voices.map((voice) => ({ ...voice }))
             : [];
+    }
+
+    getDiagnostics() {
+        return {
+            ...this.diagnostics,
+        };
+    }
+
+    getStatus() {
+        return String(this.diagnostics?.status || '').trim() || (this.isAvailable() ? 'ready' : 'unavailable');
     }
 
     isAvailable() {
@@ -162,6 +179,24 @@ class WebChatTtsManager extends EventTarget {
             this.available = manifest?.configured === true;
             this.provider = manifest?.provider || 'piper';
             this.voices = Array.isArray(manifest?.voices) ? manifest.voices : [];
+            this.diagnostics = manifest?.diagnostics && typeof manifest.diagnostics === 'object'
+                ? {
+                    status: String(manifest.diagnostics.status || '').trim() || (this.available ? 'ready' : 'unavailable'),
+                    binaryReachable: manifest.diagnostics.binaryReachable === true,
+                    voicesLoaded: manifest.diagnostics.voicesLoaded === true,
+                    message: String(manifest.diagnostics.message || '').trim()
+                        || (this.available
+                            ? 'Piper is ready.'
+                            : 'Piper voice is unavailable.'),
+                }
+                : {
+                    status: this.available ? 'ready' : 'unavailable',
+                    binaryReachable: this.available,
+                    voicesLoaded: this.voices.length > 0,
+                    message: this.available
+                        ? 'Piper is ready.'
+                        : 'Piper voice is unavailable.',
+                };
 
             const fallbackVoiceId = String(manifest?.defaultVoiceId || this.voices[0]?.id || '').trim();
             const requestedVoiceId = String(
@@ -183,6 +218,12 @@ class WebChatTtsManager extends EventTarget {
             this.available = false;
             this.voices = [];
             this.selectedVoiceId = '';
+            this.diagnostics = {
+                status: 'unavailable',
+                binaryReachable: false,
+                voicesLoaded: false,
+                message: 'Piper voice is unavailable.',
+            };
             this.stop();
         }
 

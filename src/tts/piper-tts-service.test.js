@@ -46,13 +46,13 @@ describe('PiperTtsService voice manifests', () => {
                     id: 'amy-soft',
                     label: 'Amy soft',
                     description: 'Balanced female voice.',
-                    modelPath: 'C:\\voices\\amy.onnx',
+                    modelPath: 'amy.onnx',
                 },
                 {
                     id: 'kathleen-soft',
                     label: 'Kathleen soft',
                     description: 'Gentle female voice.',
-                    modelPath: 'C:\\voices\\kathleen.onnx',
+                    modelPath: 'kathleen.onnx',
                 },
             ],
         });
@@ -61,10 +61,40 @@ describe('PiperTtsService voice manifests', () => {
         expect(service.getPublicConfig()).toEqual(expect.objectContaining({
             configured: true,
             defaultVoiceId: 'amy-soft',
+            diagnostics: expect.objectContaining({
+                status: 'ready',
+                binaryReachable: true,
+                voicesLoaded: true,
+            }),
             voices: [
                 expect.objectContaining({ id: 'amy-soft', label: 'Amy soft' }),
                 expect.objectContaining({ id: 'kathleen-soft', label: 'Kathleen soft' }),
             ],
+        }));
+    });
+
+    test('reports a misconfigured state when the Piper binary path is missing', () => {
+        const service = new PiperTtsService({
+            enabled: true,
+            binaryPath: 'C:\\missing\\piper.exe',
+            voices: [
+                {
+                    id: 'amy-soft',
+                    label: 'Amy soft',
+                    description: 'Balanced female voice.',
+                    modelPath: 'C:\\voices\\amy.onnx',
+                },
+            ],
+        });
+
+        expect(service.isConfigured()).toBe(false);
+        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
+            configured: false,
+            diagnostics: expect.objectContaining({
+                status: 'misconfigured',
+                binaryReachable: false,
+                message: expect.stringContaining('Piper binary is missing'),
+            }),
         }));
     });
 });

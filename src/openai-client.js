@@ -3093,6 +3093,23 @@ function getResponseApiText(response) {
         .join('');
 }
 
+function extractResponseReasoningSummary(response) {
+    const outputItems = Array.isArray(response?.output) ? response.output : [];
+
+    return outputItems
+        .filter((item) => item?.type === 'reasoning')
+        .flatMap((item) => Array.isArray(item.summary) ? item.summary : [])
+        .map((entry) => normalizeMessageContent(
+            entry?.text
+            ?? entry?.summary_text
+            ?? entry?.content
+            ?? entry,
+        ))
+        .filter(Boolean)
+        .join('')
+        .trim();
+}
+
 function getResponseFunctionCalls(response) {
     if (!Array.isArray(response?.output)) {
         return [];
@@ -3107,12 +3124,26 @@ function isResponsesApiResponse(response) {
 
 function normalizeResponsesApiResponse(response) {
     const outputText = getResponseApiText(response);
+    const responseMetadata = response?._kimibuilt && typeof response._kimibuilt === 'object'
+        ? response._kimibuilt
+        : {};
+    const reasoningSummary = extractResponseReasoningSummary(response);
+    const normalizedMetadata = {
+        ...responseMetadata,
+        ...(reasoningSummary && !responseMetadata.reasoningSummary
+            ? {
+                reasoningSummary,
+                reasoningAvailable: true,
+            }
+            : {}),
+    };
 
     return {
         id: response.id,
         object: 'response',
         created: response.created_at,
         model: response.model,
+        output_text: outputText,
         output: [
             {
                 type: 'message',
@@ -3126,7 +3157,7 @@ function normalizeResponsesApiResponse(response) {
             },
         ],
         session_id: response.session_id,
-        metadata: response?._kimibuilt || {},
+        metadata: normalizedMetadata,
     };
 }
 
@@ -3693,6 +3724,10 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
 }
 
 async function* normalizeStreamResponse(stream, metadata = {}) {
+    let reasoningSummary = '';
+
+    const isToolOutputItem = (item = {}) => ['function_call', 'custom_tool_call'].includes(String(item?.type || '').trim());
+
     for await (const chunk of stream) {
         if (chunk.type === 'response.output_text.delta' && chunk.delta) {
             yield {
@@ -3701,10 +3736,48 @@ async function* normalizeStreamResponse(stream, metadata = {}) {
             };
         }
 
+        if ((chunk.type === 'response.reasoning_summary_text.delta'
+            || chunk.type === 'response.reasoning_summary.delta')
+            && chunk.delta) {
+            reasoningSummary += chunk.delta;
+            yield {
+                type: 'response.reasoning_summary_text.delta',
+                delta: chunk.delta,
+                summary: reasoningSummary,
+            };
+        }
+
+        if (chunk.type === 'response.reasoning_summary_text.done'
+            || chunk.type === 'response.reasoning_summary.done') {
+            const completedReasoningSummary = [
+                chunk.text,
+                chunk.summary_text,
+                chunk.summaryText,
+            ].find((value) => typeof value === 'string' && value.trim());
+            if (completedReasoningSummary) {
+                reasoningSummary = completedReasoningSummary.trim();
+            }
+        }
+
+        if ((chunk.type === 'response.output_item.added' || chunk.type === 'response.output_item.done')
+            && isToolOutputItem(chunk.item)) {
+            yield {
+                type: chunk.type,
+                item: chunk.item,
+            };
+        }
+
         if (chunk.type === 'response.completed' && chunk.response) {
+            const responseMetadata = reasoningSummary
+                ? {
+                    ...metadata,
+                    reasoningSummary,
+                    reasoningAvailable: true,
+                }
+                : metadata;
             yield {
                 type: 'response.completed',
-                response: normalizeResponsesApiResponse(attachKimibuiltMetadata(chunk.response, metadata)),
+                response: normalizeResponsesApiResponse(attachKimibuiltMetadata(chunk.response, responseMetadata)),
             };
         }
 
@@ -3981,6 +4054,7 @@ module.exports = {
         normalizeMessageContent,
         normalizeChatCompletionsStream,
         normalizeModelResponse,
+        normalizeStreamResponse,
         normalizeToolResultForModel,
         inferProviderFamily,
         parseToolArguments,
