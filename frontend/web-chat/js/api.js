@@ -241,12 +241,25 @@ function extractReasoningSummary(value) {
         return value
             .map((entry) => extractReasoningSummary(entry))
             .filter(Boolean)
-            .join('')
+            .join(' ')
+            .replace(/\s+/g, ' ')
             .trim();
     }
 
     if (!value || typeof value !== 'object') {
         return '';
+    }
+
+    const leafTextCandidates = [
+        value.text,
+        value.output_text,
+        value.summary_text,
+        value.value,
+    ];
+    for (const candidate of leafTextCandidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return stripNullCharacters(candidate).trim();
+        }
     }
 
     if (value.type === 'reasoning') {
@@ -266,9 +279,17 @@ function extractReasoningSummary(value) {
     const directCandidates = [
         value.reasoningSummary,
         value.reasoning_summary,
+        value.reasoningText,
+        value.reasoning_text,
         value.reasoning_content,
+        value.reasoningContent,
         value.reasoning,
+        value.reasoning_delta,
+        value.reasoningDelta,
+        value.reasoning_details,
+        value.reasoningDetails,
         value.summary_text,
+        value.summaryText,
     ];
     for (const candidate of directCandidates) {
         const normalized = extractReasoningSummary(candidate);
@@ -279,13 +300,29 @@ function extractReasoningSummary(value) {
 
     const nestedCandidates = [
         value.choices?.[0]?.message?.reasoning,
+        value.choices?.[0]?.message?.reasoning_text,
         value.choices?.[0]?.message?.reasoning_content,
+        value.choices?.[0]?.message?.reasoning_details,
+        value.choices?.[0]?.delta?.reasoning,
+        value.choices?.[0]?.delta?.reasoning_text,
+        value.choices?.[0]?.delta?.reasoning_content,
+        value.choices?.[0]?.delta?.reasoning_details,
         value.message?.reasoning,
+        value.message?.reasoning_text,
         value.message?.reasoning_content,
+        value.message?.reasoning_details,
         value.response?.choices?.[0]?.message?.reasoning,
+        value.response?.choices?.[0]?.message?.reasoning_text,
         value.response?.choices?.[0]?.message?.reasoning_content,
+        value.response?.choices?.[0]?.message?.reasoning_details,
+        value.response?.choices?.[0]?.delta?.reasoning,
+        value.response?.choices?.[0]?.delta?.reasoning_text,
+        value.response?.choices?.[0]?.delta?.reasoning_content,
+        value.response?.choices?.[0]?.delta?.reasoning_details,
         value.response?.message?.reasoning,
+        value.response?.message?.reasoning_text,
         value.response?.message?.reasoning_content,
+        value.response?.message?.reasoning_details,
     ];
     for (const candidate of nestedCandidates) {
         const normalized = extractReasoningSummary(candidate);
@@ -609,8 +646,12 @@ class OpenAIAPIClient extends EventTarget {
             return events;
         }
 
-        const streamedReasoning = stripNullCharacters(
+        const streamedReasoning = extractReasoningSummary(
             parsed?.choices?.[0]?.delta?.reasoning
+            || parsed?.choices?.[0]?.delta?.reasoning_text
+            || parsed?.choices?.[0]?.delta?.reasoning_content
+            || parsed?.choices?.[0]?.delta?.reasoning_details
+            || parsed?.reasoning_delta
             || parsed?.delta
             || '',
         );
@@ -978,7 +1019,13 @@ class OpenAIAPIClient extends EventTarget {
                     return;
                 }
                 
-                const reasoning = stripNullCharacters(chunk.choices[0]?.delta?.reasoning || '');
+                const reasoning = extractReasoningSummary(
+                    chunk.choices[0]?.delta?.reasoning
+                    || chunk.choices[0]?.delta?.reasoning_text
+                    || chunk.choices[0]?.delta?.reasoning_content
+                    || chunk.choices[0]?.delta?.reasoning_details
+                    || '',
+                );
                 if (reasoning) {
                     const currentSummary = String(pendingAssistantMetadata?.reasoningSummary || '').trim();
                     const nextSummary = `${currentSummary}${reasoning}`.trim();

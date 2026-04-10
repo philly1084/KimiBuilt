@@ -395,6 +395,8 @@ class UIHelpers {
         
         // Track last focused element for focus management
         this.lastFocusedElement = null;
+        this.lastSoundCueWarningAt = 0;
+        this.soundCueWarningCooldownMs = 12000;
         
         // Command palette navigation state
         this.commandPaletteState = {
@@ -4204,6 +4206,55 @@ class UIHelpers {
         }
     }
 
+    getSoundCueGroup(kind = '') {
+        const normalizedKind = String(kind || '').trim().toLowerCase();
+        if (normalizedKind.startsWith('menu-')) {
+            return 'menu';
+        }
+
+        return 'assistant';
+    }
+
+    isSoundCueEnabledForKind(kind = '', options = {}) {
+        const cueGroup = this.getSoundCueGroup(kind);
+        if (cueGroup === 'menu') {
+            return options?.preview === true || this.isMenuSoundsEnabled();
+        }
+
+        return options?.preview === true || this.isSoundCuesEnabled();
+    }
+
+    reportSoundCuePlaybackFailure(kind = '', options = {}) {
+        if (this.isSoundCueEnabledForKind(kind, options)) {
+            const now = Date.now();
+            if (now - this.lastSoundCueWarningAt < this.soundCueWarningCooldownMs) {
+                return;
+            }
+
+            this.lastSoundCueWarningAt = now;
+            this.showToast(
+                'Sound cues are currently blocked by browser audio permissions. Click in the page and try again.',
+                'warning',
+                'Sound cues',
+            );
+        }
+    }
+
+    async maybePlaySoundCue(kind = 'response', options = {}) {
+        let result = false;
+        try {
+            result = await Promise.resolve(this.soundManager?.play?.(kind, options));
+        } catch (_error) {
+            result = false;
+        }
+
+        if (result !== true) {
+            this.reportSoundCuePlaybackFailure(kind, options);
+        }
+
+        return result;
+    }
+
     setSoundCuesEnabled(value) {
         this.soundManager?.setEnabled?.(value === true);
         this.updateSoundCuesUI();
@@ -4274,23 +4325,23 @@ class UIHelpers {
     }
 
     previewSoundCue(kind = 'response') {
-        this.soundManager?.play?.(kind, { preview: true });
+        void this.maybePlaySoundCue(kind, { preview: true });
     }
 
     playAgentCue(kind = 'response') {
-        this.soundManager?.play?.(kind);
+        void this.maybePlaySoundCue(kind);
     }
 
     playMenuCue(kind = 'menu-select') {
-        this.soundManager?.play?.(kind);
+        void this.maybePlaySoundCue(kind);
     }
 
     playAcknowledgementCue() {
-        this.soundManager?.play?.('ack');
+        void this.maybePlaySoundCue('ack');
     }
 
     playThinkingCue() {
-        this.soundManager?.play?.('thinking-start');
+        void this.maybePlaySoundCue('thinking-start');
     }
 
     async initializeTts() {

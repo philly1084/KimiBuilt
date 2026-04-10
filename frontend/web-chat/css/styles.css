@@ -3216,20 +3216,44 @@ body.layout-minimal #input-meta-row {
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
+    --typing-spinner-color: color-mix(in srgb, var(--accent) 92%, white 8%);
+    --typing-spinner-track: rgba(255, 255, 255, 0.1);
 }
 
 .typing-indicator-content::before {
     content: '';
     position: absolute;
-    inset: -0.38rem;
+    inset: -0.34rem;
     border-radius: inherit;
-    border: 1px solid rgba(88, 166, 255, 0.12);
-    opacity: 0.7;
-    animation: live-orb-pulse 1.8s ease-in-out infinite;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.typing-indicator-content::after {
+    content: '';
+    position: absolute;
+    inset: -0.46rem;
+    border-radius: inherit;
+    border: 2px solid transparent;
+    border-top-color: var(--typing-spinner-color);
+    border-right-color: color-mix(in srgb, var(--typing-spinner-color) 68%, transparent);
+    border-bottom-color: var(--typing-spinner-track);
+    border-left-color: rgba(255, 255, 255, 0.04);
+    filter: drop-shadow(0 0 10px color-mix(in srgb, var(--typing-spinner-color) 34%, transparent));
+    animation: spin 0.9s linear infinite;
 }
 
 .typing-indicator-content .typing-phase-icon {
+    position: relative;
+    z-index: 1;
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 10px 20px rgba(5, 10, 18, 0.22);
     animation: live-orb-pulse 1.8s ease-in-out infinite;
+}
+
+#typing-indicator[data-live-phase="reasoning"] .typing-indicator-content {
+    --typing-spinner-color: color-mix(in srgb, var(--accent) 92%, white 8%);
 }
 
 #typing-indicator[data-live-phase="checking-tools"] .typing-phase-icon {
@@ -3237,8 +3261,8 @@ body.layout-minimal #input-meta-row {
     color: var(--purple);
 }
 
-#typing-indicator[data-live-phase="checking-tools"] .typing-indicator-content::before {
-    border-color: rgba(168, 85, 247, 0.18);
+#typing-indicator[data-live-phase="checking-tools"] .typing-indicator-content {
+    --typing-spinner-color: color-mix(in srgb, var(--purple) 92%, white 8%);
 }
 
 #typing-indicator[data-live-phase="ready"] .typing-phase-icon {
@@ -3246,8 +3270,57 @@ body.layout-minimal #input-meta-row {
     color: var(--success);
 }
 
-#typing-indicator[data-live-phase="ready"] .typing-indicator-content::before {
-    border-color: rgba(34, 197, 94, 0.18);
+#typing-indicator[data-live-phase="ready"] .typing-indicator-content {
+    --typing-spinner-color: color-mix(in srgb, var(--success) 92%, white 8%);
+}
+
+.composer-send-btn {
+    position: relative;
+}
+
+.composer-send-btn.is-processing:disabled {
+    opacity: 1;
+    cursor: progress;
+}
+
+.composer-send-btn__busy-orb {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+}
+
+.composer-send-btn__busy-orb::before {
+    content: '';
+    position: absolute;
+    inset: -0.2rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.composer-send-btn__busy-orb::after {
+    content: '';
+    position: absolute;
+    inset: -0.34rem;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    border-top-color: rgba(255, 255, 255, 0.98);
+    border-right-color: rgba(255, 255, 255, 0.58);
+    border-bottom-color: rgba(255, 255, 255, 0.2);
+    border-left-color: rgba(255, 255, 255, 0.08);
+    animation: spin 0.8s linear infinite;
+}
+
+.composer-send-btn .composer-send-btn__busy-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .background-workload-status {

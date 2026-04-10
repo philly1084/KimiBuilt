@@ -4,8 +4,8 @@
  * Now using OpenAI SDK for API communication
  */
 
-const AMBIENT_REASONING_ROTATE_MIN_MS = 20000;
-const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
+const AMBIENT_REASONING_ROTATE_MIN_MS = 12000;
+const AMBIENT_REASONING_ROTATE_MAX_MS = 18000;
 const AMBIENT_REASONING_TYPE_TICK_MS = 120;
 const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 10000;
 const AMBIENT_REASONING_STARTS = [
@@ -29,6 +29,46 @@ const AMBIENT_REASONING_STARTS = [
     'Teaching the heron engine to pirouette',
     'Sharpening pencils for the midnight beaver shift',
     'Coaching the moondust pigeons through customs',
+    'Greasing the walrus elevator',
+    'Sweeping confetti out of the raven observatory',
+    'Translating the goose minutes into usable math',
+    'Folding weather maps for the raccoon quartermaster',
+    'Buffing the trout periscope',
+    'Balancing teacups on the elk radar',
+    'Rehearsing alibis with the seal accountants',
+    'Untying knots in the owl telegraph',
+    'Catching runaway commas for the squirrel newsroom',
+    'Refilling lantern oil for the coyote librarians',
+    'Re-threading the skunk carousel',
+    'Checking torque on the pelican launch rig',
+    'Sorting dominoes for the marmot weather bureau',
+    'Testing brakes on the puffin monorail',
+    'Patching constellations above the vole shipyard',
+    'Herding suspicious semicolons past the loon customs desk',
+    'Measuring soup pressure in the badger boiler room',
+    'Dusting footprints off the otter blueprint vault',
+    'Negotiating snacks with the ferret union',
+    'Calming the yak signal repeater',
+    'Unspooling twine across the gull foundry',
+    'Rewinding cassette tapes for the beaver archives',
+    'Counting thunderbolts in the muskrat pantry',
+    'Polishing helmets for the pigeon cavalry',
+    'Refitting the moose compass with fresh magnets',
+    'Teaching the crab forklift some manners',
+    'Mapping alleyways for the possum courier service',
+    'Inventorying moonbeams in the heron warehouse',
+    'Straightening the fox observatory curtains',
+    'Filing reports for the wolf lighthouse board',
+    'Defrosting the beehive jukebox',
+    'Tightening bolts on the narwhal weather vane',
+    'Running diagnostics on the cod parade float',
+    'De-tangling fairy lights in the goose depot',
+    'Tuning the accordion in the bat command center',
+    'Chasing echoes through the mink tunnel network',
+    'Aligning mirrors for the beaver eclipse lab',
+    'Refreshing the marmalade reserves in the badger embassy',
+    'Repainting lane markers for the penguin drag strip',
+    'Calibrating the puffin rumor detector',
 ];
 const AMBIENT_REASONING_ENDINGS = [
     'while the answer sharpens',
@@ -41,6 +81,21 @@ const AMBIENT_REASONING_ENDINGS = [
     'in case the useful bit arrives sideways',
     'to keep the thread from tangling',
     'while the final sentence lines up',
+    'before the sensible version lands',
+    'so the breadcrumbs stop tap dancing',
+    'while the good answer elbows past the weird one',
+    'until the static starts paying rent',
+    'with a suspicious amount of maritime confidence',
+    'before the moonlight hits the paperwork',
+    'so the puzzle quits pretending to be furniture',
+    'while the spare gears learn some discipline',
+    'until the thread stops doing cartwheels',
+    'with exactly enough nonsense to stay operational',
+    'before the raccoons unionize the timeline',
+    'while the quiet part puts on boots',
+    'so the useful sentence can find the exit',
+    'before the idea fog condenses into something practical',
+    'while the answer climbs out of the tool shed',
 ];
 
 function shuffleArray(items = []) {
@@ -5284,10 +5339,18 @@ class ChatApp {
         
         if (this.sendBtn) {
             this.sendBtn.disabled = !canSend;
+            this.sendBtn.classList.toggle('is-processing', this.isProcessing);
             
             if (this.isProcessing) {
-                this.sendBtn.innerHTML = `<div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" aria-hidden="true"></div>`;
+                this.sendBtn.innerHTML = `
+                    <span class="composer-send-btn__busy-orb" aria-hidden="true">
+                        <span class="assistant-stream-placeholder__phase-icon composer-send-btn__busy-icon" aria-hidden="true">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                        </span>
+                    </span>
+                `;
                 this.sendBtn.setAttribute('aria-label', 'Sending...');
+                uiHelpers.reinitializeIcons(this.sendBtn);
             } else {
                 this.sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5" aria-hidden="true"></i>`;
                 this.sendBtn.setAttribute('aria-label', 'Send message');

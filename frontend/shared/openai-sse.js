@@ -298,12 +298,25 @@
       return value
         .map((entry) => extractReasoningSummary(entry))
         .filter(Boolean)
-        .join('')
+        .join(' ')
+        .replace(/\s+/g, ' ')
         .trim();
     }
 
     if (!value || typeof value !== 'object') {
       return '';
+    }
+
+    const leafTextCandidates = [
+      value.text,
+      value.output_text,
+      value.summary_text,
+      value.value,
+    ];
+    for (const candidate of leafTextCandidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return stripNullCharacters(candidate).trim();
+      }
     }
 
     if (value.type === 'reasoning') {
@@ -323,9 +336,17 @@
     const directCandidates = [
       value.reasoningSummary,
       value.reasoning_summary,
+      value.reasoningText,
+      value.reasoning_text,
       value.reasoning_content,
+      value.reasoningContent,
       value.reasoning,
+      value.reasoning_delta,
+      value.reasoningDelta,
+      value.reasoning_details,
+      value.reasoningDetails,
       value.summary_text,
+      value.summaryText,
     ];
     for (const candidate of directCandidates) {
       const normalized = extractReasoningSummary(candidate);
@@ -336,13 +357,29 @@
 
     const nestedCandidates = [
       value.choices?.[0]?.message?.reasoning,
+      value.choices?.[0]?.message?.reasoning_text,
       value.choices?.[0]?.message?.reasoning_content,
+      value.choices?.[0]?.message?.reasoning_details,
+      value.choices?.[0]?.delta?.reasoning,
+      value.choices?.[0]?.delta?.reasoning_text,
+      value.choices?.[0]?.delta?.reasoning_content,
+      value.choices?.[0]?.delta?.reasoning_details,
       value.message?.reasoning,
+      value.message?.reasoning_text,
       value.message?.reasoning_content,
+      value.message?.reasoning_details,
       value.response?.choices?.[0]?.message?.reasoning,
+      value.response?.choices?.[0]?.message?.reasoning_text,
       value.response?.choices?.[0]?.message?.reasoning_content,
+      value.response?.choices?.[0]?.message?.reasoning_details,
+      value.response?.choices?.[0]?.delta?.reasoning,
+      value.response?.choices?.[0]?.delta?.reasoning_text,
+      value.response?.choices?.[0]?.delta?.reasoning_content,
+      value.response?.choices?.[0]?.delta?.reasoning_details,
       value.response?.message?.reasoning,
+      value.response?.message?.reasoning_text,
       value.response?.message?.reasoning_content,
+      value.response?.message?.reasoning_details,
     ];
     for (const candidate of nestedCandidates) {
       const normalized = extractReasoningSummary(candidate);
@@ -483,12 +520,18 @@
         });
       }
 
-      if (delta.reasoning) {
-        const reasoning = stripNullCharacters(delta.reasoning);
+      const reasoning = extractReasoningSummary(
+        delta.reasoning
+        || delta.reasoning_text
+        || delta.reasoning_content
+        || delta.reasoning_details
+        || '',
+      );
+      if (reasoning) {
         events.push({
           type: 'reasoning_delta',
-          content: reasoning,
-          summary: reasoning,
+          content: stripNullCharacters(reasoning),
+          summary: stripNullCharacters(reasoning),
           raw: payload,
           ...metadata,
         });
@@ -526,12 +569,19 @@
         });
       }
 
-      if (payload.reasoning_delta) {
-        const reasoning = stripNullCharacters(payload.reasoning_delta);
+      const reasoning = extractReasoningSummary(
+        payload.reasoning_delta
+        || payload.reasoning
+        || payload.reasoning_text
+        || payload.reasoning_content
+        || payload.reasoning_details
+        || '',
+      );
+      if (reasoning) {
         events.push({
           type: 'reasoning_delta',
-          content: reasoning,
-          summary: reasoning,
+          content: stripNullCharacters(reasoning),
+          summary: stripNullCharacters(reasoning),
           raw: payload,
           ...metadata,
         });

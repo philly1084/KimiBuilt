@@ -54,6 +54,27 @@ describe('openai-sse helpers', () => {
     expect(events[0].artifacts).toEqual([{ id: 'artifact-1' }]);
   });
 
+  test('normalizes object-form reasoning from chat completion chunks', () => {
+    const events = normalizeGatewayEventPayload({
+      object: 'chat.completion.chunk',
+      id: 'chatcmpl_456',
+      choices: [{
+        index: 0,
+        delta: {
+          reasoning: [
+            { type: 'reasoning', summary: [{ text: 'Checking the request. ' }] },
+            { type: 'reasoning', text: 'Choosing the direct path.' },
+          ],
+        },
+        finish_reason: null,
+      }],
+    });
+
+    expect(events.map((event) => event.type)).toEqual(['reasoning_delta']);
+    expect(events[0].content).toBe('Checking the request. Choosing the direct path.');
+    expect(events[0].summary).toBe('Checking the request. Choosing the direct path.');
+  });
+
   test('normalizes response chunk payloads', () => {
     const events = normalizeGatewayEventPayload({
       object: 'response.chunk',
@@ -91,6 +112,33 @@ describe('openai-sse helpers', () => {
       'final',
     ]);
     expect(events[0].content).toBe('Final answer');
+  });
+
+  test('normalizes final JSON chat completion reasoning fields', () => {
+    const events = normalizeGatewayEventPayload({
+      object: 'chat.completion',
+      id: 'chatcmpl_789',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'Final answer',
+          reasoning: [
+            { type: 'reasoning', summary: [{ text: 'Checked the request. ' }] },
+            { type: 'reasoning', text: 'Chose the direct path.' },
+          ],
+        },
+        finish_reason: 'stop',
+      }],
+    }, { allowFinalText: true });
+
+    expect(events.map((event) => event.type)).toEqual([
+      'text_delta',
+      'reasoning_delta',
+      'finish',
+      'final',
+    ]);
+    expect(events[1].content).toBe('Checked the request. Chose the direct path.');
   });
 
   test('filters and selects Codex-backed models', () => {

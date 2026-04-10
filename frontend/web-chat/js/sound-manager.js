@@ -471,6 +471,9 @@ const SOUND_THEMES = {
 
 const DEFAULT_SOUND_PROFILE_ID = 'orbit';
 const DEFAULT_SOUND_VOLUME = 0.68;
+const SOUND_MASTER_GAIN_SCALE = 1;
+const SOUND_MASTER_GAIN_MAX = 1;
+const SOUND_MASTER_GAIN_MIN = 0;
 
 class WebChatSoundManager {
     constructor() {
@@ -669,10 +672,11 @@ class WebChatSoundManager {
         this.masterCompressor.attack.value = 0.004;
         this.masterCompressor.release.value = Number(profile.compressorRelease || 0.16);
 
+        const requestedGain = Number(profile.outputGain || 1) * this.volume * SOUND_MASTER_GAIN_SCALE;
         this.masterGain.gain.value = this.clamp(
-            Number(profile.outputGain || 1) * this.volume * 0.28,
-            0,
-            0.34,
+            Number.isFinite(requestedGain) ? requestedGain : 0.2,
+            SOUND_MASTER_GAIN_MIN,
+            SOUND_MASTER_GAIN_MAX,
         );
     }
 
