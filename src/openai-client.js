@@ -9,6 +9,7 @@ const {
     hasExplicitImageGenerationIntent,
     normalizeReasoningEffort,
 } = require('./ai-route-utils');
+const { buildRecentTranscriptAnchor } = require('./conversation-continuity');
 const { isDashboardRequest } = require('./dashboard-template-catalog');
 const { isSessionIsolationEnabled } = require('./session-scope');
 const {
@@ -653,6 +654,7 @@ function buildMessages({
     instructions = null,
     contextMessages = [],
     recentMessages = [],
+    recentTranscriptAnchor = '',
 }) {
     const messages = [];
     const inputMessages = Array.isArray(input) ? input : null;
@@ -665,10 +667,17 @@ function buildMessages({
         });
     }
 
+    if (recentTranscriptAnchor) {
+        messages.push({
+            role: 'system',
+            content: recentTranscriptAnchor,
+        });
+    }
+
     if (contextMessages.length > 0) {
         messages.push({
             role: 'system',
-            content: `[Supplemental recalled memory]\nUse this only as supporting context when it helps resolve references or recover older details.\n${contextMessages.join('\n---\n')}`,
+            content: `[Supplemental recalled memory]\nUse this only as supporting context when it helps resolve references or recover older details.\nIf it conflicts with the recent transcript or the user's current request, ignore it and follow the recent transcript/current request.\n${contextMessages.join('\n---\n')}`,
         });
     }
 
@@ -3881,11 +3890,19 @@ async function createResponse({
         previousResponseId,
         apiMode,
     });
+    const inputMessages = Array.isArray(input) ? input : [{ role: 'user', content: input }];
+    const recentTranscriptAnchor = promptState.canReuseThreadedPrompt
+        ? buildRecentTranscriptAnchor({
+            currentInput: getLastUserText(inputMessages),
+            recentMessages,
+        })
+        : '';
     const messages = buildMessages({
         input,
         instructions: promptState.canReuseThreadedPrompt ? null : instructions,
         contextMessages,
         recentMessages: promptState.canReuseThreadedPrompt ? [] : recentMessages,
+        recentTranscriptAnchor,
     });
 
     const normalizedReasoningEffort = normalizeReasoningEffort(reasoningEffort || config.openai.reasoningEffort);

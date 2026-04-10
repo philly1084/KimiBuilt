@@ -166,6 +166,34 @@ describe('runtime-execution', () => {
         expect(result.runtimeMode).toBe('direct');
     });
 
+    test('expands referential follow-ups against recent transcript before memory recall in direct mode', async () => {
+        sessionStore.getRecentMessages.mockResolvedValue([
+            { role: 'user', content: 'Research Halifax vacation pricing for a presentation.' },
+            { role: 'assistant', content: 'I can do that.' },
+        ]);
+
+        await executeConversationRuntime({
+            locals: {},
+        }, {
+            sessionId: 'session-5',
+            input: 'yes do deep research on that',
+            memoryInput: 'yes do deep research on that',
+        });
+
+        expect(memoryService.process).toHaveBeenCalledWith(
+            'session-5',
+            'yes do deep research on that',
+            expect.objectContaining({
+                recallQuery: 'Research Halifax vacation pricing for a presentation. yes do deep research on that',
+                objective: 'Research Halifax vacation pricing for a presentation. yes do deep research on that',
+                recentMessages: [
+                    { role: 'user', content: 'Research Halifax vacation pricing for a presentation.' },
+                    { role: 'assistant', content: 'I can do that.' },
+                ],
+            }),
+        );
+    });
+
     test('passes prior prompt state from the session into direct runtime responses', async () => {
         await executeConversationRuntime({
             locals: {},

@@ -2100,6 +2100,22 @@ describe('openai-client automatic tool orchestration helpers', () => {
         });
     });
 
+    test('adds a recent transcript anchor ahead of recalled memory for referential follow-ups', () => {
+        const messages = __testUtils.buildMessages({
+            input: 'yes do deep research on that',
+            instructions: 'You are a helpful AI assistant.',
+            recentTranscriptAnchor: '[Recent transcript anchor]\nuser: Research Halifax vacation pricing for a presentation.',
+            contextMessages: ['Older memory about an unrelated project'],
+        });
+
+        expect(messages[1]).toEqual({
+            role: 'system',
+            content: '[Recent transcript anchor]\nuser: Research Halifax vacation pricing for a presentation.',
+        });
+        expect(messages[2].role).toBe('system');
+        expect(messages[2].content).toContain('If it conflicts with the recent transcript or the user\'s current request, ignore it');
+    });
+
     test('runs a direct required workload action for explicit scheduling prompts', async () => {
         const toolManager = createToolManager();
         const response = await __testUtils.runDirectRequiredToolAction({

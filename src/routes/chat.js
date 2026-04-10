@@ -28,6 +28,7 @@ const {
     getMissingCompletionDelta,
 } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
+const { resolveTranscriptObjectiveFromSession } = require('../conversation-continuity');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
@@ -277,6 +278,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
         if (effectiveOutputFormat) {
             const toolManager = await ensureRuntimeToolManager(req.app);
+            const artifactRecentMessages = await sessionStore.getRecentMessages(
+                sessionId,
+                WORKLOAD_PREFLIGHT_RECENT_LIMIT,
+            );
+            const artifactRecall = resolveTranscriptObjectiveFromSession(message, artifactRecentMessages);
             const artifactMemory = await memoryService.process(sessionId, message, {
                 ownerId,
                 memoryScope,
@@ -284,12 +290,11 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 sourceSurface: clientSurface || taskType,
                 memoryKeywords,
                 profile: 'default',
+                recallQuery: artifactRecall.objective || message,
+                objective: artifactRecall.objective || message,
+                recentMessages: artifactRecentMessages,
                 returnDetails: true,
             });
-            const artifactRecentMessages = await sessionStore.getRecentMessages(
-                sessionId,
-                WORKLOAD_PREFLIGHT_RECENT_LIMIT,
-            );
             const preparedImages = await maybePrepareImagesForArtifactPrompt({
                 toolManager,
                 sessionId,

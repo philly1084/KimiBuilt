@@ -427,6 +427,52 @@ describe('/api/chat route', () => {
         ]);
     });
 
+    test('expands referential artifact follow-ups before memory recall', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'yes make it a pdf on that',
+        });
+        require('../ai-route-utils').inferRequestedOutputFormat.mockReturnValue('pdf');
+        sessionStore.getRecentMessages.mockResolvedValue([
+            { role: 'user', content: 'Research Halifax vacation pricing for a presentation.' },
+            { role: 'assistant', content: 'I can do that.' },
+        ]);
+        generateOutputArtifactFromPrompt.mockResolvedValue({
+            responseId: 'resp-followup-pdf-1',
+            artifact: { id: 'pdf-artifact-followup-1', filename: 'halifax-pricing.pdf' },
+            artifacts: [{ id: 'pdf-artifact-followup-1', filename: 'halifax-pricing.pdf' }],
+            assistantMessage: 'Created the PDF artifact (halifax-pricing.pdf).',
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'yes make it a pdf on that',
+                stream: false,
+            });
+
+        expect(response.status).toBe(200);
+        expect(memoryService.process).toHaveBeenCalledWith(
+            'session-1',
+            'yes make it a pdf on that',
+            expect.objectContaining({
+                recallQuery: 'Research Halifax vacation pricing for a presentation. yes make it a pdf on that',
+                objective: 'Research Halifax vacation pricing for a presentation. yes make it a pdf on that',
+                recentMessages: [
+                    { role: 'user', content: 'Research Halifax vacation pricing for a presentation.' },
+                    { role: 'assistant', content: 'I can do that.' },
+                ],
+            }),
+        );
+    });
+
     test('strips the injected notes page-edit directive before artifact inference on /api/chat', async () => {
         ensureRuntimeToolManager.mockResolvedValue({
             getTool: jest.fn(),

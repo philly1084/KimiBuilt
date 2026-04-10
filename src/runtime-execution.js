@@ -1,6 +1,7 @@
 const { sessionStore } = require('./session-store');
 const { memoryService } = require('./memory/memory-service');
 const { createResponse } = require('./openai-client');
+const { resolveTranscriptObjectiveFromSession } = require('./conversation-continuity');
 const { getSessionControlState } = require('./runtime-control-state');
 const { config } = require('./config');
 const { buildScopedMemoryMetadata, isSessionIsolationEnabled, resolveProjectKey, resolveSessionScope } = require('./session-scope');
@@ -277,12 +278,19 @@ async function executeConversationRuntime(app, params = {}) {
         };
     }
 
+    const recentMessages = params.recentMessages || (
+        params.loadRecentMessages === false
+            ? []
+            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
+    );
     const recallInput = params.memoryInput || extractRuntimeText(params.input || '');
+    const continuityObjective = resolveTranscriptObjectiveFromSession(recallInput, recentMessages);
+    const recallQuery = continuityObjective.objective || recallInput;
     const contextMessages = params.contextMessages || (
         params.loadContextMessages === false
             ? []
             : await memoryService.process(params.sessionId, recallInput, {
-                profile: inferRecallProfile(recallInput),
+                profile: inferRecallProfile(recallQuery),
                 ownerId: params.ownerId || null,
                 memoryScope,
                 sessionIsolation,
@@ -295,12 +303,10 @@ async function executeConversationRuntime(app, params = {}) {
                     ...(projectKey ? { projectKey } : {}),
                     ...(sessionIsolation ? { sessionIsolation: true } : {}),
                 }, params.session || null).projectKey || null,
+                recallQuery,
+                objective: recallQuery,
+                recentMessages,
             })
-    );
-    const recentMessages = params.recentMessages || (
-        params.loadRecentMessages === false
-            ? []
-            : await sessionStore.getRecentMessages(params.sessionId, RECENT_TRANSCRIPT_LIMIT)
     );
 
     return {

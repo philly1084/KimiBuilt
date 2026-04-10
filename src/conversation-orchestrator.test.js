@@ -505,6 +505,59 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('K3s Cluster Breakdown created. Runs once at 2026-04-03T14:52:00.000Z.');
     });
 
+    test('expands referential deep-research follow-ups before recalling memory', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Starting deep research.', 'resp_deep_research_followup')),
+            complete: jest.fn(),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-deep-research-followup', metadata: {} }),
+            getRecentMessages: jest.fn().mockResolvedValue([
+                { role: 'user', content: 'Research Halifax vacation pricing for a presentation.' },
+                { role: 'assistant', content: 'I can do that.' },
+            ]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue({
+                contextMessages: [],
+                bundles: { fact: [], artifact: [], skill: [], research: [] },
+                trace: null,
+            }),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.executeConversation({
+            input: 'yes do deep research on that',
+            sessionId: 'session-deep-research-followup',
+            stream: false,
+        });
+
+        expect(memoryService.process).toHaveBeenCalledWith(
+            'session-deep-research-followup',
+            'yes do deep research on that',
+            expect.objectContaining({
+                recallQuery: 'Research Halifax vacation pricing for a presentation. yes do deep research on that',
+                objective: 'Research Halifax vacation pricing for a presentation. yes do deep research on that',
+                recentMessages: [
+                    { role: 'user', content: 'Research Halifax vacation pricing for a presentation.' },
+                    { role: 'assistant', content: 'I can do that.' },
+                ],
+            }),
+        );
+    });
+
     test('terminates immediately after a successful workload creation instead of replanning', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

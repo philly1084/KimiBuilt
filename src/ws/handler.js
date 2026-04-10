@@ -26,6 +26,7 @@ const {
 } = require('../artifacts/artifact-service');
 const { startRuntimeTask, completeRuntimeTask, failRuntimeTask } = require('../admin/runtime-monitor');
 const { getAuthenticatedUser, isAuthEnabled } = require('../auth/service');
+const { resolveTranscriptObjectiveFromSession } = require('../conversation-continuity');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('../project-memory');
 const { buildContinuityInstructions } = require('../runtime-prompts');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
@@ -355,6 +356,11 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         const runtimeToolManager = toolManager || await ensureRuntimeToolManager(ws.app);
 
         if (effectiveOutputFormat) {
+            const artifactRecentMessages = await sessionStore.getRecentMessages(
+                session.id,
+                WORKLOAD_PREFLIGHT_RECENT_LIMIT,
+            );
+            const artifactRecall = resolveTranscriptObjectiveFromSession(message, artifactRecentMessages);
             const artifactMemory = await memoryService.process(session.id, message, {
                 ownerId,
                 memoryScope,
@@ -362,12 +368,11 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 sourceSurface: clientSurface || taskType,
                 memoryKeywords,
                 profile: 'default',
+                recallQuery: artifactRecall.objective || message,
+                objective: artifactRecall.objective || message,
+                recentMessages: artifactRecentMessages,
                 returnDetails: true,
             });
-            const artifactRecentMessages = await sessionStore.getRecentMessages(
-                session.id,
-                WORKLOAD_PREFLIGHT_RECENT_LIMIT,
-            );
             const preparedImages = await maybePrepareImagesForArtifactPrompt({
                 toolManager: runtimeToolManager,
                 sessionId: session.id,
