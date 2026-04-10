@@ -16,6 +16,7 @@ describe('tool execution profiles', () => {
             'agent-workload',
             'asset-search',
             'speech-generate',
+            'deep-research-presentation',
             'security-scan',
             'architecture-design',
             'uml-generate',

@@ -63,6 +63,9 @@ class PptxGenerator {
         title: item.title || item,
         bullets: Array.isArray(item.subpoints) ? item.subpoints : [],
         imagePrompt: item.imagePrompt || '',
+        imageUrl: item.imageUrl || '',
+        imageAlt: item.imageAlt || '',
+        imageSource: item.imageSource || '',
       }))
       : [];
 
@@ -90,6 +93,9 @@ class PptxGenerator {
             subtitle: index === 0 ? (variables.subtitle || '') : '',
             caption: slide.caption || '',
             imagePrompt: slide.imagePrompt || '',
+            imageUrl: slide.imageUrl || '',
+            imageAlt: slide.imageAlt || '',
+            imageSource: slide.imageSource || '',
             content: slide.content || '',
             bullets: this.normalizeBullets(slide.bullets),
           })),
@@ -110,6 +116,9 @@ class PptxGenerator {
             chart: slide.chart || null,
             columns: Array.isArray(slide.columns) ? slide.columns : [],
             imagePrompt: slide.imagePrompt || '',
+            imageUrl: slide.imageUrl || '',
+            imageAlt: slide.imageAlt || '',
+            imageSource: slide.imageSource || '',
           })) : [
             {
               layout: 'title',
@@ -206,6 +215,9 @@ class PptxGenerator {
       chart: slide.chart && typeof slide.chart === 'object' ? slide.chart : null,
       columns: Array.isArray(slide.columns) ? slide.columns : [],
       imagePrompt: slide.imagePrompt || '',
+      imageUrl: slide.imageUrl || '',
+      imageAlt: slide.imageAlt || '',
+      imageSource: slide.imageSource || '',
       caption: slide.caption || '',
     };
   }
@@ -505,7 +517,8 @@ class PptxGenerator {
   async renderImageSlide(slide, slideData, theme, options) {
     this.addSlideHeading(slide, slideData, theme);
 
-    const imageAdded = await this.tryAddGeneratedImage(slide, slideData, options);
+    const imageAdded = await this.tryAddReferencedImage(slide, slideData)
+      || await this.tryAddGeneratedImage(slide, slideData, options);
     if (!imageAdded) {
       slide.addShape('roundRect', {
         x: 6.6,
@@ -543,6 +556,13 @@ class PptxGenerator {
 
     if (slideData.caption) {
       this.addText(slide, slideData.caption, {
+        x: 6.7, y: 6.55, w: 5.1, h: 0.3,
+        fontSize: 10,
+        color: theme.muted,
+        italic: true,
+      });
+    } else if (slideData.imageSource) {
+      this.addText(slide, slideData.imageSource, {
         x: 6.7, y: 6.55, w: 5.1, h: 0.3,
         fontSize: 10,
         color: theme.muted,
@@ -682,6 +702,28 @@ class PptxGenerator {
     }
   }
 
+  async tryAddReferencedImage(slide, slideData) {
+    if (!slideData.imageUrl) {
+      return false;
+    }
+
+    try {
+      const imageBuffer = await fetchImageBuffer(slideData.imageUrl);
+      slide.addImage({
+        data: imageBuffer.toString('base64'),
+        x: 6.6,
+        y: 1.7,
+        w: 5.5,
+        h: 4.7,
+        altText: slideData.imageAlt || slideData.title || 'Presentation image',
+      });
+      return true;
+    } catch (error) {
+      console.warn('[PptxGenerator] Failed to load referenced image:', error.message);
+      return false;
+    }
+  }
+
   addSlideFooter(slide, slideNumber, title, theme) {
     slide.addText(`${title} - ${slideNumber}`, {
       x: 0.9,
@@ -795,9 +837,26 @@ class PptxGenerator {
 }
 
 async function fetchImageBuffer(url) {
-  const response = await fetch(url);
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to load image.');
 }
 
 module.exports = { PptxGenerator };

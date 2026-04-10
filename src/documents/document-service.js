@@ -1322,6 +1322,15 @@ class DocumentService {
     const chartSeries = Array.isArray(slide.chart?.series) ? slide.chart.series : [];
     const columns = Array.isArray(slide.columns) ? slide.columns : [];
     const maxValue = Math.max(...chartSeries.map((point) => Number(point.value) || 0), 1);
+    const imageCaption = slide.caption || slide.imageSource || '';
+    const imageHtml = slide.imageUrl
+      ? `
+        <figure class="slide-figure">
+          <img src="${this.escapeHtml(slide.imageUrl)}" alt="${this.escapeHtml(slide.imageAlt || slide.title || `Slide ${index + 1}`)}" loading="lazy" />
+          ${imageCaption ? `<figcaption>${this.escapeHtml(imageCaption)}</figcaption>` : ''}
+        </figure>
+      `
+      : '';
 
     const chartHtml = chartSeries.length > 0
       ? `<div class="slide-chart">${chartSeries.map((point) => `
@@ -1339,6 +1348,7 @@ class DocumentService {
         ${slide.kicker ? `<p class="slide-kicker">${this.escapeHtml(slide.kicker)}</p>` : ''}
         <h2>${this.escapeHtml(slide.title || `Slide ${index + 1}`)}</h2>
         ${slide.subtitle ? `<p class="slide-subtitle">${this.escapeHtml(slide.subtitle)}</p>` : ''}
+        ${imageHtml}
         ${slide.content ? `<div class="slide-copy">${this.renderRichTextBlocks(slide.content)}</div>` : ''}
         ${bullets.length > 0 ? `<ul class="slide-bullets">${bullets.map((bullet) => `<li>${this.escapeHtml(bullet)}</li>`).join('')}</ul>` : ''}
         ${stats.length > 0 ? `<div class="slide-stats">${stats.map((stat) => `
@@ -1356,7 +1366,7 @@ class DocumentService {
           </article>
         `).join('')}</div>` : ''}
         ${chartHtml}
-        ${slide.imagePrompt ? `<p class="slide-visual-note">Visual direction: ${this.escapeHtml(slide.imagePrompt)}</p>` : ''}
+        ${!slide.imageUrl && slide.imagePrompt ? `<p class="slide-visual-note">Visual direction: ${this.escapeHtml(slide.imagePrompt)}</p>` : ''}
       </section>
     `;
   }
@@ -1545,6 +1555,9 @@ class DocumentService {
         .slide-kicker { color: var(--deck-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.8rem; margin: 0 0 16px; position: relative; }
         .slide-subtitle, .slide-visual-note, .deck-footer p { color: var(--deck-muted); max-width: 52ch; }
         .slide-copy p { max-width: 58ch; font-size: 1.08rem; line-height: 1.7; }
+        .slide-figure { margin: 24px 0 28px; max-width: 760px; position: relative; z-index: 1; }
+        .slide-figure img { width: 100%; max-height: 46vh; object-fit: cover; border-radius: 24px; display: block; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18); }
+        .slide-figure figcaption { margin-top: 10px; color: var(--deck-muted); font-size: 0.9rem; }
         .slide-bullets { max-width: 58ch; display: grid; gap: 10px; padding-left: 1.25rem; }
         .slide-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 24px; }
         .stat-card, .column-card { padding: 18px; border-radius: 18px; background: rgba(255,255,255,0.6); border: 1px solid rgba(15,23,42,0.08); backdrop-filter: blur(8px); }

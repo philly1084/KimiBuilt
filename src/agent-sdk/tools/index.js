@@ -14,6 +14,7 @@ const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
+const { normalizeWhitespace, stripHtml } = require('../../utils/text');
 const {
   AGENT_NOTES_CHAR_LIMIT,
   writeAgentNotesFile,
@@ -35,8 +36,17 @@ const {
 const MAX_VERIFIED_REFERENCE_IMAGES = 20;
 const IMAGE_REFERENCE_VERIFY_TIMEOUT_MS = 15000;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
+const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 const MAX_DOCUMENT_SOURCES = 8;
 const MAX_DOCUMENT_SOURCE_CHARS = 4000;
+const DEFAULT_DEEP_RESEARCH_PASSES = 3;
+const MAX_DEEP_RESEARCH_PASSES = 6;
+const DEFAULT_DEEP_RESEARCH_SEARCH_LIMIT = 6;
+const DEFAULT_DEEP_RESEARCH_PAGES_PER_PASS = 2;
+const MAX_DEEP_RESEARCH_PAGES_PER_PASS = 4;
+const DEFAULT_DEEP_RESEARCH_IMAGE_LIMIT = 4;
+const MAX_DEEP_RESEARCH_IMAGE_LIMIT = 6;
+const DEFAULT_IMAGE_SETTLE_DELAY_MS = 1500;
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -361,7 +371,11 @@ function applyWorkloadExecutionPreferences(payload = {}, params = {}, context = 
 
 function resolveDocumentService(context = {}) {
   const service = context?.documentService || null;
-  if (!service?.recommendDocumentWorkflow || !service?.buildDocumentPlan || !service?.aiGenerate || !service?.assemble) {
+  if (!service?.recommendDocumentWorkflow
+    || !service?.buildDocumentPlan
+    || !service?.aiGenerate
+    || !service?.assemble
+    || !service?.generatePresentation) {
     throw new Error('Document workflows are unavailable because the document service is not initialized.');
   }
 
@@ -532,6 +546,230 @@ function buildArtifactWorkflowResult(result = null, { includeContent = false } =
       }
       : {}),
   };
+}
+
+function delay(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function normalizePositiveInteger(value, fallback, maximum) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback;
+  }
+
+  const normalized = Math.floor(numeric);
+  if (!Number.isFinite(maximum) || maximum <= 0) {
+    return normalized;
+  }
+
+  return Math.min(normalized, maximum);
+}
+
+function dedupeStringList(values = []) {
+  const seen = new Set();
+  const results = [];
+
+  for (const value of Array.isArray(values) ? values : [values]) {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    results.push(normalized);
+  }
+
+  return results;
+}
+
+function normalizeSourceText(value = '') {
+  return truncateDocumentSourceText(normalizeWhitespace(stripHtml(String(value || ''))));
+}
+
+function normalizeDeepResearchImage(image = {}) {
+  if (!image || typeof image !== 'object') {
+    return null;
+  }
+
+  const url = String(image.url || image.imageUrl || '').trim();
+  if (!url) {
+    return null;
+  }
+
+  return {
+    url,
+    alt: String(image.alt || image.imageAlt || deriveImageAltText(url, 'image')).trim() || 'image',
+    title: String(image.title || '').trim(),
+    host: String(image.host || image.source || '').trim(),
+    mimeType: String(image.mimeType || '').trim() || null,
+    author: String(image.author || '').trim(),
+    authorLink: String(image.authorLink || '').trim(),
+    attribution: String(image.attribution || '').trim(),
+    verified: image.verified === true,
+    verificationMethod: String(image.verificationMethod || '').trim() || null,
+    source: String(image.sourceKind || image.sourceType || image.source || '').trim() || 'image',
+  };
+}
+
+function hasDeepResearchPresentationIntent(prompt = '') {
+  const normalized = String(prompt || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  const hasResearchIntent = /\b(deep research|research|look up|search the web|browse the web|search online|browse online|latest|current|today|news)\b/.test(normalized);
+  const hasPresentationIntent = /\b(slides|presentation|slide deck|deck|pptx|website slides)\b/.test(normalized);
+  return hasResearchIntent && hasPresentationIntent;
+}
+
+function deriveDeepResearchQueries({
+  prompt = '',
+  plan = null,
+  researchQueries = [],
+  passCount = DEFAULT_DEEP_RESEARCH_PASSES,
+} = {}) {
+  const outlineQueries = Array.isArray(plan?.outline)
+    ? plan.outline
+      .map((item) => item?.title || item?.heading || '')
+      .filter((value) => value && !/^title slide$/i.test(String(value)))
+      .slice(0, Math.max(0, passCount - 1))
+      .map((label) => `${prompt} ${label}`.trim())
+    : [];
+
+  return dedupeStringList([
+    ...researchQueries,
+    prompt,
+    plan?.titleSuggestion ? `${prompt} ${plan.titleSuggestion}` : '',
+    ...outlineQueries,
+  ]).slice(0, passCount);
+}
+
+function buildDeepResearchSourceFromFetch({
+  fetched = {},
+  searchResult = null,
+  fallbackUrl = '',
+  kind = 'web-fetch',
+} = {}) {
+  const url = String(fetched?.url || fallbackUrl || '').trim();
+  const title = String(
+    fetched?.title
+    || searchResult?.title
+    || url
+    || 'Research source',
+  ).trim();
+  const sourceLabel = String(searchResult?.source || '').trim();
+  const rawText = kind === 'web-scrape'
+    ? (
+      fetched?.summary
+      || fetched?.text
+      || fetched?.content
+      || JSON.stringify(fetched?.data || {})
+    )
+    : (
+      fetched?.body
+      || fetched?.content
+      || fetched?.text
+      || ''
+    );
+  const content = normalizeSourceText(rawText);
+
+  if (!content) {
+    return null;
+  }
+
+  return {
+    id: `${kind}-${url || title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+    title,
+    sourceLabel,
+    sourceUrl: url,
+    kind,
+    content,
+  };
+}
+
+function buildPresentationResearchPrompt({
+  prompt = '',
+  sources = [],
+  recommendation = null,
+  plan = null,
+  params = {},
+  format = 'pptx',
+} = {}) {
+  return buildGroundedDocumentPrompt(prompt, sources, {
+    title: params.title || plan?.titleSuggestion || '',
+    subtitle: params.subtitle || '',
+    audience: params.audience || '',
+    style: params.style || '',
+    theme: params.theme || plan?.themeSuggestion || '',
+    format,
+    documentType: params.documentType || recommendation?.inferredType || 'presentation',
+  });
+}
+
+function derivePresentationImageQueries({
+  prompt = '',
+  presentation = {},
+  maxImages = DEFAULT_DEEP_RESEARCH_IMAGE_LIMIT,
+} = {}) {
+  const slides = Array.isArray(presentation?.slides) ? presentation.slides : [];
+  const preferredSlides = slides
+    .filter((slide) => slide && typeof slide === 'object' && (slide.layout === 'image' || slide.imagePrompt))
+    .slice(0, maxImages);
+
+  if (preferredSlides.length === 0) {
+    return [];
+  }
+
+  return preferredSlides.map((slide, index) => ({
+    slideIndex: slides.indexOf(slide),
+    query: String(slide.imagePrompt || `${prompt} ${slide.title || `slide ${index + 1}`}`).trim(),
+    title: String(slide.title || `Slide ${index + 1}`).trim(),
+    caption: String(slide.caption || '').trim(),
+  }));
+}
+
+function applyImagesToPresentation(presentation = {}, imagesBySlide = new Map()) {
+  const slides = Array.isArray(presentation?.slides) ? presentation.slides : [];
+
+  return {
+    ...presentation,
+    slides: slides.map((slide, index) => {
+      const image = normalizeDeepResearchImage(imagesBySlide.get(index));
+      if (!image) {
+        return slide;
+      }
+
+      const attribution = image.attribution
+        || (image.author ? `${image.author}${image.authorLink ? ' / Unsplash' : ''}` : image.host);
+
+      return {
+        ...slide,
+        imageUrl: image.url,
+        imageAlt: image.alt || slide.title || `Slide ${index + 1}`,
+        imageSource: attribution || '',
+        caption: slide.caption || (attribution ? `Image source: ${attribution}` : ''),
+      };
+    }),
+  };
+}
+
+async function executeNestedTool(context = {}, toolId = '', params = {}) {
+  const toolManager = context?.toolManager || null;
+  if (!toolManager?.executeTool) {
+    throw new Error(`${toolId} requires a nested tool manager in the execution context.`);
+  }
+
+  const nestedContext = context?.toolManager
+    ? context
+    : { ...context, toolManager };
+  const result = await toolManager.executeTool(toolId, params, nestedContext);
+  if (!result?.success) {
+    throw new Error(result?.error || `${toolId} failed.`);
+  }
+
+  return result.data;
 }
 
 class ToolManager {
@@ -1103,6 +1341,11 @@ class ToolManager {
             }
 
             if (action === 'generate') {
+              const structuredPresentation = params.presentation
+                && typeof params.presentation === 'object'
+                && !Array.isArray(params.presentation)
+                ? params.presentation
+                : null;
               const groundedPrompt = buildGroundedDocumentPrompt(prompt, sources, {
                 title: params.title,
                 subtitle: params.subtitle,
@@ -1112,8 +1355,32 @@ class ToolManager {
                 format: resolvedFormat,
                 documentType: resolvedDocumentType,
               });
-              if (!groundedPrompt) {
+              if (!groundedPrompt && !structuredPresentation) {
                 throw new Error('document-workflow generate requires a prompt or grounded source material.');
+              }
+
+              if (structuredPresentation) {
+                const document = await documentService.generatePresentation(structuredPresentation, {
+                  format: resolvedFormat,
+                  model: params.model || context.model || undefined,
+                  title: params.title || structuredPresentation.title,
+                  subtitle: params.subtitle || structuredPresentation.subtitle,
+                  audience: params.audience,
+                  style: params.style,
+                  theme: params.theme || structuredPresentation.theme,
+                  slideCount: params.slideCount,
+                  generateImages: params.generateImages,
+                  reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+                });
+
+                return {
+                  action,
+                  recommendation,
+                  sourceCount: sources.length,
+                  document: buildDocumentWorkflowResult(document, {
+                    includeContent: params.includeContent === true,
+                  }),
+                };
               }
 
               if (resolvedFormat === 'html'
@@ -1198,6 +1465,7 @@ class ToolManager {
             slideCount: { type: 'integer' },
             generateImages: { type: 'boolean' },
             model: { type: 'string' },
+            presentation: { type: 'object' },
             includeContent: { type: 'boolean' },
             limit: { type: 'integer' },
             sources: {
@@ -1240,6 +1508,397 @@ class ToolManager {
           exposeToFrontend: false,
           icon: 'file-text'
         }
+      },
+      {
+        id: DEEP_RESEARCH_PRESENTATION_TOOL_ID,
+        name: 'Deep Research Presentation',
+        category: 'system',
+        description: 'Plan a research-backed presentation, run multiple web research passes, gather verified image sources, and build the final deck in one ordered workflow.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const documentService = resolveDocumentService(context);
+            if (!documentService?.aiGenerator?.generatePresentationContent) {
+              throw new Error('Deep research presentation generation requires the AI presentation generator.');
+            }
+
+            const prompt = String(params.prompt || params.request || params.topic || '').trim();
+            if (!prompt) {
+              throw new Error('deep-research-presentation requires a prompt, request, or topic.');
+            }
+
+            const format = String(params.format || 'pptx').trim().toLowerCase() || 'pptx';
+            const documentType = String(params.documentType || 'presentation').trim() || 'presentation';
+            const tone = String(params.tone || 'professional').trim() || 'professional';
+            const length = String(params.length || 'medium').trim() || 'medium';
+            const passCount = normalizePositiveInteger(params.researchPasses, DEFAULT_DEEP_RESEARCH_PASSES, MAX_DEEP_RESEARCH_PASSES);
+            const searchLimit = normalizePositiveInteger(params.searchLimit, DEFAULT_DEEP_RESEARCH_SEARCH_LIMIT, MAX_VERIFIED_REFERENCE_IMAGES);
+            const pagesPerPass = normalizePositiveInteger(params.pagesPerPass, DEFAULT_DEEP_RESEARCH_PAGES_PER_PASS, MAX_DEEP_RESEARCH_PAGES_PER_PASS);
+            const imageLimit = normalizePositiveInteger(params.imageLimit, DEFAULT_DEEP_RESEARCH_IMAGE_LIMIT, MAX_DEEP_RESEARCH_IMAGE_LIMIT);
+            const imageSettleDelayMs = normalizePositiveInteger(
+              params.imageSettleDelayMs,
+              DEFAULT_IMAGE_SETTLE_DELAY_MS,
+              10000,
+            );
+            const imageMode = String(params.imageMode || 'auto').trim().toLowerCase() || 'auto';
+
+            const recommendationData = await executeNestedTool(context, DOCUMENT_WORKFLOW_TOOL_ID, {
+              action: 'recommend',
+              prompt,
+              documentType,
+              format,
+              limit: params.limit,
+            });
+            const planData = await executeNestedTool(context, DOCUMENT_WORKFLOW_TOOL_ID, {
+              action: 'plan',
+              prompt,
+              documentType,
+              format,
+              tone,
+              length,
+              title: params.title,
+              subtitle: params.subtitle,
+              audience: params.audience,
+              style: params.style,
+              theme: params.theme,
+              limit: params.limit,
+            });
+
+            const recommendation = recommendationData?.recommendation || null;
+            const plan = planData?.plan || null;
+            const researchQueries = deriveDeepResearchQueries({
+              prompt,
+              plan,
+              researchQueries: params.researchQueries,
+              passCount,
+            });
+            const sourcesByKey = new Map();
+            const researchPasses = [];
+
+            for (const query of researchQueries) {
+              let searchData = null;
+              const searchStartedAt = new Date().toISOString();
+              try {
+                searchData = await executeNestedTool(context, 'web-search', {
+                  query,
+                  engine: 'perplexity',
+                  limit: searchLimit,
+                  region: 'us-en',
+                  timeRange: String(params.timeRange || 'all').trim().toLowerCase() || 'all',
+                  includeSnippets: true,
+                  includeUrls: true,
+                });
+              } catch (error) {
+                researchPasses.push({
+                  query,
+                  status: 'failed',
+                  searchStartedAt,
+                  error: error.message,
+                  verifiedCount: 0,
+                  results: [],
+                });
+                continue;
+              }
+
+              const results = Array.isArray(searchData?.results) ? searchData.results : [];
+              const passSummary = {
+                query,
+                status: 'completed',
+                searchStartedAt,
+                totalResults: Number(searchData?.totalResults || results.length || 0),
+                verifiedCount: 0,
+                results: [],
+              };
+
+              for (const result of results.slice(0, pagesPerPass)) {
+                const url = String(result?.url || '').trim();
+                if (!url) {
+                  continue;
+                }
+
+                let fetched = null;
+                let kind = 'web-fetch';
+                let fetchError = null;
+
+                try {
+                  fetched = await executeNestedTool(context, 'web-fetch', {
+                    url,
+                    timeout: 20000,
+                    cache: true,
+                  });
+                } catch (error) {
+                  fetchError = error;
+                  try {
+                    fetched = await executeNestedTool(context, 'web-scrape', {
+                      url,
+                      browser: true,
+                      timeout: 20000,
+                    });
+                    kind = 'web-scrape';
+                  } catch (scrapeError) {
+                    fetchError = scrapeError;
+                  }
+                }
+
+                if (!fetched) {
+                  passSummary.results.push({
+                    url,
+                    title: String(result?.title || url).trim(),
+                    status: 'failed',
+                    error: fetchError?.message || 'Unable to verify the result page.',
+                  });
+                  continue;
+                }
+
+                const source = buildDeepResearchSourceFromFetch({
+                  fetched,
+                  searchResult: result,
+                  fallbackUrl: url,
+                  kind,
+                });
+                if (!source) {
+                  passSummary.results.push({
+                    url,
+                    title: String(result?.title || url).trim(),
+                    status: 'skipped',
+                    tool: kind,
+                  });
+                  continue;
+                }
+
+                const sourceKey = source.sourceUrl || source.id;
+                if (!sourcesByKey.has(sourceKey)) {
+                  sourcesByKey.set(sourceKey, source);
+                }
+
+                passSummary.results.push({
+                  url,
+                  title: source.title,
+                  status: 'verified',
+                  tool: kind,
+                  sourceLabel: source.sourceLabel,
+                });
+              }
+
+              passSummary.verifiedCount = passSummary.results.filter((entry) => entry.status === 'verified').length;
+              researchPasses.push(passSummary);
+            }
+
+            const groundedSources = Array.from(sourcesByKey.values());
+            const theme = String(params.theme || plan?.themeSuggestion || 'editorial').trim() || 'editorial';
+            const groundedPrompt = buildPresentationResearchPrompt({
+              prompt,
+              sources: groundedSources,
+              recommendation,
+              plan,
+              params,
+              format,
+            });
+            const inferredSlideCount = typeof documentService.inferSlideCount === 'function'
+              ? documentService.inferSlideCount(length)
+              : undefined;
+            const draftPresentation = await documentService.aiGenerator.generatePresentationContent(groundedPrompt, {
+              documentType,
+              tone,
+              length,
+              audience: params.audience || 'general audience',
+              theme,
+              style: params.style || theme,
+              slideCount: params.slideCount || inferredSlideCount,
+              model: params.model || context.model || undefined,
+              reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+              includeImages: true,
+              includeCharts: true,
+            });
+
+            const imagesBySlide = new Map();
+            const imageQueries = derivePresentationImageQueries({
+              prompt,
+              presentation: draftPresentation,
+              maxImages: imageLimit,
+            });
+            const imagePasses = [];
+
+            for (const imageQuery of imageQueries) {
+              let selectedImage = null;
+              let imageSourceTool = '';
+              let imageError = null;
+
+              if (imageMode !== 'generated') {
+                try {
+                  const unsplashData = await executeNestedTool(context, 'image-search-unsplash', {
+                    query: imageQuery.query,
+                    perPage: 4,
+                    orientation: 'landscape',
+                  });
+                  const candidate = Array.isArray(unsplashData?.images) ? unsplashData.images[0] : null;
+                  if (candidate?.url) {
+                    if (imageSettleDelayMs > 0) {
+                      await delay(imageSettleDelayMs);
+                    }
+                    const verified = await executeNestedTool(context, 'image-from-url', {
+                      url: candidate.url,
+                      alt: candidate.alt || imageQuery.title,
+                      title: imageQuery.title,
+                    });
+                    selectedImage = normalizeDeepResearchImage({
+                      ...candidate,
+                      ...(verified?.image || verified?.images?.[0] || {}),
+                      attribution: candidate.author ? `${candidate.author} / Unsplash` : '',
+                      sourceKind: 'image-search-unsplash',
+                    });
+                    imageSourceTool = 'image-search-unsplash';
+                  }
+                } catch (error) {
+                  imageError = error;
+                }
+              }
+
+              if (!selectedImage && imageMode !== 'stock') {
+                try {
+                  const generated = await executeNestedTool(context, 'image-generate', {
+                    prompt: imageQuery.query,
+                    alt: imageQuery.title,
+                  });
+                  const candidate = generated?.image || generated?.images?.[0] || null;
+                  const candidateUrl = String(candidate?.url || '').trim();
+                  if (candidateUrl) {
+                    if (imageSettleDelayMs > 0) {
+                      await delay(imageSettleDelayMs);
+                    }
+                    const verified = await executeNestedTool(context, 'image-from-url', {
+                      url: candidateUrl,
+                      alt: candidate.alt || imageQuery.title,
+                      title: imageQuery.title,
+                    });
+                    selectedImage = normalizeDeepResearchImage({
+                      ...candidate,
+                      ...(verified?.image || verified?.images?.[0] || {}),
+                      attribution: 'Generated image',
+                      sourceKind: 'image-generate',
+                    });
+                    imageSourceTool = 'image-generate';
+                  }
+                } catch (error) {
+                  imageError = error;
+                }
+              }
+
+              if (selectedImage) {
+                imagesBySlide.set(imageQuery.slideIndex, selectedImage);
+              }
+
+              imagePasses.push({
+                slideIndex: imageQuery.slideIndex,
+                title: imageQuery.title,
+                query: imageQuery.query,
+                status: selectedImage ? 'verified' : 'failed',
+                tool: imageSourceTool || null,
+                image: selectedImage,
+                error: selectedImage ? null : (imageError?.message || 'No image source could be verified.'),
+              });
+            }
+
+            const presentationWithImages = applyImagesToPresentation(draftPresentation, imagesBySlide);
+            const finalDocument = await executeNestedTool(context, DOCUMENT_WORKFLOW_TOOL_ID, {
+              action: 'generate',
+              prompt,
+              documentType,
+              format,
+              tone,
+              length,
+              title: params.title || presentationWithImages.title,
+              subtitle: params.subtitle || presentationWithImages.subtitle,
+              audience: params.audience,
+              style: params.style,
+              theme,
+              slideCount: params.slideCount || inferredSlideCount,
+              generateImages: imagesBySlide.size < imageQueries.length,
+              model: params.model || context.model || undefined,
+              reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+              includeContent: params.includeContent === true,
+              sources: groundedSources,
+              presentation: presentationWithImages,
+            });
+
+            return {
+              action: 'research_and_generate_presentation',
+              recommendation,
+              plan,
+              researchPasses,
+              sourceCount: groundedSources.length,
+              sources: groundedSources,
+              draftPresentation: {
+                title: presentationWithImages.title,
+                subtitle: presentationWithImages.subtitle,
+                theme: presentationWithImages.theme,
+                slideCount: Array.isArray(presentationWithImages.slides) ? presentationWithImages.slides.length : 0,
+                slides: (Array.isArray(presentationWithImages.slides) ? presentationWithImages.slides : []).map((slide, index) => ({
+                  index: index + 1,
+                  layout: slide.layout,
+                  title: slide.title,
+                  imageUrl: slide.imageUrl || '',
+                  imagePrompt: slide.imagePrompt || '',
+                })),
+              },
+              imagePasses,
+              verifiedImageCount: imagesBySlide.size,
+              images: Array.from(imagesBySlide.entries()).map(([slideIndex, image]) => ({
+                slideIndex,
+                ...image,
+              })),
+              document: finalDocument?.document || null,
+            };
+          },
+          sideEffects: ['write', 'network'],
+          timeout: 180000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: [],
+          properties: {
+            prompt: { type: 'string' },
+            request: { type: 'string' },
+            topic: { type: 'string' },
+            documentType: { type: 'string' },
+            format: { type: 'string' },
+            tone: { type: 'string' },
+            length: { type: 'string' },
+            title: { type: 'string' },
+            subtitle: { type: 'string' },
+            audience: { type: 'string' },
+            style: { type: 'string' },
+            theme: { type: 'string' },
+            slideCount: { type: 'integer' },
+            model: { type: 'string' },
+            reasoningEffort: { type: 'string' },
+            includeContent: { type: 'boolean' },
+            limit: { type: 'integer' },
+            researchPasses: { type: 'integer' },
+            researchQueries: { type: 'array' },
+            searchLimit: { type: 'integer' },
+            pagesPerPass: { type: 'integer' },
+            imageLimit: { type: 'integer' },
+            imageMode: { type: 'string', enum: ['auto', 'stock', 'generated'] },
+            imageSettleDelayMs: { type: 'integer' },
+            timeRange: { type: 'string', enum: ['day', 'week', 'month', 'year', 'all'] },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: [
+            'deep research presentation',
+            'deep research deck',
+            'research-backed presentation',
+            'research-backed slide deck',
+            'research slides',
+            'research deck',
+          ],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'presentation',
+        },
       }
     ];
 
@@ -2388,15 +3047,18 @@ class ToolManager {
     const normalizedParams = id === 'file-write'
       ? normalizeFileWriteParams(params)
       : params;
+    const effectiveContext = context?.toolManager
+      ? context
+      : { ...context, toolManager: this };
 
     // Execute either a ToolBase instance or a registry definition.
     let result;
     if (typeof tool.execute === 'function') {
-      result = await tool.execute(normalizedParams, context);
+      result = await tool.execute(normalizedParams, effectiveContext);
     } else if (typeof tool.backend?.handler === 'function') {
       const startedAt = Date.now();
       try {
-        const data = await tool.backend.handler(normalizedParams, context);
+        const data = await tool.backend.handler(normalizedParams, effectiveContext);
         result = {
           success: true,
           data,
@@ -2419,7 +3081,7 @@ class ToolManager {
     
     // Record stats
     this.registry.recordInvocation(id, result, {
-      ...context,
+      ...effectiveContext,
       params: normalizedParams,
     });
     

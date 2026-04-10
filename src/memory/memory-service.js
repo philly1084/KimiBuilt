@@ -134,7 +134,7 @@ function deriveToolFamilyFromToolEvents(toolEvents = []) {
         return 'artifact';
     }
 
-    if (toolIds.some((toolId) => ['document-workflow'].includes(toolId))) {
+    if (toolIds.some((toolId) => ['document-workflow', 'deep-research-presentation'].includes(toolId))) {
         return 'document';
     }
 

@@ -74,6 +74,7 @@ const MAX_TOOL_RESULT_CHARS = config.memory.toolResultCharLimit;
 const RECENT_TRANSCRIPT_LIMIT = config.memory.recentTranscriptLimit;
 const MAX_STEP_SIGNATURE_REPEATS = 3;
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
+const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 const AUTONOMY_CONTINUATION_CHECKPOINT_ID_PREFIX = 'checkpoint-autonomy-continue';
 const REMOTE_BLOCKING_ERROR_PATTERNS = [
     /no ssh host configured/i,
@@ -380,6 +381,16 @@ function hasDocumentWorkflowIntentText(text = '') {
         /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/.test(normalized)
         && /\b(research|look up|search|browse|scrape|extract|pricing|comparison|current|latest)\b/.test(normalized)
     );
+}
+
+function hasDeepResearchPresentationIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return hasExplicitWebResearchIntentText(normalized)
+        && /\b(slides|presentation|slide deck|deck|pptx|website slides)\b/.test(normalized);
 }
 
 function hasIndexedAssetIntentText(text = '') {
@@ -6164,6 +6175,9 @@ class ConversationOrchestrator extends EventEmitter {
             if (hasSecurityIntent && allowedToolIds.includes('security-scan')) {
                 candidates.add('security-scan');
             }
+            if (hasDeepResearchPresentationIntentText(prompt) && allowedToolIds.includes(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
+                candidates.add(DEEP_RESEARCH_PRESENTATION_TOOL_ID);
+            }
             if (hasDocumentWorkflowIntent && allowedToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
                 candidates.add(DOCUMENT_WORKFLOW_TOOL_ID);
             }
@@ -6293,6 +6307,19 @@ class ConversationOrchestrator extends EventEmitter {
                         || session?.metadata?.timezone
                         || session?.metadata?.timeZone
                         || getDefaultWorkloadTimezone(),
+                },
+            });
+        }
+        if (toolPolicy.candidateToolIds.includes(DEEP_RESEARCH_PRESENTATION_TOOL_ID)
+            && hasDeepResearchPresentationIntentText(objective)
+            && !hasGroundedDocumentSources) {
+            return finalizeAction({
+                tool: DEEP_RESEARCH_PRESENTATION_TOOL_ID,
+                reason: 'Deep research presentation requests should follow the ordered plan, research, image, and deck-generation workflow.',
+                params: {
+                    prompt: objective,
+                    documentType: 'presentation',
+                    format: 'pptx',
                 },
             });
         }
@@ -6806,6 +6833,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
+            'Use `deep-research-presentation` when the user wants a research-backed deck handled as one ordered plan -> research -> images -> presentation workflow.',
             ...(toolPolicy?.userCheckpointPolicy?.enabled
                 ? [
                     Number(toolPolicy.userCheckpointPolicy.remaining || 0) > 0
@@ -7474,6 +7502,10 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-scrape` first, then call `document-workflow generate` with grounded `sources` built from those verified results.');
             parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
+        }
+
+        if (allowedToolIds.includes(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
+            parts.push('Use `deep-research-presentation` when the user explicitly wants a research-backed slide deck built through one ordered workflow: planning, multiple research passes, image sourcing, then final presentation generation.');
         }
 
         if (allowedToolIds.includes('asset-search')) {

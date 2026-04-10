@@ -29,6 +29,7 @@ const {
 } = require('./user-checkpoints');
 const { parseLenientJson } = require('./utils/lenient-json');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
+const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 
 let chatClient = null;
 
@@ -179,6 +180,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'agent-delegate',
     'agent-workload',
     DOCUMENT_WORKFLOW_TOOL_ID,
+    DEEP_RESEARCH_PRESENTATION_TOOL_ID,
     'git-safe',
     USER_CHECKPOINT_TOOL_ID,
     'ssh-execute',
@@ -950,6 +952,10 @@ function shouldAutoUseTool(toolId, prompt = '', skill = null, options = {}) {
         return Boolean(options?.documentService || options?.toolContext?.documentService);
     }
 
+    if (toolId === DEEP_RESEARCH_PRESENTATION_TOOL_ID) {
+        return Boolean(options?.documentService || options?.toolContext?.documentService);
+    }
+
     if (toolId === USER_CHECKPOINT_TOOL_ID) {
         const checkpointPolicy = options?.userCheckpointPolicy || options?.toolContext?.userCheckpointPolicy || {};
         return checkpointPolicy.enabled === true
@@ -1005,6 +1011,16 @@ function hasExplicitWebResearchIntent(prompt = '') {
         /\bsearch online\b/i,
         /\bbrowse online\b/i,
     ].some((pattern) => pattern.test(text));
+}
+
+function hasDeepResearchPresentationIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return hasExplicitWebResearchIntent(text)
+        && /\b(slides|presentation|slide deck|deck|pptx|website slides)\b/i.test(text);
 }
 
 function hasExplicitSubAgentIntent(prompt = '') {
@@ -1920,6 +1936,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
         /\b(slides|presentation|deck|pptx|docx|pdf|html document|research brief)\b/i.test(normalizedPrompt)
         && (hasWebResearchIntent || hasExplicitScrapeIntent || hasUrl)
     );
+    const hasDeepResearchDeckIntent = hasDeepResearchPresentationIntent(prompt);
     const hasResearchDocumentIntent = hasDocumentWorkflowIntent
         && (
             hasWebResearchIntent
@@ -1957,6 +1974,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
 
     if (hasSubAgentIntent && availableToolIds.has('agent-delegate')) {
         selectedIds.add('agent-delegate');
+    }
+
+    if (hasDeepResearchDeckIntent && availableToolIds.has(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
+        selectedIds.add(DEEP_RESEARCH_PRESENTATION_TOOL_ID);
     }
 
     if (hasDocumentWorkflowIntent && availableToolIds.has(DOCUMENT_WORKFLOW_TOOL_ID)) {
@@ -2167,6 +2188,11 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         return remoteToolId;
     }
 
+    if (availableToolIds.has(DEEP_RESEARCH_PRESENTATION_TOOL_ID)
+        && hasDeepResearchPresentationIntent(prompt)) {
+        return DEEP_RESEARCH_PRESENTATION_TOOL_ID;
+    }
+
     if (hasExplicitWebResearchIntent(prompt)) {
         return 'web-search';
     }
@@ -2269,6 +2295,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- When verified image URLs are available from tools, embed those directly with markdown image syntax instead of fabricating SVG placeholders, overlays, or HTML mockups.');
         guidance.push('- For HTML, PDF, and DOCX document requests that call for real images, prefer `image-search-unsplash` and `image-from-url` over `image-generate`, save the verified references, and reuse them throughout the document when the user asks for visuals.');
         guidance.push('- For research-backed reports, news pages, and current-events documents, gather grounded sources with `web-search` and `web-fetch`, then source real visuals with `image-search-unsplash` or `image-from-url` before composing the document.');
+    }
+
+    if (automaticTools.some((entry) => entry.id === DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
+        guidance.push('- Use `deep-research-presentation` when the user wants a research-backed slide deck or presentation built in one ordered workflow.');
+        guidance.push('- `deep-research-presentation` should handle the sequence itself: plan first, then multiple research passes, then verified image sourcing, then final deck generation.');
+        guidance.push('- Prefer `deep-research-presentation` over manually chaining `web-search`, `image-search-unsplash`, and `document-workflow` when the user explicitly asks for deep research plus a presentation deliverable.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'asset-search')) {

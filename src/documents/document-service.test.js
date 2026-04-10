@@ -145,6 +145,39 @@ describe('DocumentService', () => {
     expect(String(document.content)).toContain('Website Slides');
   });
 
+  test('renders verified image urls inside html presentation decks', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.generatePresentation({
+      title: 'Visual Deck',
+      subtitle: 'Verified imagery',
+      theme: 'editorial',
+      slides: [
+        { layout: 'title', title: 'Visual Deck', subtitle: 'Verified imagery' },
+        {
+          layout: 'image',
+          title: 'Waterfront',
+          imageUrl: 'https://images.example.com/halifax.jpg',
+          imageAlt: 'Halifax waterfront',
+          imageSource: 'Jane Doe / Unsplash',
+          bullets: ['Verified image source is embedded directly'],
+        },
+      ],
+    }, {
+      format: 'html',
+      generateImages: false,
+    });
+
+    expect(document.mimeType).toBe('text/html');
+    expect(String(document.content)).toContain('https://images.example.com/halifax.jpg');
+    expect(String(document.content)).toContain('Halifax waterfront');
+    expect(String(document.content)).toContain('Jane Doe / Unsplash');
+  });
+
   test('renders template-driven website slides as html presentation decks', async () => {
     const service = new DocumentService({
       responses: {

@@ -352,6 +352,7 @@ describe('ToolManager image tools', () => {
       buildDocumentPlan: jest.fn(),
       aiGenerate: jest.fn(),
       assemble: jest.fn(),
+      generatePresentation: jest.fn(),
     };
 
     const result = await toolManager.executeTool('document-workflow', {
@@ -392,6 +393,7 @@ describe('ToolManager image tools', () => {
         downloadUrl: '/api/documents/doc-1/download',
       })),
       assemble: jest.fn(),
+      generatePresentation: jest.fn(),
     };
 
     const result = await toolManager.executeTool('document-workflow', {
@@ -426,6 +428,68 @@ describe('ToolManager image tools', () => {
     }));
   });
 
+  test('generates presentations from structured slide payloads through document-workflow', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(() => ({
+        inferredType: 'presentation',
+        recommendedFormat: 'pptx',
+        blueprint: { label: 'Presentation' },
+      })),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(async () => ({
+        id: 'deck-structured-1',
+        filename: 'structured-deck.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        metadata: { slideCount: 2 },
+        downloadUrl: '/api/documents/deck-structured-1/download',
+      })),
+    };
+
+    const result = await toolManager.executeTool('document-workflow', {
+      action: 'generate',
+      documentType: 'presentation',
+      format: 'pptx',
+      generateImages: false,
+      presentation: {
+        title: 'Structured Deck',
+        theme: 'executive',
+        slides: [
+          { layout: 'title', title: 'Structured Deck' },
+          { layout: 'image', title: 'Hero', imageUrl: 'https://images.example.com/hero.jpg' },
+        ],
+      },
+    }, {
+      documentService,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(documentService.generatePresentation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Structured Deck',
+        slides: expect.arrayContaining([
+          expect.objectContaining({
+            imageUrl: 'https://images.example.com/hero.jpg',
+          }),
+        ]),
+      }),
+      expect.objectContaining({
+        format: 'pptx',
+        model: 'gpt-5.4-mini',
+        generateImages: false,
+      }),
+    );
+    expect(result.data.document).toEqual(expect.objectContaining({
+      filename: 'structured-deck.pptx',
+      downloadUrl: '/api/documents/deck-structured-1/download',
+    }));
+  });
+
   test('routes dashboard html generation through the artifact pipeline inside document-workflow', async () => {
     const toolManager = new ToolManager();
     await toolManager.initialize();
@@ -439,6 +503,7 @@ describe('ToolManager image tools', () => {
       buildDocumentPlan: jest.fn(),
       aiGenerate: jest.fn(),
       assemble: jest.fn(),
+      generatePresentation: jest.fn(),
     };
 
     artifactService.generateArtifact.mockResolvedValue({
@@ -487,6 +552,194 @@ describe('ToolManager image tools', () => {
       filename: 'support-ops-dashboard.html',
       downloadUrl: '/api/artifacts/artifact-1/download',
       content: expect.stringContaining('data-dashboard-template'),
+    }));
+  });
+
+  test('generates a research-backed presentation through the deep research workflow tool', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => {
+        if (id === 'document-workflow' && params.action === 'recommend') {
+          return {
+            success: true,
+            data: {
+              recommendation: {
+                inferredType: 'presentation',
+                recommendedFormat: 'pptx',
+                blueprint: { label: 'Presentation' },
+              },
+            },
+          };
+        }
+
+        if (id === 'document-workflow' && params.action === 'plan') {
+          return {
+            success: true,
+            data: {
+              plan: {
+                titleSuggestion: 'Halifax Travel Pricing',
+                themeSuggestion: 'executive',
+                outline: [
+                  { title: 'Title Slide' },
+                  { title: 'Pricing Snapshot' },
+                ],
+              },
+            },
+          };
+        }
+
+        if (id === 'web-search') {
+          return {
+            success: true,
+            data: {
+              totalResults: 1,
+              results: [{
+                title: 'Nova Scotia Travel Packages',
+                url: 'https://travel.example.com/packages',
+                source: 'travel.example.com',
+              }],
+            },
+          };
+        }
+
+        if (id === 'web-fetch') {
+          return {
+            success: true,
+            data: {
+              url: 'https://travel.example.com/packages',
+              title: 'Nova Scotia Travel Packages',
+              body: '<main>Weekend package: $799. Flights from Halifax start at $214.</main>',
+            },
+          };
+        }
+
+        if (id === 'image-search-unsplash') {
+          return {
+            success: true,
+            data: {
+              images: [{
+                url: 'https://images.example.com/halifax.jpg',
+                alt: 'Halifax waterfront',
+                author: 'Jane Doe',
+              }],
+            },
+          };
+        }
+
+        if (id === 'image-from-url') {
+          return {
+            success: true,
+            data: {
+              image: {
+                url: params.url,
+                alt: params.alt,
+                host: 'images.example.com',
+                mimeType: 'image/jpeg',
+                verified: true,
+                verificationMethod: 'GET',
+              },
+            },
+          };
+        }
+
+        if (id === 'document-workflow' && params.action === 'generate') {
+          return {
+            success: true,
+            data: {
+              document: {
+                id: 'deck-1',
+                filename: 'halifax-travel-pricing.pptx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                downloadUrl: '/api/documents/deck-1/download',
+              },
+            },
+          };
+        }
+
+        throw new Error(`Unexpected nested tool call: ${id}`);
+      }),
+    };
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+      inferSlideCount: jest.fn(() => 6),
+      aiGenerator: {
+        generatePresentationContent: jest.fn(async () => ({
+          title: 'Halifax Travel Pricing',
+          subtitle: 'Research-backed deck',
+          theme: 'executive',
+          slides: [
+            { layout: 'title', title: 'Halifax Travel Pricing', subtitle: 'Research-backed deck' },
+            {
+              layout: 'image',
+              title: 'Pricing Snapshot',
+              imagePrompt: 'Halifax waterfront travel hero image',
+              bullets: ['Weekend package: $799', 'Flights from Halifax start at $214'],
+            },
+          ],
+        })),
+      },
+    };
+
+    const result = await toolManager.executeTool('deep-research-presentation', {
+      prompt: 'Research vacation pricing in Halifax and build a slide deck I can review.',
+      researchPasses: 1,
+      imageLimit: 1,
+      imageSettleDelayMs: 1,
+    }, {
+      documentService,
+      toolManager: nestedToolManager,
+      model: 'gpt-5.4-mini',
+    });
+
+    expect(result.success).toBe(true);
+    expect(documentService.aiGenerator.generatePresentationContent).toHaveBeenCalledWith(
+      expect.stringContaining('Weekend package: $799'),
+      expect.objectContaining({
+        documentType: 'presentation',
+        model: 'gpt-5.4-mini',
+      }),
+    );
+
+    expect(nestedToolManager.executeTool.mock.calls.map(([id]) => id)).toEqual([
+      'document-workflow',
+      'document-workflow',
+      'web-search',
+      'web-fetch',
+      'image-search-unsplash',
+      'image-from-url',
+      'document-workflow',
+    ]);
+
+    const finalGenerateCall = nestedToolManager.executeTool.mock.calls.find(([id, params]) => (
+      id === 'document-workflow' && params.action === 'generate'
+    ));
+    expect(finalGenerateCall?.[1]).toEqual(expect.objectContaining({
+      presentation: expect.objectContaining({
+        slides: expect.arrayContaining([
+          expect.objectContaining({
+            imageUrl: 'https://images.example.com/halifax.jpg',
+            imageSource: 'Jane Doe / Unsplash',
+          }),
+        ]),
+      }),
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          sourceUrl: 'https://travel.example.com/packages',
+          kind: 'web-fetch',
+          content: expect.stringContaining('Weekend package: $799'),
+        }),
+      ]),
+    }));
+    expect(result.data.document).toEqual(expect.objectContaining({
+      filename: 'halifax-travel-pricing.pptx',
+      downloadUrl: '/api/documents/deck-1/download',
     }));
   });
 

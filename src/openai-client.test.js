@@ -325,6 +325,19 @@ function createToolManager() {
                 },
             },
         }],
+        ['deep-research-presentation', {
+            id: 'deep-research-presentation',
+            name: 'Deep Research Presentation',
+            description: 'Plan, research, source images, and generate a research-backed presentation in one workflow.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    prompt: { type: 'string' },
+                    documentType: { type: 'string' },
+                    format: { type: 'string' },
+                },
+            },
+        }],
     ]);
 
     const skills = new Map([
@@ -352,6 +365,7 @@ function createToolManager() {
         ['k3s-deploy', { enabled: true, triggerPatterns: ['deploy to k3s', 'kubectl apply', 'rollout status'], requiresConfirmation: true }],
         ['user-checkpoint', { enabled: true, triggerPatterns: ['ask a checkpoint question'], requiresConfirmation: false }],
         ['document-workflow', { enabled: true, triggerPatterns: ['generate document', 'make slides', 'create brief'], requiresConfirmation: false }],
+        ['deep-research-presentation', { enabled: true, triggerPatterns: ['deep research presentation', 'research-backed slide deck'], requiresConfirmation: false }],
     ]);
 
     return {
@@ -393,6 +407,22 @@ function createToolManager() {
                             filename: 'brief.html',
                             mimeType: 'text/html',
                             downloadUrl: '/api/documents/doc-1/download',
+                        },
+                    },
+                };
+            }
+
+            if (id === 'deep-research-presentation') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        action: 'research_and_generate_presentation',
+                        document: {
+                            id: 'deck-1',
+                            filename: 'research-deck.pptx',
+                            mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                            downloadUrl: '/api/documents/deck-1/download',
                         },
                     },
                 };
@@ -1287,6 +1317,48 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).toEqual(
             expect.arrayContaining(['web-search', 'document-workflow']),
         );
+    });
+
+    test('forces deep-research-presentation for explicit deep research deck requests', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Do deep research on Halifax vacation pricing and make me a presentation I can review.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            {
+                toolContext: {
+                    documentService: {},
+                },
+            },
+        );
+
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            {
+                toolContext: {
+                    documentService: {},
+                },
+            },
+        );
+        const toolChoice = __testUtils.buildAutomaticToolChoice(
+            selectedTools,
+            'responses',
+            {
+                prompt,
+                toolContext: {
+                    documentService: {},
+                },
+            },
+        );
+
+        expect(selectedTools.map((tool) => tool.id)).toEqual(
+            expect.arrayContaining(['deep-research-presentation', 'web-search', 'document-workflow']),
+        );
+        expect(toolChoice).toEqual({
+            type: 'function',
+            name: 'deep-research-presentation',
+        });
     });
 
     test('suppresses user-checkpoint when a checkpoint is already pending', () => {

@@ -3875,6 +3875,46 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('starts deep research presentation workflow before web search when no grounded sources exist yet', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'document-workflow', 'deep-research-presentation'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Do deep research on Halifax vacation pricing and build a presentation I can review.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+            toolEvents: [],
+        });
+
+        expect(toolPolicy.candidateToolIds).toEqual(
+            expect.arrayContaining(['deep-research-presentation', 'web-search', 'document-workflow']),
+        );
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'deep-research-presentation',
+            params: expect.objectContaining({
+                prompt: objective,
+                documentType: 'presentation',
+                format: 'pptx',
+            }),
+        }));
+    });
+
     test('forces a direct blind web-scrape action for explicit sensitive image scraping requests', () => {
         const orchestrator = new ConversationOrchestrator({
             llmClient: {
