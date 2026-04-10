@@ -22,6 +22,31 @@
                 window.__webChatStorageAvailable = false;
             }
         })();
+
+        (function resetLegacyWebChatLayoutState() {
+            if (window.__webChatStorageAvailable === false) {
+                return;
+            }
+
+            const versionKey = '__webchat_layout_state_version__';
+            const version = '20260410-layout-reset-1';
+            const staleKeys = [
+                'webchat_layout_mode',
+                'kimibuilt_sidebar_width',
+                'kimibuilt_sidebar_collapsed',
+            ];
+
+            try {
+                if (localStorage.getItem(versionKey) === version) {
+                    return;
+                }
+
+                staleKeys.forEach((key) => localStorage.removeItem(key));
+                localStorage.setItem(versionKey, version);
+            } catch (_error) {
+                // Ignore storage reset failures when browser privacy rules block persistence.
+            }
+        })();
     </script>
     
     <!-- Tailwind CSS -->
@@ -75,7 +100,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260410e">
+    <link rel="stylesheet" href="css/styles.css?v=20260410f">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
