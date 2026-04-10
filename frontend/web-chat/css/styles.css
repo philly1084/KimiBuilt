@@ -2622,6 +2622,7 @@ body.mobile-chat-menu-open {
 
 body.layout-minimal .sidebar {
     width: 0 !important;
+    min-width: 0 !important;
     opacity: 0;
     pointer-events: none;
     overflow: hidden;
@@ -2630,6 +2631,18 @@ body.layout-minimal .sidebar {
 
 body.layout-minimal .app-shell {
     gap: 0;
+    padding: 0;
+}
+
+body.layout-minimal .sidebar,
+body.layout-minimal .sidebar-resize-handle {
+    display: none !important;
+}
+
+body.layout-minimal .main-shell {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
 }
 
 body.layout-minimal #sidebar-overlay,
