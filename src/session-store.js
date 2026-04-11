@@ -29,6 +29,7 @@ class SessionStore {
         this.usePostgres = false;
         this.fallbackStoragePath = path.join(config.persistence.dataDir, 'sessions.json');
         this.fallbackLoaded = false;
+        this.fallbackPersistQueue = Promise.resolve();
     }
 
     sanitizeMessageMetadataValue(value, depth = 0) {
@@ -372,20 +373,27 @@ class SessionStore {
             return;
         }
 
-        const payload = {
-            version: 1,
-            savedAt: new Date().toISOString(),
-            sessions: Array.from(this.sessions.values()),
-            messages: Array.from(this.sessionMessages.entries()),
-            userSessionState: Array.from(this.userSessionState.values()),
-        };
+        const writeTask = this.fallbackPersistQueue
+            .catch(() => {})
+            .then(async () => {
+                const payload = {
+                    version: 1,
+                    savedAt: new Date().toISOString(),
+                    sessions: Array.from(this.sessions.values()),
+                    messages: Array.from(this.sessionMessages.entries()),
+                    userSessionState: Array.from(this.userSessionState.values()),
+                };
 
-        const directory = path.dirname(this.fallbackStoragePath);
-        const tempPath = `${this.fallbackStoragePath}.tmp`;
+                const directory = path.dirname(this.fallbackStoragePath);
+                const tempPath = `${this.fallbackStoragePath}.tmp`;
 
-        await fs.mkdir(directory, { recursive: true });
-        await fs.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
-        await fs.rename(tempPath, this.fallbackStoragePath);
+                await fs.mkdir(directory, { recursive: true });
+                await fs.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+                await fs.rename(tempPath, this.fallbackStoragePath);
+            });
+
+        this.fallbackPersistQueue = writeTask;
+        return writeTask;
     }
 
     async initialize() {

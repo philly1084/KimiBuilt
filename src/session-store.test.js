@@ -341,6 +341,42 @@ describe('SessionStore recent message continuity', () => {
         }
     });
 
+    test('serializes concurrent fallback writes without losing the sessions file', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-session-race-'));
+        const storagePath = path.join(tempDir, 'sessions.json');
+
+        try {
+            const store = new SessionStore();
+            store.initialized = true;
+            store.usePostgres = false;
+            store.fallbackStoragePath = storagePath;
+            store.fallbackLoaded = true;
+
+            await store.create({ mode: 'chat', ownerId: 'phill' }, 'session-a');
+            await store.create({ mode: 'chat', ownerId: 'phill' }, 'session-b');
+
+            await Promise.all([
+                store.setActiveSession('phill', 'session-a'),
+                store.setActiveSession('phill', 'session-b'),
+                store.appendMessages('session-a', [
+                    { role: 'user', content: 'hello' },
+                ]),
+                store.updateControlState('session-a', {
+                    lastToolIntent: 'remote-command',
+                }),
+            ]);
+
+            const persisted = JSON.parse(await fs.readFile(storagePath, 'utf8'));
+            expect(Array.isArray(persisted.sessions)).toBe(true);
+            expect(persisted.sessions.map((session) => session.id)).toEqual(expect.arrayContaining([
+                'session-a',
+                'session-b',
+            ]));
+        } finally {
+            await fs.rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
     test('stores runtime control state separately while mirroring legacy metadata fields', async () => {
         const store = new SessionStore();
         store.initialized = true;

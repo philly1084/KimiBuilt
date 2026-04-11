@@ -455,24 +455,15 @@ class UIHelpers {
     }
 
     checkStorageAvailability() {
-        if (window.__webChatStorageAvailable === false) {
-            return false;
+        if (typeof window.__webChatStorageAvailable === 'boolean') {
+            return window.__webChatStorageAvailable === true;
         }
 
         if (window.sessionManager?.storageAvailable != null) {
             return window.sessionManager.storageAvailable === true;
         }
 
-        try {
-            const key = '__webchat_ui_storage_test__';
-            localStorage.setItem(key, '1');
-            localStorage.removeItem(key);
-            window.__webChatStorageAvailable = true;
-            return true;
-        } catch (_error) {
-            window.__webChatStorageAvailable = false;
-            return false;
-        }
+        return false;
     }
 
     ensureAssistantModelControls() {

@@ -108,6 +108,33 @@ describe('auth service OpenCode gateway access', () => {
         });
     });
 
+    test('falls back to the gateway token when no dedicated frontend API key is configured', () => {
+        delete process.env.KIMIBUILT_FRONTEND_API_KEY;
+
+        const req = {
+            path: '/api/sessions',
+            method: 'GET',
+            headers: {
+                authorization: 'Bearer gateway-secret',
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toEqual({
+            username: 'frontend-api',
+            role: 'frontend-api',
+        });
+    });
+
     test('allows the frontend API token on provider session admin routes', () => {
         const req = {
             path: '/admin/provider-capabilities',

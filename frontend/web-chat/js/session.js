@@ -178,19 +178,13 @@ class SessionManager extends EventTarget {
      * Check if localStorage is available and not blocked by Tracking Prevention
      */
     checkStorageAvailability() {
-        if (typeof window !== 'undefined' && window.__webChatStorageAvailable === false) {
-            return this.setStorageAvailability(false);
+        if (typeof window !== 'undefined' && typeof window.__webChatStorageAvailable === 'boolean') {
+            return this.setStorageAvailability(window.__webChatStorageAvailable === true);
         }
 
-        try {
-            const test = '__storage_test__';
-            localStorage.setItem(test, test);
-            localStorage.removeItem(test);
-            return this.setStorageAvailability(true);
-        } catch (e) {
-            // Tracking Prevention can block storage in some browsers; continue without persistence.
-            return this.setStorageAvailability(false);
-        }
+        // Avoid eager storage probes because privacy-focused browsers can log
+        // warnings even when the access is caught and handled.
+        return this.setStorageAvailability(false);
     }
 
     /**

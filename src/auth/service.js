@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 const { config } = require('../config');
-const { isAuthorizedOpenCodeGatewayRequest } = require('../opencode/gateway');
+const {
+    isAuthorizedOpenCodeGatewayRequest,
+    resolveOpenCodeGatewayApiKey,
+} = require('../opencode/gateway');
 
 function base64UrlEncode(input) {
     return Buffer.from(input)
