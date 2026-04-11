@@ -749,6 +749,12 @@ class ChatApp {
             this.pageWasHidden = true;
             this.markActiveStreamInterrupted('offline');
             this.updateConnectionStatus('disconnected');
+            if ((this.pendingStreamResync || this.activeStreamRequest)?.acceptedByServer) {
+                this.enterBackgroundStreamMode({
+                    detail: this.getBackgroundStreamDetail(),
+                });
+                return;
+            }
             uiHelpers.showToast('You are offline', 'warning');
         });
     }
@@ -4466,12 +4472,18 @@ class ChatApp {
             }
 
             const now = Date.now();
-            if (this.liveResponseState.hasRealReasoning === true || this.hasRecentReasoningStream(now)) {
-                const liveSummary = String(
-                    message.reasoningSummary
-                    || message.metadata?.reasoningSummary
-                    || '',
-                ).trim();
+            const liveSummary = String(
+                message.reasoningSummary
+                || message.metadata?.reasoningSummary
+                || this.liveResponseState.reasoningSummary
+                || '',
+            ).trim();
+            const shouldPreferRealReasoning = Boolean(liveSummary) && (
+                this.liveResponseState.hasRealReasoning === true
+                || this.hasRecentReasoningStream(now)
+                || (this.connectionStatus !== 'disconnected' && message.reasoningDisplaySource === 'stream')
+            );
+            if (shouldPreferRealReasoning) {
                 if (liveSummary && message.reasoningDisplaySource !== 'stream') {
                     this.updateStreamingMessageState({
                         reasoningDisplaySource: 'stream',
@@ -5774,6 +5786,16 @@ class ChatApp {
             || trackedRequest.placeholderMessage
             || {};
         const currentMessage = this.getSessionMessage(sessionId, messageId) || {};
+        const preservedReasoningSummary = String(
+            currentMessage.reasoningSummary
+            || currentMessage.metadata?.reasoningSummary
+            || preservedMessage.reasoningSummary
+            || preservedMessage.metadata?.reasoningSummary
+            || this.liveResponseState.reasoningSummary
+            || ''
+        ).trim();
+        const shouldPreserveRealReasoning = Boolean(preservedReasoningSummary)
+            && this.connectionStatus !== 'disconnected';
         const preservedContent = String(
             options.content !== undefined
                 ? options.content
@@ -5794,8 +5816,8 @@ class ChatApp {
         this.liveResponseState = {
             phase: 'thinking',
             detail,
-            reasoningSummary: '',
-            hasRealReasoning: false,
+            reasoningSummary: shouldPreserveRealReasoning ? preservedReasoningSummary : '',
+            hasRealReasoning: shouldPreserveRealReasoning,
         };
         uiHelpers.showTypingIndicator({
             phase: 'thinking',
@@ -5808,12 +5830,25 @@ class ChatApp {
                 phase: 'thinking',
                 detail,
             },
-            reasoningDisplaySource: 'synthetic',
-            reasoningDisplayText: initialAmbientFrame.visibleText,
-            reasoningDisplayFullText: initialAmbientFrame.fullText,
-            reasoningDisplayTitle: 'Thinking',
-            reasoningDisplayIcon: 'sparkles',
-            reasoningDisplayAnimated: initialAmbientFrame.isTyping,
+            ...(shouldPreserveRealReasoning
+                ? {
+                    reasoningSummary: preservedReasoningSummary,
+                    reasoningAvailable: true,
+                    reasoningDisplaySource: 'stream',
+                    reasoningDisplayText: preservedReasoningSummary,
+                    reasoningDisplayFullText: preservedReasoningSummary,
+                    reasoningDisplayTitle: 'Reasoning',
+                    reasoningDisplayIcon: 'brain',
+                    reasoningDisplayAnimated: false,
+                }
+                : {
+                    reasoningDisplaySource: 'synthetic',
+                    reasoningDisplayText: initialAmbientFrame.visibleText,
+                    reasoningDisplayFullText: initialAmbientFrame.fullText,
+                    reasoningDisplayTitle: 'Thinking',
+                    reasoningDisplayIcon: 'sparkles',
+                    reasoningDisplayAnimated: initialAmbientFrame.isTyping,
+                }),
         }, {
             render: true,
             scroll: false,

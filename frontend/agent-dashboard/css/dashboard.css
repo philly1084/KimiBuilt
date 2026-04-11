@@ -2302,10 +2302,22 @@ select.form-control,
     background-color: var(--bg-tertiary);
 }
 
+.workload-detail-block__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
 .workload-detail-block h4 {
     font-size: var(--text-sm);
     margin-bottom: var(--space-sm);
     color: var(--text-primary);
+}
+
+.workload-detail-block__header h4 {
+    margin-bottom: 0;
 }
 
 .workload-detail-code {
@@ -2314,6 +2326,11 @@ select.form-control,
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+.workload-run-export-cell {
+    width: 1%;
+    white-space: nowrap;
 }
 
 .status-badge.neutral {

@@ -1165,7 +1165,7 @@ class Dashboard {
         if (!runs.length) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="empty-state">No workload runs have been recorded yet.</td>
+                    <td colspan="8" class="empty-state">No workload runs have been recorded yet.</td>
                 </tr>
             `;
             return;
@@ -1180,6 +1180,15 @@ class Dashboard {
                 <td>${this.escapeHtml(this.formatDate(run.scheduledFor))}</td>
                 <td>${this.escapeHtml(this.formatDate(run.startedAt))}</td>
                 <td>${this.escapeHtml(this.formatDate(run.finishedAt))}</td>
+                <td class="workload-run-export-cell">
+                    <button
+                        class="btn btn-secondary btn-sm"
+                        onclick="dashboard.downloadAdminRunTraceJson(event, '${run.id}')"
+                        title="Download this run trace as JSON"
+                    >
+                        JSON
+                    </button>
+                </td>
             </tr>
         `).join('');
     }
@@ -1246,7 +1255,16 @@ class Dashboard {
                 <div class="workload-detail-code">${this.escapeHtml(errorPayload)}</div>
             </div>
             <div class="workload-detail-block">
-                <h4>Trace</h4>
+                <div class="workload-detail-block__header">
+                    <h4>Trace</h4>
+                    <button
+                        class="btn btn-secondary btn-sm"
+                        onclick="dashboard.downloadAdminRunTraceJson(event, '${run.id}')"
+                        title="Download this run trace as JSON"
+                    >
+                        Download trace JSON
+                    </button>
+                </div>
                 <div class="workload-detail-code">${this.escapeHtml(tracePayload)}</div>
             </div>
         `;
@@ -1469,7 +1487,7 @@ class Dashboard {
         try {
             const response = await apiClient.getAdminRun(id);
             const detailedRun = this.normalizeAdminRun(this.unwrapApiPayload(response, existing || {}), this.state.workloads);
-            this.state.selectedRun = detailedRun;
+            this.replaceAdminRunInState(detailedRun);
             this.renderAdminRuns(this.state.runs);
             this.renderAdminRunDetails(detailedRun);
         } catch (error) {
@@ -2306,6 +2324,111 @@ class Dashboard {
             return 'base run';
         }
         return `stage ${normalized + 1}`;
+    }
+
+    replaceAdminRunInState(run = null) {
+        if (!run?.id) {
+            return;
+        }
+
+        const index = this.state.runs.findIndex((entry) => entry.id === run.id);
+        if (index >= 0) {
+            this.state.runs[index] = run;
+        } else {
+            this.state.runs.unshift(run);
+        }
+
+        if (this.state.selectedRun?.id === run.id) {
+            this.state.selectedRun = run;
+        }
+    }
+
+    sanitizeFilenameSegment(value = '', fallback = 'run') {
+        const normalized = String(value || '')
+            .trim()
+            .replace(/[^a-z0-9._-]+/gi, '-')
+            .replace(/-+/g, '-')
+            .replace(/^[-_.]+|[-_.]+$/g, '');
+
+        return normalized || fallback;
+    }
+
+    buildAdminRunTraceExport(run = {}) {
+        return {
+            exportedAt: new Date().toISOString(),
+            source: 'kimibuilt-admin-dashboard',
+            run: {
+                id: run.id || null,
+                workloadId: run.workloadId || null,
+                workloadTitle: run.workloadTitle || run.workload?.title || null,
+                sessionId: run.sessionId || null,
+                status: run.status || null,
+                reason: run.reason || null,
+                scheduledFor: run.scheduledFor || null,
+                startedAt: run.startedAt || null,
+                finishedAt: run.finishedAt || null,
+                stageIndex: Number.isFinite(Number(run.stageIndex)) ? Number(run.stageIndex) : null,
+                stageLabel: this.formatRunStageLabel(run.stageIndex),
+                attempt: Number.isFinite(Number(run.attempt)) ? Number(run.attempt) : null,
+                parentRunId: run.parentRunId || null,
+                responseId: run.responseId || null,
+                prompt: run.prompt || '',
+            },
+            error: run.error || null,
+            metadata: run.metadata || {},
+            trace: run.trace || null,
+        };
+    }
+
+    async downloadAdminRunTraceJson(event, runId = null) {
+        event?.stopPropagation?.();
+
+        const targetRunId = String(runId || this.state.selectedRun?.id || '').trim();
+        if (!targetRunId) {
+            this.showToast('Select a run before downloading trace JSON', 'warning');
+            return;
+        }
+
+        const existingRun = this.state.runs.find((run) => run.id === targetRunId)
+            || (this.state.selectedRun?.id === targetRunId ? this.state.selectedRun : null);
+
+        let run = existingRun;
+
+        try {
+            const response = await apiClient.getAdminRun(targetRunId);
+            const detailedRun = this.normalizeAdminRun(this.unwrapApiPayload(response, existingRun || {}), this.state.workloads);
+            this.replaceAdminRunInState(detailedRun);
+            run = detailedRun;
+            if (this.state.selectedRun?.id === targetRunId) {
+                this.renderAdminRuns(this.state.runs);
+                this.renderAdminRunDetails(detailedRun);
+            }
+        } catch (error) {
+            console.error('Error loading trace export payload:', error);
+            if (!run) {
+                this.showToast(error.userMessage || error.message || 'Failed to load run details', 'error');
+                return;
+            }
+        }
+
+        if (!run?.trace) {
+            this.showToast('Trace JSON is not available for this run yet', 'warning');
+            return;
+        }
+
+        const exportPayload = this.buildAdminRunTraceExport(run);
+        const filename = [
+            this.sanitizeFilenameSegment(run.workloadTitle || run.workloadId || 'workload', 'workload'),
+            this.sanitizeFilenameSegment(run.id || 'run', 'run'),
+            'trace',
+        ].join('-') + '.json';
+
+        this.downloadFile(
+            JSON.stringify(exportPayload, null, 2),
+            filename,
+            'application/json',
+        );
+        this.showToast(`Downloaded trace JSON for ${run.id}`, 'success');
     }
 
     stringifyAdminPayload(value) {
