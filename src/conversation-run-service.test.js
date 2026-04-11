@@ -207,15 +207,26 @@ describe('ConversationRunService', () => {
             }),
         }));
         expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', [
-            {
+            expect.objectContaining({
                 role: 'assistant',
                 content: 'Created the PDF artifact (penguins.pdf).',
-            },
+                metadata: expect.objectContaining({
+                    artifacts: [
+                        expect.objectContaining({
+                            id: 'artifact-1',
+                            filename: 'penguins.pdf',
+                        }),
+                    ],
+                }),
+            }),
         ]);
-        expect(result.artifacts).toEqual([{
-            id: 'artifact-1',
-            filename: 'penguins.pdf',
-        }]);
+        expect(result.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-1',
+                filename: 'penguins.pdf',
+                format: 'pdf',
+            }),
+        ]);
         expect(result.artifactMessage).toBe('Created the PDF artifact (penguins.pdf).');
     });
 
@@ -299,6 +310,112 @@ describe('ConversationRunService', () => {
         expect(result.artifactMessage).toBe('Created the PDF artifact (cluster-plan.pdf).');
     });
 
+    test('surfaces tool-generated presentation artifacts for workload deep-research runs', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            executeTool: jest.fn(),
+            getTool: jest.fn(),
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: true,
+            response: {
+                id: 'resp-deck-1',
+                output: [{
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Built the research-backed presentation.' }],
+                }],
+                metadata: {
+                    toolEvents: [{
+                        toolCall: {
+                            function: {
+                                name: 'deep-research-presentation',
+                            },
+                        },
+                        result: {
+                            success: true,
+                            data: {
+                                action: 'research_and_generate_presentation',
+                                document: {
+                                    id: 'deck-1',
+                                    filename: 'pigeon-love-research.pptx',
+                                    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                                    downloadUrl: '/api/documents/deck-1/download',
+                                    metadata: { format: 'pptx' },
+                                },
+                            },
+                        },
+                    }],
+                },
+            },
+        });
+        inferRequestedOutputFormat.mockReturnValue(null);
+
+        const sessionStore = {
+            getOwned: jest.fn(async () => ({
+                id: 'session-1',
+                previousResponseId: null,
+                metadata: {},
+            })),
+            get: jest.fn(async () => ({
+                id: 'session-1',
+                previousResponseId: null,
+                metadata: {},
+            })),
+            appendMessages: jest.fn(async () => null),
+            update: jest.fn(async () => null),
+            recordResponse: jest.fn(async () => null),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+            rememberArtifactResult: jest.fn(async () => null),
+        };
+        const service = new ConversationRunService({
+            app: { locals: {} },
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await service.runChatTurn({
+            sessionId: 'session-1',
+            ownerId: 'user-1',
+            session: {
+                id: 'session-1',
+                previousResponseId: null,
+                metadata: {},
+            },
+            message: 'Research pigeon courtship and build a deck I can review.',
+            metadata: {
+                taskType: 'chat',
+                clientSurface: 'workload',
+                workloadRun: true,
+            },
+        });
+
+        expect(result.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'deck-1',
+                filename: 'pigeon-love-research.pptx',
+                format: 'pptx',
+                downloadUrl: '/api/documents/deck-1/download',
+            }),
+        ]);
+        expect(result.artifactMessage).toBe('Created the PPTX artifact (pigeon-love-research.pptx).');
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', [
+            expect.objectContaining({
+                role: 'assistant',
+                content: 'Created the PPTX artifact (pigeon-love-research.pptx).',
+                metadata: expect.objectContaining({
+                    artifacts: [
+                        expect.objectContaining({
+                            id: 'deck-1',
+                            downloadUrl: '/api/documents/deck-1/download',
+                        }),
+                    ],
+                }),
+            }),
+        ]);
+    });
+
     test('formats opencode structured execution results for the transcript', async () => {
         const executeTool = jest.fn(async () => ({
             success: true,
@@ -373,6 +490,83 @@ describe('ConversationRunService', () => {
                 role: 'assistant',
                 content: result.outputText,
             },
+        ]);
+    });
+
+    test('returns structured execution artifacts when a tool materializes a presentation', async () => {
+        const executeTool = jest.fn(async () => ({
+            success: true,
+            data: {
+                action: 'research_and_generate_presentation',
+                document: {
+                    id: 'deck-structured-1',
+                    filename: 'travel-pricing-deck.pptx',
+                    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                    downloadUrl: '/api/documents/deck-structured-1/download',
+                    metadata: { format: 'pptx' },
+                },
+            },
+        }));
+        ensureRuntimeToolManager.mockResolvedValue({
+            executeTool,
+        });
+
+        const sessionStore = {
+            getOwned: jest.fn(async () => ({
+                id: 'session-1',
+                metadata: {},
+            })),
+            get: jest.fn(),
+            appendMessages: jest.fn(async () => null),
+            update: jest.fn(async () => null),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+            rememberArtifactResult: jest.fn(async () => null),
+        };
+        const service = new ConversationRunService({
+            app: { locals: {} },
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await service.runStructuredExecution({
+            sessionId: 'session-1',
+            ownerId: 'user-1',
+            execution: {
+                tool: 'deep-research-presentation',
+                params: {
+                    prompt: 'Research Halifax vacation pricing and build a slide deck.',
+                },
+            },
+            metadata: {
+                executionProfile: 'default',
+                prompt: 'Research Halifax vacation pricing and build a slide deck.',
+            },
+        });
+
+        expect(result.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'deck-structured-1',
+                filename: 'travel-pricing-deck.pptx',
+                format: 'pptx',
+                downloadUrl: '/api/documents/deck-structured-1/download',
+            }),
+        ]);
+        expect(result.artifactMessage).toBe('Created the PPTX artifact (travel-pricing-deck.pptx).');
+        expect(sessionStore.appendMessages).toHaveBeenNthCalledWith(2, 'session-1', [
+            expect.objectContaining({
+                role: 'assistant',
+                content: 'Created the PPTX artifact (travel-pricing-deck.pptx).',
+                metadata: expect.objectContaining({
+                    artifacts: [
+                        expect.objectContaining({
+                            id: 'deck-structured-1',
+                            downloadUrl: '/api/documents/deck-structured-1/download',
+                        }),
+                    ],
+                }),
+            }),
         ]);
     });
 });

@@ -2,8 +2,8 @@ const { v4: uuidv4 } = require('uuid');
 const { stripNullCharacters } = require('./utils/text');
 const { parseLenientJson } = require('./utils/lenient-json');
 
-const COLLAPSIBLE_ARTIFACT_FORMATS = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query']);
-const COLLAPSIBLE_ARTIFACT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m'];
+const COLLAPSIBLE_ARTIFACT_FORMATS = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query', 'pptx', 'ppt']);
+const COLLAPSIBLE_ARTIFACT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m', '.ppt', '.pptx'];
 
 function offsetIsoTimestamp(timestamp = null, offsetMs = 0) {
     const parsed = timestamp ? new Date(timestamp) : new Date();

@@ -15,6 +15,15 @@ describe('buildWebChatSessionMessages', () => {
         }])).toBe('Created system-flow.mmd. Preview and Download below.');
     });
 
+    test('treats presentation artifacts as downloadable files in the assistant summary', () => {
+        expect(buildArtifactSummary([{
+            id: 'artifact-pptx-1',
+            filename: 'research-deck.pptx',
+            format: 'pptx',
+            downloadUrl: '/api/documents/deck-1/download',
+        }])).toBe('Created research-deck.pptx. Use Download below.');
+    });
+
     test('stores artifacts inline on the assistant message without a separate gallery message', () => {
         const messages = buildWebChatSessionMessages({
             userText: 'Question first',

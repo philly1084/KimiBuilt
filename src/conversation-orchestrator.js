@@ -27,6 +27,10 @@ const {
     buildWebChatSessionMessages,
 } = require('./web-chat-message-state');
 const {
+    extractArtifactsFromToolEvents,
+    mergeRuntimeArtifacts,
+} = require('./runtime-artifacts');
+const {
     buildForegroundTurnMessageOptions,
     persistForegroundTurnMessages,
     resolveForegroundTurn,
@@ -7602,6 +7606,10 @@ class ConversationOrchestrator extends EventEmitter {
         stream = false,
         controlStatePatch = {},
     } = {}) {
+        const responseArtifacts = mergeRuntimeArtifacts(
+            finalResponse?.metadata?.artifacts || [],
+            extractArtifactsFromToolEvents(toolEvents),
+        );
         const activeTaskFrame = normalizeActiveTaskFrame(controlStatePatch?.activeTaskFrame) || buildActiveTaskFrame({
             objective,
             projectKey: toolPolicy?.projectKey || '',
@@ -7637,6 +7645,7 @@ class ConversationOrchestrator extends EventEmitter {
                 : { sessionId },
         };
         let tracedResponse = this.withResponseMetadata(finalResponse, {
+            ...(responseArtifacts.length > 0 ? { artifacts: responseArtifacts } : {}),
             projectKey: toolPolicy?.projectKey || null,
             memoryNamespace: memoryTrace?.routing?.memoryNamespace || memoryWriteTargets.conversation?.memoryNamespace || null,
             memoryReadSetSummary: intelligenceSummary.memoryReadSetSummary,
@@ -7674,6 +7683,7 @@ class ConversationOrchestrator extends EventEmitter {
             memoryKeywords,
             autonomyApproved,
             controlStatePatch: finalControlStatePatch,
+            artifacts: responseArtifacts,
             assistantMetadata: tracedResponse?.metadata || null,
         });
 
@@ -7765,6 +7775,7 @@ class ConversationOrchestrator extends EventEmitter {
         memoryKeywords = [],
         autonomyApproved = false,
         controlStatePatch = {},
+        artifacts = [],
         assistantMetadata = null,
         foregroundTurn = null,
     }) {
@@ -7790,6 +7801,11 @@ class ConversationOrchestrator extends EventEmitter {
             ...(clientSurface ? { sourceSurface: clientSurface } : {}),
             ...(Array.isArray(memoryKeywords) && memoryKeywords.length > 0 ? { memoryKeywords } : {}),
         }, currentSession || null);
+        const persistedArtifacts = mergeRuntimeArtifacts(
+            artifacts,
+            assistantMetadata?.artifacts || [],
+            extractArtifactsFromToolEvents(toolEvents),
+        );
 
         if (this.sessionStore?.recordResponse) {
             if (promptState) {
@@ -7834,6 +7850,7 @@ class ConversationOrchestrator extends EventEmitter {
                     userText,
                     assistantText,
                     toolEvents,
+                    artifacts: persistedArtifacts,
                     assistantMetadata,
                     ...buildForegroundTurnMessageOptions(resolvedForegroundTurn),
                 })
@@ -7877,6 +7894,7 @@ class ConversationOrchestrator extends EventEmitter {
                     userText,
                     assistantText,
                     toolEvents,
+                    artifacts: persistedArtifacts,
                 }),
             );
 

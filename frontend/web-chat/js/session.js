@@ -558,104 +558,108 @@ class SessionManager extends EventTarget {
                 taskType: SESSION_MANAGER_TASK_TYPE,
                 clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
             });
-            const response = await fetch(`${this.apiBaseUrl}/sessions?${params.toString()}`);
-            if (response.ok) {
-                const data = await response.json();
-                const storedSessions = new Map(this.sessions.map((session) => [session.id, session]));
-                const backendSessions = Array.isArray(data.sessions) ? data.sessions : [];
-
-                this.sessions = backendSessions.map((session) => {
-                    const stored = storedSessions.get(session.id);
-                    const mergedMetadata = {
-                        ...(stored?.metadata && typeof stored.metadata === 'object' && !Array.isArray(stored.metadata)
-                            ? stored.metadata
-                            : {}),
-                        ...(session.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
-                            ? session.metadata
-                            : {}),
-                    };
-                    let model;
-                    
-                    // Safely get default model
-                    try {
-                        model = mergedMetadata.model
-                            || stored?.model
-                            || this.safeStorageGet('kimibuilt_default_model')
-                            || SESSION_DEFAULT_MODEL;
-                    } catch (e) {
-                        model = mergedMetadata.model || stored?.model || SESSION_DEFAULT_MODEL;
-                    }
-                    model = normalizeSessionModel(model, SESSION_DEFAULT_MODEL);
-                    
-                    return {
-                        id: session.id,
-                        mode: mergedMetadata.mode || stored?.mode || 'chat',
-                        model: model,
-                        title: this.resolveSessionTitle({
-                            ...session,
-                            metadata: mergedMetadata,
-                        }, stored),
-                        createdAt: session.createdAt,
-                        updatedAt: session.updatedAt,
-                        metadata: mergedMetadata,
-                        controlState: session.controlState
-                            || stored?.controlState
-                            || mergedMetadata.controlState
-                            || {},
-                        workloadSummary: session.workloadSummary || stored?.workloadSummary || {
-                            queued: 0,
-                            running: 0,
-                            failed: 0,
-                        },
-                        isLocal: false,
-                        version: this.version,
-                    };
-                });
-
-                const knownSessionIds = new Set(this.sessions.map((session) => session.id));
-                for (const [sessionId, storedSession] of storedSessions.entries()) {
-                    if (knownSessionIds.has(sessionId)) {
-                        continue;
-                    }
-
-                    const cachedMessages = this.sessionMessages.get(sessionId) || [];
-                    const shouldPreserveCachedSession = cachedMessages.some((message) => {
-                        if (message.type === 'image' && (message.imageUrl || message.isLoading)) {
-                            return true;
-                        }
-
-                        return Boolean(String(message.content || message.prompt || '').trim());
-                    });
-
-                    if (shouldPreserveCachedSession) {
-                        this.sessions.push({
-                            ...storedSession,
-                            isLocal: true,
-                            recoveredFromCache: true,
-                            updatedAt: storedSession.updatedAt || new Date().toISOString(),
-                        });
-                        knownSessionIds.add(sessionId);
-                    } else if (!this.isLocalSession(sessionId)) {
-                        this.sessionMessages.delete(sessionId);
-                    }
-                }
-
-                this.sessions.sort((a, b) => {
-                    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-                });
-
-                const backendActiveSessionId = typeof data.activeSessionId === 'string'
-                    ? data.activeSessionId.trim()
-                    : '';
-                if (backendActiveSessionId && this.sessions.find((session) => session.id === backendActiveSessionId)) {
-                    this.currentSessionId = backendActiveSessionId;
-                } else if (!this.sessions.find((session) => session.id === this.currentSessionId)) {
-                    this.currentSessionId = this.sessions[0]?.id || null;
-                }
-
-                await this.pruneBlankSessions();
-                this.saveToStorage();
+            const response = await fetch(`${this.apiBaseUrl}/sessions?${params.toString()}`, {
+                credentials: 'same-origin',
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
             }
+
+            const data = await response.json();
+            const storedSessions = new Map(this.sessions.map((session) => [session.id, session]));
+            const backendSessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+            this.sessions = backendSessions.map((session) => {
+                const stored = storedSessions.get(session.id);
+                const mergedMetadata = {
+                    ...(stored?.metadata && typeof stored.metadata === 'object' && !Array.isArray(stored.metadata)
+                        ? stored.metadata
+                        : {}),
+                    ...(session.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+                        ? session.metadata
+                        : {}),
+                };
+                let model;
+                
+                // Safely get default model
+                try {
+                    model = mergedMetadata.model
+                        || stored?.model
+                        || this.safeStorageGet('kimibuilt_default_model')
+                        || SESSION_DEFAULT_MODEL;
+                } catch (e) {
+                    model = mergedMetadata.model || stored?.model || SESSION_DEFAULT_MODEL;
+                }
+                model = normalizeSessionModel(model, SESSION_DEFAULT_MODEL);
+                
+                return {
+                    id: session.id,
+                    mode: mergedMetadata.mode || stored?.mode || 'chat',
+                    model: model,
+                    title: this.resolveSessionTitle({
+                        ...session,
+                        metadata: mergedMetadata,
+                    }, stored),
+                    createdAt: session.createdAt,
+                    updatedAt: session.updatedAt,
+                    metadata: mergedMetadata,
+                    controlState: session.controlState
+                        || stored?.controlState
+                        || mergedMetadata.controlState
+                        || {},
+                    workloadSummary: session.workloadSummary || stored?.workloadSummary || {
+                        queued: 0,
+                        running: 0,
+                        failed: 0,
+                    },
+                    isLocal: false,
+                    version: this.version,
+                };
+            });
+
+            const knownSessionIds = new Set(this.sessions.map((session) => session.id));
+            for (const [sessionId, storedSession] of storedSessions.entries()) {
+                if (knownSessionIds.has(sessionId)) {
+                    continue;
+                }
+
+                const cachedMessages = this.sessionMessages.get(sessionId) || [];
+                const shouldPreserveCachedSession = cachedMessages.some((message) => {
+                    if (message.type === 'image' && (message.imageUrl || message.isLoading)) {
+                        return true;
+                    }
+
+                    return Boolean(String(message.content || message.prompt || '').trim());
+                });
+
+                if (shouldPreserveCachedSession) {
+                    this.sessions.push({
+                        ...storedSession,
+                        isLocal: true,
+                        recoveredFromCache: true,
+                        updatedAt: storedSession.updatedAt || new Date().toISOString(),
+                    });
+                    knownSessionIds.add(sessionId);
+                } else if (!this.isLocalSession(sessionId)) {
+                    this.sessionMessages.delete(sessionId);
+                }
+            }
+
+            this.sessions.sort((a, b) => {
+                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+            });
+
+            const backendActiveSessionId = typeof data.activeSessionId === 'string'
+                ? data.activeSessionId.trim()
+                : '';
+            if (backendActiveSessionId && this.sessions.find((session) => session.id === backendActiveSessionId)) {
+                this.currentSessionId = backendActiveSessionId;
+            } else if (!this.sessions.find((session) => session.id === this.currentSessionId)) {
+                this.currentSessionId = this.sessions[0]?.id || null;
+            }
+
+            await this.pruneBlankSessions();
+            this.saveToStorage();
         } catch (error) {
             console.warn('Failed to load backend sessions, using local cache:', error);
         }
@@ -675,6 +679,7 @@ class SessionManager extends EventTarget {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     activeSessionId: normalizedSessionId || null,
                     taskType: SESSION_MANAGER_TASK_TYPE,
@@ -731,6 +736,7 @@ class SessionManager extends EventTarget {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({ messages }),
             });
 
@@ -756,6 +762,7 @@ class SessionManager extends EventTarget {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({ message }),
             });
 
@@ -778,7 +785,9 @@ class SessionManager extends EventTarget {
         const limit = Number.isFinite(Number(options.limit)) ? Number(options.limit) : 200;
 
         try {
-            const response = await fetch(`${this.apiBaseUrl}/sessions/${sessionId}/messages?limit=${encodeURIComponent(limit)}`);
+            const response = await fetch(`${this.apiBaseUrl}/sessions/${sessionId}/messages?limit=${encodeURIComponent(limit)}`, {
+                credentials: 'same-origin',
+            });
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
@@ -861,6 +870,7 @@ class SessionManager extends EventTarget {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     taskType: SESSION_MANAGER_TASK_TYPE,
                     clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
@@ -930,6 +940,7 @@ class SessionManager extends EventTarget {
             try {
                 await fetch(`${this.apiBaseUrl}/sessions/${sessionId}`, {
                     method: 'DELETE',
+                    credentials: 'same-origin',
                 });
             } catch (error) {
                 console.warn('Failed to delete backend session:', error);
@@ -1137,6 +1148,7 @@ class SessionManager extends EventTarget {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     metadata: metadataPatch,
                 }),

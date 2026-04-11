@@ -274,14 +274,14 @@ function requireAuth(req, res, next) {
         return next();
     }
 
-    if (isAuthorizedFrontendApiRequest(req)) {
-        req.user = { username: 'frontend-api', role: 'frontend-api' };
-        return next();
-    }
-
     const authState = getAuthenticatedUser(req);
     if (authState.authenticated) {
         req.user = authState.user;
+        return next();
+    }
+
+    if (isAuthorizedFrontendApiRequest(req)) {
+        req.user = { username: 'frontend-api', role: 'frontend-api' };
         return next();
     }
 

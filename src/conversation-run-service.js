@@ -16,6 +16,7 @@ const {
 const { extractResponseText } = require('./artifacts/artifact-service');
 const { buildProjectMemoryUpdate, mergeProjectMemory } = require('./project-memory');
 const { buildContinuityInstructions } = require('./runtime-prompts');
+const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('./runtime-artifacts');
 const { buildScopedMemoryMetadata, isSessionIsolationEnabled, resolveSessionScope } = require('./session-scope');
 
 class ConversationRunService {
@@ -44,6 +45,88 @@ class ConversationRunService {
             ...(metadata?.memoryKeywords ? { memoryKeywords: metadata.memoryKeywords } : {}),
             ...(metadata?.clientSurface ? { sourceSurface: metadata.clientSurface } : {}),
         }, session || null);
+    }
+
+    buildAssistantArtifactMessage(artifacts = []) {
+        const normalizedArtifacts = mergeRuntimeArtifacts(artifacts);
+        if (normalizedArtifacts.length === 0) {
+            return null;
+        }
+
+        return {
+            artifacts: normalizedArtifacts,
+            metadata: {
+                artifacts: normalizedArtifacts,
+            },
+        };
+    }
+
+    async persistArtifactOutcome({
+        sessionId,
+        ownerId = null,
+        session = null,
+        message = '',
+        outputText = '',
+        artifacts = [],
+        outputFormat = '',
+        metadata = {},
+    }) {
+        const normalizedArtifacts = mergeRuntimeArtifacts(artifacts);
+        if (!sessionId || normalizedArtifacts.length === 0) {
+            return {
+                artifacts: [],
+                artifactMessage: '',
+            };
+        }
+
+        const primaryArtifact = normalizedArtifacts[normalizedArtifacts.length - 1];
+        const effectiveFormat = String(
+            outputFormat
+            || primaryArtifact?.format
+            || inferRequestedOutputFormat(message)
+            || '',
+        ).trim();
+        const artifactMessage = buildArtifactCompletionMessage(effectiveFormat, primaryArtifact);
+        const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, session);
+        const assistantMessagePayload = this.buildAssistantArtifactMessage(normalizedArtifacts);
+
+        if (this.sessionStore?.update) {
+            await this.sessionStore.update(sessionId, {
+                metadata: {
+                    ...(effectiveFormat ? { lastOutputFormat: effectiveFormat } : {}),
+                    lastGeneratedArtifactId: primaryArtifact.id,
+                },
+            });
+        }
+
+        await this.appendSyntheticMessage(sessionId, 'assistant', artifactMessage, assistantMessagePayload);
+
+        if (artifactMessage && this.memoryService?.rememberResponse) {
+            this.memoryService.rememberResponse(sessionId, artifactMessage, memoryMetadata);
+        }
+
+        if (this.memoryService?.rememberArtifactResult) {
+            await Promise.all(normalizedArtifacts.map((artifact) => this.memoryService.rememberArtifactResult(sessionId, {
+                artifact,
+                summary: artifactMessage,
+                sourceText: outputText,
+                metadata: {
+                    ...memoryMetadata,
+                    sourcePrompt: message,
+                },
+            })));
+        }
+
+        await this.updateProjectMemory(sessionId, ownerId, {
+            userText: message,
+            assistantText: artifactMessage,
+            artifacts: normalizedArtifacts,
+        });
+
+        return {
+            artifacts: normalizedArtifacts,
+            artifactMessage,
+        };
     }
 
     async runChatTurn({
@@ -116,6 +199,7 @@ class ConversationRunService {
         const response = execution.response;
         const outputText = extractResponseText(response);
         const toolEvents = response?.metadata?.toolEvents || [];
+        const toolArtifacts = extractArtifactsFromToolEvents(toolEvents);
         const memoryMetadata = this.buildMemoryMetadata(ownerId, metadata, resolvedSession);
 
         if (!execution.handledPersistence) {
@@ -151,12 +235,35 @@ class ConversationRunService {
             reasoningEffort,
             metadata,
         });
+        const persistedDeferredArtifacts = mergeRuntimeArtifacts(deferredArtifact.artifacts || []);
+        let artifactMessage = String(deferredArtifact.artifactMessage || '').trim();
+        const missingToolArtifacts = toolArtifacts.filter((artifact) => !persistedDeferredArtifacts.some((entry) => (
+            (entry?.id && artifact?.id && entry.id === artifact.id)
+            || (entry?.downloadUrl && artifact?.downloadUrl && entry.downloadUrl === artifact.downloadUrl)
+        )));
+
+        if (missingToolArtifacts.length > 0 || (!artifactMessage && toolArtifacts.length > 0)) {
+            const surfacedArtifactOutcome = await this.persistArtifactOutcome({
+                sessionId,
+                ownerId,
+                session: resolvedSession,
+                message,
+                outputText,
+                artifacts: missingToolArtifacts.length > 0 ? missingToolArtifacts : toolArtifacts,
+                outputFormat: missingToolArtifacts[missingToolArtifacts.length - 1]?.format
+                    || toolArtifacts[toolArtifacts.length - 1]?.format
+                    || '',
+                metadata,
+            });
+            artifactMessage = artifactMessage || surfacedArtifactOutcome.artifactMessage;
+        }
+        const runtimeArtifacts = mergeRuntimeArtifacts(toolArtifacts, persistedDeferredArtifacts);
 
         await this.updateProjectMemory(sessionId, ownerId, {
             userText: message,
             assistantText: outputText,
             toolEvents,
-            artifacts: deferredArtifact.artifacts,
+            artifacts: runtimeArtifacts,
         });
 
         return {
@@ -164,8 +271,8 @@ class ConversationRunService {
             response,
             outputText,
             toolEvents,
-            artifacts: deferredArtifact.artifacts,
-            artifactMessage: deferredArtifact.artifactMessage,
+            artifacts: runtimeArtifacts,
+            artifactMessage,
         };
     }
 
@@ -306,26 +413,50 @@ class ConversationRunService {
             ]);
         }
 
+        const artifacts = extractArtifactsFromToolEvents(toolEvents);
+        const artifactOutcome = artifacts.length > 0
+            ? await this.persistArtifactOutcome({
+                sessionId,
+                ownerId,
+                session: resolvedSession,
+                message: metadata.prompt || `Deferred execution via ${toolId}`,
+                outputText,
+                artifacts,
+                outputFormat: artifacts[artifacts.length - 1]?.format || '',
+                metadata,
+            })
+            : { artifacts: [], artifactMessage: '' };
+
         await this.updateProjectMemory(sessionId, ownerId, {
             userText: metadata.prompt || `Deferred execution via ${toolId}`,
             assistantText: outputText,
             toolEvents,
+            artifacts: artifactOutcome.artifacts,
         });
 
         return {
             result,
             outputText,
             toolEvents,
+            artifacts: artifactOutcome.artifacts,
+            artifactMessage: artifactOutcome.artifactMessage,
         };
     }
 
-    async appendSyntheticMessage(sessionId, role, content) {
+    async appendSyntheticMessage(sessionId, role, content, message = null) {
         if (!sessionId || !content) {
             return;
         }
 
+        const baseMessage = message && typeof message === 'object' && !Array.isArray(message)
+            ? message
+            : {};
         await this.sessionStore.appendMessages(sessionId, [
-            { role, content },
+            {
+                role,
+                content,
+                ...baseMessage,
+            },
         ]);
     }
 
@@ -422,43 +553,16 @@ class ConversationRunService {
             };
         }
 
-        const primaryArtifact = artifacts[artifacts.length - 1];
-        const artifactMessage = buildArtifactCompletionMessage(outputFormat, primaryArtifact);
-        await this.sessionStore.update(sessionId, {
-            metadata: {
-                lastOutputFormat: outputFormat,
-                lastGeneratedArtifactId: primaryArtifact.id,
-            },
-        });
-        await this.appendSyntheticMessage(sessionId, 'assistant', artifactMessage);
-        if (artifactMessage && this.memoryService?.rememberResponse) {
-            this.memoryService.rememberResponse(
-                sessionId,
-                artifactMessage,
-                this.buildMemoryMetadata(ownerId, metadata, artifactSession),
-            );
-        }
-        if (this.memoryService?.rememberArtifactResult) {
-            await Promise.all(artifacts.map((artifact) => this.memoryService.rememberArtifactResult(sessionId, {
-                artifact,
-                summary: artifactMessage,
-                sourceText: outputText,
-                metadata: {
-                    ...this.buildMemoryMetadata(ownerId, metadata, artifactSession),
-                    sourcePrompt: message,
-                },
-            })));
-        }
-        await this.updateProjectMemory(sessionId, ownerId, {
-            userText: message,
-            assistantText: artifactMessage,
+        return this.persistArtifactOutcome({
+            sessionId,
+            ownerId,
+            session: artifactSession,
+            message,
+            outputText,
             artifacts,
+            outputFormat,
+            metadata,
         });
-
-        return {
-            artifacts,
-            artifactMessage,
-        };
     }
 }
 

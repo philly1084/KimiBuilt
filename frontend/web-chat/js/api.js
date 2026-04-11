@@ -851,6 +851,7 @@ class OpenAIAPIClient extends EventTarget {
                         'Content-Type': 'application/json',
                         'Accept': 'text/event-stream',
                     }),
+                    credentials: 'same-origin',
                     body: JSON.stringify(params),
                     signal: signal,
                 });
@@ -1246,6 +1247,7 @@ class OpenAIAPIClient extends EventTarget {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
                     }),
+                    credentials: 'same-origin',
                     body: JSON.stringify(params),
                 });
                 
@@ -1320,6 +1322,7 @@ class OpenAIAPIClient extends EventTarget {
                     headers: buildGatewayHeaders({
                         'Accept': 'application/json',
                     }),
+                    credentials: 'same-origin',
                 });
                 if (response.ok) {
                     const data = await response.json();

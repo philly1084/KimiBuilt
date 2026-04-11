@@ -1,7 +1,7 @@
 'use strict';
 
 const { config } = require('../config');
-const { requireAuth } = require('./service');
+const { createAuthToken, requireAuth } = require('./service');
 
 describe('auth service OpenCode gateway access', () => {
     const originalAuth = { ...config.auth };
@@ -157,6 +157,33 @@ describe('auth service OpenCode gateway access', () => {
         expect(req.user).toEqual({
             username: 'frontend-api',
             role: 'frontend-api',
+        });
+    });
+
+    test('prefers the signed-in browser user over the frontend API token when both are present', () => {
+        const auth = createAuthToken('phill');
+        const req = {
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer frontend-secret',
+                cookie: `${config.auth.cookieName}=${auth.token}`,
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toMatchObject({
+            username: 'phill',
+            role: 'admin',
         });
     });
 });

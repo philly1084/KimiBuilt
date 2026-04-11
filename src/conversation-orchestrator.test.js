@@ -243,6 +243,94 @@ describe('ConversationOrchestrator', () => {
         });
     });
 
+    test('persists tool-derived presentation artifacts onto web-chat assistant messages', async () => {
+        const sessionStore = {
+            getOwned: jest.fn().mockResolvedValue({ id: 'session-artifacts', metadata: {} }),
+            get: jest.fn().mockResolvedValue({ id: 'session-artifacts', metadata: {} }),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            updateControlState: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+            rememberLearnedSkill: jest.fn(async () => undefined),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.persistConversationState({
+            sessionId: 'session-artifacts',
+            userText: 'Build the deck.',
+            objective: 'Build the deck.',
+            assistantText: 'Built the research deck.',
+            responseId: 'resp-artifacts-1',
+            clientSurface: 'web-chat',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'deep-research-presentation',
+                    },
+                },
+                result: {
+                    success: true,
+                    toolId: 'deep-research-presentation',
+                    data: {
+                        action: 'research_and_generate_presentation',
+                        document: {
+                            id: 'deck-1',
+                            filename: 'research-deck.pptx',
+                            mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                            downloadUrl: '/api/documents/deck-1/download',
+                            metadata: { format: 'pptx' },
+                        },
+                    },
+                },
+            }],
+        });
+
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith(
+            'session-artifacts',
+            expect.arrayContaining([
+                expect.objectContaining({
+                    role: 'assistant',
+                    content: 'Built the research deck.',
+                    metadata: expect.objectContaining({
+                        artifacts: [
+                            expect.objectContaining({
+                                id: 'deck-1',
+                                filename: 'research-deck.pptx',
+                                downloadUrl: '/api/documents/deck-1/download',
+                            }),
+                        ],
+                    }),
+                }),
+            ]),
+        );
+        expect(sessionStore.update).toHaveBeenCalledWith('session-artifacts', expect.objectContaining({
+            metadata: expect.objectContaining({
+                projectMemory: expect.objectContaining({
+                    artifacts: expect.arrayContaining([
+                        expect.objectContaining({
+                            id: 'deck-1',
+                            filename: 'research-deck.pptx',
+                        }),
+                    ]),
+                }),
+            }),
+        }));
+    });
+
     test('expands a truncated follow-up from recent transcript before asking the model for a plain response', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Recovered answer', 'resp_recovered')),
