@@ -86,6 +86,7 @@ describe('user checkpoint helpers', () => {
         expect(instructions).toContain('do not say the quota or budget is exhausted');
         expect(instructions).toContain('After a checkpoint answer, do not ask a fresh checkpoint');
         expect(instructions).toContain('For research, web-search, web-fetch, or web-scrape work');
+        expect(instructions).toContain('Do not use a checkpoint just to ask which public websites to scrape');
         expect(instructions).toContain('use one short choice checkpoint with 2 to 4 concrete options');
     });
 

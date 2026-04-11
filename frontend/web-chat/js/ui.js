@@ -2212,19 +2212,7 @@ class UIHelpers {
     }
 
     buildAssistantAvatarMarkup(message = null, isStreaming = false) {
-        if (isStreaming !== true) {
-            return `<div class="message-avatar assistant" aria-hidden="true"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
-        }
-
-        const phaseMeta = this.getLivePhaseMeta(message?.liveState?.phase || 'thinking');
-
-        return `
-            <div class="message-avatar assistant message-avatar--live" data-live-phase="${this.escapeHtmlAttr(phaseMeta.phase)}" aria-hidden="true">
-                <span class="message-avatar__live-orb" aria-hidden="true">
-                    <i data-lucide="${this.escapeHtmlAttr(phaseMeta.icon)}" class="w-3.5 h-3.5"></i>
-                </span>
-            </div>
-        `;
+        return `<div class="message-avatar assistant" aria-hidden="true"><i data-lucide="bot" class="w-4 h-4"></i></div>`;
     }
 
     extractReasoningText(value = null) {
@@ -6695,38 +6683,14 @@ class UIHelpers {
             return;
         }
 
-        const phaseMeta = this.getLivePhaseMeta(state.phase || 'thinking');
+        indicator.classList.add('hidden');
+        indicator.setAttribute('aria-hidden', 'true');
+        indicator.removeAttribute('aria-label');
         const content = indicator.querySelector('.typing-indicator-content');
-        const label = document.getElementById('typing-phase-label');
-        const text = document.getElementById('typing-text');
-        const detail = document.getElementById('typing-detail');
-        const icon = indicator.querySelector('[data-live-icon]');
-        const nextText = String(state.text || phaseMeta.text).trim() || phaseMeta.text;
-        const nextDetail = String(state.detail || phaseMeta.detail).trim() || phaseMeta.detail;
-        const statusLabel = `${phaseMeta.label}: ${nextDetail || nextText}`;
-
-        indicator.dataset.livePhase = phaseMeta.phase;
-        indicator.classList.remove('hidden');
-        indicator.setAttribute('aria-hidden', 'false');
-        indicator.setAttribute('aria-label', statusLabel);
-
-        if (label) {
-            label.textContent = phaseMeta.label;
-        }
-        if (text) {
-            text.textContent = nextText;
-        }
-        if (detail) {
-            detail.textContent = nextDetail;
-        }
-        if (icon) {
-            icon.setAttribute('data-lucide', phaseMeta.icon);
-        }
         if (content) {
-            content.setAttribute('title', statusLabel);
+            content.removeAttribute('title');
         }
-
-        this.reinitializeIcons(indicator);
+        delete indicator.dataset.livePhase;
     }
 
     hideTypingIndicator() {

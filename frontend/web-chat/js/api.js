@@ -1873,21 +1873,29 @@ class OpenAIAPIClient extends EventTarget {
 
         try {
             const baseUrl = API_BASE_URL.replace('/v1', '');
-            const sessionsParams = new URLSearchParams({
-                taskType: WEB_CHAT_API_TASK_TYPE,
-                clientSurface: WEB_CHAT_API_CLIENT_SURFACE,
-            });
-            const response = await fetch(`${baseUrl}/api/sessions?${sessionsParams.toString()}`, {
-                signal: controller.signal
+            const response = await fetch(`${baseUrl}/live`, {
+                signal: controller.signal,
+                credentials: 'same-origin',
+                cache: 'no-store',
             });
 
             clearTimeout(timeoutId);
 
-            if (response.ok) {
-                const data = await response.json();
-                return { connected: true, data };
+            let data = null;
+            try {
+                data = await response.json();
+            } catch (_error) {
+                data = null;
             }
-            return { connected: false, error: `Health check failed: HTTP ${response.status}` };
+
+            // Treat any HTTP response from the lightweight liveness endpoint as
+            // "connected". Reserve the disconnected state for transport failures.
+            return {
+                connected: true,
+                ok: response.ok,
+                status: response.status,
+                data,
+            };
         } catch (error) {
             clearTimeout(timeoutId);
             return { connected: false, error: error.message };

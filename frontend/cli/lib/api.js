@@ -3,8 +3,7 @@ const { getApiBaseUrl, get } = require('./config');
 const {
   buildGatewayHeaders,
   extractAssistantText,
-  filterCodexBackedModels,
-  selectPreferredCodexModel,
+  resolvePreferredChatModel,
   splitSSEFrames,
   streamGatewayResponse,
   DEFAULT_CODEX_MODEL_ID,
@@ -73,7 +72,7 @@ class OpenAIClient {
     this.baseURL = getApiBaseUrl();
     this.client = new OpenAI({
       baseURL: this.baseURL,
-      apiKey: 'any-key', // LillyBuilt doesn't require auth, but OpenAI SDK needs a key
+      apiKey: this.getFrontendApiKey() || 'any-key',
       timeout: DEFAULT_TIMEOUT,
     });
   }
@@ -85,7 +84,7 @@ class OpenAIClient {
     this.baseURL = getApiBaseUrl();
     this.client = new OpenAI({
       baseURL: this.baseURL,
-      apiKey: 'any-key',
+      apiKey: this.getFrontendApiKey() || 'any-key',
       timeout: DEFAULT_TIMEOUT,
     });
   }
@@ -113,6 +112,11 @@ class OpenAIClient {
     }
 
     return buildGatewayHeaders(headers, { authToken });
+  }
+
+  buildApiHeaders(headers = {}) {
+    const authToken = this.getFrontendApiKey();
+    return buildGatewayHeaders(headers, authToken ? { authToken } : {});
   }
 
   async adminRequest(routePath, options = {}) {
@@ -171,7 +175,7 @@ class OpenAIClient {
     this.refreshClient();
     
     const messages = [{ role: 'user', content: message }];
-    const selectedModel = selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL);
+    const selectedModel = resolvePreferredChatModel([], model || DEFAULT_CHAT_MODEL);
     const params = {
       model: selectedModel,
       messages,
@@ -194,7 +198,7 @@ class OpenAIClient {
     try {
       const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
-        headers: buildGatewayHeaders({
+        headers: this.buildApiHeaders({
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
         }),
@@ -289,7 +293,7 @@ class OpenAIClient {
     this.refreshClient();
     
     const messages = [{ role: 'user', content: message }];
-    const selectedModel = selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL);
+    const selectedModel = resolvePreferredChatModel([], model || DEFAULT_CHAT_MODEL);
     const params = {
       model: selectedModel,
       messages,
@@ -354,7 +358,7 @@ class OpenAIClient {
     }
     
     const params = {
-      model: selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL),
+      model: resolvePreferredChatModel([], model || DEFAULT_CHAT_MODEL),
       messages,
       stream: false,
     };
@@ -398,7 +402,7 @@ class OpenAIClient {
     ];
     
     const params = {
-      model: selectPreferredCodexModel([], model || DEFAULT_CHAT_MODEL),
+      model: resolvePreferredChatModel([], model || DEFAULT_CHAT_MODEL),
       messages,
       stream: false,
     };
@@ -487,7 +491,7 @@ class OpenAIClient {
     try {
       const response = await fetch(`${this.baseURL}/models`, {
         method: 'GET',
-        headers: buildGatewayHeaders({
+        headers: this.buildApiHeaders({
           'Accept': 'application/json',
         }),
       });
@@ -509,7 +513,7 @@ class OpenAIClient {
     try {
       const response = await fetch(`${this.baseURL}/models`, {
         method: 'GET',
-        headers: buildGatewayHeaders({
+        headers: this.buildApiHeaders({
           'Accept': 'application/json',
         }),
       });
@@ -523,7 +527,7 @@ class OpenAIClient {
       }
 
       const data = await response.json();
-      return filterCodexBackedModels(data?.data || []);
+      return Array.isArray(data?.data) ? data.data : [];
     } catch (err) {
       throw this._handleError(err);
     }
@@ -653,9 +657,9 @@ class OpenAIClient {
 
     const response = await fetch(targetUrl.toString(), {
       method: 'GET',
-      headers: {
+      headers: this.buildFrontendAuthHeaders({
         Accept: 'text/event-stream',
-      },
+      }),
       signal: options.signal,
     });
 
@@ -785,6 +789,7 @@ class OpenAIClient {
       const method = options.method || 'GET';
       const postData = options.body ? JSON.stringify(options.body) : null;
       const timeout = options.timeout || DEFAULT_TIMEOUT;
+      const authToken = this.getFrontendApiKey();
       
       const requestOptions = {
         hostname: baseUrl.hostname,
@@ -796,6 +801,7 @@ class OpenAIClient {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'User-Agent': 'LillyBuilt-CLI/2.2.0',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
           ...(postData && { 'Content-Length': Buffer.byteLength(postData) }),
         },
       };
@@ -883,6 +889,7 @@ function uploadArtifact(filePath, sessionId, mode = 'chat') {
     const baseUrlStr = client.baseURL.replace('/v1', '');
     const baseUrl = new URL(baseUrlStr);
     const httpModule = baseUrlStr.startsWith('https:') ? https : http;
+    const authToken = client.getFrontendApiKey();
 
     const req = httpModule.request({
       hostname: baseUrl.hostname,
@@ -894,6 +901,7 @@ function uploadArtifact(filePath, sessionId, mode = 'chat') {
         'Content-Length': body.length,
         'Accept': 'application/json',
         'User-Agent': 'LillyBuilt-CLI/2.2.0',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
     }, (res) => {
       const chunks = [];
@@ -931,6 +939,7 @@ function downloadArtifact(artifactId, outputPath) {
     const baseUrlStr = client.baseURL.replace('/v1', '');
     const baseUrl = new URL(baseUrlStr);
     const httpModule = baseUrlStr.startsWith('https:') ? https : http;
+    const authToken = client.getFrontendApiKey();
 
     const req = httpModule.request({
       hostname: baseUrl.hostname,
@@ -939,6 +948,7 @@ function downloadArtifact(artifactId, outputPath) {
       method: 'GET',
       headers: {
         'User-Agent': 'LillyBuilt-CLI/2.2.0',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
     }, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {

@@ -6,6 +6,7 @@ const { requireAuth } = require('./service');
 describe('auth service OpenCode gateway access', () => {
     const originalAuth = { ...config.auth };
     const originalGatewayApiKey = config.opencode.gatewayApiKey;
+    const originalFrontendApiKey = process.env.KIMIBUILT_FRONTEND_API_KEY;
 
     beforeEach(() => {
         config.auth.username = 'admin';
@@ -14,11 +15,17 @@ describe('auth service OpenCode gateway access', () => {
         config.auth.cookieName = 'kimibuilt_auth';
         config.auth.tokenTtlSeconds = 3600;
         config.opencode.gatewayApiKey = 'gateway-secret';
+        process.env.KIMIBUILT_FRONTEND_API_KEY = 'frontend-secret';
     });
 
     afterEach(() => {
         Object.assign(config.auth, originalAuth);
         config.opencode.gatewayApiKey = originalGatewayApiKey;
+        if (originalFrontendApiKey === undefined) {
+            delete process.env.KIMIBUILT_FRONTEND_API_KEY;
+        } else {
+            process.env.KIMIBUILT_FRONTEND_API_KEY = originalFrontendApiKey;
+        }
         jest.clearAllMocks();
     });
 
@@ -73,6 +80,56 @@ describe('auth service OpenCode gateway access', () => {
                 message: 'Authentication required',
                 code: expect.any(String),
             },
+        });
+    });
+
+    test('allows the frontend API token on standard CLI routes', () => {
+        const req = {
+            path: '/api/sessions',
+            method: 'GET',
+            headers: {
+                authorization: 'Bearer frontend-secret',
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toEqual({
+            username: 'frontend-api',
+            role: 'frontend-api',
+        });
+    });
+
+    test('allows the frontend API token on provider session admin routes', () => {
+        const req = {
+            path: '/admin/provider-capabilities',
+            method: 'GET',
+            headers: {
+                authorization: 'Bearer frontend-secret',
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toEqual({
+            username: 'frontend-api',
+            role: 'frontend-api',
         });
     });
 });

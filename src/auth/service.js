@@ -158,6 +158,55 @@ function getTokenFromRequest(req) {
     return '';
 }
 
+function resolveFrontendApiKey() {
+    const explicit = String(
+        process.env.KIMIBUILT_FRONTEND_API_KEY
+        || process.env.FRONTEND_API_KEY
+        || '',
+    ).trim();
+
+    if (explicit) {
+        return explicit;
+    }
+
+    return resolveOpenCodeGatewayApiKey();
+}
+
+function isFrontendTokenRoute(req) {
+    const routePath = String(req.path || '').trim();
+    if (!routePath) {
+        return false;
+    }
+
+    if (routePath.startsWith('/v1/')) {
+        return true;
+    }
+
+    if (routePath.startsWith('/api/admin/')) {
+        return routePath.startsWith('/api/admin/provider-');
+    }
+
+    if (routePath.startsWith('/admin/')) {
+        return routePath.startsWith('/admin/provider-');
+    }
+
+    return routePath.startsWith('/api/');
+}
+
+function isAuthorizedFrontendApiRequest(req = {}) {
+    if (!isFrontendTokenRoute(req)) {
+        return false;
+    }
+
+    const expected = resolveFrontendApiKey();
+    const provided = getTokenFromRequest(req);
+    if (!expected || !provided) {
+        return false;
+    }
+
+    return safeEqualString(provided, expected);
+}
+
 function getAuthenticatedUser(req) {
     if (!isAuthEnabled()) {
         return { authenticated: true, user: { username: 'anonymous', role: 'open' } };
@@ -222,6 +271,11 @@ function requireAuth(req, res, next) {
         return next();
     }
 
+    if (isAuthorizedFrontendApiRequest(req)) {
+        req.user = { username: 'frontend-api', role: 'frontend-api' };
+        return next();
+    }
+
     const authState = getAuthenticatedUser(req);
     if (authState.authenticated) {
         req.user = authState.user;
@@ -248,9 +302,11 @@ module.exports = {
     createAuthToken,
     getAuthenticatedUser,
     getSafeReturnTo,
+    isAuthorizedFrontendApiRequest,
     isAuthEnabled,
     parseCookies,
     requireAuth,
+    resolveFrontendApiKey,
     safeEqualString,
     setAuthCookie,
 };

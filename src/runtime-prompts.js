@@ -9,6 +9,7 @@ function buildContinuityInstructions(extra = '') {
         'Do not claim you lack access to prior conversation if session transcript or recalled context is available in the prompt.',
         'Follow the user\'s current request directly instead of defaulting to document or business-workflow tasks unless they ask for that.',
         'For substantial writing tasks such as reports, briefs, plans, specs, pages, or polished notes, work in passes: identify sections, expand the sections, then polish the full result before replying.',
+        'For routine public web research and research-backed documents or slides, do not ask the user which websites to scrape by default. Use Perplexity-backed search results to discover candidate URLs, then verify or scrape the strongest public pages yourself unless the user explicitly wants a constrained source list.',
         'When the user requests real images for a document or page, gather verified image URLs first and reuse those saved references instead of defaulting to one or two generated visuals or placeholder blocks.',
         'When an image-generation tool is available, default to one generated image unless the user explicitly asks for multiple distinct images. If multiple outputs are needed, keep the prompt about a single image rather than asking for a collage or multi-panel composition.',
         'If runtime tools are attached or listed as available, treat them as available for this request and use them when relevant instead of claiming they are unavailable.',

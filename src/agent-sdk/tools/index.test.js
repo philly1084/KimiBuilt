@@ -416,11 +416,15 @@ describe('ToolManager image tools', () => {
 
     expect(result.success).toBe(true);
     expect(documentService.aiGenerate).toHaveBeenCalledWith(
-      expect.stringContaining('Weekend package: $799. Flights from Halifax start at $214.'),
+      expect.stringContaining('Do not ask the user to supply website lists or source URLs'),
       expect.objectContaining({
         format: 'html',
         model: 'gpt-5.4-mini',
       }),
+    );
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      expect.stringContaining('Weekend package: $799. Flights from Halifax start at $214.'),
+      expect.any(Object),
     );
     expect(result.data.document).toEqual(expect.objectContaining({
       filename: 'vacation-pricing.html',
@@ -701,11 +705,15 @@ describe('ToolManager image tools', () => {
 
     expect(result.success).toBe(true);
     expect(documentService.aiGenerator.generatePresentationContent).toHaveBeenCalledWith(
-      expect.stringContaining('Weekend package: $799'),
+      expect.stringContaining('Do not ask the user to supply website lists or source URLs'),
       expect.objectContaining({
         documentType: 'presentation',
         model: 'gpt-5.4-mini',
       }),
+    );
+    expect(documentService.aiGenerator.generatePresentationContent).toHaveBeenCalledWith(
+      expect.stringContaining('Weekend package: $799'),
+      expect.any(Object),
     );
 
     expect(nestedToolManager.executeTool.mock.calls.map(([id]) => id)).toEqual([

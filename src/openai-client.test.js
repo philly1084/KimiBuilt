@@ -693,6 +693,19 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('prompt for one image, not a collage');
     });
 
+    test('research guidance tells the model to discover scrape URLs itself for deep research deliverables', () => {
+        const guidance = __testUtils.buildAutomaticToolGuidance([
+            { id: 'web-search' },
+            { id: 'web-scrape' },
+            { id: 'deep-research-presentation' },
+        ]);
+
+        expect(guidance).toContain('use Perplexity-backed `web-search` to discover candidate source URLs yourself');
+        expect(guidance).toContain('instead of asking the user which websites to scrape');
+        expect(guidance).toContain('approvedDomains` from the chosen result host');
+        expect(guidance).toContain('should not stop to ask the user for a public source list');
+    });
+
     test('asset search guidance explains how to recover prior files and visuals', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
             { id: 'asset-search' },

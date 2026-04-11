@@ -33,6 +33,7 @@ const authRouter = require('./routes/auth');
 const toolsRouter = require('./routes/tools');
 const workloadsRouter = require('./routes/workloads');
 const opencodeRouter = require('./routes/opencode');
+const providerSessionsRouter = require('./routes/provider-sessions');
 const DashboardController = require('./routes/admin/dashboard.controller');
 const { getToolManager } = require('./agent-sdk/tools');
 const { setDashboardController } = require('./admin/runtime-monitor');
@@ -42,6 +43,7 @@ const { ConversationRunService } = require('./conversation-run-service');
 const { AgentWorkloadService } = require('./workloads/service');
 const { AgentWorkloadRunner } = require('./workloads/runner');
 const { OpenCodeService } = require('./opencode/service');
+const { ProviderSessionService } = require('./provider-session-service');
 const { TemplateStore } = require('./template-store');
 
 // Document Service
@@ -236,6 +238,8 @@ app.use('/api/templates', templatesRouter);
 app.use('/api/unsplash', unsplashRouter);
 app.use('/v1', openaiCompatRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/admin', providerSessionsRouter);
+app.use('/admin', providerSessionsRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api', workloadsRouter);
 app.use('/api', opencodeRouter);
@@ -347,6 +351,7 @@ async function start() {
         app.locals.opencodeService = new OpenCodeService({
             sessionStore,
         });
+        app.locals.providerSessionService = new ProviderSessionService();
         app.locals.conversationRunService = new ConversationRunService({
             app,
             sessionStore,

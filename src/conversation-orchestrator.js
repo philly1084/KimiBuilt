@@ -6797,6 +6797,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or more than 6 steps.',
             'When the latest user turn starts with `Survey response (`, treat that as the resolved answer to the prior checkpoint and continue the work instead of planning another survey.',
             'For research, web-search, web-fetch, or web-scrape work, avoid long scrape surveys and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.',
+            'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, then verify or scrape the strongest public pages yourself unless the user explicitly wants a constrained source list.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
             'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
@@ -7474,6 +7475,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
             parts.push('Use `document-workflow` to recommend, plan, and generate reports, briefs, HTML documents, and slide decks.');
+            parts.push('For routine public research behind those deliverables, discover candidate source URLs through Perplexity-backed `web-search` and verify or scrape them directly instead of asking the user which websites to scrape.');
             parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-scrape` first, then call `document-workflow generate` with grounded `sources` built from those verified results.');
             parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
@@ -7481,6 +7483,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
             parts.push('Use `deep-research-presentation` when the user explicitly wants a research-backed slide deck built through one ordered workflow: planning, multiple research passes, image sourcing, then final presentation generation.');
+            parts.push('During that workflow, do not stop to ask for a routine public source list. Discover source URLs through Perplexity search passes, then verify or scrape the strongest candidates directly.');
         }
 
         if (allowedToolIds.includes('asset-search')) {

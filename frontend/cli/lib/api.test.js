@@ -68,6 +68,31 @@ describe('OpenAIClient provider sessions', () => {
     );
   });
 
+  test('getModels returns the full backend chat model catalog instead of filtering to codex-only models', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: jest.fn(() => 'application/json'),
+      },
+      json: jest.fn(async () => ({
+        data: [
+          { id: 'gpt-5.4-mini', owned_by: 'openai' },
+          { id: 'gemini-2.5-pro', owned_by: 'google' },
+          { id: 'kimi-k2.5', owned_by: 'moonshot' },
+        ],
+      })),
+    });
+
+    const client = new OpenAIClient();
+    const models = await client.getModels();
+
+    expect(models).toEqual([
+      { id: 'gpt-5.4-mini', owned_by: 'openai' },
+      { id: 'gemini-2.5-pro', owned_by: 'google' },
+      { id: 'kimi-k2.5', owned_by: 'moonshot' },
+    ]);
+  });
+
   test('createProviderSession posts the expected provider session body', async () => {
     global.fetch.mockResolvedValue({
       ok: true,
@@ -162,6 +187,7 @@ describe('OpenAIClient provider sessions', () => {
         method: 'GET',
         headers: {
           Accept: 'text/event-stream',
+          Authorization: 'Bearer config-front-key',
         },
       }),
     );

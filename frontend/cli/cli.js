@@ -1645,8 +1645,8 @@ Options:
 
 Environment Variables:
   KIMIBUILT_API_URL             Override API base URL
-  KIMIBUILT_FRONTEND_API_KEY    Auth for /admin/provider-sessions gateway calls
-  FRONTEND_API_KEY              Alternate auth env var for provider sessions
+  KIMIBUILT_FRONTEND_API_KEY    Auth for /v1, /api, and /admin/provider-sessions when backend auth is enabled
+  FRONTEND_API_KEY              Alternate auth env var for the frontend token
 
 Provider Session Commands:
   /providers                    List codex-cli, gemini-cli, kimi-cli when enabled

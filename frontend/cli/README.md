@@ -130,7 +130,7 @@ git diff | kimibuilt "Review these changes"
 
 ## 🤖 Model Selection
 
-The CLI supports selecting different AI models for chat, canvas, and notation modes.
+The CLI reads the full backend `/v1/models` catalog and supports selecting any chat model the backend exposes for chat, canvas, and notation modes, including Codex, Gemini, and Kimi models.
 
 ### List Available Models
 
@@ -300,8 +300,8 @@ Configuration is stored in `~/.kimibuilt/config.json`:
 | Variable | Description |
 |----------|-------------|
 | `KIMIBUILT_API_URL` | Override the API base URL |
-| `KIMIBUILT_FRONTEND_API_KEY` | Auth for `/admin/provider-capabilities` and `/admin/provider-sessions/*` |
-| `FRONTEND_API_KEY` | Alternate auth env var for provider-session access |
+| `KIMIBUILT_FRONTEND_API_KEY` | Auth for `/v1/*`, standard `/api/*`, and `/admin/provider-sessions/*` when backend auth is enabled |
+| `FRONTEND_API_KEY` | Alternate auth env var for the frontend token |
 
 ### Changing Settings
 
@@ -383,8 +383,10 @@ The CLI uses the OpenAI SDK to communicate with KimiBuilt's OpenAI-compatible en
 |----------|--------|-------------|
 | `/admin/provider-capabilities` | GET | List providers and whether they support provider sessions |
 | `/admin/provider-sessions` | POST | Create an interactive backend CLI session |
+| `/admin/provider-sessions/:id/stream` | GET | Stream backend CLI output over SSE |
 | `/admin/provider-sessions/:id/input` | POST | Send raw stdin to the backend CLI |
 | `/admin/provider-sessions/:id/signal` | POST | Send signals like `SIGINT` |
+| `/admin/provider-sessions/:id/resize` | POST | Update stored terminal size metadata |
 | `/admin/provider-sessions/:id` | DELETE | Close the backend CLI session |
 
 ### KimiBuilt Custom Endpoints

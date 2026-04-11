@@ -215,6 +215,7 @@ class ChatApp {
         this.resumeSyncInFlight = false;
         this.pageWasHidden = document.hidden === true;
         this.lastResumeSyncAt = 0;
+        this.connectionStatus = 'checking';
         
         this.init();
     }
@@ -672,7 +673,8 @@ class ChatApp {
     async loadSessions() {
         try {
             await sessionManager.loadSessions();
-            this.updateConnectionStatus('connected');
+            const health = await apiClient.checkHealth();
+            this.updateConnectionStatus(health.connected ? 'connected' : 'disconnected');
             uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
             apiClient.setSessionId(sessionManager.currentSessionId || null);
             
@@ -2306,6 +2308,7 @@ class ChatApp {
                 switch (chunk.type) {
                     case 'stream_open':
                         console.debug('[ChatApp] Gateway SSE stream opened.');
+                        this.updateConnectionStatus('connected');
                         break;
                     case 'status':
                         this.handleStreamStatus(chunk);
@@ -4967,6 +4970,7 @@ class ChatApp {
                 switch (chunk.type) {
                     case 'stream_open':
                         console.debug('[ChatApp] Gateway SSE stream opened.');
+                        this.updateConnectionStatus('connected');
                         break;
                     case 'status':
                         this.handleStreamStatus(chunk);
@@ -5429,6 +5433,9 @@ class ChatApp {
         const text = document.getElementById('connection-text');
         
         if (!indicator || !text) return;
+        if (this.connectionStatus === status) return;
+
+        this.connectionStatus = status;
         
         indicator.className = 'connection-indicator';
         

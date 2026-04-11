@@ -59,7 +59,7 @@ function buildPlannerPromptSurface() {
     'Avoid redundant tool calls.',
     'Reject steps that repeat a no-op command from this run, mismatch the active surface, skip required grounding, or omit required parameters.',
     'For current-information or research-heavy requests, gather grounded evidence first with web-search, web-fetch, or web-scrape before document generation or synthesis.',
-    'For routine public web research, do not stop to ask the user to approve source domains. Use web-search to discover strong candidates, then verify or scrape the best public pages that do not explicitly block bots.',
+    'For routine public web research, research-backed documents, and slide or deep-research requests, do not stop to ask the user which websites to scrape or to approve source domains. Use web-search with the Perplexity provider to discover candidate URLs, then verify or scrape the best public pages that do not explicitly block bots.',
     'Do not invent SSH hosts, usernames, file paths, or credentials.',
     'Every remote-command step must include a non-empty params.command string.',
     'Every agent-workload step must pass the full original user request and let the runtime extract schedule and command details.',
