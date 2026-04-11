@@ -16,6 +16,7 @@ const { piperTtsService } = require('../../tts/piper-tts-service');
 const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const { normalizeWhitespace, stripHtml } = require('../../utils/text');
+const { mergeMemoryKeywords, normalizeMemoryKeywords } = require('../../memory/memory-keywords');
 const {
   AGENT_NOTES_CHAR_LIMIT,
   writeAgentNotesFile,
@@ -59,6 +60,8 @@ const MAX_DEEP_RESEARCH_PAGES_PER_PASS = 8;
 const DEFAULT_DEEP_RESEARCH_IMAGE_LIMIT = 4;
 const MAX_DEEP_RESEARCH_IMAGE_LIMIT = 6;
 const DEFAULT_IMAGE_SETTLE_DELAY_MS = 1500;
+const DEFAULT_DEEP_RESEARCH_RECALL_TOP_K = 4;
+const MAX_DEEP_RESEARCH_QUERY_KEYWORDS = 5;
 
 // Tool categories
 const { registerWebTools } = require('./categories/web');
@@ -659,6 +662,144 @@ function deriveDeepResearchQueries({
     plan?.titleSuggestion ? `${prompt} ${plan.titleSuggestion}` : '',
     ...outlineQueries,
   ]).slice(0, passCount);
+}
+
+function summarizeDeepResearchSourceForMemory(source = {}) {
+  const content = String(source?.content || '').trim();
+  if (!content) {
+    return '';
+  }
+
+  const limit = Math.max(300, Math.min(Number(config.memory?.researchSourceExcerptChars || 2000), 1400));
+  return content.length > limit ? `${content.slice(0, limit)}...` : content;
+}
+
+async function storeDeepResearchSourcesInMemory({
+  context = {},
+  prompt = '',
+  query = '',
+  passIndex = 0,
+  sources = [],
+} = {}) {
+  if (!context?.memoryService?.rememberResearchNote || !context?.sessionId) {
+    return [];
+  }
+
+  const writes = (Array.isArray(sources) ? sources : [])
+    .filter((source) => source && typeof source === 'object' && (source.sourceUrl || source.title || source.content))
+    .slice(0, DEFAULT_DEEP_RESEARCH_PAGES_PER_PASS)
+    .map((source) => {
+      const note = [
+        '[Research note]',
+        prompt ? `Objective: ${prompt}` : null,
+        query ? `Query: ${query}` : null,
+        `Pass: ${passIndex + 1}`,
+        source.title ? `Title: ${String(source.title).trim()}` : null,
+        source.sourceUrl ? `URL: ${String(source.sourceUrl).trim()}` : null,
+        source.sourceLabel ? `Source: ${String(source.sourceLabel).trim()}` : null,
+        `Source notes: ${summarizeDeepResearchSourceForMemory(source)}`,
+      ].filter(Boolean).join('\n');
+
+      return context.memoryService.rememberResearchNote(context.sessionId, note, {
+        ...(context.ownerId ? { ownerId: context.ownerId } : {}),
+        ...(context.memoryScope ? { memoryScope: context.memoryScope } : {}),
+        ...(context.sourceSurface ? { sourceSurface: context.sourceSurface } : {}),
+        ...(context.projectKey ? { projectKey: context.projectKey } : {}),
+        sourceUrl: String(source.sourceUrl || '').trim(),
+        sourceTitle: String(source.title || '').trim(),
+        summary: String(source.title || source.sourceLabel || query || prompt || '').trim(),
+        memoryKeywords: mergeMemoryKeywords([
+          prompt,
+          query,
+          source.title,
+          source.sourceLabel,
+          source.kind,
+        ].filter(Boolean), source.content || '', 20),
+      });
+    });
+
+  if (writes.length === 0) {
+    return [];
+  }
+
+  return Promise.allSettled(writes);
+}
+
+async function deriveDeepResearchProgressKeywords({
+  context = {},
+  prompt = '',
+  query = '',
+  sources = [],
+} = {}) {
+  const sourceKeywordSeed = normalizeMemoryKeywords(
+    (Array.isArray(sources) ? sources : []).flatMap((source) => mergeMemoryKeywords([
+      prompt,
+      query,
+      source?.title || '',
+      source?.sourceLabel || '',
+      source?.kind || '',
+    ], source?.content || '', 12)),
+    24,
+  );
+
+  if ((!context?.memoryService?.recallDetailed && !context?.memoryService?.recall) || !context?.sessionId) {
+    return sourceKeywordSeed.slice(0, MAX_DEEP_RESEARCH_QUERY_KEYWORDS);
+  }
+
+  try {
+    const recall = context.memoryService.recallDetailed
+      ? await context.memoryService.recallDetailed(prompt || query, {
+        sessionId: context.sessionId,
+        ...(context.ownerId ? { ownerId: context.ownerId } : {}),
+        ...(context.memoryScope ? { memoryScope: context.memoryScope } : {}),
+        ...(context.sourceSurface ? { sourceSurface: context.sourceSurface } : {}),
+        ...(context.projectKey ? { projectKey: context.projectKey } : {}),
+        profile: 'research',
+        objective: prompt || query,
+        memoryKeywords: sourceKeywordSeed,
+        topK: DEFAULT_DEEP_RESEARCH_RECALL_TOP_K,
+      })
+      : { entries: [] };
+
+    const recallEntries = Array.isArray(recall?.entries) ? recall.entries : [];
+    const recallKeywords = normalizeMemoryKeywords([
+      ...recallEntries.flatMap((entry) => entry?.metadata?.keywords || []),
+      ...recallEntries.flatMap((entry) => entry?.keywordOverlap || []),
+      ...recallEntries.map((entry) => entry?.text || ''),
+    ], 24);
+
+    return normalizeMemoryKeywords([
+      ...recallKeywords,
+      ...sourceKeywordSeed,
+    ], MAX_DEEP_RESEARCH_QUERY_KEYWORDS);
+  } catch (_error) {
+    return sourceKeywordSeed.slice(0, MAX_DEEP_RESEARCH_QUERY_KEYWORDS);
+  }
+}
+
+function buildRefinedDeepResearchQuery({
+  baseQuery = '',
+  prompt = '',
+  progressKeywords = [],
+} = {}) {
+  const normalizedBaseQuery = String(baseQuery || prompt || '').trim();
+  if (!normalizedBaseQuery) {
+    return '';
+  }
+
+  const loweredBaseQuery = normalizedBaseQuery.toLowerCase();
+  const appendedKeywords = normalizeMemoryKeywords(progressKeywords, MAX_DEEP_RESEARCH_QUERY_KEYWORDS)
+    .filter((keyword) => (
+      keyword
+      && keyword.length >= 3
+      && !/^https?:/i.test(keyword)
+      && !loweredBaseQuery.includes(keyword.toLowerCase())
+    ))
+    .slice(0, MAX_DEEP_RESEARCH_QUERY_KEYWORDS);
+
+  return appendedKeywords.length > 0
+    ? `${normalizedBaseQuery} ${appendedKeywords.join(' ')}`.trim()
+    : normalizedBaseQuery;
 }
 
 function buildDeepResearchSourceFromFetch({
@@ -1557,6 +1698,10 @@ class ToolManager {
             const imageMode = String(params.imageMode || 'auto').trim().toLowerCase() || 'auto';
             const searchDomains = normalizeDomainList(params.searchDomains || params.domains || []);
             const researchSafeScrape = params.researchSafeScrape !== false;
+            const requestedResearchMode = String(params.researchMode || '').trim().toLowerCase();
+            const researchMode = ['fast-search', 'pro-search', 'deep-research', 'advanced-deep-research'].includes(requestedResearchMode)
+              ? requestedResearchMode
+              : 'deep-research';
 
             const recommendationData = await executeNestedTool(context, DOCUMENT_WORKFLOW_TOOL_ID, {
               action: 'recommend',
@@ -1582,7 +1727,7 @@ class ToolManager {
 
             const recommendation = recommendationData?.recommendation || null;
             const plan = planData?.plan || null;
-            const researchQueries = deriveDeepResearchQueries({
+            const researchQueryPlan = deriveDeepResearchQueries({
               prompt,
               plan,
               researchQueries: params.researchQueries,
@@ -1590,14 +1735,22 @@ class ToolManager {
             });
             const sourcesByKey = new Map();
             const researchPasses = [];
+            let progressKeywords = [];
 
-            for (const query of researchQueries) {
+            for (let passIndex = 0; passIndex < passCount; passIndex += 1) {
+              const baseQuery = researchQueryPlan[passIndex] || researchQueryPlan[researchQueryPlan.length - 1] || prompt;
+              const query = buildRefinedDeepResearchQuery({
+                baseQuery,
+                prompt,
+                progressKeywords,
+              });
               let searchData = null;
               const searchStartedAt = new Date().toISOString();
               try {
                 searchData = await executeNestedTool(context, 'web-search', {
                   query,
                   engine: 'perplexity',
+                  researchMode,
                   limit: searchLimit,
                   region: 'us-en',
                   timeRange: String(params.timeRange || 'all').trim().toLowerCase() || 'all',
@@ -1618,6 +1771,7 @@ class ToolManager {
               }
 
               const results = Array.isArray(searchData?.results) ? searchData.results : [];
+              const verifiedSourcesThisPass = [];
               const passSummary = {
                 query,
                 status: 'completed',
@@ -1691,6 +1845,7 @@ class ToolManager {
                 if (!sourcesByKey.has(sourceKey)) {
                   sourcesByKey.set(sourceKey, source);
                 }
+                verifiedSourcesThisPass.push(source);
 
                 passSummary.results.push({
                   url,
@@ -1703,6 +1858,21 @@ class ToolManager {
 
               passSummary.verifiedCount = passSummary.results.filter((entry) => entry.status === 'verified').length;
               researchPasses.push(passSummary);
+
+              await storeDeepResearchSourcesInMemory({
+                context,
+                prompt,
+                query,
+                passIndex,
+                sources: verifiedSourcesThisPass,
+              });
+
+              progressKeywords = await deriveDeepResearchProgressKeywords({
+                context,
+                prompt,
+                query,
+                sources: Array.from(sourcesByKey.values()),
+              });
             }
 
             const groundedSources = Array.from(sourcesByKey.values());

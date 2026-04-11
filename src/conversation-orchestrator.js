@@ -27,6 +27,11 @@ const {
     buildWebChatSessionMessages,
 } = require('./web-chat-message-state');
 const {
+    buildForegroundTurnMessageOptions,
+    persistForegroundTurnMessages,
+    resolveForegroundTurn,
+} = require('./foreground-turn-state');
+const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
@@ -1214,6 +1219,27 @@ function inferResearchTimeRangeFromText(text = '') {
     }
 
     return 'all';
+}
+
+function inferPerplexityResearchModeFromText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return 'search';
+    }
+
+    if (/\b(advanced deep research|institutional(?:-|\s)grade research|maximum depth research|maximum-depth research)\b/.test(normalized)) {
+        return 'advanced-deep-research';
+    }
+
+    if (/\b(deep research|in-depth research|comprehensive research|exhaustive research|thorough research)\b/.test(normalized)) {
+        return 'deep-research';
+    }
+
+    if (hasExplicitWebResearchIntentText(normalized)) {
+        return 'pro-search';
+    }
+
+    return 'search';
 }
 
 function extractExplicitWebResearchQuery(text = '') {
@@ -4321,6 +4347,7 @@ class ConversationOrchestrator extends EventEmitter {
         const setupStartedAt = new Date().toISOString();
         const requestedProfile = normalizeExecutionProfile(executionProfile);
         const rawObjective = extractObjective(input, memoryInput);
+        const foregroundTurn = metadata?.foregroundTurn || metadata?.foreground_turn || null;
         const runtimeToolManager = toolManager || this.toolManager;
         const clientSurface = resolveClientSurface({
             taskType,
@@ -4663,6 +4690,7 @@ class ConversationOrchestrator extends EventEmitter {
                     finalResponse,
                     startedAt,
                     metadata,
+                    foregroundTurn,
                     clientSurface,
                     memoryKeywords,
                     memoryTrace,
@@ -4762,6 +4790,7 @@ class ConversationOrchestrator extends EventEmitter {
                     finalResponse,
                     startedAt,
                     metadata,
+                    foregroundTurn,
                     clientSurface,
                     memoryKeywords,
                     memoryTrace,
@@ -5292,6 +5321,7 @@ class ConversationOrchestrator extends EventEmitter {
                         finalResponse,
                         startedAt,
                         metadata,
+                        foregroundTurn,
                         clientSurface,
                         memoryKeywords,
                         memoryTrace,
@@ -5432,6 +5462,7 @@ class ConversationOrchestrator extends EventEmitter {
                     finalResponse,
                     startedAt,
                     metadata,
+                    foregroundTurn,
                     clientSurface,
                     memoryKeywords,
                     memoryTrace,
@@ -5487,6 +5518,7 @@ class ConversationOrchestrator extends EventEmitter {
                     finalResponse,
                     startedAt,
                     metadata,
+                    foregroundTurn,
                     clientSurface,
                     memoryKeywords,
                     memoryTrace,
@@ -5554,6 +5586,7 @@ class ConversationOrchestrator extends EventEmitter {
                     finalResponse,
                     startedAt,
                     metadata,
+                    foregroundTurn,
                     clientSurface,
                     memoryKeywords,
                     memoryTrace,
@@ -5740,6 +5773,7 @@ class ConversationOrchestrator extends EventEmitter {
                 finalResponse,
                 startedAt,
                 metadata,
+                foregroundTurn,
                 clientSurface,
                 memoryKeywords,
                 memoryTrace,
@@ -6327,6 +6361,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     query: searchQuery,
                     engine: 'perplexity',
+                    researchMode: inferPerplexityResearchModeFromText(objective),
                     limit: normalizeResearchSearchResultCount(),
                     region: 'us-en',
                     timeRange: inferResearchTimeRangeFromText(objective),
@@ -6569,6 +6604,7 @@ class ConversationOrchestrator extends EventEmitter {
                 params: {
                     query,
                     engine: 'perplexity',
+                    researchMode: inferPerplexityResearchModeFromText(prompt),
                     limit: normalizeResearchSearchResultCount(),
                     region: 'us-en',
                     timeRange: 'all',
@@ -7556,6 +7592,7 @@ class ConversationOrchestrator extends EventEmitter {
         finalResponse = {},
         startedAt = Date.now(),
         metadata = {},
+        foregroundTurn = null,
         clientSurface = '',
         memoryScope = null,
         memoryKeywords = [],
@@ -7631,6 +7668,7 @@ class ConversationOrchestrator extends EventEmitter {
             promptState: tracedResponse?.metadata?.promptState || null,
             toolEvents,
             executionProfile,
+            foregroundTurn,
             clientSurface,
             memoryScope,
             memoryKeywords,
@@ -7728,12 +7766,18 @@ class ConversationOrchestrator extends EventEmitter {
         autonomyApproved = false,
         controlStatePatch = {},
         assistantMetadata = null,
+        foregroundTurn = null,
     }) {
         const currentSession = ownerId && this.sessionStore?.getOwned
             ? await this.sessionStore.getOwned(sessionId, ownerId)
             : this.sessionStore?.get
                 ? await this.sessionStore.get(sessionId)
                 : null;
+        const resolvedForegroundTurn = resolveForegroundTurn(
+            currentSession,
+            { foregroundTurn },
+            clientSurface,
+        );
         const resolvedMemoryScope = resolveSessionScope({
             mode: currentSession?.metadata?.taskType || currentSession?.metadata?.mode || '',
             taskType: currentSession?.metadata?.taskType || '',
@@ -7791,12 +7835,18 @@ class ConversationOrchestrator extends EventEmitter {
                     assistantText,
                     toolEvents,
                     assistantMetadata,
+                    ...buildForegroundTurnMessageOptions(resolvedForegroundTurn),
                 })
                 : [
                     { role: 'user', content: userText },
                     { role: 'assistant', content: assistantText },
                 ];
-            await this.sessionStore.appendMessages(sessionId, persistedMessages);
+            await persistForegroundTurnMessages(
+                this.sessionStore,
+                sessionId,
+                persistedMessages,
+                resolvedForegroundTurn,
+            );
         }
 
         const sshMetadata = extractSshSessionMetadataFromToolEvents(toolEvents);

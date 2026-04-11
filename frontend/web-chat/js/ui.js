@@ -2292,6 +2292,7 @@ class UIHelpers {
 
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
         const summary = this.getMessageReasoningSummary(message);
+        const content = String(message?.displayContent ?? message?.content ?? '').trim();
         const displaySource = String(message?.reasoningDisplaySource || '').trim();
         const displayText = String(message?.reasoningDisplayText || '').trim();
         const displayFullText = String(message?.reasoningDisplayFullText || '').trim();
@@ -2300,6 +2301,10 @@ class UIHelpers {
         const displayAnimated = message?.reasoningDisplayAnimated === true;
 
         if (isStreaming && displaySource === 'synthetic' && displayText) {
+            if (content) {
+                return null;
+            }
+
             return {
                 source: 'synthetic',
                 title: displayTitle || 'Thinking',

@@ -10,6 +10,7 @@ jest.mock('../session-store', () => ({
         update: jest.fn(),
         recordResponse: jest.fn(),
         appendMessages: jest.fn(),
+        upsertMessage: jest.fn(),
         updateControlState: jest.fn(),
     },
 }));
@@ -102,6 +103,7 @@ jest.mock('../web-chat-message-state', () => ({
 }));
 
 jest.mock('../session-scope', () => ({
+    buildScopedMemoryMetadata: jest.fn((metadata = {}) => metadata),
     buildScopedSessionMetadata: jest.fn((metadata = {}) => metadata),
     isSessionIsolationEnabled: jest.fn(() => false),
     resolveSessionScope: jest.fn(() => 'notes'),

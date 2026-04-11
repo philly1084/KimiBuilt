@@ -163,6 +163,86 @@ describe('ConversationOrchestrator', () => {
         );
     });
 
+    test('finalizes a pending web-chat foreground turn in place instead of appending duplicate transcript rows', async () => {
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({
+                id: 'session-foreground',
+                metadata: {
+                    taskType: 'chat',
+                    clientSurface: 'web-chat',
+                },
+                controlState: {
+                    foregroundTurn: {
+                        requestId: 'req-foreground-1',
+                        userMessageId: 'user-msg-foreground-1',
+                        assistantMessageId: 'assistant-msg-foreground-1',
+                        clientSurface: 'web-chat',
+                        taskType: 'chat',
+                        status: 'running',
+                        userTimestamp: '2026-04-11T10:00:00.000Z',
+                        assistantTimestamp: '2026-04-11T10:00:00.001Z',
+                    },
+                },
+            }),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            upsertMessage: jest.fn().mockResolvedValue(undefined),
+            updateControlState: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            rememberResponse: jest.fn(),
+            rememberLearnedSkill: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+            sessionStore,
+            memoryService,
+        });
+
+        await orchestrator.persistConversationState({
+            sessionId: 'session-foreground',
+            userText: 'Keep this turn durable.',
+            objective: 'Keep this turn durable.',
+            assistantText: 'Finished in place.',
+            responseId: 'resp-foreground-1',
+            clientSurface: 'web-chat',
+            foregroundTurn: {
+                requestId: 'req-foreground-1',
+                userMessageId: 'user-msg-foreground-1',
+                assistantMessageId: 'assistant-msg-foreground-1',
+                userTimestamp: '2026-04-11T10:00:00.000Z',
+                assistantTimestamp: '2026-04-11T10:00:00.001Z',
+                clientSurface: 'web-chat',
+                taskType: 'chat',
+                status: 'running',
+            },
+            assistantMetadata: {
+                reasoningSummary: 'Finalized from the server.',
+            },
+        });
+
+        expect(sessionStore.appendMessages).not.toHaveBeenCalled();
+        expect(sessionStore.upsertMessage).toHaveBeenCalledWith(
+            'session-foreground',
+            expect.objectContaining({
+                id: 'assistant-msg-foreground-1',
+                role: 'assistant',
+                content: 'Finished in place.',
+            }),
+        );
+        expect(sessionStore.updateControlState).toHaveBeenCalledWith('session-foreground', {
+            foregroundTurn: null,
+        });
+    });
+
     test('expands a truncated follow-up from recent transcript before asking the model for a plain response', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Recovered answer', 'resp_recovered')),
@@ -3478,8 +3558,44 @@ describe('ConversationOrchestrator', () => {
             params: expect.objectContaining({
                 engine: 'perplexity',
                 query: 'managed Postgres providers for startups',
-                }),
+                researchMode: 'pro-search',
+            }),
         });
+    });
+
+    test('upgrades explicit deep research requests to the deep-research Perplexity mode', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    toolId === 'web-search'
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const objective = 'Do deep research on managed Postgres providers for startups.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            toolPolicy,
+        });
+
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'web-search',
+            params: expect.objectContaining({
+                engine: 'perplexity',
+                researchMode: 'deep-research',
+            }),
+        }));
     });
 
     test('forces a direct Perplexity-backed web-search action for current-info prompts like weather', () => {
@@ -3515,6 +3631,7 @@ describe('ConversationOrchestrator', () => {
             params: expect.objectContaining({
                 engine: 'perplexity',
                 query: 'What is the weather in Halifax today',
+                researchMode: 'search',
                 timeRange: 'day',
             }),
         });
@@ -4250,6 +4367,7 @@ describe('ConversationOrchestrator', () => {
                 params: expect.objectContaining({
                     engine: 'perplexity',
                     query: expect.stringContaining('managed Postgres providers for startups'),
+                    researchMode: 'pro-search',
                 }),
             }),
         ]);

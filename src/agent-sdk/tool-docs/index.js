@@ -6,7 +6,7 @@ const TOOL_DOCS_DIR = path.join(__dirname);
 
 const TOOL_SUPPORT = {
   'web-fetch': { status: 'stable', notes: ['Static HTTP/HTTPS fetch with retries and caching.'] },
-  'web-search': { status: 'stable', notes: ['Perplexity-backed search is implemented.', 'Requires PERPLEXITY_API_KEY in the backend environment.'] },
+  'web-search': { status: 'stable', notes: ['Perplexity-backed raw search and preset research modes are implemented.', 'Requires PERPLEXITY_API_KEY in the backend environment.'] },
   'web-scrape': { status: 'stable', notes: ['Supports static fetch and backend Chromium rendering for dynamic pages.'] },
   'security-scan': { status: 'stable', notes: ['Pattern-based source scanning for secrets and common issues.'] },
   'schema-generate': { status: 'stable', notes: ['Generates DDL, ORM schemas, and ER diagrams from entity specs.'] },

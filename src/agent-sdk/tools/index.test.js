@@ -730,6 +730,7 @@ describe('ToolManager image tools', () => {
     expect(webSearchCall?.[1]).toEqual(expect.objectContaining({
       limit: Math.min(config.memory.researchSearchLimit, config.search.maxLimit),
       engine: 'perplexity',
+      researchMode: 'deep-research',
     }));
 
     const finalGenerateCall = nestedToolManager.executeTool.mock.calls.find(([id, params]) => (
@@ -756,6 +757,150 @@ describe('ToolManager image tools', () => {
       filename: 'halifax-travel-pricing.pptx',
       downloadUrl: '/api/documents/deck-1/download',
     }));
+  });
+
+  test('refines later deep research passes from stored research-note keywords', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const nestedToolManager = {
+      executeTool: jest.fn(async (id, params) => {
+        if (id === 'document-workflow' && params.action === 'recommend') {
+          return {
+            success: true,
+            data: {
+              recommendation: {
+                inferredType: 'presentation',
+                recommendedFormat: 'pptx',
+              },
+            },
+          };
+        }
+
+        if (id === 'document-workflow' && params.action === 'plan') {
+          return {
+            success: true,
+            data: {
+              plan: {
+                titleSuggestion: 'Halifax Travel Pricing',
+                outline: [
+                  { title: 'Title Slide' },
+                  { title: 'Pricing Snapshot' },
+                ],
+              },
+            },
+          };
+        }
+
+        if (id === 'web-search') {
+          return {
+            success: true,
+            data: {
+              totalResults: 1,
+              results: [{
+                title: 'Nova Scotia Travel Packages',
+                url: 'https://travel.example.com/packages',
+                source: 'travel.example.com',
+              }],
+            },
+          };
+        }
+
+        if (id === 'web-fetch') {
+          return {
+            success: true,
+            data: {
+              url: 'https://travel.example.com/packages',
+              title: 'Nova Scotia Travel Packages',
+              body: '<main>Weekend package pricing is $799 and flight costs start at $214.</main>',
+            },
+          };
+        }
+
+        if (id === 'image-search-unsplash') {
+          return {
+            success: true,
+            data: {
+              images: [],
+            },
+          };
+        }
+
+        if (id === 'document-workflow' && params.action === 'generate') {
+          return {
+            success: true,
+            data: {
+              document: {
+                id: 'deck-2',
+                filename: 'halifax-research-pass.pptx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                downloadUrl: '/api/documents/deck-2/download',
+              },
+            },
+          };
+        }
+
+        throw new Error(`Unexpected nested tool call: ${id}`);
+      }),
+    };
+
+    const memoryService = {
+      rememberResearchNote: jest.fn().mockResolvedValue('note-1'),
+      recallDetailed: jest.fn().mockResolvedValue({
+        entries: [
+          {
+            text: 'Weekend package pricing and flight costs for Halifax travel.',
+            metadata: {
+              keywords: ['weekend package', 'flight costs', 'halifax travel'],
+            },
+          },
+        ],
+      }),
+    };
+
+    const documentService = {
+      recommendDocumentWorkflow: jest.fn(),
+      buildDocumentPlan: jest.fn(),
+      aiGenerate: jest.fn(),
+      assemble: jest.fn(),
+      generatePresentation: jest.fn(),
+      inferSlideCount: jest.fn(() => 6),
+      aiGenerator: {
+        generatePresentationContent: jest.fn(async () => ({
+          title: 'Halifax Travel Pricing',
+          slides: [
+            { layout: 'title', title: 'Halifax Travel Pricing' },
+          ],
+        })),
+      },
+    };
+
+    const result = await toolManager.executeTool('deep-research-presentation', {
+      prompt: 'Research vacation pricing in Halifax and build a slide deck I can review.',
+      researchPasses: 2,
+      imageLimit: 0,
+    }, {
+      documentService,
+      toolManager: nestedToolManager,
+      memoryService,
+      sessionId: 'session-1',
+      memoryScope: 'web-chat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(memoryService.rememberResearchNote).toHaveBeenCalled();
+    expect(memoryService.recallDetailed).toHaveBeenCalledWith(
+      'Research vacation pricing in Halifax and build a slide deck I can review.',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        memoryScope: 'web-chat',
+        profile: 'research',
+      }),
+    );
+
+    const webSearchCalls = nestedToolManager.executeTool.mock.calls.filter(([id]) => id === 'web-search');
+    expect(webSearchCalls).toHaveLength(2);
+    expect(webSearchCalls[1][1].query).toContain('weekend package');
   });
 
   test('creates a workload from structured cron fields when request is omitted', async () => {

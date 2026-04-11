@@ -10,6 +10,7 @@ jest.mock('../session-store', () => ({
         update: jest.fn(),
         recordResponse: jest.fn(),
         appendMessages: jest.fn(),
+        upsertMessage: jest.fn(),
         updateControlState: jest.fn(),
     },
 }));
@@ -68,7 +69,7 @@ jest.mock('../artifacts/artifact-service', () => ({
     artifactService: {
         getGenerationInstructions: jest.fn(() => ''),
     },
-    extractResponseText: jest.fn(() => 'Answer'),
+    extractResponseText: jest.fn((response = {}) => response.output_text || 'Answer'),
     resolveCompletedResponseText: jest.fn((fullText = '', response = {}) => fullText || response.output_text || 'Answer'),
     getMissingCompletionDelta: jest.fn(() => ''),
 }));
@@ -96,12 +97,10 @@ jest.mock('../runtime-control-state', () => ({
     getSessionControlState: jest.fn(() => ({})),
 }));
 
-jest.mock('../web-chat-message-state', () => ({
-    buildWebChatSessionMessages: jest.fn(() => []),
-    buildFrontendAssistantMetadata: jest.fn((metadata = {}) => metadata),
-}));
+jest.mock('../web-chat-message-state', () => jest.requireActual('../web-chat-message-state'));
 
 jest.mock('../session-scope', () => ({
+    buildScopedMemoryMetadata: jest.fn((metadata = {}) => metadata),
     buildScopedSessionMetadata: jest.fn((metadata = {}) => metadata),
     isSessionIsolationEnabled: jest.fn(() => false),
     resolveSessionScope: jest.fn(() => 'web-chat'),
@@ -256,5 +255,82 @@ describe('/v1/chat/completions stream forwarding', () => {
         expect(response.status).toBe(200);
         expect(response.body.choices[0].message.content).toBe('Answer');
         expect(response.body.choices[0].message.reasoning).toBe('Checked the request and chose the direct path.');
+    });
+
+    test('reuses client-provided message ids when persisting a durable web-chat turn', async () => {
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: false,
+            response: {
+                id: 'resp-compat-durable-1',
+                model: 'gpt-4o',
+                output_text: 'Background-safe answer',
+                output: [{
+                    type: 'message',
+                    role: 'assistant',
+                    content: [{ type: 'output_text', text: 'Background-safe answer' }],
+                }],
+                metadata: {
+                    toolEvents: [],
+                },
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/v1', openAiCompatRouter);
+
+        const response = await request(app)
+            .post('/v1/chat/completions')
+            .send({
+                messages: [
+                    { role: 'user', content: 'Make this durable.' },
+                ],
+                taskType: 'chat',
+                clientSurface: 'web-chat',
+                stream: false,
+                session_id: 'web-chat-stream-1',
+                metadata: {
+                    messageId: 'user-msg-1',
+                    assistantMessageId: 'assistant-msg-1',
+                    userMessageTimestamp: '2026-04-11T10:00:00.000Z',
+                    assistantMessageTimestamp: '2026-04-11T10:00:00.001Z',
+                },
+            });
+
+        expect(response.status).toBe(200);
+        expect(sessionStore.upsertMessage).toHaveBeenNthCalledWith(1,
+            'web-chat-stream-1',
+            expect.objectContaining({
+                id: 'user-msg-1',
+                role: 'user',
+                content: 'Make this durable.',
+            }),
+        );
+        expect(sessionStore.upsertMessage).toHaveBeenNthCalledWith(2,
+            'web-chat-stream-1',
+            expect.objectContaining({
+                id: 'assistant-msg-1',
+                role: 'assistant',
+                metadata: expect.objectContaining({
+                    isStreaming: true,
+                    pendingForeground: true,
+                }),
+            }),
+        );
+        expect(sessionStore.upsertMessage).toHaveBeenCalledWith(
+            'web-chat-stream-1',
+            expect.objectContaining({
+                id: 'assistant-msg-1',
+                role: 'assistant',
+                content: 'Background-safe answer',
+                metadata: expect.objectContaining({
+                    isStreaming: false,
+                }),
+            }),
+        );
+        expect(sessionStore.appendMessages).not.toHaveBeenCalled();
+        expect(sessionStore.updateControlState).toHaveBeenCalledWith('web-chat-stream-1', {
+            foregroundTurn: null,
+        });
     });
 });

@@ -36,6 +36,12 @@ const { persistGeneratedImages } = require('../generated-image-artifacts');
 const { buildContinuityInstructions: buildBaseContinuityInstructions } = require('../runtime-prompts');
 const { getSessionControlState } = require('../runtime-control-state');
 const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require('../web-chat-message-state');
+const {
+    beginForegroundTurn,
+    buildForegroundTurnMessageOptions,
+    failForegroundTurn,
+    persistForegroundTurnMessages,
+} = require('../foreground-turn-state');
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const { toPublicChatModelList } = require('../model-catalog');
@@ -450,6 +456,7 @@ function setSessionHeaders(res, sessionId) {
 }
 
 function openSseStream(req, res, sessionId = null, route = 'unknown') {
+    let closed = false;
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -459,23 +466,61 @@ function openSseStream(req, res, sessionId = null, route = 'unknown') {
     res.write(': stream-open\n\n');
 
     const keepAlive = setInterval(() => {
-        if (res.writableEnded || req.destroyed) {
+        if (closed || res.writableEnded || res.destroyed) {
             clearInterval(keepAlive);
             return;
         }
 
-        res.write(': keepalive\n\n');
+        try {
+            res.write(': keepalive\n\n');
+        } catch (_error) {
+            closed = true;
+            clearInterval(keepAlive);
+        }
     }, 15000);
 
     const cleanup = () => {
+        closed = true;
         clearInterval(keepAlive);
     };
 
-    req.on('close', cleanup);
+    req.on('aborted', cleanup);
     res.on('close', cleanup);
     res.on('finish', cleanup);
 
     console.log(`[OpenAICompat] SSE stream opened route=${route} sessionId=${sessionId || 'unknown'}`);
+
+    return {
+        write(payload = '') {
+            if (closed || res.writableEnded || res.destroyed) {
+                return false;
+            }
+
+            try {
+                res.write(payload);
+                return true;
+            } catch (_error) {
+                closed = true;
+                return false;
+            }
+        },
+        end() {
+            if (closed || res.writableEnded) {
+                return false;
+            }
+
+            try {
+                res.end();
+                return true;
+            } catch (_error) {
+                closed = true;
+                return false;
+            }
+        },
+        isClosed() {
+            return closed || res.writableEnded || res.destroyed;
+        },
+    };
 }
 
 function isNotesSurfaceValue(value = '') {
@@ -557,6 +602,9 @@ router.get('/models', async (_req, res, next) => {
 
 router.post('/chat/completions', async (req, res, next) => {
     let runtimeTask = null;
+    let trackedSessionId = null;
+    let pendingForegroundTurn = null;
+    let foregroundTurnFinalized = false;
     const startedAt = Date.now();
     try {
         const {
@@ -620,6 +668,7 @@ router.post('/chat/completions', async (req, res, next) => {
         );
         if (session) {
             sessionId = session.id;
+            trackedSessionId = sessionId;
         }
         if (!session) {
             return res.status(404).json({
@@ -629,6 +678,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 },
             });
         }
+        trackedSessionId = sessionId;
 
         const clientSurface = resolveClientSurface(req.body, session);
         const memoryScope = resolveSessionScope({
@@ -655,6 +705,20 @@ router.post('/chat/completions', async (req, res, next) => {
         const effectiveInput = sshContext.effectivePrompt || lastUserText;
         const artifactIntentText = stripInjectedNotesPageEditDirective(lastUserText);
         const taskType = resolveConversationTaskType(req.body, session);
+        pendingForegroundTurn = await beginForegroundTurn({
+            sessionStore,
+            sessionId,
+            userText: lastUserText,
+            metadata: effectiveRequestMetadata,
+            clientSurface,
+            taskType,
+        });
+        if (pendingForegroundTurn) {
+            effectiveRequestMetadata = {
+                ...effectiveRequestMetadata,
+                foregroundTurn: pendingForegroundTurn,
+            };
+        }
         const effectiveMessages = messages.map((message) => (
             message.role === 'user' && message === lastUserMessage
                 ? { role: message.role, content: effectiveInput }
@@ -746,6 +810,9 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         if (effectiveOutputFormat) {
             setSessionHeaders(res, sessionId);
+            const sse = stream
+                ? openSseStream(req, res, sessionId, '/v1/chat/completions#artifact')
+                : null;
             const toolManager = await ensureRuntimeToolManager(req.app);
             const preparedImages = await maybePrepareImagesForArtifactPrompt({
                 toolManager,
@@ -760,10 +827,6 @@ router.post('/chat/completions', async (req, res, next) => {
             const artifactGenerationSession = preparedImages.resetPreviousResponse
                 ? { ...session, previousResponseId: null }
                 : session;
-
-            if (stream) {
-                openSseStream(req, res, sessionId, '/v1/chat/completions#artifact');
-            }
 
             const generation = await generateOutputArtifactFromPrompt({
                 sessionId,
@@ -814,12 +877,19 @@ router.post('/chat/completions', async (req, res, next) => {
                     ...(memoryKeywords.length > 0 ? { memoryKeywords } : {}),
                 }),
             );
-            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
-                userText: lastUserText,
-                assistantText: generation.assistantMessage,
-                toolEvents: preparedImages.toolEvents,
-                artifacts: responseArtifacts,
-            }));
+            await persistForegroundTurnMessages(
+                sessionStore,
+                sessionId,
+                buildWebChatSessionMessages({
+                    userText: lastUserText,
+                    assistantText: generation.assistantMessage,
+                    toolEvents: preparedImages.toolEvents,
+                    artifacts: responseArtifacts,
+                    ...buildForegroundTurnMessageOptions(pendingForegroundTurn),
+                }),
+                pendingForegroundTurn,
+            );
+            foregroundTurnFinalized = true;
             await updateSessionProjectMemory(sessionId, {
                 userText: lastUserText,
                 assistantText: generation.assistantMessage,
@@ -840,14 +910,14 @@ router.post('/chat/completions', async (req, res, next) => {
             });
 
             if (stream) {
-                res.write(`data: ${JSON.stringify({
+                sse?.write(`data: ${JSON.stringify({
                     id: `chatcmpl-${sessionId}-0`,
                     object: 'chat.completion.chunk',
                     created: Math.floor(Date.now() / 1000),
                     model: model || 'gpt-4o',
                     choices: [{ index: 0, delta: { content: generation.assistantMessage }, finish_reason: null }],
                 })}\n\n`);
-                res.write(`data: ${JSON.stringify({
+                sse?.write(`data: ${JSON.stringify({
                     id: `chatcmpl-${sessionId}`,
                     object: 'chat.completion.chunk',
                     created: Math.floor(Date.now() / 1000),
@@ -860,8 +930,8 @@ router.post('/chat/completions', async (req, res, next) => {
                     assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                     assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                 })}\n\n`);
-                res.write('data: [DONE]\n\n');
-                res.end();
+                sse?.write('data: [DONE]\n\n');
+                sse?.end();
                 return;
             }
 
@@ -908,7 +978,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const input = effectiveMessages;
 
         if (stream) {
-            openSseStream(req, res, sessionId, '/v1/chat/completions');
+            const sse = openSseStream(req, res, sessionId, '/v1/chat/completions');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: messages.map((message) => (
@@ -960,7 +1030,7 @@ router.post('/chat/completions', async (req, res, next) => {
             for await (const event of response) {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
-                    res.write(`data: ${JSON.stringify({
+                    sse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -971,7 +1041,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 }
 
                 if (event.type === 'response.reasoning_summary_text.delta' && event.delta) {
-                    res.write(`data: ${JSON.stringify({
+                    sse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -986,7 +1056,7 @@ router.post('/chat/completions', async (req, res, next) => {
 
                 if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
                     && isResponseToolOutputItem(event.item)) {
-                    res.write(`data: ${JSON.stringify({
+                    sse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -1008,7 +1078,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const missingDelta = getMissingCompletionDelta(fullText, resolvedCompletion.outputText);
                     if (missingDelta) {
                         fullText = resolvedCompletion.outputText;
-                        res.write(`data: ${JSON.stringify({
+                        sse.write(`data: ${JSON.stringify({
                             id: `chatcmpl-${sessionId}-${chunkIndex}`,
                             object: 'chat.completion.chunk',
                             created: Math.floor(Date.now() / 1000),
@@ -1062,14 +1132,24 @@ router.post('/chat/completions', async (req, res, next) => {
                         toolEvents,
                         artifacts,
                     }, ownerId);
+                    if (execution.handledPersistence) {
+                        foregroundTurnFinalized = true;
+                    }
                     if (!execution.handledPersistence) {
-                        await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
-                            userText: lastUserText,
-                            assistantText: fullText,
-                            toolEvents,
-                            artifacts,
-                            assistantMetadata: resolvedCompletion.response?.metadata,
-                        }));
+                        await persistForegroundTurnMessages(
+                            sessionStore,
+                            sessionId,
+                            buildWebChatSessionMessages({
+                                userText: lastUserText,
+                                assistantText: fullText,
+                                toolEvents,
+                                artifacts,
+                                assistantMetadata: resolvedCompletion.response?.metadata,
+                                ...buildForegroundTurnMessageOptions(pendingForegroundTurn),
+                            }),
+                            pendingForegroundTurn,
+                        );
+                        foregroundTurnFinalized = true;
                     }
                     completeRuntimeTask(runtimeTask?.id, {
                         responseId: resolvedCompletion.response.id,
@@ -1078,7 +1158,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         duration: Date.now() - startedAt,
                         metadata: resolvedCompletion.response?.metadata || {},
                     });
-                    res.write(`data: ${JSON.stringify({
+                    sse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -1097,11 +1177,11 @@ router.post('/chat/completions', async (req, res, next) => {
                             artifacts,
                         }),
                     })}\n\n`);
-                    res.write('data: [DONE]\n\n');
+                    sse.write('data: [DONE]\n\n');
                 }
             }
 
-            res.end();
+            sse.end();
             return;
         }
 
@@ -1245,14 +1325,24 @@ router.post('/chat/completions', async (req, res, next) => {
             toolEvents: response?.metadata?.toolEvents || [],
             artifacts,
         }, ownerId);
+        if (execution.handledPersistence) {
+            foregroundTurnFinalized = true;
+        }
         if (!execution.handledPersistence) {
-            await sessionStore.appendMessages(sessionId, buildWebChatSessionMessages({
-                userText: lastUserText,
-                assistantText: outputText,
-                toolEvents: response?.metadata?.toolEvents || [],
-                artifacts,
-                assistantMetadata: response?.metadata,
-            }));
+            await persistForegroundTurnMessages(
+                sessionStore,
+                sessionId,
+                buildWebChatSessionMessages({
+                    userText: lastUserText,
+                    assistantText: outputText,
+                    toolEvents: response?.metadata?.toolEvents || [],
+                    artifacts,
+                    assistantMetadata: response?.metadata,
+                    ...buildForegroundTurnMessageOptions(pendingForegroundTurn),
+                }),
+                pendingForegroundTurn,
+            );
+            foregroundTurnFinalized = true;
         }
         completeRuntimeTask(runtimeTask?.id, {
             responseId: response.id,
@@ -1303,6 +1393,18 @@ router.post('/chat/completions', async (req, res, next) => {
             model: req.body?.model || null,
             metadata: { reasoningEffort: resolveReasoningEffort(req.body) },
         });
+        if (pendingForegroundTurn && !foregroundTurnFinalized) {
+            try {
+                await failForegroundTurn(
+                    sessionStore,
+                    trackedSessionId,
+                    pendingForegroundTurn,
+                    `Request failed: ${err.message || 'The request could not be completed.'}`,
+                );
+            } catch (foregroundError) {
+                console.warn('[OpenAICompat] Failed to persist foreground turn failure:', foregroundError.message);
+            }
+        }
         next(err);
     }
 });

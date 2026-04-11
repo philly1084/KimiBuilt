@@ -16,10 +16,19 @@ describe('WebSearchTool', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
-    global.fetch = jest.fn().mockResolvedValue({
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('passes normalized filters to the Perplexity Search API', async () => {
+    global.fetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
+        id: 'search-123',
         results: [{
           title: 'OpenAI API docs',
           url: 'https://platform.openai.com/docs/overview',
@@ -28,13 +37,7 @@ describe('WebSearchTool', () => {
         }],
       }),
     });
-  });
 
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  test('passes normalized domain filters to the Perplexity search endpoint', async () => {
     const tool = new WebSearchTool();
     const tracker = {
       recordNetworkCall: jest.fn(),
@@ -42,20 +45,44 @@ describe('WebSearchTool', () => {
 
     const result = await tool.handler({
       query: 'latest OpenAI API best practices',
-      domains: ['https://platform.openai.com/docs', 'www.developer.mozilla.org/en-US/'],
+      domains: ['https://platform.openai.com/docs', 'www.developer.mozilla.org/en-US/', '-reddit.com'],
+      languageFilter: ['en', 'fr', 'english'],
+      timeRange: 'week',
+      maxTokens: 9000,
+      maxTokensPerPage: 2048,
+      publishedAfter: '04/01/2026',
+      updatedBefore: '04/10/2026',
+      userLocation: {
+        country: 'ca',
+      },
     }, {}, tracker);
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [, request] = global.fetch.mock.calls[0];
+    const [endpoint, request] = global.fetch.mock.calls[0];
     const payload = JSON.parse(request.body);
 
-    expect(payload.search_domain_filter).toEqual([
-      'platform.openai.com',
-      'developer.mozilla.org',
-    ]);
+    expect(endpoint).toBe('https://api.perplexity.ai/search');
+    expect(payload).toEqual(expect.objectContaining({
+      query: 'latest OpenAI API best practices',
+      max_results: 12,
+      max_tokens: 9000,
+      max_tokens_per_page: 2048,
+      search_domain_filter: [
+        'platform.openai.com',
+        'developer.mozilla.org',
+      ],
+      country: 'CA',
+      search_recency_filter: 'week',
+      search_language_filter: ['en', 'fr'],
+      search_after_date_filter: '04/01/2026',
+      last_updated_before_filter: '04/10/2026',
+    }));
+    expect(payload.search_domain_filter).not.toContain('-reddit.com');
+    expect(result.researchMode).toBe('search');
     expect(result.domainFilter).toEqual([
       'platform.openai.com',
       'developer.mozilla.org',
+      '-reddit.com',
     ]);
     expect(result.results).toEqual([
       expect.objectContaining({
@@ -63,10 +90,174 @@ describe('WebSearchTool', () => {
         source: 'platform.openai.com',
       }),
     ]);
+    expect(result.searchQueries).toEqual(['latest OpenAI API best practices']);
+    expect(result.provider).toEqual({
+      endpoint: '/search',
+      model: '',
+      responseId: 'search-123',
+    });
     expect(tracker.recordNetworkCall).toHaveBeenCalledWith(
       'https://api.perplexity.ai/search',
       'POST',
-      { results: 1 },
+      { results: 1, researchMode: 'search' },
+    );
+  });
+
+  test('uses Perplexity Agent API presets for deep research and preserves results output', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'resp_deep_123',
+        model: 'openai/gpt-5.2',
+        related_questions: ['How do hosted Postgres backups compare?'],
+        usage: {
+          total_tokens: 4321,
+        },
+        output: [
+          {
+            type: 'search_results',
+            queries: ['managed postgres startups pricing', 'managed postgres startup backups'],
+            results: [
+              {
+                title: 'Neon pricing',
+                url: 'https://neon.tech/pricing',
+                snippet: 'Usage-based Postgres pricing.',
+                date: '2026-04-01',
+                source: 'web',
+              },
+              {
+                title: 'Crunchy Bridge',
+                url: 'https://www.crunchydata.com/products/crunchy-bridge',
+                snippet: 'Managed Postgres with backups.',
+                date: '2026-03-15',
+                source: 'web',
+              },
+            ],
+          },
+          {
+            type: 'fetch_url_results',
+            contents: [
+              {
+                title: 'Neon pricing',
+                url: 'https://neon.tech/pricing',
+                snippet: 'Serverless Postgres pricing details.',
+              },
+            ],
+          },
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'Neon and Crunchy Bridge are strong startup options with different cost shapes.',
+                annotations: [
+                  {
+                    title: 'Neon pricing',
+                    url: 'https://neon.tech/pricing',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const tool = new WebSearchTool();
+    const tracker = {
+      recordNetworkCall: jest.fn(),
+    };
+
+    const result = await tool.handler({
+      query: 'Compare managed Postgres providers for startups',
+      researchMode: 'deep-research',
+      limit: 7,
+      domains: ['neon.tech', 'crunchydata.com'],
+      timeRange: 'month',
+      maxTokens: 12000,
+      maxTokensPerPage: 4096,
+      maxSteps: 8,
+      instructions: 'Focus on startup pricing, backups, and operational tradeoffs.',
+      userLocation: {
+        country: 'US',
+        region: 'New York',
+        city: 'New York',
+      },
+    }, {}, tracker);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [endpoint, request] = global.fetch.mock.calls[0];
+    const payload = JSON.parse(request.body);
+
+    expect(endpoint).toBe('https://api.perplexity.ai/v1/agent');
+    expect(payload).toEqual(expect.objectContaining({
+      preset: 'deep-research',
+      input: 'Compare managed Postgres providers for startups',
+      max_steps: 8,
+      instructions: 'Focus on startup pricing, backups, and operational tradeoffs.',
+    }));
+    expect(payload.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'web_search',
+        max_results_per_query: 7,
+        max_tokens: 12000,
+        max_tokens_per_page: 4096,
+        filters: expect.objectContaining({
+          search_domain_filter: ['neon.tech', 'crunchydata.com'],
+          search_recency_filter: 'month',
+        }),
+        user_location: expect.objectContaining({
+          country: 'US',
+          region: 'New York',
+          city: 'New York',
+        }),
+      }),
+      expect.objectContaining({
+        type: 'fetch_url',
+      }),
+    ]));
+    expect(result.researchMode).toBe('deep-research');
+    expect(result.answer).toContain('Neon and Crunchy Bridge are strong startup options');
+    expect(result.searchQueries).toEqual([
+      'managed postgres startups pricing',
+      'managed postgres startup backups',
+    ]);
+    expect(result.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: 'Neon pricing',
+        url: 'https://neon.tech/pricing',
+      }),
+      expect.objectContaining({
+        title: 'Crunchy Bridge',
+        url: 'https://www.crunchydata.com/products/crunchy-bridge',
+      }),
+    ]));
+    expect(result.verifiedPages).toEqual([
+      {
+        title: 'Neon pricing',
+        url: 'https://neon.tech/pricing',
+        snippet: 'Serverless Postgres pricing details.',
+      },
+    ]);
+    expect(result.citations).toEqual([
+      {
+        title: 'Neon pricing',
+        url: 'https://neon.tech/pricing',
+      },
+    ]);
+    expect(result.provider).toEqual({
+      endpoint: '/v1/agent',
+      model: 'openai/gpt-5.2',
+      responseId: 'resp_deep_123',
+    });
+    expect(result.usage).toEqual({
+      total_tokens: 4321,
+    });
+    expect(tracker.recordNetworkCall).toHaveBeenCalledWith(
+      'https://api.perplexity.ai/v1/agent',
+      'POST',
+      { results: 2, researchMode: 'deep-research' },
     );
   });
 });

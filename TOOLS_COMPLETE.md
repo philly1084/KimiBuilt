@@ -13,7 +13,7 @@
 |------|-----|----------|
 | Web Fetch | `web-fetch` | HTTP GET/POST with retries, caching, timeouts |
 | Web Scrape | `web-scrape` | CSS selector extraction, AI-powered extraction |
-| Web Search | `web-search` | DuckDuckGo search with filters |
+| Web Search | `web-search` | Perplexity raw search plus preset research modes |
 
 ### Phase 3: SSH Tools ✓
 | Tool | ID | Features |

@@ -69,6 +69,66 @@ const AMBIENT_REASONING_STARTS = [
     'Refreshing the marmalade reserves in the badger embassy',
     'Repainting lane markers for the penguin drag strip',
     'Calibrating the puffin rumor detector',
+    'Untucking the seals from the filing cabinet',
+    'Rebalancing the marmot chandelier',
+    'Sharpening chalk for the heron cartographers',
+    'Inflating backup tires for the squirrel rover',
+    'Resetting the walrus espresso boiler',
+    'Sorting moon rocks in the possum annex',
+    'Greasing hinges on the beaver observatory hatch',
+    'Counting freckles on the cod navigation chart',
+    'Testing lantern batteries for the fox relay team',
+    'Folding tarp corners in the loon machine room',
+    'Waking the crab semaphore one claw at a time',
+    'Stacking invoices for the otter ferry guild',
+    'Brushing frost off the raven signal dish',
+    'Refilling the badger weather cannon',
+    'Untangling kite string in the puffin switchyard',
+    'Checking flour levels in the raccoon bakery lab',
+    'Polishing gauges on the elk tide engine',
+    'Shuffling index cards for the muskrat dispatch desk',
+    'Anchoring the gull weather balloon',
+    'Cooling the porcupine soldering bench',
+    'Winding springs for the mink transit clock',
+    'Charting puddles for the moose survey corps',
+    'Refitting the heron newsroom with quieter gears',
+    'Straightening banners in the ferret hangar',
+    'Sharpening compasses for the goose rescue flotilla',
+    'Bundling spare bolts for the squirrel tram depot',
+    'Counting biscuits for the wolf audit committee',
+    'Resetting the badger hourglass array',
+    'Teaching the otter lighthouse to blink on beat',
+    'Inspecting hinges in the marmot archive vault',
+    'De-icing the pelican message tube',
+    'Balancing ledgers in the beaver tea room',
+    'Rotating mirrors in the loon signal attic',
+    'Checking spark plugs on the yak rumor wagon',
+    'Ventilating the possum blueprint cellar',
+    'Collecting spare feathers for the goose upholstery unit',
+    'Debugging the trout weather choir',
+    'Unpacking crates in the heron customs bay',
+    'Calming the mink kettle drum',
+    'Washing soot off the crab launch scaffold',
+    'Tightening rivets on the raven rain catcher',
+    'Refreshing ink wells in the owl map shop',
+    'Sorting brass keys for the fox locksmith train',
+    'Priming the beehive story engine',
+    'Tallying footsteps in the badger corridor',
+    'Leveling tables in the otter signal cafe',
+    'Refolding the eel parade banners',
+    'Refastening ropes on the puffin cargo lift',
+    'Proofreading memos for the marmot switchboard',
+    'Uncrumpling blueprints in the coyote drafting den',
+    'Loading coal into the walrus tea locomotive',
+    'Cleaning lenses for the seal horizon bureau',
+    'Bracing ladders in the raccoon weather mill',
+    'Running inventory on the beaver snack locker',
+    'Spinning up the heron fog projector',
+    'Counting paperclips in the fox observatory pantry',
+    'Sanding splinters off the moose briefing bench',
+    'Re-keying the gull workshop lockers',
+    'Clearing steam from the otter signal tunnel',
+    'Balancing lunch trays for the penguin design review',
 ];
 const AMBIENT_REASONING_ENDINGS = [
     'while the answer sharpens',
@@ -96,6 +156,31 @@ const AMBIENT_REASONING_ENDINGS = [
     'so the useful sentence can find the exit',
     'before the idea fog condenses into something practical',
     'while the answer climbs out of the tool shed',
+    'while the useful answer stops hiding in the rafters',
+    'so the next sentence can land without skidding',
+    'until the puzzle starts wearing a name tag',
+    'while the loose ends sit down and cooperate',
+    'before the obvious part misses its train',
+    'so the answer arrives with all four tires attached',
+    'while the quiet clues stop whispering through vents',
+    'before the wrong hunch borrows the microphone',
+    'so the facts can line up without elbowing each other',
+    'while the practical answer untangles its shoelaces',
+    'until the messy draft remembers its job',
+    'so the final idea has somewhere dry to stand',
+    'while the answer irons its own collar',
+    'before the breadcrumbs try to form a jazz trio',
+    'so the useful bit stops circling the block',
+    'while the thread learns how to walk in a straight line',
+    'before the question puts on another disguise',
+    'so the reply can arrive without spare smoke',
+    'while the rough edges file themselves into order',
+    'until the good explanation clears customs',
+    'so the hidden hinge stops squeaking',
+    'while the answer trades static for traction',
+    'before the obvious route gets stuck behind a goose',
+    'so the final wording quits pacing the hallway',
+    'while the real point climbs onto the stage',
 ];
 
 function shuffleArray(items = []) {
@@ -170,6 +255,7 @@ class ChatApp {
             phase: 'idle',
             detail: '',
             reasoningSummary: '',
+            hasRealReasoning: false,
         };
         this.ambientReasoningDeck = buildAmbientReasoningLines();
         this.ambientReasoningDeckIndex = 0;
@@ -204,6 +290,7 @@ class ChatApp {
         this.editingWorkload = null;
         this.workloadSocket = null;
         this.workloadSocketReconnectTimer = null;
+        this.backgroundWorkloadStatusHideTimer = null;
         this.subscribedWorkloadSessionId = null;
         this.isRefreshingSessionSummaries = false;
         this.isLoadingWorkloads = false;
@@ -945,6 +1032,11 @@ class ChatApp {
             return;
         }
 
+        if (this.backgroundWorkloadStatusHideTimer) {
+            window.clearTimeout(this.backgroundWorkloadStatusHideTimer);
+            this.backgroundWorkloadStatusHideTimer = null;
+        }
+
         const sessionId = sessionManager.currentSessionId;
         if (!sessionId || !this.workloadsAvailable) {
             this.backgroundWorkloadStatus.innerHTML = '';
@@ -987,6 +1079,17 @@ class ChatApp {
         `;
         this.backgroundWorkloadStatus.classList.remove('hidden');
         uiHelpers.reinitializeIcons(this.backgroundWorkloadStatus);
+
+        const isMobile = window.matchMedia('(max-width: 640px)').matches;
+        if (isMobile && snapshot.running < 1 && snapshot.queued > 0) {
+            this.backgroundWorkloadStatusHideTimer = window.setTimeout(() => {
+                if (!this.backgroundWorkloadStatus || !window.matchMedia('(max-width: 640px)').matches) {
+                    return;
+                }
+                this.backgroundWorkloadStatus.classList.add('hidden');
+                this.backgroundWorkloadStatus.innerHTML = '';
+            }, 7000);
+        }
     }
 
     renderWorkloadCard(workload) {
@@ -2307,9 +2410,20 @@ class ChatApp {
                 this.currentAbortController.signal,
                 reasoningEffort,
                 {
+                    metadata: {
+                        foregroundRequestId: storedAssistantMessage.id,
+                        messageId: storedUserMessage.id,
+                        assistantMessageId: storedAssistantMessage.id,
+                        userMessageTimestamp: storedUserMessage.timestamp,
+                        assistantMessageTimestamp: storedAssistantMessage.timestamp,
+                    },
                     shouldResyncAfterDisconnect: (error) => this.shouldResyncAfterDisconnect(error),
                 },
             )) {
+                if (chunk.type !== 'retry') {
+                    this.markActiveStreamAccepted();
+                }
+
                 if (chunk.sessionId) {
                     this.syncBackendSession(chunk.sessionId);
                 }
@@ -4346,7 +4460,7 @@ class ChatApp {
             }
 
             const now = Date.now();
-            if (this.hasRecentReasoningStream(now)) {
+            if (this.liveResponseState.hasRealReasoning === true || this.hasRecentReasoningStream(now)) {
                 const liveSummary = String(
                     message.reasoningSummary
                     || message.metadata?.reasoningSummary
@@ -4409,6 +4523,7 @@ class ChatApp {
             phase: 'thinking',
             detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
             reasoningSummary: '',
+            hasRealReasoning: false,
         };
         uiHelpers.showTypingIndicator({
             phase: 'thinking',
@@ -4544,6 +4659,7 @@ class ChatApp {
         this.liveResponseState = {
             ...this.liveResponseState,
             reasoningSummary: nextSummary,
+            hasRealReasoning: true,
         };
         this.updateLiveResponsePhase('reasoning', 'Working through the answer');
         this.updateStreamingMessageState({
@@ -4576,9 +4692,21 @@ class ChatApp {
             return;
         }
 
+        const reasoningPatch = String(currentMessage.reasoningDisplaySource || '').trim() === 'synthetic'
+            ? {
+                reasoningDisplaySource: '',
+                reasoningDisplayText: '',
+                reasoningDisplayFullText: '',
+                reasoningDisplayTitle: '',
+                reasoningDisplayIcon: '',
+                reasoningDisplayAnimated: false,
+            }
+            : {};
+
         this.updateLiveResponsePhase('writing', 'Streaming the reply');
         this.updateStreamingMessageState({
             content: `${currentMessage.content || ''}${content}`,
+            ...reasoningPatch,
             isStreaming: true,
         }, {
             render: true,
@@ -4707,6 +4835,7 @@ class ChatApp {
             phase: 'idle',
             detail: '',
             reasoningSummary: '',
+            hasRealReasoning: false,
         };
         this.activeStreamRequest = null;
         this.resetAmbientReasoningState();
@@ -4740,6 +4869,7 @@ class ChatApp {
             normalizedMessage.includes('disconnected');
 
         const isServerError = typeof status === 'number' && status >= 500;
+        const acceptedByServer = Boolean((this.pendingStreamResync || this.activeStreamRequest)?.acceptedByServer);
 
         if (isNetworkError && !isServerError && this.shouldResyncAfterDisconnect(message)) {
             this.handleInterruptedStreamResync({
@@ -4749,7 +4879,7 @@ class ChatApp {
         }
         
         // For network errors, try to retry instead of immediately failing
-        if (isNetworkError && !isServerError && this.retryAttempt < this.maxRetries) {
+        if (isNetworkError && !isServerError && !acceptedByServer && this.retryAttempt < this.maxRetries) {
             this.retryAttempt++;
             console.log(`[ChatApp] Retrying after network error (attempt ${this.retryAttempt}/${this.maxRetries})...`);
             
@@ -4811,6 +4941,7 @@ class ChatApp {
             phase: 'idle',
             detail: '',
             reasoningSummary: '',
+            hasRealReasoning: false,
         };
         this.updateSendButton();
         
@@ -4881,6 +5012,7 @@ class ChatApp {
             phase: 'idle',
             detail: '',
             reasoningSummary: '',
+            hasRealReasoning: false,
         };
         this.updateSendButton();
     }
@@ -4969,9 +5101,20 @@ class ChatApp {
                 this.currentAbortController.signal,
                 reasoningEffort,
                 {
+                    metadata: {
+                        foregroundRequestId: storedAssistantMessage.id,
+                        messageId: userMessage.id,
+                        assistantMessageId: storedAssistantMessage.id,
+                        userMessageTimestamp: userMessage.timestamp,
+                        assistantMessageTimestamp: storedAssistantMessage.timestamp,
+                    },
                     shouldResyncAfterDisconnect: (error) => this.shouldResyncAfterDisconnect(error),
                 },
             )) {
+                if (chunk.type !== 'retry') {
+                    this.markActiveStreamAccepted();
+                }
+
                 if (chunk.sessionId) {
                     this.syncBackendSession(chunk.sessionId);
                 }
@@ -5481,6 +5624,7 @@ class ChatApp {
             sessionId,
             requestType: String(context.requestType || 'chat'),
             startedAt: Date.now(),
+            acceptedByServer: false,
             lifecycleInterrupted: false,
             interruptionReason: '',
             previousMessages: Array.isArray(context.previousMessages) ? context.previousMessages.slice() : [],
@@ -5492,6 +5636,15 @@ class ChatApp {
         };
         this.pendingStreamResync = null;
         return this.activeStreamRequest;
+    }
+
+    markActiveStreamAccepted() {
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (!trackedRequest) {
+            return;
+        }
+
+        trackedRequest.acceptedByServer = true;
     }
 
     markActiveStreamInterrupted(reason = 'connection') {
@@ -5522,6 +5675,10 @@ class ChatApp {
         }
 
         if (trackedRequest.lifecycleInterrupted) {
+            return true;
+        }
+
+        if (trackedRequest.acceptedByServer) {
             return true;
         }
 
@@ -5611,6 +5768,7 @@ class ChatApp {
                     phase: 'idle',
                     detail: '',
                     reasoningSummary: '',
+                    hasRealReasoning: false,
                 };
                 uiHelpers.hideTypingIndicator();
                 this.resetAmbientReasoningState();
@@ -5674,11 +5832,39 @@ class ChatApp {
             return true;
         }
 
+        const trackedAssistantMessage = trackedRequest?.assistantMessageId
+            ? messages.find((message) => message?.id === trackedRequest.assistantMessageId && message?.role === 'assistant')
+            : null;
+        if (trackedAssistantMessage) {
+            return trackedAssistantMessage.isStreaming === true
+                || Boolean(String(trackedAssistantMessage.content || trackedAssistantMessage.displayContent || '').trim());
+        }
+
         return messages.length > trackedRequest.previousMessages.length
             && messages[messages.length - 1]?.role === 'assistant';
     }
 
     finalizeInterruptedStreamFailure() {
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (trackedRequest?.acceptedByServer) {
+            this.isProcessing = false;
+            this.currentStreamingMessageId = null;
+            this.clearLiveIndicatorTimer();
+            this.clearPendingStreamResync();
+            this.activeStreamRequest = null;
+            this.liveResponseState = {
+                phase: 'idle',
+                detail: '',
+                reasoningSummary: '',
+                hasRealReasoning: false,
+            };
+            this.resetAmbientReasoningState();
+            this.updateSendButton();
+            uiHelpers.hideTypingIndicator();
+            uiHelpers.showToast('The request is still running on the server. This conversation will update when the reply is ready.', 'info', 'Backgrounded');
+            return;
+        }
+
         const sessionId = sessionManager.currentSessionId;
         const messageId = this.pendingStreamResync?.assistantMessageId || this.currentStreamingMessageId;
         if (sessionId && messageId) {
@@ -5704,6 +5890,7 @@ class ChatApp {
             phase: 'idle',
             detail: '',
             reasoningSummary: '',
+            hasRealReasoning: false,
         };
         this.resetAmbientReasoningState();
         this.updateSendButton();
@@ -5748,6 +5935,18 @@ class ChatApp {
         }
     }
 
+    buildMessageRefreshSignature(messages = []) {
+        return JSON.stringify((Array.isArray(messages) ? messages : []).slice(-5).map((message) => ([
+            message?.id || '',
+            message?.timestamp || '',
+            message?.role || '',
+            String(message?.content || ''),
+            message?.isStreaming === true,
+            String(message?.displayContent || ''),
+            String(message?.reasoningSummary || message?.metadata?.reasoningSummary || ''),
+        ])));
+    }
+
     async refreshSharedSessionState(options = {}) {
         if (this.isProcessing && options.allowWhileProcessing !== true) {
             return;
@@ -5757,6 +5956,7 @@ class ChatApp {
         const previousMessages = previousSessionId ? sessionManager.getMessages(previousSessionId) : [];
         const previousMessageCount = previousMessages.length;
         const previousLastTimestamp = previousMessages[previousMessages.length - 1]?.timestamp || '';
+        const previousSignature = this.buildMessageRefreshSignature(previousMessages);
 
         await sessionManager.loadSessions();
 
@@ -5788,8 +5988,11 @@ class ChatApp {
         const messages = this.syncAnnotatedSurveyStates(currentSessionId);
         const refreshedCount = messages.length;
         const refreshedLastTimestamp = messages[messages.length - 1]?.timestamp || '';
+        const refreshedSignature = this.buildMessageRefreshSignature(messages);
 
-        if (refreshedCount !== previousMessageCount || refreshedLastTimestamp !== previousLastTimestamp) {
+        if (refreshedCount !== previousMessageCount
+            || refreshedLastTimestamp !== previousLastTimestamp
+            || refreshedSignature !== previousSignature) {
             this.renderMessages(messages);
             this.playCueForNewAssistantMessages(previousMessages, messages);
             this.updateSessionInfo();

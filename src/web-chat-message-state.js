@@ -562,15 +562,19 @@ function buildWebChatSessionMessages({
     artifacts = [],
     assistantMetadata: inputAssistantMetadata = null,
     timestamp = null,
+    userMessageId = '',
+    assistantMessageId: inputAssistantMessageId = '',
+    userTimestamp = null,
+    assistantTimestamp = null,
 } = {}) {
-    const userTimestamp = offsetIsoTimestamp(timestamp, 0);
-    const assistantTimestamp = offsetIsoTimestamp(userTimestamp, 1);
-    const assistantMessageId = uuidv4();
+    const resolvedUserTimestamp = userTimestamp || offsetIsoTimestamp(timestamp, 0);
+    const resolvedAssistantTimestamp = assistantTimestamp || offsetIsoTimestamp(resolvedUserTimestamp, 1);
+    const assistantMessageId = String(inputAssistantMessageId || '').trim() || uuidv4();
     const { assistantMetadata, auxiliaryMessages } = buildWebChatAssistantEnvelope({
         toolEvents,
         artifacts,
         parentMessageId: assistantMessageId,
-        timestamp: assistantTimestamp,
+        timestamp: resolvedAssistantTimestamp,
     });
     const mergedAssistantMetadata = {
         ...assistantMetadata,
@@ -578,21 +582,21 @@ function buildWebChatSessionMessages({
     };
     const sequencedAuxiliaryMessages = auxiliaryMessages.map((message, index) => ({
         ...message,
-        timestamp: offsetIsoTimestamp(assistantTimestamp, index + 1),
+        timestamp: offsetIsoTimestamp(resolvedAssistantTimestamp, index + 1),
     }));
 
     return [
         {
-            id: uuidv4(),
+            id: String(userMessageId || '').trim() || uuidv4(),
             role: 'user',
             content: stripNullCharacters(String(userText || '')).trim(),
-            timestamp: userTimestamp,
+            timestamp: resolvedUserTimestamp,
         },
         {
             id: assistantMessageId,
             role: 'assistant',
             content: stripNullCharacters(String(assistantText || '')).trim(),
-            timestamp: assistantTimestamp,
+            timestamp: resolvedAssistantTimestamp,
             metadata: mergedAssistantMetadata,
         },
         ...sequencedAuxiliaryMessages,
