@@ -636,7 +636,7 @@ class FileManager {
    */
   async loadFiles() {
     const sessionId = this.getSessionId();
-    if (!sessionId) {
+    if (!sessionId || window.sessionManager?.isLocalSession?.(sessionId)) {
       this.files = [];
       this.renderFiles();
       return;
@@ -644,6 +644,11 @@ class FileManager {
 
     try {
       const response = await fetch(`/api/sessions/${sessionId}/artifacts`);
+      if (response.status === 404 || response.status === 503) {
+        this.files = [];
+        this.renderFiles();
+        return;
+      }
       if (!response.ok) throw new Error('Failed to load files');
       
       const data = await response.json();

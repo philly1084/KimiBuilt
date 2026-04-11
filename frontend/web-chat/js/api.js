@@ -1749,7 +1749,7 @@ class OpenAIAPIClient extends EventTarget {
             credentials: 'same-origin',
         });
 
-        if (response.status === 503) {
+        if (response.status === 404 || response.status === 503) {
             return { available: false, workloads: [] };
         }
         if (!response.ok) {

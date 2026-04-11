@@ -10,6 +10,7 @@ jest.mock('../session-store', () => ({
         getOwned: jest.fn(),
         getActiveOwnedSession: jest.fn(),
         getLatestOwnedSession: jest.fn(),
+        isPersistent: jest.fn(),
         setActiveSession: jest.fn(),
         listMessages: jest.fn(),
         update: jest.fn(),
@@ -38,6 +39,7 @@ const sessionsRouter = require('./sessions');
 describe('/api/sessions route', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        sessionStore.isPersistent.mockReturnValue(true);
     });
 
     test('enriches session list responses with workload summaries', async () => {
@@ -207,6 +209,48 @@ describe('/api/sessions route', () => {
                 filename: 'pigeon-love-research.pptx',
                 format: 'pptx',
                 downloadUrl: '/api/documents/doc-77/download',
+            }),
+        ]);
+    });
+
+    test('returns message-derived artifacts without querying stored artifacts in file-backed mode', async () => {
+        sessionStore.isPersistent.mockReturnValue(false);
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+        sessionStore.listMessages.mockResolvedValue([
+            {
+                id: 'assistant-1',
+                role: 'assistant',
+                metadata: {
+                    artifacts: [{
+                        id: 'doc-88',
+                        filename: 'fallback-only.pdf',
+                        mimeType: 'application/pdf',
+                        downloadUrl: '/api/documents/doc-88/download',
+                        metadata: { format: 'pdf' },
+                    }],
+                },
+            },
+        ]);
+
+        const app = express();
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app).get('/api/sessions/session-1/artifacts');
+
+        expect(response.status).toBe(200);
+        expect(artifactService.listSessionArtifacts).not.toHaveBeenCalled();
+        expect(response.body.artifacts).toEqual([
+            expect.objectContaining({
+                id: 'doc-88',
+                filename: 'fallback-only.pdf',
+                format: 'pdf',
             }),
         ]);
     });

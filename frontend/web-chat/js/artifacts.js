@@ -257,7 +257,7 @@
 
     async function fetchArtifacts() {
         const sessionId = window.sessionManager?.currentSessionId || window.apiClient?.getSessionId?.();
-        if (!sessionId) {
+        if (!sessionId || window.sessionManager?.isLocalSession?.(sessionId)) {
             state.artifacts = [];
             renderSelectedChips();
             return;
@@ -265,6 +265,11 @@
 
         try {
             const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/artifacts`);
+            if (response.status === 404 || response.status === 503) {
+                state.artifacts = [];
+                renderSelectedChips();
+                return;
+            }
             if (!response.ok) return;
             const data = await response.json();
             state.artifacts = data.artifacts || [];

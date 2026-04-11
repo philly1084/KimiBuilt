@@ -183,8 +183,13 @@ router.get('/:id/artifacts', async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
 
+        const canListStoredArtifacts = typeof sessionStore.isPersistent === 'function'
+            ? sessionStore.isPersistent()
+            : false;
         const [storedArtifacts, messages] = await Promise.all([
-            artifactService.listSessionArtifacts(req.params.id),
+            canListStoredArtifacts
+                ? artifactService.listSessionArtifacts(req.params.id)
+                : Promise.resolve([]),
             sessionStore.listMessages(req.params.id, 500, getRequestOwnerId(req)),
         ]);
         const artifacts = mergeRuntimeArtifacts(
@@ -309,7 +314,9 @@ router.delete('/:id', async (req, res, next) => {
         const deletedScopeKey = session?.metadata?.memoryScope || null;
         const activeSession = await sessionStore.getActiveOwnedSession(ownerId, deletedScopeKey);
 
-        await artifactService.deleteArtifactsForSession(id);
+        if (typeof sessionStore.isPersistent === 'function' && sessionStore.isPersistent()) {
+            await artifactService.deleteArtifactsForSession(id);
+        }
         await memoryService.forget(id);
         await sessionStore.delete(id);
 

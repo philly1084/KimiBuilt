@@ -734,6 +734,15 @@ class ChatApp {
             return [];
         }
 
+        if (window.sessionManager?.isLocalSession?.(sessionId)) {
+            this.workloadsAvailable = false;
+            this.currentSessionWorkloads = [];
+            this.workloadRunsById.clear();
+            this.hiddenCompletedWorkloadCount = 0;
+            this.renderWorkloadsPanel();
+            return [];
+        }
+
         if (this.isLoadingWorkloads && !options.force) {
             return this.currentSessionWorkloads;
         }
