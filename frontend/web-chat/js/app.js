@@ -2390,6 +2390,10 @@ class ChatApp {
         this.messagesContainer.appendChild(assistantMessageEl);
         uiHelpers.reinitializeIcons(assistantMessageEl);
         uiHelpers.scrollToBottom();
+        this.persistSessionMessagesIfNeeded(sessionId, [
+            storedUserMessage,
+            storedAssistantMessage,
+        ]);
         this.beginAssistantStream({
             messageId: this.currentStreamingMessageId,
             detail: 'Gathering context and preparing the reply.',
@@ -3237,6 +3241,24 @@ class ChatApp {
         };
         sessionManager.saveToStorage();
         return messages[index];
+    }
+
+    persistSessionMessageIfNeeded(sessionId, message) {
+        if (!sessionId || !message?.id || sessionManager.isLocalSession?.(sessionId)) {
+            return;
+        }
+
+        void sessionManager.syncMessageToBackend(sessionId, message);
+    }
+
+    persistSessionMessagesIfNeeded(sessionId, messages = []) {
+        if (!sessionId || sessionManager.isLocalSession?.(sessionId) || !Array.isArray(messages)) {
+            return;
+        }
+
+        messages.forEach((message) => {
+            this.persistSessionMessageIfNeeded(sessionId, message);
+        });
     }
 
     renderOrReplaceMessage(message) {
@@ -4816,7 +4838,7 @@ class ChatApp {
             ? 'Ready to speak'
             : 'Reply complete';
         this.updateLiveResponsePhase('ready', readyDetail);
-        this.updateStreamingMessageState({
+        const finalizedStreamingMessage = this.updateStreamingMessageState({
             liveState: null,
             isStreaming: false,
             reasoningDisplaySource: streamedReasoningSummary ? 'final' : '',
@@ -4844,6 +4866,9 @@ class ChatApp {
             message?.role === 'assistant'
             && Boolean(this.extractSurveyDefinition(message?.displayContent ?? message?.content ?? ''))
         ));
+        const persistedAssistantMessage = this.getSessionMessage(sessionId, parentMessageId)
+            || finalizedStreamingMessage
+            || currentMessage;
 
         if (insertedSurveyMessage) {
             this.renderMessages(messages);
@@ -4852,6 +4877,9 @@ class ChatApp {
             this.renderOrReplaceMessage(lastMessage);
             uiHelpers.markMessageSettled(lastMessage.id);
             this.presentAssistantMessage(lastMessage, chunk.toolEvents);
+        }
+        if (persistedAssistantMessage) {
+            this.persistSessionMessageIfNeeded(sessionId, persistedAssistantMessage);
         }
         
         this.isProcessing = false;
@@ -4965,6 +4993,10 @@ class ChatApp {
             if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
                 messages.pop();
                 sessionManager.saveToStorage();
+                const userMessage = [...messages].reverse().find((message) => message.role === 'user');
+                if (userMessage) {
+                    this.persistSessionMessageIfNeeded(sessionId, userMessage);
+                }
             }
         }
         
@@ -5107,6 +5139,7 @@ class ChatApp {
         this.messagesContainer.appendChild(assistantMessageEl);
         uiHelpers.reinitializeIcons(assistantMessageEl);
         uiHelpers.scrollToBottom();
+        this.persistSessionMessageIfNeeded(sessionId, storedAssistantMessage);
         this.beginAssistantStream({
             messageId: this.currentStreamingMessageId,
             detail: 'Gathering context and preparing the reply.',
