@@ -49,6 +49,8 @@ describe('agent notes helpers', () => {
     expect(instructions).toContain('[Carryover notes memory]');
     expect(instructions).toContain(`The notes file lives at ${notesPath}`);
     expect(instructions).toContain('facts about working with Phil');
+    expect(instructions).toContain('more personal, consistent, and easier to work with over time');
+    expect(instructions).toContain('proactively update these notes');
     expect(instructions).toContain('- Remember the roadmap naming.');
   });
 });

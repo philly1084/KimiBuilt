@@ -781,7 +781,7 @@ function buildScoredCandidateToolMap({
         adjustCandidateToolScore(scoreMap, 'file-mkdir', 0.35, 'Directory creation is explicitly requested.');
     }
     if (!sessionIsolation) {
-        adjustCandidateToolScore(scoreMap, 'agent-notes-write', /\b(preference|remember|note for later|carryover|future sessions?)\b/.test(normalizedPrompt) ? 0.7 : 0, 'Durable carryover notes may help later sessions.');
+        adjustCandidateToolScore(scoreMap, 'agent-notes-write', /\b(preference|remember|note for later|carryover|future sessions?|between sessions?|personal agent|know me|understand me|work with me)\b/.test(normalizedPrompt) ? 0.7 : 0, 'Durable carryover notes may help later sessions.');
     }
     if (hasArchitectureIntent) {
         adjustCandidateToolScore(scoreMap, 'architecture-design', 1.0, 'Architecture intent is explicit.');
@@ -6875,7 +6875,8 @@ class ConversationOrchestrator extends EventEmitter {
                 ? ['Do not use `agent-notes-write` in this isolated session.']
                 : [
                     'Use `agent-notes-write` only for concise, durable carryover notes that should help future sessions.',
-                    'Good `agent-notes-write` candidates include Phil-specific collaboration preferences, long-lived defaults, and durable user-wide workflow preferences.',
+                    'When a turn reveals a stable tone preference, collaboration style, or long-lived way Phil likes to work, proactively update `agent-notes-write` before finishing.',
+                    'Good `agent-notes-write` candidates include Phil-specific collaboration preferences, stable tone or partner-style expectations, long-lived defaults, and durable user-wide workflow preferences.',
                     'Every `agent-notes-write` step must include the full replacement notes file as `params.content`.',
                     'Keep project-specific facts, current task state, and frontend-specific continuity in project/session memory instead of `agent-notes-write`.',
                     'Do not store secrets, code dumps, verbose logs, or temporary scratch notes in `agent-notes-write`.',

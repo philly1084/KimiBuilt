@@ -2363,7 +2363,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     }
 
     if (!sessionIsolation && automaticTools.some((entry) => entry.id === 'agent-notes-write')) {
-        guidance.push(`- Use \`agent-notes-write\` to maintain the durable user-wide carryover notes file for Phil-specific collaboration facts, stable preferences, and long-lived workflow defaults. Keep it under ${AGENT_NOTES_CHAR_LIMIT} characters.`);
+        guidance.push(`- Use \`agent-notes-write\` to maintain the durable user-wide carryover notes file for Phil-specific collaboration facts, stable tone preferences, and long-lived workflow defaults. Keep it under ${AGENT_NOTES_CHAR_LIMIT} characters.`);
+        guidance.push('- When a turn reveals a stable tone preference, collaboration pattern, or personal-agent expectation, consider an `agent-notes-write` update before finishing the turn.');
         guidance.push('- Rewrite the full notes file in each `agent-notes-write` call, keeping only concise, durable notes rather than project-specific task state or long prose.');
         guidance.push('- Keep project-scoped continuity, artifacts, and working context out of the global carryover notes file.');
         guidance.push('- Do not store secrets, credentials, logs, or code snippets in the carryover notes.');

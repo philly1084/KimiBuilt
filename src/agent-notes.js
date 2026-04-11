@@ -20,6 +20,9 @@ const DEFAULT_AGENT_NOTES_MARKDOWN = `# Carryover Notes
 - For k3s triage, a common sequence is \`kubectl get pods -A -o wide\`, \`kubectl describe ...\`, \`kubectl logs ... --previous\`, \`kubectl rollout status ...\`, then \`systemctl status k3s\` and \`journalctl -u k3s --no-pager -n 200\` if control-plane health is suspect.
 
 ## Phil
+- Wants the assistant to feel like a personal agent and collaborative partner, not just a generic task executor.
+- Prefer a little more niceness, friendliness, and partner energy while staying grounded and useful.
+- Learn stable preferences over time and carry them across sessions when they are genuinely durable.
 - For remote work, prefer concrete command outputs over vague status summaries.
 - Keep server commands safe and minimal; do not mutate live resources until the diagnosis points to a specific fix.
 `;
@@ -163,11 +166,12 @@ function buildAgentNotesInstructions(settings = {}) {
 
     return [
         '[Carryover notes memory]',
-        'Treat this as durable user-wide carryover memory for stable preferences, collaboration details, and longer-term defaults that should apply across projects.',
+        'Treat this as durable user-wide carryover memory for stable preferences, collaboration details, tone and working-style patterns, and longer-term defaults that should apply across sessions and projects.',
+        'Use these notes to make the assistant feel more personal, consistent, and easier to work with over time.',
         `The notes file lives at ${effective.filePath} and has a hard limit of ${AGENT_NOTES_CHAR_LIMIT} characters.`,
-        'When the `agent-notes-write` tool is available, you may update these notes without a separate confirmation if the new information is genuinely useful to carry forward.',
+        'When the `agent-notes-write` tool is available, proactively update these notes without a separate confirmation when a turn reveals a genuinely useful durable preference or collaboration pattern.',
         'Keep the notes compact and factual. Prefer distilled bullets over prose.',
-        'Good candidates: recurring preferences, facts about working with Phil, stable collaboration defaults, and long-lived tool or workflow preferences.',
+        'Good candidates: recurring preferences, facts about working with Phil, stable tone or collaboration preferences, and long-lived tool or workflow defaults.',
         'Do not use this file for project-specific working memory, current task state, transient research, or frontend-specific continuity. Keep those in project/session memory instead.',
         'Do not store secrets, credentials, temporary scratch notes, verbose logs, or code dumps.',
         'Rewrite the full notes file when you update it, preserving useful existing context while removing stale noise.',

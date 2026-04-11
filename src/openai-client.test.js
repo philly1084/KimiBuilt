@@ -676,6 +676,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('durable user-wide carryover notes file');
         expect(guidance).toContain('Phil-specific collaboration facts');
         expect(guidance).toContain('under 4000 characters');
+        expect(guidance).toContain('personal-agent expectation');
     });
 
     test('image guidance encourages saving verified real images for documents', () => {

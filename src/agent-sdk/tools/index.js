@@ -1359,7 +1359,7 @@ class ToolManager {
         id: 'agent-notes-write',
         name: 'Agent Notes Writer',
         category: 'system',
-        description: 'Update the persistent carryover notes file used for durable project context, Phil preferences, and future-useful ideas.',
+        description: 'Update the persistent carryover notes file used for durable project context, Phil preferences, personal-agent memory, and future-useful ideas.',
         backend: {
           handler: async (params) => {
             if (!Object.prototype.hasOwnProperty.call(params || {}, 'content')) {

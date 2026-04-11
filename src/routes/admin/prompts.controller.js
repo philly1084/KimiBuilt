@@ -147,7 +147,7 @@ function buildPromptSurfaces() {
     {
       id: 'agent-notes',
       name: agentNotes.displayName || 'Carryover Notes',
-      description: 'Persistent carryover notes loaded from agent-notes.md for durable project facts, Phil preferences, and future-useful ideas.',
+      description: 'Persistent carryover notes loaded from agent-notes.md for durable project facts, Phil preferences, personal-agent memory, and future-useful ideas.',
       assignment: 'shared runtime carryover memory',
       category: 'runtime',
       live: true,
