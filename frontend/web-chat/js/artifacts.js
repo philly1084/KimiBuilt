@@ -156,6 +156,7 @@
             
             .artifact-generated-card .file-icon.docx { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
             .artifact-generated-card .file-icon.pdf { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+            .artifact-generated-card .file-icon.pptx { background: rgba(234, 88, 12, 0.15); color: #ea580c; }
             .artifact-generated-card .file-icon.html { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
             .artifact-generated-card .file-icon.image { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
             .artifact-generated-card .file-icon.code { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
@@ -459,12 +460,14 @@
         const ext = filename.split('.').pop()?.toLowerCase();
         const docExts = ['doc', 'docx'];
         const pdfExts = ['pdf'];
+        const slideExts = ['ppt', 'pptx'];
         const htmlExts = ['html', 'htm'];
         const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
         const diagramExts = ['mmd', 'mermaid'];
         
         if (docExts.includes(ext)) return 'docx';
         if (pdfExts.includes(ext)) return 'pdf';
+        if (slideExts.includes(ext)) return 'pptx';
         if (htmlExts.includes(ext)) return 'html';
         if (imageExts.includes(ext)) return 'image';
         if (diagramExts.includes(ext)) return 'mermaid';
@@ -481,6 +484,8 @@
             pdf: 'file-text',
             doc: 'file-type',
             docx: 'file-type',
+            ppt: 'presentation',
+            pptx: 'presentation',
             html: 'globe',
             htm: 'globe',
             jpg: 'image',
@@ -505,8 +510,8 @@
 
         const format = String(artifact?.format || '').toLowerCase();
         const filename = String(artifact?.filename || '').toLowerCase();
-        const collapsibleFormats = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query']);
-        const collapsibleExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m'];
+        const collapsibleFormats = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query', 'ppt', 'pptx']);
+        const collapsibleExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m', '.ppt', '.pptx'];
         return collapsibleFormats.has(format) || collapsibleExtensions.some((ext) => filename.endsWith(ext));
     }
 

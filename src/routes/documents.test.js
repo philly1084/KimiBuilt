@@ -5,7 +5,15 @@ jest.mock('../middleware/validate', () => ({
   validate: () => (_req, _res, next) => next(),
 }));
 
+jest.mock('../session-store', () => ({
+  sessionStore: {
+    get: jest.fn(),
+    getOwned: jest.fn(),
+  },
+}));
+
 const documentsRouter = require('./documents');
+const { sessionStore } = require('../session-store');
 
 describe('/api/documents route', () => {
   function buildApp(documentService, { artifactService = null, templateStore = null } = {}) {
@@ -17,6 +25,10 @@ describe('/api/documents route', () => {
     app.use('/api/documents', documentsRouter);
     return app;
   }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
   test('downloads a stored generated document', async () => {
     const documentService = {
@@ -294,5 +306,101 @@ describe('/api/documents route', () => {
     );
     expect(runtimeArtifactService.generateArtifact).not.toHaveBeenCalled();
     expect(response.body.downloadUrl).toBe('/api/documents/doc-2/download');
+  });
+
+  test('persists session-linked pptx ai generation into the artifact store', async () => {
+    sessionStore.get.mockResolvedValue({
+      id: 'session-1',
+      metadata: {},
+    });
+    const documentService = {
+      buildDocumentPlan: jest.fn().mockReturnValue({
+        inferredType: 'presentation',
+        outlineType: 'slides',
+        blueprint: { id: 'presentation' },
+      }),
+      aiGenerate: jest.fn().mockResolvedValue({
+        id: 'doc-pptx-1',
+        filename: 'launch-story.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        size: 4096,
+        metadata: { format: 'pptx', slideCount: 6 },
+        contentBuffer: Buffer.from('pptx-buffer'),
+        preview: {
+          type: 'html',
+          content: '<!DOCTYPE html><html><body><h1>Launch Story</h1></body></html>',
+        },
+        previewHtml: '<!DOCTYPE html><html><body><h1>Launch Story</h1></body></html>',
+        extractedText: 'Launch Story',
+      }),
+    };
+    const runtimeArtifactService = {
+      generateArtifact: jest.fn(),
+      createStoredArtifact: jest.fn().mockResolvedValue({
+        id: 'artifact-pptx-1',
+        filename: 'launch-story.pptx',
+        extension: 'pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        sizeBytes: 4096,
+        previewHtml: '<!DOCTYPE html><html><body><h1>Launch Story</h1></body></html>',
+        metadata: { format: 'pptx', slideCount: 6 },
+      }),
+      serializeArtifact: jest.fn().mockReturnValue({
+        id: 'artifact-pptx-1',
+        filename: 'launch-story.pptx',
+        format: 'pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        sizeBytes: 4096,
+        downloadUrl: '/api/artifacts/artifact-pptx-1/download',
+        previewUrl: '/api/artifacts/artifact-pptx-1/preview',
+        preview: {
+          type: 'html',
+          content: '<!DOCTYPE html><html><body><h1>Launch Story</h1></body></html>',
+        },
+        metadata: { format: 'pptx', slideCount: 6 },
+      }),
+    };
+
+    const response = await request(buildApp(documentService, {
+      artifactService: runtimeArtifactService,
+    }))
+      .post('/api/documents/ai-generate')
+      .send({
+        sessionId: 'session-1',
+        prompt: 'Build a launch presentation.',
+        format: 'pptx',
+        documentType: 'presentation',
+      });
+
+    expect(response.status).toBe(200);
+    expect(documentService.aiGenerate).toHaveBeenCalledWith(
+      'Build a launch presentation.',
+      expect.objectContaining({
+        documentType: 'presentation',
+        format: 'pptx',
+      }),
+    );
+    expect(runtimeArtifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      sourceMode: 'document-ai',
+      filename: 'launch-story.pptx',
+      extension: 'pptx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      previewHtml: expect.stringContaining('Launch Story'),
+      extractedText: 'Launch Story',
+    }));
+    expect(response.body.document).toEqual(expect.objectContaining({
+      id: 'artifact-pptx-1',
+      filename: 'launch-story.pptx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      metadata: expect.objectContaining({
+        format: 'pptx',
+        slideCount: 6,
+      }),
+      preview: expect.objectContaining({
+        type: 'html',
+      }),
+    }));
+    expect(response.body.downloadUrl).toBe('/api/artifacts/artifact-pptx-1/download');
   });
 });

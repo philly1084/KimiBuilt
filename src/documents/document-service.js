@@ -9,7 +9,7 @@ const { PptxGenerator } = require('./generators/pptx-generator');
 const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
 const { ensureHtmlDocument } = require('../artifacts/artifact-renderer');
-const { createUniqueFilename } = require('../utils/text');
+const { createUniqueFilename, stripHtml } = require('../utils/text');
 const {
   BLUEPRINTS,
   normalizeDocumentType,
@@ -303,6 +303,9 @@ class DocumentService {
     let document;
     let mimeType;
     let generatedContent;
+    const previewDeck = this.renderPresentationDeck(presentationContent, options);
+    const previewHtml = String(previewDeck.content || '');
+    const extractedText = stripHtml(previewHtml);
 
     if (format === 'html') {
       document = this.renderPresentationDeck(presentationContent, options);
@@ -332,7 +335,12 @@ class DocumentService {
         slideCount: presentationContent.slides?.length,
         theme: presentationContent.theme || options.theme || 'editorial',
         ...document.metadata
-      }
+      },
+      preview: previewHtml
+        ? { type: 'html', content: previewHtml }
+        : null,
+      previewHtml,
+      extractedText,
     });
   }
 

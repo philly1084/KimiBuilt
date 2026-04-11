@@ -15,6 +15,27 @@ class DocumentCreator {
     this.init();
   }
 
+  getActiveSessionId() {
+    const sessionId = window.sessionManager?.currentSessionId
+      || this.api?.getSessionId?.()
+      || '';
+    const normalized = String(sessionId || '').trim();
+    return normalized && !normalized.startsWith('local_')
+      ? normalized
+      : '';
+  }
+
+  async refreshArtifactInventory() {
+    try {
+      await window.artifactManager?.refresh?.();
+      if (window.fileManager?.isOpen) {
+        await window.fileManager.refreshFiles();
+      }
+    } catch (error) {
+      console.warn('[DocumentCreator] Failed to refresh artifact inventory:', error);
+    }
+  }
+
   async init() {
     // Load templates on init
     await this.loadTemplates();
@@ -719,6 +740,7 @@ class DocumentCreator {
     
     // Get selected format
     const format = document.querySelector('input[name="doc-format"]:checked')?.value || 'docx';
+    const sessionId = this.getActiveSessionId();
     
     // Show loading
     this.showLoading('Generating document...');
@@ -728,6 +750,7 @@ class DocumentCreator {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: sessionId || undefined,
           templateId: this.currentTemplate.id,
           variables,
           format,
@@ -761,6 +784,7 @@ class DocumentCreator {
       URL.revokeObjectURL(url);
       
       // Show success and close
+      await this.refreshArtifactInventory();
       this.showSuccess(`Document created: ${filename}`);
       setTimeout(() => this.closeModal(), 1500);
       
@@ -785,6 +809,7 @@ class DocumentCreator {
     const length = document.getElementById('doc-ai-length').value;
     const style = document.getElementById('doc-ai-style').value;
     const format = document.getElementById('doc-ai-format').value;
+    const sessionId = this.getActiveSessionId();
     
     this.showLoading('AI is generating your document...');
     
@@ -793,6 +818,7 @@ class DocumentCreator {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: sessionId || undefined,
           prompt,
           documentType,
           tone,
@@ -826,6 +852,7 @@ class DocumentCreator {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
+        await this.refreshArtifactInventory();
         this.showSuccess(`Document created: ${data.document.filename}`);
         setTimeout(() => this.closeModal(), 1500);
       }
