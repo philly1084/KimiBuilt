@@ -509,6 +509,7 @@ class ChatApp {
             if (window.innerWidth > 768) {
                 uiHelpers.closeSidebar();
             }
+            this.renderBackgroundWorkloadStatus();
         });
         
         // Handle regenerate event
@@ -1058,6 +1059,12 @@ class ChatApp {
             return;
         }
 
+        if (window.matchMedia('(max-width: 640px)').matches) {
+            this.backgroundWorkloadStatus.innerHTML = '';
+            this.backgroundWorkloadStatus.classList.add('hidden');
+            return;
+        }
+
         const snapshot = this.getCurrentBackgroundWorkloadSnapshot();
         if (snapshot.running < 1 && snapshot.queued < 1) {
             this.backgroundWorkloadStatus.innerHTML = '';
@@ -1093,17 +1100,6 @@ class ChatApp {
         `;
         this.backgroundWorkloadStatus.classList.remove('hidden');
         uiHelpers.reinitializeIcons(this.backgroundWorkloadStatus);
-
-        const isMobile = window.matchMedia('(max-width: 640px)').matches;
-        if (isMobile && snapshot.running < 1 && snapshot.queued > 0) {
-            this.backgroundWorkloadStatusHideTimer = window.setTimeout(() => {
-                if (!this.backgroundWorkloadStatus || !window.matchMedia('(max-width: 640px)').matches) {
-                    return;
-                }
-                this.backgroundWorkloadStatus.classList.add('hidden');
-                this.backgroundWorkloadStatus.innerHTML = '';
-            }, 7000);
-        }
     }
 
     renderWorkloadCard(workload) {
