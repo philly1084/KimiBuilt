@@ -26,6 +26,7 @@ const WEB_CHAT_SYNCED_STORAGE_KEYS = new Set([
 ]);
 const sessionGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const SESSION_DEFAULT_MODEL = sessionGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
+const buildSessionGatewayHeaders = sessionGatewayHelpers.buildGatewayHeaders || ((headers) => headers);
 const resolveSessionPreferredModel = sessionGatewayHelpers.resolvePreferredChatModel
     || ((models, preferredModel = '', fallbackModel = SESSION_DEFAULT_MODEL) => {
         const availableModels = Array.isArray(models) ? models : [];
@@ -387,6 +388,7 @@ class SessionManager extends EventTarget {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
+                    ...buildSessionGatewayHeaders(),
                 },
                 credentials: 'same-origin',
                 cache: 'no-store',
@@ -483,6 +485,7 @@ class SessionManager extends EventTarget {
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
+                    ...buildSessionGatewayHeaders(),
                 },
                 credentials: 'same-origin',
                 body: JSON.stringify({
@@ -559,6 +562,9 @@ class SessionManager extends EventTarget {
                 clientSurface: SESSION_MANAGER_CLIENT_SURFACE,
             });
             const response = await fetch(`${this.apiBaseUrl}/sessions?${params.toString()}`, {
+                headers: buildSessionGatewayHeaders({
+                    'Accept': 'application/json',
+                }),
                 credentials: 'same-origin',
             });
             if (!response.ok) {
@@ -676,9 +682,9 @@ class SessionManager extends EventTarget {
         try {
             await fetch(`${this.apiBaseUrl}/sessions/state`, {
                 method: 'PUT',
-                headers: {
+                headers: buildSessionGatewayHeaders({
                     'Content-Type': 'application/json',
-                },
+                }),
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     activeSessionId: normalizedSessionId || null,
@@ -733,9 +739,9 @@ class SessionManager extends EventTarget {
         try {
             const response = await fetch(`${this.apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}/messages`, {
                 method: 'POST',
-                headers: {
+                headers: buildSessionGatewayHeaders({
                     'Content-Type': 'application/json',
-                },
+                }),
                 credentials: 'same-origin',
                 body: JSON.stringify({ messages }),
             });
@@ -759,9 +765,9 @@ class SessionManager extends EventTarget {
         try {
             const response = await fetch(`${this.apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(message.id)}`, {
                 method: 'PUT',
-                headers: {
+                headers: buildSessionGatewayHeaders({
                     'Content-Type': 'application/json',
-                },
+                }),
                 credentials: 'same-origin',
                 body: JSON.stringify({ message }),
             });
@@ -786,6 +792,9 @@ class SessionManager extends EventTarget {
 
         try {
             const response = await fetch(`${this.apiBaseUrl}/sessions/${sessionId}/messages?limit=${encodeURIComponent(limit)}`, {
+                headers: buildSessionGatewayHeaders({
+                    'Accept': 'application/json',
+                }),
                 credentials: 'same-origin',
             });
             if (!response.ok) {
@@ -867,9 +876,9 @@ class SessionManager extends EventTarget {
         try {
             const response = await fetch(`${this.apiBaseUrl}/sessions`, {
                 method: 'POST',
-                headers: {
+                headers: buildSessionGatewayHeaders({
                     'Content-Type': 'application/json',
-                },
+                }),
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     taskType: SESSION_MANAGER_TASK_TYPE,
@@ -940,6 +949,7 @@ class SessionManager extends EventTarget {
             try {
                 await fetch(`${this.apiBaseUrl}/sessions/${sessionId}`, {
                     method: 'DELETE',
+                    headers: buildSessionGatewayHeaders(),
                     credentials: 'same-origin',
                 });
             } catch (error) {
@@ -1145,9 +1155,9 @@ class SessionManager extends EventTarget {
         try {
             const response = await fetch(`${this.apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}`, {
                 method: 'PATCH',
-                headers: {
+                headers: buildSessionGatewayHeaders({
                     'Content-Type': 'application/json',
-                },
+                }),
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     metadata: metadataPatch,
