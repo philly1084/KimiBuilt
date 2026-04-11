@@ -186,4 +186,31 @@ describe('auth service OpenCode gateway access', () => {
             role: 'admin',
         });
     });
+
+    test('prefers the signed-in browser user over the OpenCode gateway token when both are present', () => {
+        const auth = createAuthToken('phill');
+        const req = {
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer gateway-secret',
+                cookie: `${config.auth.cookieName}=${auth.token}`,
+            },
+            secure: false,
+        };
+        const res = {
+            status: jest.fn().mockReturnThis(),
+            json: jest.fn(),
+            redirect: jest.fn(),
+        };
+        const next = jest.fn();
+
+        requireAuth(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(req.user).toMatchObject({
+            username: 'phill',
+            role: 'admin',
+        });
+    });
 });

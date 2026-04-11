@@ -269,14 +269,14 @@ function requireAuth(req, res, next) {
         return next();
     }
 
-    if (req.path.startsWith('/v1') && isAuthorizedOpenCodeGatewayRequest(req)) {
-        req.user = { username: 'opencode', role: 'internal-gateway' };
-        return next();
-    }
-
     const authState = getAuthenticatedUser(req);
     if (authState.authenticated) {
         req.user = authState.user;
+        return next();
+    }
+
+    if (req.path.startsWith('/v1') && isAuthorizedOpenCodeGatewayRequest(req)) {
+        req.user = { username: 'opencode', role: 'internal-gateway' };
         return next();
     }
 

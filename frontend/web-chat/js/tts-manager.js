@@ -229,33 +229,16 @@ class WebChatTtsManager extends EventTarget {
         if (window.sessionManager?.safeStorageGet) {
             return window.sessionManager.safeStorageGet(key);
         }
-        if (window.__webChatStorageAvailable === false) {
-            return null;
-        }
-
-        try {
-            return localStorage.getItem(key);
-        } catch (_error) {
-            window.__webChatStorageAvailable = false;
-            return null;
-        }
+        window.__webChatStorageAvailable = false;
+        return null;
     }
 
     storageSet(key, value) {
         if (window.sessionManager?.safeStorageSet) {
             return window.sessionManager.safeStorageSet(key, value);
         }
-        if (window.__webChatStorageAvailable === false) {
-            return false;
-        }
-
-        try {
-            localStorage.setItem(key, value);
-            return true;
-        } catch (_error) {
-            window.__webChatStorageAvailable = false;
-            return false;
-        }
+        window.__webChatStorageAvailable = false;
+        return false;
     }
 
     emitStateChange(eventName = 'statechange') {

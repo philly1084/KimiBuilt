@@ -39,25 +39,14 @@ class SidebarResizer {
 
   storageGet(key) {
     if (window.sessionManager?.safeStorageGet) return window.sessionManager.safeStorageGet(key);
-    if (!this.storageAvailable) return null;
-    try {
-      return localStorage.getItem(key);
-    } catch (_error) {
-      this.storageAvailable = false;
-      return null;
-    }
+    this.storageAvailable = false;
+    return null;
   }
 
   storageSet(key, value) {
     if (window.sessionManager?.safeStorageSet) return window.sessionManager.safeStorageSet(key, value);
-    if (!this.storageAvailable) return false;
-    try {
-      localStorage.setItem(key, value);
-      return true;
-    } catch (_error) {
-      this.storageAvailable = false;
-      return false;
-    }
+    this.storageAvailable = false;
+    return false;
   }
   
   init() {
