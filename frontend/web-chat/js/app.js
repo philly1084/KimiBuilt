@@ -805,6 +805,7 @@ class ChatApp {
         await sessionManager.loadSessionMessagesFromBackend(sessionId);
         const messages = this.syncAnnotatedSurveyStates(sessionId);
         this.renderMessages(messages);
+        this.resumePersistedBackgroundStream(sessionId, messages);
         if (options.notifyNewAssistant === true && Array.isArray(options.previousMessages)) {
             this.playCueForNewAssistantMessages(options.previousMessages, messages);
         }
@@ -4174,6 +4175,19 @@ class ChatApp {
 
         const nextMessages = [];
         const searchLookup = this.buildResearchSearchLookup(toolEvents);
+        const researchSources = [];
+        const seenResearchUrls = new Set();
+
+        toolEvents.forEach((event) => {
+            const normalized = this.normalizeResearchSourceEvent(event, searchLookup);
+            if (!normalized || seenResearchUrls.has(normalized.url)) {
+                return;
+            }
+
+            seenResearchUrls.add(normalized.url);
+            researchSources.push(normalized);
+        });
+        const hasVerifiedResearchSources = researchSources.length > 0;
 
         toolEvents.forEach((event, index) => {
             const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
@@ -4209,6 +4223,10 @@ class ChatApp {
             }
 
             if (toolId === 'web-search') {
+                if (hasVerifiedResearchSources) {
+                    return;
+                }
+
                 const results = (Array.isArray(data.results) ? data.results : [])
                     .map((result) => this.normalizeSearchResult(result))
                     .filter(Boolean);
@@ -4222,9 +4240,10 @@ class ChatApp {
                     parentMessageId,
                     role: 'assistant',
                     type: 'search-results',
-                    content: `Source pages for "${data.query || args.query || 'research'}"`,
+                    content: `Candidate pages for "${data.query || args.query || 'research'}"`,
                     query: data.query || args.query || '',
                     results,
+                    interactive: false,
                     total: results.length,
                     excludeFromTranscript: true,
                     timestamp: new Date().toISOString(),
@@ -4291,24 +4310,11 @@ class ChatApp {
             }
         });
 
-        const searchEvent = [...toolEvents].reverse().find((event) => (
-            (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'web-search'
-            && event?.result?.success !== false
-        ));
-        const researchSources = [];
-        const seenResearchUrls = new Set();
-
-        toolEvents.forEach((event) => {
-            const normalized = this.normalizeResearchSourceEvent(event, searchLookup);
-            if (!normalized || seenResearchUrls.has(normalized.url)) {
-                return;
-            }
-
-            seenResearchUrls.add(normalized.url);
-            researchSources.push(normalized);
-        });
-
         if (researchSources.length > 0) {
+            const searchEvent = [...toolEvents].reverse().find((event) => (
+                (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'web-search'
+                && event?.result?.success !== false
+            ));
             const searchArgs = this.parseToolArguments(searchEvent?.toolCall?.function?.arguments);
             const query = searchEvent?.result?.data?.query || searchArgs.query || '';
 
@@ -5631,6 +5637,16 @@ class ChatApp {
             userMessage: context.userMessage || null,
             placeholderMessage: context.placeholderMessage || null,
             assistantMessageId: String(context.placeholderMessage?.id || '').trim(),
+            lastVisibleAssistantMessage: context.placeholderMessage ? {
+                ...context.placeholderMessage,
+                metadata: context.placeholderMessage?.metadata && typeof context.placeholderMessage.metadata === 'object'
+                    ? { ...context.placeholderMessage.metadata }
+                    : {},
+                liveState: context.placeholderMessage?.liveState && typeof context.placeholderMessage.liveState === 'object'
+                    ? { ...context.placeholderMessage.liveState }
+                    : null,
+            } : null,
+            backgroundMode: false,
             maxResyncAttempts: 6,
             resyncAttempts: 0,
         };
@@ -5699,6 +5715,195 @@ class ChatApp {
         );
     }
 
+    captureTrackedAssistantSnapshot(trackedRequest = null) {
+        const request = trackedRequest || this.pendingStreamResync || this.activeStreamRequest;
+        if (!request) {
+            return null;
+        }
+
+        const sessionId = String(request.sessionId || sessionManager.currentSessionId || '').trim();
+        const messageId = String(request.assistantMessageId || this.currentStreamingMessageId || '').trim();
+        if (!sessionId || !messageId) {
+            return request.lastVisibleAssistantMessage || null;
+        }
+
+        const currentMessage = this.getSessionMessage(sessionId, messageId);
+        if (!currentMessage) {
+            return request.lastVisibleAssistantMessage || null;
+        }
+
+        request.lastVisibleAssistantMessage = {
+            ...currentMessage,
+            metadata: currentMessage?.metadata && typeof currentMessage.metadata === 'object'
+                ? { ...currentMessage.metadata }
+                : {},
+            liveState: currentMessage?.liveState && typeof currentMessage.liveState === 'object'
+                ? { ...currentMessage.liveState }
+                : null,
+        };
+
+        return request.lastVisibleAssistantMessage;
+    }
+
+    getBackgroundStreamDetail() {
+        return 'Still working in the background.';
+    }
+
+    getBackgroundResyncDelayMs(attemptCount = 0) {
+        const normalizedAttempts = Math.max(0, Number(attemptCount) || 0);
+        return Math.min(6000, 1400 + (normalizedAttempts * 450));
+    }
+
+    enterBackgroundStreamMode(options = {}) {
+        const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
+        if (!trackedRequest) {
+            return null;
+        }
+
+        const sessionId = String(trackedRequest.sessionId || sessionManager.currentSessionId || '').trim();
+        const messageId = String(trackedRequest.assistantMessageId || this.currentStreamingMessageId || '').trim();
+        if (!sessionId || !messageId) {
+            return null;
+        }
+
+        trackedRequest.backgroundMode = true;
+        trackedRequest.notifiedResync = true;
+        const detail = String(options.detail || this.getBackgroundStreamDetail()).trim();
+        const preservedMessage = trackedRequest.lastVisibleAssistantMessage
+            || this.captureTrackedAssistantSnapshot(trackedRequest)
+            || trackedRequest.placeholderMessage
+            || {};
+        const currentMessage = this.getSessionMessage(sessionId, messageId) || {};
+        const preservedContent = String(
+            options.content !== undefined
+                ? options.content
+                : (
+                    preservedMessage.content
+                    || currentMessage.content
+                    || trackedRequest.placeholderMessage?.content
+                    || ''
+                )
+        );
+
+        this.currentStreamingMessageId = messageId;
+        this.isProcessing = true;
+        this.retryAttempt = 0;
+        this.clearLiveIndicatorTimer();
+        this.resetAmbientReasoningState();
+        const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
+        this.liveResponseState = {
+            phase: 'thinking',
+            detail,
+            reasoningSummary: '',
+            hasRealReasoning: false,
+        };
+        uiHelpers.showTypingIndicator({
+            phase: 'thinking',
+            detail,
+        });
+        const savedMessage = this.updateStreamingMessageState({
+            content: preservedContent,
+            isStreaming: true,
+            liveState: {
+                phase: 'thinking',
+                detail,
+            },
+            reasoningDisplaySource: 'synthetic',
+            reasoningDisplayText: initialAmbientFrame.visibleText,
+            reasoningDisplayFullText: initialAmbientFrame.fullText,
+            reasoningDisplayTitle: 'Thinking',
+            reasoningDisplayIcon: 'sparkles',
+            reasoningDisplayAnimated: initialAmbientFrame.isTyping,
+        }, {
+            render: true,
+            scroll: false,
+        });
+        this.startAmbientReasoningLoop();
+
+        if (savedMessage) {
+            trackedRequest.lastVisibleAssistantMessage = {
+                ...savedMessage,
+                metadata: savedMessage?.metadata && typeof savedMessage.metadata === 'object'
+                    ? { ...savedMessage.metadata }
+                    : {},
+                liveState: savedMessage?.liveState && typeof savedMessage.liveState === 'object'
+                    ? { ...savedMessage.liveState }
+                    : null,
+            };
+        }
+
+        this.updateSendButton();
+        return savedMessage;
+    }
+
+    findPersistedForegroundMessage(messages = []) {
+        return [...(Array.isArray(messages) ? messages : [])]
+            .reverse()
+            .find((message) => (
+                message?.role === 'assistant'
+                && message?.isStreaming === true
+                && (
+                    message?.metadata?.pendingForeground === true
+                    || Boolean(String(message?.metadata?.foregroundRequestId || '').trim())
+                )
+            )) || null;
+    }
+
+    resumePersistedBackgroundStream(sessionId, messages = []) {
+        if (!sessionId
+            || this.pendingStreamResync
+            || this.activeStreamRequest
+            || this.isProcessing) {
+            return false;
+        }
+
+        const persistedMessage = this.findPersistedForegroundMessage(messages);
+        if (!persistedMessage) {
+            return false;
+        }
+
+        const previousMessages = (Array.isArray(messages) ? messages : [])
+            .filter((message) => message?.id !== persistedMessage.id);
+        const trackedRequest = this.trackActiveStreamRequest({
+            sessionId,
+            requestType: String(persistedMessage?.metadata?.taskType || 'chat'),
+            previousMessages,
+            placeholderMessage: persistedMessage,
+        });
+        if (!trackedRequest) {
+            return false;
+        }
+
+        trackedRequest.acceptedByServer = true;
+        trackedRequest.backgroundMode = true;
+        trackedRequest.notifiedResync = true;
+        trackedRequest.lastVisibleAssistantMessage = {
+            ...persistedMessage,
+            metadata: persistedMessage?.metadata && typeof persistedMessage.metadata === 'object'
+                ? { ...persistedMessage.metadata }
+                : {},
+            liveState: persistedMessage?.liveState && typeof persistedMessage.liveState === 'object'
+                ? { ...persistedMessage.liveState }
+                : null,
+        };
+
+        this.markActiveStreamInterrupted('persisted-background');
+        this.currentStreamingMessageId = persistedMessage.id;
+        this.enterBackgroundStreamMode({
+            detail: String(
+                persistedMessage?.liveState?.detail
+                || this.getBackgroundStreamDetail()
+            ).trim(),
+            content: String(persistedMessage?.content || ''),
+        });
+
+        if (!document.hidden) {
+            this.scheduleResumeSync('stream-resync', 0);
+        }
+
+        return true;
+    }
+
     scheduleResumeSync(reason = 'resume', delayMs = 150) {
         const now = Date.now();
         if (reason !== 'stream-resync' && reason !== 'online' && now - this.lastResumeSyncAt < 1200) {
@@ -5753,6 +5958,7 @@ class ChatApp {
             apiClient.setSessionId(sessionId);
             await sessionManager.loadSessions();
             await sessionManager.loadSessionMessagesFromBackend(sessionId);
+            this.updateConnectionStatus('connected');
 
             const messages = this.syncAnnotatedSurveyStates(sessionId);
             if (this.hasRecoveredInterruptedStream(messages, trackedRequest)) {
@@ -5778,6 +5984,18 @@ class ChatApp {
             }
 
             trackedRequest.resyncAttempts += 1;
+
+            if (trackedRequest.acceptedByServer) {
+                this.enterBackgroundStreamMode({
+                    detail: this.getBackgroundStreamDetail(),
+                });
+                this.updateSendButton();
+                this.scheduleResumeSync(
+                    'stream-resync',
+                    this.getBackgroundResyncDelayMs(trackedRequest.resyncAttempts),
+                );
+                return;
+            }
 
             if (trackedRequest.placeholderMessage) {
                 const placeholderMessage = this.upsertSessionMessage(sessionId, {
@@ -5836,8 +6054,11 @@ class ChatApp {
             ? messages.find((message) => message?.id === trackedRequest.assistantMessageId && message?.role === 'assistant')
             : null;
         if (trackedAssistantMessage) {
-            return trackedAssistantMessage.isStreaming === true
-                || Boolean(String(trackedAssistantMessage.content || trackedAssistantMessage.displayContent || '').trim());
+            if (trackedAssistantMessage.isStreaming === true) {
+                return false;
+            }
+
+            return Boolean(String(trackedAssistantMessage.content || trackedAssistantMessage.displayContent || '').trim());
         }
 
         return messages.length > trackedRequest.previousMessages.length
@@ -5847,21 +6068,14 @@ class ChatApp {
     finalizeInterruptedStreamFailure() {
         const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
         if (trackedRequest?.acceptedByServer) {
-            this.isProcessing = false;
-            this.currentStreamingMessageId = null;
-            this.clearLiveIndicatorTimer();
-            this.clearPendingStreamResync();
-            this.activeStreamRequest = null;
-            this.liveResponseState = {
-                phase: 'idle',
-                detail: '',
-                reasoningSummary: '',
-                hasRealReasoning: false,
-            };
-            this.resetAmbientReasoningState();
+            this.enterBackgroundStreamMode({
+                detail: this.getBackgroundStreamDetail(),
+            });
             this.updateSendButton();
-            uiHelpers.hideTypingIndicator();
-            uiHelpers.showToast('The request is still running on the server. This conversation will update when the reply is ready.', 'info', 'Backgrounded');
+            this.scheduleResumeSync(
+                'stream-resync',
+                this.getBackgroundResyncDelayMs(trackedRequest?.resyncAttempts || 0),
+            );
             return;
         }
 
@@ -5904,10 +6118,22 @@ class ChatApp {
             return;
         }
 
+        this.captureTrackedAssistantSnapshot(trackedRequest);
         this.markActiveStreamInterrupted(chunk.reason || 'connection');
         this.retryAttempt = 0;
         this.currentAbortController = null;
         this.updateConnectionStatus('checking');
+
+        if (trackedRequest.acceptedByServer) {
+            this.enterBackgroundStreamMode({
+                detail: this.getBackgroundStreamDetail(),
+            });
+            if (!document.hidden) {
+                this.scheduleResumeSync('stream-resync', 0);
+            }
+            return;
+        }
+
         this.updateLiveResponsePhase('thinking', 'Connection changed. Syncing the latest reply.');
 
         if (trackedRequest.placeholderMessage) {
@@ -5994,6 +6220,7 @@ class ChatApp {
             || refreshedLastTimestamp !== previousLastTimestamp
             || refreshedSignature !== previousSignature) {
             this.renderMessages(messages);
+            this.resumePersistedBackgroundStream(currentSessionId, messages);
             this.playCueForNewAssistantMessages(previousMessages, messages);
             this.updateSessionInfo();
         }

@@ -369,6 +369,19 @@ function buildToolSelectionMessages({ parentMessageId = '', toolEvents = [], tim
     const nextMessages = [];
     const normalizedTimestamp = timestamp || new Date().toISOString();
     const searchLookup = buildResearchSearchLookup(toolEvents);
+    const researchSources = [];
+    const seenResearchUrls = new Set();
+
+    toolEvents.forEach((event) => {
+        const normalized = normalizeResearchSourceEvent(event, searchLookup);
+        if (!normalized || seenResearchUrls.has(normalized.url)) {
+            return;
+        }
+
+        seenResearchUrls.add(normalized.url);
+        researchSources.push(normalized);
+    });
+    const hasVerifiedResearchSources = researchSources.length > 0;
 
     toolEvents.forEach((event, index) => {
         const toolId = event?.toolCall?.function?.name || event?.result?.toolId || '';
@@ -404,6 +417,10 @@ function buildToolSelectionMessages({ parentMessageId = '', toolEvents = [], tim
         }
 
         if (toolId === 'web-search') {
+            if (hasVerifiedResearchSources) {
+                return;
+            }
+
             const results = (Array.isArray(data.results) ? data.results : [])
                 .map((result) => normalizeSearchResult(result))
                 .filter(Boolean);
@@ -417,9 +434,10 @@ function buildToolSelectionMessages({ parentMessageId = '', toolEvents = [], tim
                 parentMessageId,
                 role: 'assistant',
                 type: 'search-results',
-                content: `Source pages for "${data.query || args.query || 'research'}"`,
+                content: `Candidate pages for "${data.query || args.query || 'research'}"`,
                 query: data.query || args.query || '',
                 results,
+                interactive: false,
                 total: results.length,
                 excludeFromTranscript: true,
                 timestamp: normalizedTimestamp,
@@ -462,24 +480,11 @@ function buildToolSelectionMessages({ parentMessageId = '', toolEvents = [], tim
         }
     });
 
-    const searchEvent = [...toolEvents].reverse().find((event) => (
-        (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'web-search'
-        && event?.result?.success !== false
-    ));
-    const researchSources = [];
-    const seenResearchUrls = new Set();
-
-    toolEvents.forEach((event) => {
-        const normalized = normalizeResearchSourceEvent(event, searchLookup);
-        if (!normalized || seenResearchUrls.has(normalized.url)) {
-            return;
-        }
-
-        seenResearchUrls.add(normalized.url);
-        researchSources.push(normalized);
-    });
-
     if (researchSources.length > 0) {
+        const searchEvent = [...toolEvents].reverse().find((event) => (
+            (event?.toolCall?.function?.name || event?.result?.toolId || '') === 'web-search'
+            && event?.result?.success !== false
+        ));
         const searchArgs = parseToolArguments(searchEvent?.toolCall?.function?.arguments);
         const query = searchEvent?.result?.data?.query || searchArgs.query || '';
 

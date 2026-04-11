@@ -1,6 +1,7 @@
 const {
     buildArtifactSummary,
     buildFrontendAssistantMetadata,
+    buildWebChatAssistantEnvelope,
     buildWebChatSessionMessages,
 } = require('./web-chat-message-state');
 
@@ -234,5 +235,122 @@ describe('buildWebChatSessionMessages', () => {
             reasoningSummary: 'Checked the request and chose the direct path.',
             reasoningAvailable: true,
         }));
+    });
+
+    test('suppresses manual search-result choices once verified research sources exist', () => {
+        const { auxiliaryMessages } = buildWebChatAssistantEnvelope({
+            parentMessageId: 'assistant-research-1',
+            timestamp: '2026-04-11T12:00:00.000Z',
+            toolEvents: [
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-search',
+                            arguments: JSON.stringify({
+                                query: 'latest AI chip news',
+                            }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'web-search',
+                        data: {
+                            query: 'latest AI chip news',
+                            results: [
+                                {
+                                    title: 'AI chip demand surges',
+                                    url: 'https://example.com/ai-chip-demand',
+                                    snippet: 'Demand climbed after new accelerator launches.',
+                                    source: 'Example News',
+                                    publishedAt: '2026-04-10T00:00:00.000Z',
+                                },
+                            ],
+                        },
+                    },
+                },
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-fetch',
+                            arguments: JSON.stringify({
+                                url: 'https://example.com/ai-chip-demand',
+                            }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'web-fetch',
+                        data: {
+                            url: 'https://example.com/ai-chip-demand',
+                            title: 'AI chip demand surges',
+                            body: '<main><p>AI chip demand climbed sharply after new accelerator launches.</p></main>',
+                        },
+                    },
+                },
+            ],
+        });
+
+        expect(auxiliaryMessages.find((message) => message.type === 'search-results')).toBeUndefined();
+        expect(auxiliaryMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'research-sources',
+                query: 'latest AI chip news',
+                results: [
+                    expect.objectContaining({
+                        url: 'https://example.com/ai-chip-demand',
+                        source: 'Example News',
+                        excerpt: expect.stringContaining('AI chip demand climbed sharply'),
+                    }),
+                ],
+            }),
+        ]));
+    });
+
+    test('marks standalone search results as passive context for the agent', () => {
+        const { auxiliaryMessages } = buildWebChatAssistantEnvelope({
+            parentMessageId: 'assistant-research-2',
+            timestamp: '2026-04-11T12:05:00.000Z',
+            toolEvents: [
+                {
+                    toolCall: {
+                        function: {
+                            name: 'web-search',
+                            arguments: JSON.stringify({
+                                query: 'semiconductor supply chain',
+                            }),
+                        },
+                    },
+                    result: {
+                        success: true,
+                        toolId: 'web-search',
+                        data: {
+                            query: 'semiconductor supply chain',
+                            results: [
+                                {
+                                    title: 'Supply chain outlook',
+                                    url: 'https://example.com/supply-chain',
+                                    snippet: 'Lead times improved in Q1.',
+                                    source: 'Industry Journal',
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
+        });
+
+        expect(auxiliaryMessages).toEqual([
+            expect.objectContaining({
+                type: 'search-results',
+                query: 'semiconductor supply chain',
+                interactive: false,
+                results: [
+                    expect.objectContaining({
+                        url: 'https://example.com/supply-chain',
+                        source: 'Industry Journal',
+                    }),
+                ],
+            }),
+        ]);
     });
 });

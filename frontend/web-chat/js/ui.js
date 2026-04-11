@@ -997,6 +997,19 @@ class UIHelpers {
         return String(text == null ? '' : text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
+    truncatePreviewText(text, maxLength = 180) {
+        const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!normalized) {
+            return '';
+        }
+
+        if (normalized.length <= maxLength) {
+            return normalized;
+        }
+
+        return `${normalized.slice(0, maxLength).replace(/[\s,;:.!?-]+$/g, '')}…`;
+    }
+
     // ============================================
     // Message Rendering
     // ============================================
@@ -2968,13 +2981,14 @@ class UIHelpers {
         const fullTimestamp = message.timestamp ? new Date(message.timestamp).toLocaleString() : '';
         const query = message.query || '';
         const results = Array.isArray(message.results) ? message.results : [];
+        const interactive = message.interactive === true;
 
         const messageEl = document.createElement('div');
         messageEl.className = 'message assistant';
         messageEl.id = messageId;
         messageEl.dataset.messageId = messageId;
         messageEl.setAttribute('role', 'article');
-        messageEl.setAttribute('aria-label', 'Search result choices');
+        messageEl.setAttribute('aria-label', 'Candidate source pages');
 
         const contentHtml = results.length > 0
             ? `
@@ -2988,12 +3002,14 @@ class UIHelpers {
                                     ${this.formatToolResultDate(result.publishedAt) ? `<span>${this.escapeHtml(this.formatToolResultDate(result.publishedAt))}</span>` : ''}
                                 </div>
                             </div>
-                            <a class="search-result-url" href="${this.escapeHtmlAttr(result.url)}" target="_blank" rel="noopener noreferrer nofollow">${this.escapeHtml(result.url)}</a>
-                            ${result.snippet ? `<p class="search-result-snippet">${this.escapeHtml(result.snippet)}</p>` : ''}
+                            <a class="search-result-url" href="${this.escapeHtmlAttr(result.url)}" target="_blank" rel="noopener noreferrer nofollow" title="${this.escapeHtmlAttr(result.url)}">${this.escapeHtml(this.truncatePreviewText(result.url, 88))}</a>
+                            ${result.snippet ? `<p class="search-result-snippet">${this.escapeHtml(this.truncatePreviewText(result.snippet, 150))}</p>` : ''}
                             <div class="search-result-actions">
+                                ${interactive ? `
                                 <button type="button" class="selection-action-btn primary" onclick="app.useSearchResult('${messageId}', ${index})">
                                     Use This Page
                                 </button>
+                                ` : ''}
                                 <button type="button" class="selection-action-btn" onclick="app.openSearchResult('${messageId}', ${index})">
                                     Open
                                 </button>
@@ -3005,7 +3021,7 @@ class UIHelpers {
             : `
                 <div class="unsplash-search-empty">
                     <i data-lucide="search-x" class="w-8 h-8" aria-hidden="true"></i>
-                    <p>No source pages were returned.</p>
+                    <p>No candidate pages were returned.</p>
                 </div>
             `;
 
@@ -3015,7 +3031,7 @@ class UIHelpers {
             </div>
             <div class="message-content">
                 <div class="message-header">
-                    <span class="message-author">Source Pages</span>
+                    <span class="message-author">Candidate Pages</span>
                     <span class="message-time" title="${fullTimestamp}">${time}</span>
                 </div>
                 <div class="message-selection-panel">
@@ -3023,8 +3039,8 @@ class UIHelpers {
                         <div class="icon" aria-hidden="true">
                             <i data-lucide="globe" class="w-3.5 h-3.5"></i>
                         </div>
-                        <span class="text">Choose a page</span>
-                        <span class="meta">${results.length} options</span>
+                        <span class="text">${interactive ? 'Choose a page' : 'Pages the agent can use'}</span>
+                        <span class="meta">${results.length} ${results.length === 1 ? 'result' : 'results'}</span>
                     </div>
                     ${query ? `<p class="selection-panel-query">"${this.escapeHtml(query)}"</p>` : ''}
                     ${contentHtml}
@@ -3062,9 +3078,9 @@ class UIHelpers {
                                     ${result.toolId ? `<span class="research-source-label">${this.escapeHtml(result.toolId)}</span>` : ''}
                                 </div>
                             </div>
-                            <a class="search-result-url" href="${this.escapeHtmlAttr(result.url)}" target="_blank" rel="noopener noreferrer nofollow">${this.escapeHtml(result.url)}</a>
-                            ${result.snippet ? `<p class="search-result-snippet">${this.escapeHtml(result.snippet)}</p>` : ''}
-                            ${result.excerpt ? `<div class="research-source-excerpt">${this.escapeHtml(result.excerpt)}</div>` : ''}
+                            <a class="search-result-url" href="${this.escapeHtmlAttr(result.url)}" target="_blank" rel="noopener noreferrer nofollow" title="${this.escapeHtmlAttr(result.url)}">${this.escapeHtml(this.truncatePreviewText(result.url, 88))}</a>
+                            ${result.snippet ? `<p class="search-result-snippet">${this.escapeHtml(this.truncatePreviewText(result.snippet, 140))}</p>` : ''}
+                            ${result.excerpt ? `<div class="research-source-excerpt">${this.escapeHtml(this.truncatePreviewText(result.excerpt, 220))}</div>` : ''}
                             <div class="search-result-actions">
                                 <button type="button" class="selection-action-btn" onclick="window.open('${this.escapeHtmlAttr(result.url)}', '_blank', 'noopener')">
                                     Open Source
