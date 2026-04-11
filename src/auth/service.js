@@ -175,6 +175,11 @@ function resolveFrontendApiKey() {
     return resolveOpenCodeGatewayApiKey();
 }
 
+function resolveFrontendApiUsername() {
+    const configuredUsername = String(config.auth.username || '').trim();
+    return configuredUsername || 'frontend-api';
+}
+
 function isFrontendTokenRoute(req) {
     const routePath = String(req.path || '').trim();
     if (!routePath) {
@@ -281,7 +286,7 @@ function requireAuth(req, res, next) {
     }
 
     if (isAuthorizedFrontendApiRequest(req)) {
-        req.user = { username: 'frontend-api', role: 'frontend-api' };
+        req.user = { username: resolveFrontendApiUsername(), role: 'frontend-api' };
         return next();
     }
 
@@ -309,6 +314,7 @@ module.exports = {
     isAuthEnabled,
     parseCookies,
     requireAuth,
+    resolveFrontendApiUsername,
     resolveFrontendApiKey,
     safeEqualString,
     setAuthCookie,

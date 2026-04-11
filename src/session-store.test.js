@@ -213,6 +213,27 @@ describe('SessionStore recent message continuity', () => {
         expect(sessions.map((session) => session.id)).toEqual(['web-chat-session']);
     });
 
+    test('list keeps web-chat sessions visible when metadata scope expands beyond the surface', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.create({ mode: 'chat', clientSurface: 'web-chat', ownerId: 'phill' }, 'web-chat-session');
+        await store.update('web-chat-session', {
+            metadata: {
+                memoryScope: 'project-alpha',
+                projectKey: 'project-alpha',
+            },
+        });
+
+        const sessions = await store.list({
+            ownerId: 'phill',
+            scopeKey: 'web-chat',
+        });
+
+        expect(sessions.map((session) => session.id)).toEqual(['web-chat-session']);
+    });
+
     test('listMessages returns the full persisted transcript, not just the recent continuity window', async () => {
         const store = new SessionStore();
         store.initialized = true;

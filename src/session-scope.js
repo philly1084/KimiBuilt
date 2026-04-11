@@ -440,7 +440,19 @@ function sessionMatchesScope(session = null, scopeKey = DEFAULT_SESSION_SCOPE) {
     return false;
   }
 
-  return resolveSessionScope(session?.metadata || {}, session) === normalizeSessionScopeKey(scopeKey);
+  const normalizedScopeKey = normalizeSessionScopeKey(scopeKey);
+  const metadata = getPlainObject(session?.metadata);
+  const candidateScopes = new Set([
+    resolveSessionScope(metadata, session),
+    resolveClientSurface(metadata, session),
+    firstNormalizedValue([
+      metadata.taskType,
+      metadata.task_type,
+      metadata.mode,
+    ]),
+  ].filter(Boolean));
+
+  return candidateScopes.has(normalizedScopeKey);
 }
 
 module.exports = {
