@@ -138,6 +138,48 @@ describe('SessionStore recent message continuity', () => {
         }));
     });
 
+    test('patchUserPreferences stores a namespaced web-chat preference map', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.patchUserPreferences('phill', 'webChat', {
+            kimibuilt_default_model: 'gpt-5.4-mini',
+            kimibuilt_theme_preset: 'obsidian',
+        });
+
+        await expect(store.getUserSessionState('phill')).resolves.toEqual(expect.objectContaining({
+            preferences: expect.objectContaining({
+                webChat: {
+                    kimibuilt_default_model: 'gpt-5.4-mini',
+                    kimibuilt_theme_preset: 'obsidian',
+                },
+            }),
+        }));
+        await expect(store.getUserPreferences('phill', 'webChat')).resolves.toEqual({
+            kimibuilt_default_model: 'gpt-5.4-mini',
+            kimibuilt_theme_preset: 'obsidian',
+        });
+    });
+
+    test('patchUserPreferences removes keys when the patch value is null', async () => {
+        const store = new SessionStore();
+        store.initialized = true;
+        store.usePostgres = false;
+
+        await store.patchUserPreferences('phill', 'webChat', {
+            kimibuilt_default_model: 'gpt-5.4-mini',
+            kimibuilt_reasoning_effort: 'high',
+        });
+        await store.patchUserPreferences('phill', 'webChat', {
+            kimibuilt_reasoning_effort: null,
+        });
+
+        await expect(store.getUserPreferences('phill', 'webChat')).resolves.toEqual({
+            kimibuilt_default_model: 'gpt-5.4-mini',
+        });
+    });
+
     test('resolveOwnedSession does not reuse an active session from another scope', async () => {
         const store = new SessionStore();
         store.initialized = true;
@@ -336,6 +378,35 @@ describe('SessionStore recent message continuity', () => {
             await expect(reloaded.resolveOwnedSession(null, { mode: 'chat' }, 'phill')).resolves.toEqual(expect.objectContaining({
                 id: 'session-b',
             }));
+        } finally {
+            await fs.rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test('persists fallback user preferences across store instances', async () => {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-user-preferences-'));
+        const storagePath = path.join(tempDir, 'sessions.json');
+
+        try {
+            const store = new SessionStore();
+            store.initialized = true;
+            store.usePostgres = false;
+            store.fallbackStoragePath = storagePath;
+            store.fallbackLoaded = true;
+
+            await store.patchUserPreferences('phill', 'webChat', {
+                kimibuilt_default_model: 'gpt-5.4',
+                kimibuilt_theme_preset: 'paper',
+            });
+
+            const reloaded = new SessionStore();
+            reloaded.fallbackStoragePath = storagePath;
+            await reloaded.initialize();
+
+            await expect(reloaded.getUserPreferences('phill', 'webChat')).resolves.toEqual({
+                kimibuilt_default_model: 'gpt-5.4',
+                kimibuilt_theme_preset: 'paper',
+            });
         } finally {
             await fs.rm(tempDir, { recursive: true, force: true });
         }

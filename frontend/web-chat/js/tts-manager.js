@@ -364,6 +364,26 @@ class WebChatTtsManager extends EventTarget {
         this.emitStateChange('configchange');
     }
 
+    refreshFromStorage() {
+        this.autoPlay = this.parseBoolean(this.storageGet(this.storageKeys.autoPlay), false);
+
+        const requestedVoiceId = String(
+            this.storageGet(this.storageKeys.voiceId)
+            || this.selectedVoiceId
+            || '',
+        ).trim();
+
+        if (!this.voices.length) {
+            this.selectedVoiceId = requestedVoiceId;
+            this.emitStateChange('configchange');
+            return;
+        }
+
+        const matchingVoice = this.voices.find((voice) => voice.id === requestedVoiceId);
+        this.selectedVoiceId = matchingVoice?.id || this.getFallbackVoiceId();
+        this.emitStateChange('configchange');
+    }
+
     getSelectedVoiceId() {
         if (!this.voices.length) {
             return this.provider === 'browser' ? DEFAULT_BROWSER_VOICE_ID : '';

@@ -345,6 +345,8 @@ class UIHelpers {
         this.searchResults = [];
         this.currentSearchIndex = -1;
         this.expandedReasoningMessageIds = new Set();
+        this.renamingSessionId = null;
+        this.pendingSessionRenameTitle = '';
         this.setupMarked();
         this.ensureAssistantModelControls();
         this.setupEventListeners();
@@ -4136,6 +4138,55 @@ class UIHelpers {
         return ['1', 'true', 'yes', 'on'].includes(normalized);
     }
 
+    parseBooleanPreference(value, fallback = false) {
+        const normalized = String(value ?? '').trim().toLowerCase();
+        if (!normalized) {
+            return fallback;
+        }
+
+        if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+            return true;
+        }
+
+        if (['0', 'false', 'no', 'off'].includes(normalized)) {
+            return false;
+        }
+
+        return fallback;
+    }
+
+    rehydrateStoredPreferences(options = {}) {
+        const appInstance = options.appInstance || window.chatApp || null;
+
+        const savedModel = String(this.storageGet('kimibuilt_default_model') || WEB_CHAT_DEFAULT_MODEL).trim() || WEB_CHAT_DEFAULT_MODEL;
+        const savedReasoningEffort = this.normalizeReasoningEffort(this.storageGet('kimibuilt_reasoning_effort'));
+        const savedRemoteAutonomy = this.parseRemoteBuildAutonomyPreference(this.storageGet('kimibuilt_remote_build_autonomy'));
+
+        this.currentModel = savedModel;
+        this.currentReasoningEffort = savedReasoningEffort;
+        this.remoteBuildAutonomyApproved = savedRemoteAutonomy;
+        this.updateModelUI();
+        this.updateReasoningUI();
+        this.updateRemoteBuildAutonomyUI();
+
+        this.soundManager?.refreshFromStorage?.();
+        this.updateSoundCuesUI();
+        this.updateMenuSoundsUI();
+        this.populateSoundProfileOptions();
+        this.updateSoundProfileUI();
+        this.updateSoundVolumeUI();
+
+        this.ttsManager?.refreshFromStorage?.();
+        this.updateTtsUI();
+        this.updateTtsPreviewButtons();
+        this.updateMessageSpeechButtons();
+
+        window.sidebarResizer?.reloadFromStorage?.();
+        this.restoreInputAreaState();
+        this.updateMinimalistToggleUI();
+        appInstance?.updateSessionInfo?.();
+    }
+
     setCurrentReasoningEffort(value) {
         this.currentReasoningEffort = this.normalizeReasoningEffort(value);
         if (this.currentReasoningEffort) {
@@ -5200,8 +5251,53 @@ class UIHelpers {
     // Session List Rendering
     // ============================================
 
+    startSessionRename(sessionId) {
+        const session = sessionManager.sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+            return;
+        }
+
+        this.renamingSessionId = sessionId;
+        this.pendingSessionRenameTitle = session.title || 'New Chat';
+        this.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+    }
+
+    cancelSessionRename() {
+        if (!this.renamingSessionId) {
+            return;
+        }
+
+        this.renamingSessionId = null;
+        this.pendingSessionRenameTitle = '';
+        this.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+    }
+
+    async submitSessionRename(sessionId, value = '') {
+        const normalizedSessionId = String(sessionId || this.renamingSessionId || '').trim();
+        if (!normalizedSessionId) {
+            return;
+        }
+
+        const nextTitle = String(value || this.pendingSessionRenameTitle || '').trim();
+        this.renamingSessionId = null;
+        this.pendingSessionRenameTitle = '';
+
+        const result = await sessionManager.renameSession(normalizedSessionId, nextTitle);
+        if (!result?.session) {
+            this.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+            this.showToast('Unable to rename conversation', 'error');
+            return;
+        }
+
+        if (result.persisted === false && !sessionManager.isLocalSession(normalizedSessionId)) {
+            this.showToast('Conversation renamed locally, but the backend copy did not sync.', 'warning', 'Rename pending');
+        }
+    }
+
     renderSessionsList(sessions, currentSessionId) {
         if (sessions.length === 0) {
+            this.renamingSessionId = null;
+            this.pendingSessionRenameTitle = '';
             this.sessionsList.innerHTML = `
                 <div class="empty-state py-8">
                     <i data-lucide="message-square" class="w-12 h-12 mb-3 text-text-muted" aria-hidden="true"></i>
@@ -5213,8 +5309,14 @@ class UIHelpers {
             return;
         }
 
+        if (this.renamingSessionId && !sessions.some((session) => session.id === this.renamingSessionId)) {
+            this.renamingSessionId = null;
+            this.pendingSessionRenameTitle = '';
+        }
+
         this.sessionsList.innerHTML = sessions.map(session => {
             const isActive = session.id === currentSessionId;
+            const isEditing = session.id === this.renamingSessionId;
             const modeIcon = sessionManager.getSessionModeIcon(session.mode);
             const modeClass = session.mode || 'chat';
             const timeAgo = sessionManager.formatTimestamp(session.updatedAt);
@@ -5227,22 +5329,52 @@ class UIHelpers {
                     : workloadSummary.failed > 0
                         ? `${workloadSummary.failed} failed`
                         : '';
+            const renameValue = this.escapeHtmlAttr(this.pendingSessionRenameTitle || session.title || 'New Chat');
             
             return `
-                <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}" role="button" tabindex="0" aria-label="${this.escapeHtmlAttr(session.title || 'New Chat')}" title="${this.escapeHtmlAttr(session.title || 'New Chat')}">
+                <div class="session-item ${isActive ? 'active' : ''} ${isEditing ? 'editing' : ''}" data-session-id="${session.id}" role="${isEditing ? 'group' : 'button'}" tabindex="${isEditing ? '-1' : '0'}" aria-label="${this.escapeHtmlAttr(session.title || 'New Chat')}" title="${this.escapeHtmlAttr(session.title || 'New Chat')}">
                     <div class="session-icon ${modeClass}" aria-hidden="true">
                         <i data-lucide="${modeIcon}" class="w-4 h-4 text-white"></i>
                     </div>
                     <div class="session-info sidebar-session-info">
-                        <div class="session-title-row">
-                            <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
-                            ${workloadBadge ? `<span class="session-workload-badge">${this.escapeHtml(workloadBadge)}</span>` : ''}
-                        </div>
-                        <div class="session-meta">
-                            ${timeAgo} | ${messageCount} message${messageCount !== 1 ? 's' : ''}
-                        </div>
+                        ${isEditing ? `
+                            <form class="session-rename-form" data-session-id="${session.id}">
+                                <input
+                                    class="session-rename-input"
+                                    data-session-id="${session.id}"
+                                    type="text"
+                                    value="${renameValue}"
+                                    maxlength="120"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    aria-label="Conversation name"
+                                >
+                                <div class="session-rename-actions">
+                                    <span class="session-edit-hint">Enter to save, Esc to cancel</span>
+                                    <div class="session-rename-actions-buttons">
+                                        <button class="btn-icon save-session-rename-btn" data-session-id="${session.id}" type="submit" title="Save conversation name" aria-label="Save conversation name">
+                                            <i data-lucide="check" class="w-4 h-4" aria-hidden="true"></i>
+                                        </button>
+                                        <button class="btn-icon cancel-session-rename-btn" data-session-id="${session.id}" type="button" title="Cancel rename" aria-label="Cancel rename">
+                                            <i data-lucide="x" class="w-4 h-4" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        ` : `
+                            <div class="session-title-row">
+                                <div class="session-title">${this.escapeHtml(session.title || 'New Chat')}</div>
+                                ${workloadBadge ? `<span class="session-workload-badge">${this.escapeHtml(workloadBadge)}</span>` : ''}
+                            </div>
+                            <div class="session-meta">
+                                ${timeAgo} | ${messageCount} message${messageCount !== 1 ? 's' : ''}
+                            </div>
+                        `}
                     </div>
                     <div class="session-actions">
+                        <button class="btn-icon p-1.5 rounded rename-session-btn" data-session-id="${session.id}" title="Rename conversation" aria-label="Rename conversation">
+                            <i data-lucide="pencil" class="w-4 h-4" aria-hidden="true"></i>
+                        </button>
                         <button class="btn-icon danger p-1.5 rounded delete-session-btn" data-session-id="${session.id}" title="Delete conversation" aria-label="Delete conversation">
                             <i data-lucide="trash-2" class="w-4 h-4" aria-hidden="true"></i>
                         </button>
@@ -5253,6 +5385,16 @@ class UIHelpers {
 
         this.reinitializeIcons(this.sessionsList);
         this.attachSessionListeners();
+
+        if (this.renamingSessionId) {
+            requestAnimationFrame(() => {
+                const renameInput = this.sessionsList.querySelector('.session-rename-input');
+                if (renameInput) {
+                    renameInput.focus();
+                    renameInput.setSelectionRange(0, renameInput.value.length);
+                }
+            });
+        }
     }
 
     attachSessionListeners() {
@@ -5260,7 +5402,12 @@ class UIHelpers {
         this.sessionsList.querySelectorAll('.session-item').forEach(item => {
             const clickHandler = (e) => {
                 // Don't switch if clicking delete button
-                if (e.target.closest('.delete-session-btn')) return;
+                if (item.classList.contains('editing')
+                    || e.target.closest('.delete-session-btn')
+                    || e.target.closest('.rename-session-btn')
+                    || e.target.closest('.session-rename-form')) {
+                    return;
+                }
                 
                 const sessionId = item.dataset.sessionId;
                 sessionManager.switchSession(sessionId);
@@ -5270,10 +5417,63 @@ class UIHelpers {
             
             // Keyboard support
             item.addEventListener('keydown', (e) => {
+                if (e.key === 'F2') {
+                    e.preventDefault();
+                    this.startSessionRename(item.dataset.sessionId);
+                    return;
+                }
+
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     clickHandler(e);
                 }
+            });
+        });
+
+        this.sessionsList.querySelectorAll('.rename-session-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.startSessionRename(btn.dataset.sessionId);
+            });
+        });
+
+        this.sessionsList.querySelectorAll('.session-rename-form').forEach(form => {
+            form.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const input = form.querySelector('.session-rename-input');
+                this.pendingSessionRenameTitle = input?.value || '';
+                void this.submitSessionRename(form.dataset.sessionId, input?.value || '');
+            });
+        });
+
+        this.sessionsList.querySelectorAll('.session-rename-input').forEach(input => {
+            input.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+
+            input.addEventListener('input', () => {
+                this.pendingSessionRenameTitle = input.value;
+            });
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.cancelSessionRename();
+                }
+            });
+        });
+
+        this.sessionsList.querySelectorAll('.cancel-session-rename-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.cancelSessionRename();
             });
         });
 
@@ -6490,11 +6690,7 @@ class UIHelpers {
             
             // Update session title if available
             if (this.pendingImport.title) {
-                const session = sessionManager.sessions.find(s => s.id === sessionId);
-                if (session) {
-                    session.title = this.pendingImport.title;
-                    sessionManager.saveToStorage();
-                }
+                await sessionManager.renameSession(sessionId, this.pendingImport.title);
             }
             
             // Refresh the UI
@@ -7186,17 +7382,19 @@ class UIHelpers {
         }
 
         const isHidden = this.storageGet('webchat_input_hidden') === 'true';
-        if (isHidden) {
-            const inputArea = document.getElementById('input-area');
-            const toggleBtn = document.getElementById('input-toggle-btn');
-            const toggleIcon = document.getElementById('input-toggle-icon');
-            
-            if (inputArea) inputArea.classList.add('hidden');
-            if (toggleBtn) toggleBtn.classList.add('input-hidden');
-            if (toggleIcon) {
-                toggleIcon.setAttribute('data-lucide', 'chevron-up');
-                lucide.createIcons();
-            }
+        const inputArea = document.getElementById('input-area');
+        const toggleBtn = document.getElementById('input-toggle-btn');
+        const toggleIcon = document.getElementById('input-toggle-icon');
+
+        if (inputArea) {
+            inputArea.classList.toggle('hidden', isHidden);
+        }
+        if (toggleBtn) {
+            toggleBtn.classList.toggle('input-hidden', isHidden);
+        }
+        if (toggleIcon) {
+            toggleIcon.setAttribute('data-lucide', isHidden ? 'chevron-up' : 'chevron-down');
+            lucide.createIcons();
         }
     }
     

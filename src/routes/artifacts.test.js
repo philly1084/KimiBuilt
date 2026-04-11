@@ -83,6 +83,30 @@ describe('/api/artifacts route', () => {
         expect(response.text).toBe('hello');
     });
 
+    test('serves stored preview html for non-html artifacts', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'artifact-text-1',
+            sessionId: 'session-1',
+            filename: 'notes.txt',
+            extension: 'txt',
+            mimeType: 'text/plain',
+            previewHtml: '<pre>Preview me</pre>',
+            contentBuffer: Buffer.from('raw-content'),
+            metadata: {},
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const response = await request(buildApp()).get('/api/artifacts/artifact-text-1/preview');
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('<pre>Preview me</pre>');
+        expect(response.headers['content-type']).toContain('text/html');
+        expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    });
+
     test('serves bundled html artifact previews from the server', async () => {
         artifactService.getArtifact.mockResolvedValue({
             id: 'artifact-site-1',

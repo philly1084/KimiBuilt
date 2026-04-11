@@ -79,6 +79,11 @@ class PostgresManager {
         `);
 
         await this.query(`
+            ALTER TABLE user_session_state
+            ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+        `);
+
+        await this.query(`
             CREATE TABLE IF NOT EXISTS session_messages (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

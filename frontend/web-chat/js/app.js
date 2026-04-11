@@ -310,6 +310,9 @@ class ChatApp {
     async init() {
         // Add preload class to prevent transitions on load
         document.body.classList.add('preload');
+
+        await sessionManager.ensureUserPreferencesLoaded();
+        uiHelpers.rehydrateStoredPreferences({ appInstance: this });
         
         // Initialize theme
         uiHelpers.initTheme();
@@ -554,6 +557,7 @@ class ChatApp {
         sessionManager.addEventListener('sessionsChanged', (e) => {
             uiHelpers.renderSessionsList(e.detail.sessions, sessionManager.currentSessionId);
             this.renderWorkloadsPanel();
+            this.updateSessionInfo();
         });
         
         sessionManager.addEventListener('sessionCreated', (e) => {
@@ -809,9 +813,12 @@ class ChatApp {
     async loadSessionMessages(sessionId, options = {}) {
         uiHelpers.stopSpeechPlayback();
         await sessionManager.loadSessionMessagesFromBackend(sessionId);
-        const messages = this.syncAnnotatedSurveyStates(sessionId);
+        let messages = this.syncAnnotatedSurveyStates(sessionId);
+        const resumedBackgroundStream = this.resumePersistedBackgroundStream(sessionId, messages);
+        if (resumedBackgroundStream) {
+            messages = this.syncAnnotatedSurveyStates(sessionId);
+        }
         this.renderMessages(messages);
-        this.resumePersistedBackgroundStream(sessionId, messages);
         if (options.notifyNewAssistant === true && Array.isArray(options.previousMessages)) {
             this.playCueForNewAssistantMessages(options.previousMessages, messages);
         }
@@ -2424,7 +2431,7 @@ class ChatApp {
                         userMessageTimestamp: storedUserMessage.timestamp,
                         assistantMessageTimestamp: storedAssistantMessage.timestamp,
                     },
-                    shouldResyncAfterDisconnect: (error) => this.shouldResyncAfterDisconnect(error),
+                    shouldResyncAfterDisconnect: (error, context) => this.shouldResyncAfterDisconnect(error, context),
                 },
             )) {
                 if (chunk.type !== 'retry') {
@@ -4895,6 +4902,16 @@ class ChatApp {
             });
             return;
         }
+
+        if (isNetworkError && !isServerError && acceptedByServer) {
+            this.enterBackgroundStreamMode({
+                detail: this.connectionStatus === 'disconnected'
+                    ? this.getBackgroundStreamDetail()
+                    : String(this.liveResponseState.detail || 'Working through the answer.').trim(),
+            });
+            this.scheduleResumeSync('stream-resync', this.getBackgroundResyncDelayMs());
+            return;
+        }
         
         // For network errors, try to retry instead of immediately failing
         if (isNetworkError && !isServerError && !acceptedByServer && this.retryAttempt < this.maxRetries) {
@@ -5126,7 +5143,7 @@ class ChatApp {
                         userMessageTimestamp: userMessage.timestamp,
                         assistantMessageTimestamp: storedAssistantMessage.timestamp,
                     },
-                    shouldResyncAfterDisconnect: (error) => this.shouldResyncAfterDisconnect(error),
+                    shouldResyncAfterDisconnect: (error, context) => this.shouldResyncAfterDisconnect(error, context),
                 },
             )) {
                 if (chunk.type !== 'retry') {
@@ -5696,25 +5713,28 @@ class ChatApp {
         this.resumeSyncInFlight = false;
     }
 
-    shouldResyncAfterDisconnect(error = null) {
+    shouldResyncAfterDisconnect(error = null, context = {}) {
         const trackedRequest = this.pendingStreamResync || this.activeStreamRequest;
         if (!trackedRequest) {
             return false;
         }
+
+        const hidden = context?.hidden === true || document.hidden;
+        const online = context?.online !== false && (typeof navigator === 'undefined' || navigator.onLine !== false);
 
         if (trackedRequest.lifecycleInterrupted) {
             return true;
         }
 
         if (trackedRequest.acceptedByServer) {
+            return hidden || !online || this.pageWasHidden || this.connectionStatus === 'disconnected';
+        }
+
+        if (hidden) {
             return true;
         }
 
-        if (document.hidden) {
-            return true;
-        }
-
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        if (!online) {
             return true;
         }
 
@@ -5757,8 +5777,13 @@ class ChatApp {
         return request.lastVisibleAssistantMessage;
     }
 
+    isBackgroundPlaceholderContent(content = '') {
+        const normalized = String(content || '').trim().toLowerCase();
+        return normalized.startsWith('working in background');
+    }
+
     getBackgroundStreamDetail() {
-        return 'Still working in the background.';
+        return 'Working through the answer.';
     }
 
     getBackgroundResyncDelayMs(attemptCount = 0) {
@@ -5780,12 +5805,23 @@ class ChatApp {
 
         trackedRequest.backgroundMode = true;
         trackedRequest.notifiedResync = true;
-        const detail = String(options.detail || this.getBackgroundStreamDetail()).trim();
         const preservedMessage = trackedRequest.lastVisibleAssistantMessage
             || this.captureTrackedAssistantSnapshot(trackedRequest)
             || trackedRequest.placeholderMessage
             || {};
         const currentMessage = this.getSessionMessage(sessionId, messageId) || {};
+        let detail = String(options.detail || '').trim();
+        if (!detail || /background/i.test(detail)) {
+            detail = String(
+                currentMessage.liveState?.detail
+                || preservedMessage.liveState?.detail
+                || this.liveResponseState.detail
+                || ''
+            ).trim();
+        }
+        if (!detail || /background/i.test(detail)) {
+            detail = this.getBackgroundStreamDetail();
+        }
         const preservedReasoningSummary = String(
             currentMessage.reasoningSummary
             || currentMessage.metadata?.reasoningSummary
@@ -5796,7 +5832,7 @@ class ChatApp {
         ).trim();
         const shouldPreserveRealReasoning = Boolean(preservedReasoningSummary)
             && this.connectionStatus !== 'disconnected';
-        const preservedContent = String(
+        let preservedContent = String(
             options.content !== undefined
                 ? options.content
                 : (
@@ -5806,6 +5842,9 @@ class ChatApp {
                     || ''
                 )
         );
+        if (this.isBackgroundPlaceholderContent(preservedContent)) {
+            preservedContent = '';
+        }
 
         this.currentStreamingMessageId = messageId;
         this.isProcessing = true;

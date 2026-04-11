@@ -282,9 +282,14 @@ router.get('/:id/preview', async (req, res, next) => {
 
         const previewFile = resolveMetadataBundlePreviewFile(artifact);
 
+        const previewBuffer = previewFile?.contentBuffer
+            || (typeof artifact.previewHtml === 'string' && artifact.previewHtml
+                ? Buffer.from(artifact.previewHtml, 'utf8')
+                : artifact.contentBuffer);
+
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         applyPreviewResponseHeaders(res);
-        res.send(previewFile?.contentBuffer || artifact.contentBuffer);
+        res.send(previewBuffer);
     } catch (err) {
         next(err);
     }

@@ -958,6 +958,8 @@ router.post('/chat/completions', async (req, res, next) => {
                 artifacts: responseArtifacts,
                 tool_events: preparedImages.toolEvents,
                 toolEvents: preparedImages.toolEvents,
+                assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
             });
             return;
         }

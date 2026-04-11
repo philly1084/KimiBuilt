@@ -15,7 +15,7 @@ const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
 const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
-const { normalizeWhitespace, stripHtml } = require('../../utils/text');
+const { escapeHtml, normalizeWhitespace, stripHtml } = require('../../utils/text');
 const { mergeMemoryKeywords, normalizeMemoryKeywords } = require('../../memory/memory-keywords');
 const {
   AGENT_NOTES_CHAR_LIMIT,
@@ -271,6 +271,98 @@ function normalizeFileWriteParams(params = {}) {
   }
 
   return normalized;
+}
+
+function inferFileWriteArtifactExtension(targetPath = '') {
+  const path = require('path');
+  return path.extname(String(targetPath || '')).replace(/^\./, '').trim().toLowerCase() || 'txt';
+}
+
+function inferFileWriteArtifactMimeType(extension = '') {
+  const normalized = String(extension || '').trim().toLowerCase();
+  const mimeByExtension = {
+    css: 'text/css',
+    csv: 'text/csv',
+    htm: 'text/html',
+    html: 'text/html',
+    js: 'text/javascript',
+    json: 'application/json',
+    markdown: 'text/markdown',
+    md: 'text/markdown',
+    mermaid: 'text/vnd.mermaid',
+    mjs: 'text/javascript',
+    mmd: 'text/vnd.mermaid',
+    txt: 'text/plain',
+    xml: 'application/xml',
+    yaml: 'application/yaml',
+    yml: 'application/yaml',
+  };
+
+  return mimeByExtension[normalized] || 'text/plain';
+}
+
+function buildFileWriteArtifactPreviewHtml(extension = '', content = '') {
+  const normalizedExtension = String(extension || '').trim().toLowerCase();
+  const source = String(content || '');
+
+  if (!source) {
+    return '';
+  }
+
+  if (normalizedExtension === 'html' || normalizedExtension === 'htm') {
+    return source;
+  }
+
+  return `<pre>${escapeHtml(source.slice(0, 12000))}</pre>`;
+}
+
+async function persistFileWriteArtifact({
+  sessionId,
+  sourceMode = 'chat',
+  targetPath = '',
+  content = '',
+} = {}) {
+  if (!sessionId) {
+    return null;
+  }
+
+  const path = require('path');
+  const extension = inferFileWriteArtifactExtension(targetPath);
+  const filename = path.basename(String(targetPath || '').trim()) || `generated-file.${extension}`;
+  const normalizedContent = String(content || '').replace(/\r\n?/g, '\n');
+  const storedArtifact = await artifactService.createStoredArtifact({
+    sessionId,
+    direction: 'generated',
+    sourceMode,
+    filename,
+    extension,
+    mimeType: inferFileWriteArtifactMimeType(extension),
+    buffer: Buffer.from(normalizedContent, 'utf8'),
+    extractedText: normalizedContent,
+    previewHtml: buildFileWriteArtifactPreviewHtml(extension, normalizedContent),
+    metadata: {
+      createdByAgentTool: true,
+      originalFilename: filename,
+      toolId: 'file-write',
+      ...(extension === 'mermaid' || extension === 'mmd'
+        ? { mermaidSource: normalizedContent }
+        : {}),
+    },
+    vectorize: false,
+  });
+
+  return artifactService.serializeArtifact(storedArtifact);
+}
+
+function resolveArtifactSourceMode(context = {}) {
+  const route = String(context?.route || '').trim().toLowerCase();
+  if (route === '/api/canvas') {
+    return 'canvas';
+  }
+  if (route === '/api/notation') {
+    return 'notation';
+  }
+  return String(context?.taskType || context?.mode || 'chat').trim() || 'chat';
 }
 
 function normalizeWorkloadAction(value = '') {
@@ -1106,7 +1198,7 @@ class ToolManager {
         id: 'file-write',
         name: 'File Writer',
         category: 'system',
-        description: 'Write a full content string to a local runtime file. Requires both path and content in the same call.',
+        description: 'Write a full content string to a local runtime file. Requires both path and content in the same call. When a session is active, the written file is also mirrored into a downloadable artifact.',
         backend: {
           handler: async (params, context = {}) => {
             const path = require('path');
@@ -1126,8 +1218,31 @@ class ToolManager {
             }
 
             const targetPath = path.resolve(normalized.path);
-            await fs.mkdir(path.dirname(targetPath), { recursive: true });
-            await fs.writeFile(targetPath, normalized.content, normalized.encoding || 'utf8');
+            let persistedArtifact = null;
+
+            if (context.sessionId) {
+              persistedArtifact = await persistFileWriteArtifact({
+                sessionId: context.sessionId,
+                sourceMode: resolveArtifactSourceMode(context),
+                targetPath,
+                content: normalized.content,
+              });
+            }
+
+            try {
+              await fs.mkdir(path.dirname(targetPath), { recursive: true });
+              await fs.writeFile(targetPath, normalized.content, normalized.encoding || 'utf8');
+            } catch (error) {
+              if (persistedArtifact?.id && typeof artifactService.deleteArtifact === 'function') {
+                try {
+                  await artifactService.deleteArtifact(persistedArtifact.id);
+                } catch (cleanupError) {
+                  console.warn('[ToolManager] Failed to clean up persisted artifact after file-write error:', cleanupError.message);
+                }
+              }
+              throw error;
+            }
+
             let indexedAsset = null;
             try {
               indexedAsset = await assetManager.upsertWorkspacePath(targetPath, {
@@ -1141,6 +1256,13 @@ class ToolManager {
               path: targetPath,
               bytesWritten: Buffer.byteLength(normalized.content, normalized.encoding || 'utf8'),
               assetIndexed: Boolean(indexedAsset),
+              artifactPersisted: Boolean(persistedArtifact),
+              ...(persistedArtifact
+                ? {
+                  artifact: persistedArtifact,
+                  artifacts: [persistedArtifact],
+                }
+                : {}),
             };
           },
           sideEffects: ['write'],

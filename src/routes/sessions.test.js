@@ -169,6 +169,58 @@ describe('/api/sessions route', () => {
         expect(sessionStore.getActiveOwnedSession).toHaveBeenCalledWith('phill', 'web-chat');
     });
 
+    test('patch persists renamed conversation titles in session metadata', async () => {
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: {
+                ownerId: 'phill',
+                clientSurface: 'web-chat',
+                memoryScope: 'web-chat',
+                mode: 'chat',
+            },
+        });
+        sessionStore.update.mockResolvedValue({
+            id: 'session-1',
+            updatedAt: '2026-04-11T12:00:00.000Z',
+            metadata: {
+                ownerId: 'phill',
+                clientSurface: 'web-chat',
+                memoryScope: 'web-chat',
+                mode: 'chat',
+                title: 'Release Checklist',
+            },
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+            req.user = { username: 'phill' };
+            next();
+        });
+        app.use('/api/sessions', sessionsRouter);
+
+        const response = await request(app)
+            .patch('/api/sessions/session-1')
+            .send({
+                metadata: {
+                    title: 'Release Checklist',
+                },
+            });
+
+        expect(response.status).toBe(200);
+        expect(sessionStore.getOwned).toHaveBeenCalledWith('session-1', 'phill');
+        expect(sessionStore.update).toHaveBeenCalledWith('session-1', {
+            metadata: expect.objectContaining({
+                ownerId: 'phill',
+                clientSurface: 'web-chat',
+                memoryScope: 'web-chat',
+                mode: 'chat',
+                title: 'Release Checklist',
+            }),
+        });
+        expect(response.body.metadata.title).toBe('Release Checklist');
+    });
+
     test('merges message-derived document links into the session artifact list', async () => {
         sessionStore.getOwned.mockResolvedValue({
             id: 'session-1',

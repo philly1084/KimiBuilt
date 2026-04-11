@@ -1,6 +1,9 @@
 jest.mock('../../artifacts/artifact-service', () => ({
   artifactService: {
+    createStoredArtifact: jest.fn(),
+    deleteArtifact: jest.fn(),
     generateArtifact: jest.fn(),
+    serializeArtifact: jest.fn(),
   },
 }));
 
@@ -47,11 +50,39 @@ describe('ToolManager image tools', () => {
 
   beforeEach(() => {
     originalFetch = global.fetch;
+    artifactService.createStoredArtifact.mockReset();
+    artifactService.deleteArtifact.mockReset();
     artifactService.generateArtifact.mockReset();
+    artifactService.serializeArtifact.mockReset();
     assetManager.searchAssets.mockReset();
     assetManager.upsertWorkspacePath.mockClear();
     piperTtsService.synthesize.mockReset();
     persistGeneratedAudio.mockReset();
+    artifactService.createStoredArtifact.mockResolvedValue({
+      id: 'artifact-file-write-1',
+      sessionId: 'session-1',
+      filename: 'sample.html',
+      extension: 'html',
+      mimeType: 'text/html',
+      sizeBytes: 57,
+      previewHtml: '<!DOCTYPE html><html><body><h1>Hello</h1></body></html>',
+      metadata: {},
+    });
+    artifactService.deleteArtifact.mockResolvedValue(true);
+    artifactService.serializeArtifact.mockReturnValue({
+      id: 'artifact-file-write-1',
+      filename: 'sample.html',
+      format: 'html',
+      mimeType: 'text/html',
+      sizeBytes: 57,
+      downloadUrl: '/api/artifacts/artifact-file-write-1/download',
+      previewUrl: '/api/artifacts/artifact-file-write-1/preview',
+      preview: {
+        type: 'html',
+        content: '<!DOCTYPE html><html><body><h1>Hello</h1></body></html>',
+      },
+      metadata: {},
+    });
   });
 
   afterEach(() => {
@@ -197,6 +228,48 @@ describe('ToolManager image tools', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('file-write requires a `content` string');
+  });
+
+  test('mirrors file-write outputs into artifacts when a session is active', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-file-write-artifact-'));
+    try {
+      const targetPath = path.join(tempDir, 'sample.html');
+
+      const result = await toolManager.executeTool('file-write', {
+        path: targetPath,
+        content: '<!DOCTYPE html><html><body><h1>Hello</h1></body></html>',
+      }, {
+        route: '/api/chat',
+        sessionId: 'session-1',
+      });
+
+      expect(result.success).toBe(true);
+      expect(artifactService.createStoredArtifact).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'session-1',
+        sourceMode: 'chat',
+        filename: 'sample.html',
+        extension: 'html',
+        mimeType: 'text/html',
+        metadata: expect.objectContaining({
+          createdByAgentTool: true,
+          toolId: 'file-write',
+        }),
+      }));
+      expect(result.data.artifactPersisted).toBe(true);
+      expect(result.data.artifact).toEqual(expect.objectContaining({
+        id: 'artifact-file-write-1',
+        downloadUrl: '/api/artifacts/artifact-file-write-1/download',
+        previewUrl: '/api/artifacts/artifact-file-write-1/preview',
+      }));
+      expect(result.data.artifacts).toEqual([expect.objectContaining({
+        id: 'artifact-file-write-1',
+      })]);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   test('searches indexed assets through asset-search', async () => {

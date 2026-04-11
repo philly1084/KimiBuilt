@@ -228,6 +228,44 @@ class SessionStore {
         );
     }
 
+    normalizeUserPreferences(preferences = {}) {
+        if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
+            return {};
+        }
+
+        const sanitized = this.sanitizeMessageMetadataValue(preferences);
+        return sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+            ? sanitized
+            : {};
+    }
+
+    normalizeUserPreferenceNamespace(namespace = '') {
+        const normalized = String(namespace || '').trim();
+        return normalized || null;
+    }
+
+    mergeUserPreferencePatch(current = {}, patch = {}) {
+        const nextPreferences = {
+            ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
+        };
+
+        Object.entries(patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}).forEach(([key, value]) => {
+            const normalizedKey = String(key || '').trim();
+            if (!normalizedKey) {
+                return;
+            }
+
+            if (value == null) {
+                delete nextPreferences[normalizedKey];
+                return;
+            }
+
+            nextPreferences[normalizedKey] = String(value);
+        });
+
+        return this.normalizeUserPreferences(nextPreferences);
+    }
+
     getSessionOwnerId(sessionOrMetadata = null) {
         const metadata = sessionOrMetadata?.metadata || sessionOrMetadata || {};
         const ownerId = this.normalizeOwnerId(
@@ -246,6 +284,7 @@ class SessionStore {
             scopedActiveSessionIds: this.normalizeScopedActiveSessionIds(
                 state?.scopedActiveSessionIds || state?.scoped_active_session_ids || {},
             ),
+            preferences: this.normalizeUserPreferences(state?.preferences || {}),
             updatedAt: state?.updatedAt instanceof Date
                 ? state.updatedAt.toISOString()
                 : (state?.updatedAt || state?.updated_at || new Date().toISOString()),
@@ -569,11 +608,45 @@ class SessionStore {
 
         const result = await postgres.query(
             `
-                SELECT owner_id, active_session_id, scoped_active_session_ids, updated_at
+                SELECT owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at
                 FROM user_session_state
                 WHERE owner_id = $1
             `,
             [normalizedOwnerId],
+        );
+
+        return this.toUserSessionState(result.rows[0]);
+    }
+
+    async persistUserSessionState(state = {}) {
+        const nextState = this.normalizeUserSessionState(state);
+        if (!nextState.ownerId) {
+            return null;
+        }
+
+        if (!this.usePostgres) {
+            this.userSessionState.set(nextState.ownerId, nextState);
+            await this.persistFallbackState();
+            return nextState;
+        }
+
+        const result = await postgres.query(
+            `
+                INSERT INTO user_session_state (owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at)
+                VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW())
+                ON CONFLICT (owner_id) DO UPDATE
+                SET active_session_id = EXCLUDED.active_session_id,
+                    scoped_active_session_ids = EXCLUDED.scoped_active_session_ids,
+                    preferences = EXCLUDED.preferences,
+                    updated_at = NOW()
+                RETURNING owner_id, active_session_id, scoped_active_session_ids, preferences, updated_at
+            `,
+            [
+                nextState.ownerId,
+                nextState.activeSessionId,
+                JSON.stringify(nextState.scopedActiveSessionIds || {}),
+                JSON.stringify(nextState.preferences || {}),
+            ],
         );
 
         return this.toUserSessionState(result.rows[0]);
@@ -620,33 +693,11 @@ class SessionStore {
             ownerId: normalizedOwnerId,
             activeSessionId: nextGlobalActiveSessionId,
             scopedActiveSessionIds,
+            preferences: currentState?.preferences || {},
             updatedAt: new Date().toISOString(),
         });
 
-        if (!this.usePostgres) {
-            this.userSessionState.set(normalizedOwnerId, nextState);
-            await this.persistFallbackState();
-            return nextState;
-        }
-
-        const result = await postgres.query(
-            `
-                INSERT INTO user_session_state (owner_id, active_session_id, scoped_active_session_ids, updated_at)
-                VALUES ($1, $2, $3::jsonb, NOW())
-                ON CONFLICT (owner_id) DO UPDATE
-                SET active_session_id = EXCLUDED.active_session_id,
-                    scoped_active_session_ids = EXCLUDED.scoped_active_session_ids,
-                    updated_at = NOW()
-                RETURNING owner_id, active_session_id, scoped_active_session_ids, updated_at
-            `,
-            [
-                normalizedOwnerId,
-                nextState.activeSessionId,
-                JSON.stringify(nextState.scopedActiveSessionIds || {}),
-            ],
-        );
-
-        return this.toUserSessionState(result.rows[0]);
+        return this.persistUserSessionState(nextState);
     }
 
     async getActiveOwnedSession(ownerId = null, scopeKey = null) {
@@ -672,6 +723,57 @@ class SessionStore {
 
         await this.setActiveSession(normalizedOwnerId, null, normalizedScopeKey);
         return null;
+    }
+
+    async getUserPreferences(ownerId = null, namespace = null) {
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        if (!normalizedOwnerId) {
+            return {};
+        }
+
+        const state = await this.getUserSessionState(normalizedOwnerId);
+        const preferences = this.normalizeUserPreferences(state?.preferences || {});
+        const normalizedNamespace = this.normalizeUserPreferenceNamespace(namespace);
+        if (!normalizedNamespace) {
+            return preferences;
+        }
+
+        return this.normalizeUserPreferences(preferences[normalizedNamespace] || {});
+    }
+
+    async patchUserPreferences(ownerId = null, namespace = null, patch = {}) {
+        await this.initialize();
+
+        const normalizedOwnerId = this.normalizeOwnerId(ownerId);
+        const normalizedNamespace = this.normalizeUserPreferenceNamespace(namespace);
+        if (!normalizedOwnerId || !normalizedNamespace) {
+            return {};
+        }
+
+        const currentState = await this.getUserSessionState(normalizedOwnerId);
+        const currentPreferences = this.normalizeUserPreferences(currentState?.preferences || {});
+        const currentNamespacePreferences = this.normalizeUserPreferences(currentPreferences[normalizedNamespace] || {});
+        const nextNamespacePreferences = this.mergeUserPreferencePatch(currentNamespacePreferences, patch);
+        const nextPreferences = {
+            ...currentPreferences,
+        };
+
+        if (Object.keys(nextNamespacePreferences).length > 0) {
+            nextPreferences[normalizedNamespace] = nextNamespacePreferences;
+        } else {
+            delete nextPreferences[normalizedNamespace];
+        }
+
+        const nextState = this.normalizeUserSessionState({
+            ownerId: normalizedOwnerId,
+            activeSessionId: currentState?.activeSessionId || null,
+            scopedActiveSessionIds: currentState?.scopedActiveSessionIds || {},
+            preferences: nextPreferences,
+            updatedAt: new Date().toISOString(),
+        });
+
+        const savedState = await this.persistUserSessionState(nextState);
+        return this.normalizeUserPreferences(savedState?.preferences?.[normalizedNamespace] || {});
     }
 
     async getLatestOwnedSession(ownerId = null, options = {}) {

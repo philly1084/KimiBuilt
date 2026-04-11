@@ -1419,7 +1419,7 @@ class ArtifactService {
             ? siteBundle.files.length
             : Number(siteBundle?.fileCount || 0);
         const hasSiteBundle = siteBundleFileCount > 1;
-        const previewUrl = artifact.extension === 'html'
+        const previewUrl = (artifact.extension === 'html' || Boolean(artifact.previewHtml))
             ? `/api/artifacts/${artifact.id}/preview`
             : null;
         const bundleDownloadUrl = hasSiteBundle

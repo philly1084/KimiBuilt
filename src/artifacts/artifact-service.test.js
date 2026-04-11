@@ -596,6 +596,31 @@ describe('ArtifactService', () => {
         }));
     });
 
+    test('serializeArtifact exposes preview urls for previewable non-html artifacts', () => {
+        const serialized = artifactService.serializeArtifact({
+            id: 'artifact-text-1',
+            sessionId: 'session-1',
+            parentArtifactId: null,
+            direction: 'generated',
+            sourceMode: 'chat',
+            filename: 'notes.txt',
+            extension: 'txt',
+            mimeType: 'text/plain',
+            sizeBytes: 32,
+            vectorizedAt: null,
+            previewHtml: '<pre>hello world</pre>',
+            extractedText: 'hello world',
+            metadata: {},
+            createdAt: '2026-04-08T00:00:00.000Z',
+        });
+
+        expect(serialized.previewUrl).toBe('/api/artifacts/artifact-text-1/preview');
+        expect(serialized.preview).toEqual({
+            type: 'html',
+            content: '<pre>hello world</pre>',
+        });
+    });
+
     test('injects dashboard template guidance for dashboard html artifacts', async () => {
         createResponse.mockResolvedValueOnce({
             id: 'resp-dashboard-1',

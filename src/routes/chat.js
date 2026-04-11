@@ -35,6 +35,15 @@ const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require(
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
+    buildUserCheckpointInstructions,
+    buildUserCheckpointPolicy,
+} = require('../user-checkpoints');
+const {
+    applyAnsweredUserCheckpointState,
+    applyAskedUserCheckpointState,
+    buildUserCheckpointPolicyMetadata,
+} = require('../web-chat-user-checkpoints');
+const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
@@ -232,9 +241,6 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
         let effectiveSession = await persistSessionModel(sessionId, session, model);
-
-        const sshContext = resolveSshRequestContext(message, effectiveSession);
-        const effectiveMessage = sshContext.effectivePrompt || message;
         const clientSurface = resolveClientSurface(req.body || {}, session, requestedTaskType);
         const taskType = resolveConversationTaskType(requestMetadata, session);
         const memoryScope = resolveSessionScope({
@@ -243,11 +249,25 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             clientSurface,
         }, session);
         const sessionIsolation = isSessionIsolationEnabled(requestedSessionMetadata, session);
+        const answeredCheckpointResult = await applyAnsweredUserCheckpointState(
+            sessionStore,
+            sessionId,
+            effectiveSession,
+            message,
+        );
+        effectiveSession = answeredCheckpointResult.session;
+        const userCheckpointPolicy = buildUserCheckpointPolicy({
+            session: effectiveSession,
+            clientSurface,
+        });
+        const sshContext = resolveSshRequestContext(message, effectiveSession);
+        const effectiveMessage = sshContext.effectivePrompt || message;
         const artifactIntentText = stripInjectedNotesPageEditDirective(message);
         effectiveRequestMetadata = {
             ...effectiveRequestMetadata,
             clientSurface,
             memoryScope,
+            userCheckpointPolicy: buildUserCheckpointPolicyMetadata(userCheckpointPolicy),
             ...(sessionIsolation ? { sessionIsolation: true } : {}),
         };
         let effectiveOutputFormat = outputFormat
@@ -470,13 +490,15 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 message: generationArtifacts.assistantMessage,
                 artifacts: responseArtifacts,
                 toolEvents: preparedImages.toolEvents,
+                assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
+                assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
             });
             return;
         }
 
         const instructions = await buildInstructionsWithArtifacts(
-            session,
-            buildContinuityInstructions(),
+            effectiveSession,
+            buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
             effectiveArtifactIds,
         );
 
@@ -487,10 +509,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
 
             const execution = await executeConversationRuntime(req.app, {
                 input: effectiveMessage,
-                session,
+                session: effectiveSession,
                 sessionId,
                 memoryInput: message,
-                previousResponseId: session.previousResponseId,
+                previousResponseId: effectiveSession.previousResponseId,
                 instructions,
                 stream: true,
                 model,
@@ -509,6 +531,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     timezone: requestTimezone,
                     now: requestNow,
                     workloadService: req.app.locals.agentWorkloadService,
+                    userCheckpointPolicy,
                 },
                 executionProfile,
                 enableAutomaticToolCalls: true,
@@ -572,6 +595,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                         await sessionStore.update(sessionId, { metadata: sshMetadata });
                     }
                     effectiveSession = await persistSessionModel(sessionId, effectiveSession, event.response?.model || model || null);
+                    effectiveSession = await applyAskedUserCheckpointState(
+                        sessionStore,
+                        sessionId,
+                        effectiveSession,
+                        toolEvents,
+                    );
                     const generatedArtifacts = await maybeGenerateOutputArtifact({
                         sessionId,
                         session: effectiveSession,
@@ -660,10 +689,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         const runtimeToolManager = await ensureRuntimeToolManager(req.app);
         const execution = await executeConversationRuntime(req.app, {
             input: effectiveMessage,
-            session,
+            session: effectiveSession,
             sessionId,
             memoryInput: message,
-            previousResponseId: session.previousResponseId,
+            previousResponseId: effectiveSession.previousResponseId,
             instructions,
             stream: false,
             model,
@@ -682,6 +711,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: req.app.locals.agentWorkloadService,
+                userCheckpointPolicy,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
@@ -713,6 +743,12 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             await sessionStore.update(sessionId, { metadata: sshMetadata });
         }
         effectiveSession = await persistSessionModel(sessionId, effectiveSession, response.model || model || null);
+        effectiveSession = await applyAskedUserCheckpointState(
+            sessionStore,
+            sessionId,
+            effectiveSession,
+            response?.metadata?.toolEvents || [],
+        );
         const generatedArtifacts = await maybeGenerateOutputArtifact({
             sessionId,
             session: effectiveSession,
@@ -783,6 +819,14 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             message: outputText,
             artifacts,
             toolEvents: response?.metadata?.toolEvents || [],
+            assistant_metadata: buildFrontendAssistantMetadata({
+                ...(response?.metadata || {}),
+                artifacts,
+            }),
+            assistantMetadata: buildFrontendAssistantMetadata({
+                ...(response?.metadata || {}),
+                artifacts,
+            }),
         });
     } catch (err) {
         failRuntimeTask(runtimeTask?.id, {

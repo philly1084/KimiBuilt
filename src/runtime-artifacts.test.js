@@ -66,6 +66,39 @@ describe('runtime artifact helpers', () => {
         ]);
     });
 
+    test('extracts file-write mirrored artifacts from successful tool events', () => {
+        const artifacts = extractArtifactsFromToolEvents([{
+            toolCall: {
+                function: {
+                    name: 'file-write',
+                },
+            },
+            result: {
+                success: true,
+                data: {
+                    path: '/tmp/report.html',
+                    artifact: {
+                        id: 'artifact-file-write-1',
+                        filename: 'report.html',
+                        mimeType: 'text/html',
+                        downloadUrl: '/api/artifacts/artifact-file-write-1/download',
+                        previewUrl: '/api/artifacts/artifact-file-write-1/preview',
+                    },
+                },
+            },
+        }]);
+
+        expect(artifacts).toEqual([
+            expect.objectContaining({
+                id: 'artifact-file-write-1',
+                filename: 'report.html',
+                format: 'html',
+                downloadUrl: '/api/artifacts/artifact-file-write-1/download',
+                previewUrl: '/api/artifacts/artifact-file-write-1/preview',
+            }),
+        ]);
+    });
+
     test('deduplicates runtime artifacts across tool and generated sources', () => {
         const merged = mergeRuntimeArtifacts(
             [{

@@ -33,6 +33,15 @@ const { buildFrontendAssistantMetadata, buildWebChatSessionMessages } = require(
 const { normalizeMemoryKeywords } = require('../memory/memory-keywords');
 const { extractArtifactsFromToolEvents, mergeRuntimeArtifacts } = require('../runtime-artifacts');
 const {
+    buildUserCheckpointInstructions,
+    buildUserCheckpointPolicy,
+} = require('../user-checkpoints');
+const {
+    applyAnsweredUserCheckpointState,
+    applyAskedUserCheckpointState,
+    buildUserCheckpointPolicyMetadata,
+} = require('../web-chat-user-checkpoints');
+const {
     buildScopedMemoryMetadata,
     buildScopedSessionMetadata,
     isSessionIsolationEnabled,
@@ -272,9 +281,6 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         return;
     }
     session = await persistSessionModel(session.id, session, model);
-
-    const sshContext = resolveSshRequestContext(message, session);
-    const effectiveMessage = sshContext.effectivePrompt || message;
     const taskType = resolveConversationTaskType(payload, session);
     const clientSurface = resolveClientSurface(payload || {}, session, taskType);
     const memoryScope = resolveSessionScope({
@@ -284,10 +290,24 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
         clientSurface,
     }, session);
     const sessionIsolation = isSessionIsolationEnabled(effectiveRequestMetadata, session);
+    const answeredCheckpointResult = await applyAnsweredUserCheckpointState(
+        sessionStore,
+        session.id,
+        session,
+        message,
+    );
+    session = answeredCheckpointResult.session;
+    const userCheckpointPolicy = buildUserCheckpointPolicy({
+        session,
+        clientSurface,
+    });
+    const sshContext = resolveSshRequestContext(message, session);
+    const effectiveMessage = sshContext.effectivePrompt || message;
     effectiveRequestMetadata = {
         ...effectiveRequestMetadata,
         clientSurface,
         memoryScope,
+        userCheckpointPolicy: buildUserCheckpointPolicyMetadata(userCheckpointPolicy),
         ...(sessionIsolation ? { sessionIsolation: true } : {}),
     };
     let effectiveOutputFormat = outputFormat
@@ -501,7 +521,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
 
         const instructions = await buildInstructionsWithArtifacts(
             session,
-            buildContinuityInstructions(),
+            buildContinuityInstructions(buildUserCheckpointInstructions(userCheckpointPolicy)),
             effectiveArtifactIds,
         );
         const execution = await executeConversationRuntime(ws.app, {
@@ -528,6 +548,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                 timezone: requestTimezone,
                 now: requestNow,
                 workloadService: ws.app.locals.agentWorkloadService,
+                userCheckpointPolicy,
             },
             executionProfile,
             enableAutomaticToolCalls: true,
@@ -574,6 +595,12 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     await sessionStore.update(session.id, { metadata: sshMetadata });
                 }
                 session = await persistSessionModel(session.id, session, event.response?.model || model || null);
+                session = await applyAskedUserCheckpointState(
+                    sessionStore,
+                    session.id,
+                    session,
+                    event.response?.metadata?.toolEvents || [],
+                );
                 const generatedArtifacts = await maybeGenerateOutputArtifact({
                     sessionId: session.id,
                     session,
@@ -641,6 +668,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     sessionId: session.id,
                     responseId: event.response.id,
                     artifacts,
+                    toolEvents: event.response?.metadata?.toolEvents || [],
                     assistant_metadata: buildFrontendAssistantMetadata({
                         ...(event.response?.metadata || {}),
                         artifacts,

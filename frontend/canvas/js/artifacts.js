@@ -85,9 +85,10 @@
             item.className = `artifact-item${state.selectedArtifactIds.includes(artifact.id) ? ' active' : ''}`;
             item.innerHTML = `
                 <strong>${artifact.filename}</strong>
-                <div class="artifact-meta">${artifact.format} • ${artifact.sizeBytes} bytes</div>
+                <div class="artifact-meta">${artifact.format} | ${artifact.sizeBytes} bytes</div>
                 <div class="artifact-actions">
                     <button type="button" data-action="toggle">${state.selectedArtifactIds.includes(artifact.id) ? 'Detach' : 'Attach'}</button>
+                    ${artifact.previewUrl ? `<a href="${artifact.previewUrl}" target="_blank" rel="noopener">Preview</a>` : ''}
                     <a href="${artifact.downloadUrl}" target="_blank" rel="noopener">Download</a>
                 </div>
             `;

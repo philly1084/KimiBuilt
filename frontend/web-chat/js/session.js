@@ -6,6 +6,24 @@
 
 const SESSION_MANAGER_TASK_TYPE = 'chat';
 const SESSION_MANAGER_CLIENT_SURFACE = 'web-chat';
+const WEB_CHAT_PREFERENCE_SYNC_DELAY_MS = 180;
+const WEB_CHAT_SYNCED_STORAGE_KEYS = new Set([
+    'kimibuilt_default_model',
+    'kimibuilt_reasoning_effort',
+    'kimibuilt_remote_build_autonomy',
+    'kimibuilt_theme_preset',
+    'kimibuilt_theme',
+    'webchat_layout_mode',
+    'kimibuilt_sound_cues_enabled',
+    'kimibuilt_menu_sounds_enabled',
+    'kimibuilt_sound_profile',
+    'kimibuilt_sound_volume',
+    'kimibuilt_tts_autoplay',
+    'kimibuilt_tts_voice_id',
+    'webchat_input_hidden',
+    'kimibuilt_sidebar_width',
+    'kimibuilt_sidebar_collapsed',
+]);
 const sessionGatewayHelpers = window.KimiBuiltGatewaySSE || {};
 const SESSION_DEFAULT_MODEL = sessionGatewayHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
 const resolveSessionPreferredModel = sessionGatewayHelpers.resolvePreferredChatModel
@@ -161,9 +179,14 @@ class SessionManager extends EventTarget {
         this.currentSessionKey = 'kimibuilt_web_chat_current_session';
         this.version = '4.0';
         this.storageAvailable = this.checkStorageAvailability();
+        this.syncedStorageValues = {};
+        this.pendingPreferencePatch = {};
+        this.preferenceSyncTimer = null;
+        this.userPreferencesPromise = null;
         
         this.loadFromStorage();
         this.migrateIfNeeded();
+        this.userPreferencesPromise = this.loadUserPreferences();
     }
 
     setStorageAvailability(value) {
@@ -191,9 +214,13 @@ class SessionManager extends EventTarget {
      * Safely get item from localStorage
      */
     safeStorageGet(key) {
+        const normalizedKey = String(key || '').trim();
+        if (this.isSyncedStorageKey(normalizedKey) && Object.prototype.hasOwnProperty.call(this.syncedStorageValues, normalizedKey)) {
+            return this.syncedStorageValues[normalizedKey];
+        }
         if (!this.storageAvailable) return null;
         try {
-            return localStorage.getItem(key);
+            return localStorage.getItem(normalizedKey);
         } catch (e) {
             this.setStorageAvailability(false);
             return null;
@@ -204,23 +231,35 @@ class SessionManager extends EventTarget {
      * Safely set item in localStorage
      */
     safeStorageSet(key, value) {
-        if (!this.storageAvailable) return false;
+        const normalizedKey = String(key || '').trim();
+        const normalizedValue = String(value);
+        let wroteRemote = false;
+
+        if (this.isSyncedStorageKey(normalizedKey)) {
+            this.syncedStorageValues[normalizedKey] = normalizedValue;
+            this.queueUserPreferencePatch({
+                [normalizedKey]: normalizedValue,
+            });
+            wroteRemote = true;
+        }
+
+        if (!this.storageAvailable) return wroteRemote;
         try {
-            localStorage.setItem(key, value);
+            localStorage.setItem(normalizedKey, normalizedValue);
             return true;
         } catch (e) {
             if (e.name === 'QuotaExceededError') {
                 this.cleanupOldSessions();
                 try {
-                    localStorage.setItem(key, value);
+                    localStorage.setItem(normalizedKey, normalizedValue);
                     return true;
-                } catch (e2) {
+                } catch (_quotaError) {
                     this.setStorageAvailability(false);
                 }
             } else {
                 this.setStorageAvailability(false);
             }
-            return false;
+            return wroteRemote;
         }
     }
 
@@ -228,14 +267,285 @@ class SessionManager extends EventTarget {
      * Safely remove item from localStorage
      */
     safeStorageRemove(key) {
-        if (!this.storageAvailable) return false;
+        const normalizedKey = String(key || '').trim();
+        let removedRemote = false;
+
+        if (this.isSyncedStorageKey(normalizedKey)) {
+            delete this.syncedStorageValues[normalizedKey];
+            this.queueUserPreferencePatch({
+                [normalizedKey]: null,
+            });
+            removedRemote = true;
+        }
+
+        if (!this.storageAvailable) return removedRemote;
         try {
-            localStorage.removeItem(key);
+            localStorage.removeItem(normalizedKey);
             return true;
         } catch (e) {
             this.setStorageAvailability(false);
-            return false;
+            return removedRemote;
         }
+    }
+
+    isSyncedStorageKey(key = '') {
+        return WEB_CHAT_SYNCED_STORAGE_KEYS.has(String(key || '').trim());
+    }
+
+    normalizePreferencePatch(input = {}, options = {}) {
+        const source = input && typeof input === 'object' && !Array.isArray(input)
+            ? input
+            : {};
+        const normalized = {};
+
+        Object.entries(source).forEach(([rawKey, rawValue]) => {
+            const key = String(rawKey || '').trim();
+            if (!this.isSyncedStorageKey(key)) {
+                return;
+            }
+
+            if (rawValue == null) {
+                if (options.allowNull === true) {
+                    normalized[key] = null;
+                }
+                return;
+            }
+
+            normalized[key] = String(rawValue);
+        });
+
+        return normalized;
+    }
+
+    readLocalSeedPreferences() {
+        if (!this.storageAvailable) {
+            return {};
+        }
+
+        const seededPreferences = {};
+        WEB_CHAT_SYNCED_STORAGE_KEYS.forEach((key) => {
+            try {
+                const value = localStorage.getItem(key);
+                if (value != null) {
+                    seededPreferences[key] = value;
+                }
+            } catch (_error) {
+                this.setStorageAvailability(false);
+            }
+        });
+        return seededPreferences;
+    }
+
+    syncLocalStoragePreferences(preferences = {}, options = {}) {
+        if (!this.storageAvailable) {
+            return;
+        }
+
+        const values = this.normalizePreferencePatch(preferences);
+        WEB_CHAT_SYNCED_STORAGE_KEYS.forEach((key) => {
+            try {
+                if (Object.prototype.hasOwnProperty.call(values, key)) {
+                    localStorage.setItem(key, values[key]);
+                    return;
+                }
+
+                if (options.removeMissing === true) {
+                    localStorage.removeItem(key);
+                }
+            } catch (_error) {
+                this.setStorageAvailability(false);
+            }
+        });
+    }
+
+    getPreferencesEndpoint() {
+        return `${this.apiBaseUrl}/preferences/web-chat`;
+    }
+
+    async ensureUserPreferencesLoaded() {
+        if (!this.userPreferencesPromise) {
+            this.userPreferencesPromise = this.loadUserPreferences();
+        }
+
+        try {
+            await this.userPreferencesPromise;
+        } catch (_error) {
+            // Preference sync should never block the rest of the UI.
+        }
+
+        return {
+            ...this.syncedStorageValues,
+        };
+    }
+
+    async loadUserPreferences() {
+        const localSeedPreferences = this.readLocalSeedPreferences();
+        const pendingPatch = this.normalizePreferencePatch(this.pendingPreferencePatch, { allowNull: true });
+
+        try {
+            const response = await fetch(this.getPreferencesEndpoint(), {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const payload = await response.json();
+            const remotePreferences = this.normalizePreferencePatch(payload?.preferences || {});
+            const mergedPreferences = {
+                ...localSeedPreferences,
+                ...remotePreferences,
+            };
+
+            Object.entries(pendingPatch).forEach(([key, value]) => {
+                if (value == null) {
+                    delete mergedPreferences[key];
+                    return;
+                }
+
+                mergedPreferences[key] = value;
+            });
+
+            this.syncedStorageValues = mergedPreferences;
+            this.syncLocalStoragePreferences(mergedPreferences, { removeMissing: true });
+
+            const seedPatch = {};
+            Object.entries(localSeedPreferences).forEach(([key, value]) => {
+                if (!Object.prototype.hasOwnProperty.call(remotePreferences, key)
+                    && !Object.prototype.hasOwnProperty.call(pendingPatch, key)) {
+                    seedPatch[key] = value;
+                }
+            });
+
+            if (Object.keys(seedPatch).length > 0) {
+                this.queueUserPreferencePatch(seedPatch);
+            }
+        } catch (error) {
+            console.warn('Failed to load synced web-chat preferences:', error);
+            this.syncedStorageValues = {
+                ...localSeedPreferences,
+                ...this.normalizePreferencePatch(this.syncedStorageValues),
+            };
+
+            Object.entries(pendingPatch).forEach(([key, value]) => {
+                if (value == null) {
+                    delete this.syncedStorageValues[key];
+                    return;
+                }
+
+                this.syncedStorageValues[key] = value;
+            });
+        }
+
+        return {
+            ...this.syncedStorageValues,
+        };
+    }
+
+    queueUserPreferencePatch(patch = {}) {
+        const normalizedPatch = this.normalizePreferencePatch(patch, { allowNull: true });
+        if (Object.keys(normalizedPatch).length === 0) {
+            return;
+        }
+
+        this.pendingPreferencePatch = {
+            ...this.pendingPreferencePatch,
+            ...normalizedPatch,
+        };
+
+        if (this.preferenceSyncTimer) {
+            clearTimeout(this.preferenceSyncTimer);
+        }
+
+        this.preferenceSyncTimer = window.setTimeout(() => {
+            this.preferenceSyncTimer = null;
+            void this.flushUserPreferencePatch();
+        }, WEB_CHAT_PREFERENCE_SYNC_DELAY_MS);
+    }
+
+    async flushUserPreferencePatch() {
+        const patch = this.normalizePreferencePatch(this.pendingPreferencePatch, { allowNull: true });
+        if (Object.keys(patch).length === 0) {
+            return;
+        }
+
+        this.pendingPreferencePatch = {};
+
+        try {
+            const response = await fetch(this.getPreferencesEndpoint(), {
+                method: 'PUT',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    preferences: patch,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const payload = await response.json();
+            const savedPreferences = this.normalizePreferencePatch(payload?.preferences || {});
+            const pendingPatch = this.normalizePreferencePatch(this.pendingPreferencePatch, { allowNull: true });
+            const nextPreferences = {
+                ...savedPreferences,
+            };
+
+            Object.entries(pendingPatch).forEach(([key, value]) => {
+                if (value == null) {
+                    delete nextPreferences[key];
+                    return;
+                }
+
+                nextPreferences[key] = value;
+            });
+
+            this.syncedStorageValues = nextPreferences;
+            this.syncLocalStoragePreferences(nextPreferences, { removeMissing: true });
+        } catch (error) {
+            console.warn('Failed to save synced web-chat preferences:', error);
+            this.pendingPreferencePatch = {
+                ...patch,
+                ...this.pendingPreferencePatch,
+            };
+        }
+    }
+
+    normalizeSessionTitle(title, fallback = 'New Chat') {
+        const normalized = String(title || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return normalized || fallback;
+    }
+
+    resolveSessionTitle(session = {}, storedSession = null) {
+        const backendTitle = this.normalizeSessionTitle(session?.metadata?.title || '', '');
+        const storedTitle = this.normalizeSessionTitle(
+            storedSession?.title || storedSession?.metadata?.title || '',
+            '',
+        );
+        const backendTimestamp = new Date(session?.updatedAt || session?.createdAt || 0).getTime();
+        const storedTimestamp = new Date(storedSession?.updatedAt || storedSession?.createdAt || 0).getTime();
+
+        if (backendTitle && (!storedTitle || (Number.isFinite(backendTimestamp) && Number.isFinite(storedTimestamp) && backendTimestamp >= storedTimestamp))) {
+            return backendTitle;
+        }
+
+        if (storedTitle) {
+            return storedTitle;
+        }
+
+        return 'New Chat';
     }
 
     // ============================================
@@ -256,31 +566,41 @@ class SessionManager extends EventTarget {
 
                 this.sessions = backendSessions.map((session) => {
                     const stored = storedSessions.get(session.id);
+                    const mergedMetadata = {
+                        ...(stored?.metadata && typeof stored.metadata === 'object' && !Array.isArray(stored.metadata)
+                            ? stored.metadata
+                            : {}),
+                        ...(session.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+                            ? session.metadata
+                            : {}),
+                    };
                     let model;
                     
                     // Safely get default model
                     try {
-                        model = session.metadata?.model
+                        model = mergedMetadata.model
                             || stored?.model
                             || this.safeStorageGet('kimibuilt_default_model')
                             || SESSION_DEFAULT_MODEL;
                     } catch (e) {
-                        model = session.metadata?.model || stored?.model || SESSION_DEFAULT_MODEL;
+                        model = mergedMetadata.model || stored?.model || SESSION_DEFAULT_MODEL;
                     }
                     model = normalizeSessionModel(model, SESSION_DEFAULT_MODEL);
                     
                     return {
                         id: session.id,
-                        mode: session.metadata?.mode || stored?.mode || 'chat',
+                        mode: mergedMetadata.mode || stored?.mode || 'chat',
                         model: model,
-                        title: stored?.title || 'New Chat',
+                        title: this.resolveSessionTitle({
+                            ...session,
+                            metadata: mergedMetadata,
+                        }, stored),
                         createdAt: session.createdAt,
                         updatedAt: session.updatedAt,
-                        metadata: session.metadata || stored?.metadata || {},
+                        metadata: mergedMetadata,
                         controlState: session.controlState
                             || stored?.controlState
-                            || session.metadata?.controlState
-                            || stored?.metadata?.controlState
+                            || mergedMetadata.controlState
                             || {},
                         workloadSummary: session.workloadSummary || stored?.workloadSummary || {
                             queued: 0,
@@ -750,6 +1070,11 @@ class SessionManager extends EventTarget {
         this.saveToStorage();
         if (!this.isLocalSession(newSessionId)) {
             void this.persistActiveSession(newSessionId);
+            const promotedSession = this.sessions.find((entry) => entry.id === newSessionId);
+            const promotedTitle = this.normalizeSessionTitle(promotedSession?.title || '', '');
+            if (promotedTitle && promotedTitle !== 'New Chat') {
+                void this.persistSessionMetadata(newSessionId, { title: promotedTitle });
+            }
         }
         this.dispatchEvent(new CustomEvent('sessionPromoted', {
             detail: {
@@ -763,6 +1088,107 @@ class SessionManager extends EventTarget {
         }));
 
         return newSessionId;
+    }
+
+    updateSessionTitleLocally(sessionId, title, options = {}) {
+        const session = this.sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+            return null;
+        }
+
+        const nextTitle = this.normalizeSessionTitle(title);
+        const previousTitle = this.normalizeSessionTitle(session.title, '');
+        const metadata = session.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+            ? session.metadata
+            : {};
+
+        session.title = nextTitle;
+        session.metadata = {
+            ...metadata,
+            title: nextTitle,
+        };
+
+        if (options.touchUpdatedAt !== false) {
+            session.updatedAt = new Date().toISOString();
+        }
+
+        if (options.save !== false) {
+            this.saveToStorage();
+        }
+
+        if (options.dispatch !== false && (previousTitle !== nextTitle || options.forceDispatch === true)) {
+            this.dispatchEvent(new CustomEvent('sessionsChanged', {
+                detail: { sessions: this.sessions },
+            }));
+        }
+
+        return session;
+    }
+
+    async persistSessionMetadata(sessionId, metadataPatch = {}) {
+        const session = this.sessions.find((entry) => entry.id === sessionId);
+        if (!session || this.isLocalSession(sessionId)) {
+            return true;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/sessions/${encodeURIComponent(sessionId)}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    metadata: metadataPatch,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const savedSession = await response.json();
+            const targetSession = this.sessions.find((entry) => entry.id === sessionId);
+            if (targetSession) {
+                const savedMetadata = savedSession?.metadata && typeof savedSession.metadata === 'object' && !Array.isArray(savedSession.metadata)
+                    ? savedSession.metadata
+                    : {};
+                targetSession.metadata = {
+                    ...(targetSession.metadata || {}),
+                    ...savedMetadata,
+                };
+                targetSession.updatedAt = savedSession?.updatedAt || targetSession.updatedAt || new Date().toISOString();
+                targetSession.title = this.resolveSessionTitle({
+                    ...savedSession,
+                    metadata: targetSession.metadata,
+                    updatedAt: targetSession.updatedAt,
+                }, targetSession);
+                this.saveToStorage();
+                this.dispatchEvent(new CustomEvent('sessionsChanged', {
+                    detail: { sessions: this.sessions },
+                }));
+            }
+
+            return true;
+        } catch (error) {
+            console.warn('Failed to persist backend session metadata:', error);
+            return false;
+        }
+    }
+
+    async renameSession(sessionId, title) {
+        const session = this.updateSessionTitleLocally(sessionId, title);
+        if (!session) {
+            return { session: null, persisted: false };
+        }
+
+        const persisted = await this.persistSessionMetadata(sessionId, {
+            title: session.title,
+        });
+
+        return {
+            session,
+            persisted,
+        };
     }
 
     setSessionModel(sessionId, model) {
@@ -807,10 +1233,11 @@ class SessionManager extends EventTarget {
         // Update session title from first user message if it's still default
         const session = this.sessions.find(s => s.id === sessionId);
         if (session && (session.title === 'New Chat' || !session.title) && message.role === 'user') {
-            session.title = this.generateTitleFromMessage(message.content);
-            this.dispatchEvent(new CustomEvent('sessionsChanged', { 
-                detail: { sessions: this.sessions } 
-            }));
+            const generatedTitle = this.generateTitleFromMessage(message.content);
+            this.updateSessionTitleLocally(sessionId, generatedTitle);
+            if (!this.isLocalSession(sessionId)) {
+                void this.persistSessionMetadata(sessionId, { title: generatedTitle });
+            }
         }
         
         // Update session timestamp
@@ -905,6 +1332,10 @@ class SessionManager extends EventTarget {
             const session = this.sessions.find(s => s.id === sessionId);
             if (session) {
                 session.title = 'New Chat';
+                session.metadata = {
+                    ...(session.metadata || {}),
+                    title: 'New Chat',
+                };
                 session.updatedAt = new Date().toISOString();
             }
             

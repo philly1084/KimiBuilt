@@ -625,6 +625,21 @@ class WebChatSoundManager {
         this.applyMasteringProfile();
     }
 
+    refreshFromStorage() {
+        this.enabled = this.parseBoolean(this.storageGet(this.storageKeys.enabled), false);
+        this.menuEnabled = this.parseBoolean(this.storageGet(this.storageKeys.menuEnabled), false);
+        this.soundProfileId = this.normalizeSoundProfileId(
+            this.storageGet(this.storageKeys.profile),
+            DEFAULT_SOUND_PROFILE_ID,
+        );
+        this.volume = this.normalizeVolume(
+            this.storageGet(this.storageKeys.volume),
+            DEFAULT_SOUND_VOLUME,
+        );
+        this.syncUnlockListeners();
+        this.applyMasteringProfile();
+    }
+
     syncUnlockListeners() {
         if (this.hasActivePreferences()) {
             this.installUnlockListeners();

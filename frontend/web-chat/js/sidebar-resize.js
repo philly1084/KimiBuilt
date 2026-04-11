@@ -418,9 +418,18 @@ class SidebarResizer {
     if (this.isCollapsed) {
       this.sidebar.classList.add('collapsed');
       this.resizeHandle.classList.add('collapsed');
-    } else {
-      this.setWidth(this.currentWidth);
+      return;
     }
+
+    this.sidebar.classList.remove('collapsed');
+    this.resizeHandle.classList.remove('collapsed');
+    this.setWidth(this.currentWidth);
+  }
+
+  reloadFromStorage() {
+    this.currentWidth = this.loadWidth();
+    this.isCollapsed = this.loadCollapsedState();
+    this.applyInitialState();
   }
   
   /**

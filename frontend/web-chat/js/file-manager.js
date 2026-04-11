@@ -758,6 +758,7 @@ class FileManager {
    */
   renderFileItem(file) {
     const icon = this.getFileIcon(file.category, file.filename);
+    const openUrl = file.previewUrl || file.downloadUrl || '';
     const statusIcon = {
       ready: '',
       downloading: 'loader',
@@ -804,8 +805,8 @@ class FileManager {
           <button class="file-item-btn" onclick="fileManager.downloadFile('${file.id}')" title="Download" ${file.status === 'downloading' ? 'disabled' : ''}>
             <i data-lucide="download" class="w-4 h-4"></i>
           </button>
-          ${file.downloadUrl ? `
-            <a class="file-item-btn" href="${file.downloadUrl}" target="_blank" title="Open" onclick="event.stopPropagation()">
+          ${openUrl ? `
+            <a class="file-item-btn" href="${openUrl}" target="_blank" title="${file.previewUrl ? 'Preview' : 'Open'}" onclick="event.stopPropagation()">
               <i data-lucide="external-link" class="w-4 h-4"></i>
             </a>
           ` : ''}

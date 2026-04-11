@@ -13,6 +13,7 @@ jest.mock('../session-store', () => ({
         get: jest.fn(),
         getRecentMessages: jest.fn(),
         update: jest.fn(),
+        updateControlState: jest.fn(),
         recordResponse: jest.fn(),
         appendMessages: jest.fn(),
     },
@@ -107,12 +108,14 @@ describe('/api/chat route', () => {
             id: 'session-1',
             previousResponseId: null,
             metadata: {},
+            controlState: {},
         };
         sessionStore.resolveOwnedSession.mockResolvedValue(session);
         sessionStore.getOwned.mockResolvedValue(session);
         sessionStore.get.mockResolvedValue(session);
         sessionStore.getRecentMessages.mockResolvedValue([]);
         sessionStore.update.mockResolvedValue(session);
+        sessionStore.updateControlState.mockResolvedValue({});
         buildInstructionsWithArtifacts.mockResolvedValue('continuity instructions');
         maybeGenerateOutputArtifact.mockResolvedValue([]);
         memoryService.process.mockResolvedValue({ contextMessages: [] });
@@ -925,4 +928,5 @@ describe('/api/chat route', () => {
             }),
         ]);
     });
+
 });
