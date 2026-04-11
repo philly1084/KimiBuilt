@@ -1,6 +1,6 @@
 const DEFAULT_TTS_CACHE_LIMIT = 24;
 const DEFAULT_BROWSER_VOICE_ID = 'browser:default';
-const DEFAULT_PIPER_CHUNK_TARGET_CHARS = 360;
+const DEFAULT_PIPER_CHUNK_TARGET_CHARS = 520;
 const DEFAULT_TTS_MAX_TEXT_CHARS = 2400;
 
 function normalizeSpeechSentence(line = '') {
@@ -723,11 +723,10 @@ class WebChatTtsManager extends EventTarget {
         return Math.abs(hash).toString(36);
     }
 
-    buildCacheKey(messageId = '', text = '') {
+    buildCacheKey(_messageId = '', text = '') {
         return [
             this.getProvider(),
             this.getSelectedVoiceId(),
-            String(messageId || '').trim() || this.hashText(text),
             this.hashText(text),
         ].join(':');
     }
@@ -797,22 +796,32 @@ class WebChatTtsManager extends EventTarget {
         return context;
     }
 
-    async playAudioBlob(audioBlob, messageId = '', options = {}) {
+    async decodeAudioBlob(audioBlob, playbackContext = null) {
         if (!(audioBlob instanceof Blob) || audioBlob.size === 0) {
             throw new Error('No audio was returned for playback.');
         }
 
-        const context = await this.preparePlayback();
-        if (this.currentAudio || this.currentSourceNode || this.currentUtterance) {
-            this.resetPlaybackState();
-        }
-
-        let decodedBuffer = null;
+        const context = playbackContext || await this.preparePlayback();
         try {
             const arrayBuffer = await audioBlob.arrayBuffer();
-            decodedBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+            const decodedBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+            return {
+                context,
+                decodedBuffer,
+            };
         } catch (_error) {
             throw new Error('The generated voice audio could not be decoded for playback.');
+        }
+    }
+
+    async playDecodedAudioBuffer(decodedBuffer, messageId = '', options = {}) {
+        if (!decodedBuffer || typeof decodedBuffer.duration !== 'number') {
+            throw new Error('No audio was returned for playback.');
+        }
+
+        const context = options.playbackContext || await this.preparePlayback();
+        if (this.currentAudio || this.currentSourceNode || this.currentUtterance) {
+            this.resetPlaybackState();
         }
 
         const sourceNode = context.createBufferSource();
@@ -869,6 +878,17 @@ class WebChatTtsManager extends EventTarget {
 
         playbackPromise.catch(() => null);
         return true;
+    }
+
+    async playAudioBlob(audioBlob, messageId = '', options = {}) {
+        const { context, decodedBuffer } = await this.decodeAudioBlob(
+            audioBlob,
+            options.playbackContext || null,
+        );
+        return this.playDecodedAudioBuffer(decodedBuffer, messageId, {
+            ...options,
+            playbackContext: context,
+        });
     }
 
     speakWithBrowserVoice({ messageId = '', text = '' } = {}) {
@@ -949,6 +969,19 @@ class WebChatTtsManager extends EventTarget {
         }
     }
 
+    async synthesizeAndPrepareMessageAudio(text, messageId = '', options = {}) {
+        const result = await this.synthesizeMessageAudio(text, messageId, options);
+        const { context, decodedBuffer } = await this.decodeAudioBlob(
+            result.blob,
+            options.playbackContext || null,
+        );
+        return {
+            ...result,
+            decodedBuffer,
+            playbackContext: context,
+        };
+    }
+
     getPiperSpeechChunks(text = '') {
         return splitTextIntoSpeechChunks(text, {
             absoluteMaxChars: this.maxTextChars,
@@ -956,7 +989,7 @@ class WebChatTtsManager extends EventTarget {
         });
     }
 
-    async speakPiperChunks({ messageId = '', text = '', playbackToken = 0 } = {}) {
+    async speakPiperChunks({ messageId = '', text = '', playbackToken = 0, playbackContext = null } = {}) {
         const normalizedMessageId = String(messageId || '').trim();
         const chunks = this.getPiperSpeechChunks(text);
         if (chunks.length === 0) {
@@ -964,20 +997,24 @@ class WebChatTtsManager extends EventTarget {
         }
 
         if (chunks.length === 1) {
-            const result = await this.synthesizeMessageAudio(chunks[0], normalizedMessageId, {
+            const result = await this.synthesizeAndPrepareMessageAudio(chunks[0], normalizedMessageId, {
                 showLoading: true,
                 resetCurrentMessage: true,
+                playbackContext,
             });
             if (!this.isPlaybackRequestActive(playbackToken)) {
                 return false;
             }
 
-            return this.playAudioBlob(result.blob, normalizedMessageId);
+            return this.playDecodedAudioBuffer(result.decodedBuffer, normalizedMessageId, {
+                playbackContext: result.playbackContext || playbackContext,
+            });
         }
 
-        let nextChunkPromise = this.synthesizeMessageAudio(chunks[0], normalizedMessageId, {
+        let nextChunkPromise = this.synthesizeAndPrepareMessageAudio(chunks[0], normalizedMessageId, {
             showLoading: true,
             resetCurrentMessage: true,
+            playbackContext,
         });
 
         for (let index = 0; index < chunks.length; index += 1) {
@@ -988,14 +1025,17 @@ class WebChatTtsManager extends EventTarget {
 
             const hasNextChunk = index < (chunks.length - 1);
             if (hasNextChunk) {
-                nextChunkPromise = this.synthesizeMessageAudio(chunks[index + 1], normalizedMessageId, {
+                // Decode the next chunk while the current one is still playing.
+                nextChunkPromise = this.synthesizeAndPrepareMessageAudio(chunks[index + 1], normalizedMessageId, {
                     showLoading: false,
+                    playbackContext: chunkResult.playbackContext || playbackContext,
                 });
             }
 
-            const didFinishPlayback = await this.playAudioBlob(chunkResult.blob, normalizedMessageId, {
+            const didFinishPlayback = await this.playDecodedAudioBuffer(chunkResult.decodedBuffer, normalizedMessageId, {
                 awaitEnd: true,
                 keepMessageActiveOnEnd: hasNextChunk,
+                playbackContext: chunkResult.playbackContext || playbackContext,
             });
 
             if (didFinishPlayback === false || !this.isPlaybackRequestActive(playbackToken)) {
@@ -1026,13 +1066,14 @@ class WebChatTtsManager extends EventTarget {
             });
         }
 
-        await this.preparePlayback();
+        const playbackContext = await this.preparePlayback();
 
         try {
             return await this.speakPiperChunks({
                 messageId: normalizedMessageId,
                 text: normalizedText,
                 playbackToken,
+                playbackContext,
             });
         } catch (error) {
             if (this.isPlaybackRequestActive(playbackToken)) {
