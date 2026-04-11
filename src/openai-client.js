@@ -2292,9 +2292,9 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `web-search` for finding current or relevant pages before answering.');
         guidance.push('- When the user explicitly asks for research, call `web-search` first. This backend routes it through the configured Perplexity provider.');
         guidance.push('- Treat strong `web-search` results as approved candidate sources for routine research, best-practice lookups, and news gathering. Do not stop to ask the user to pre-approve normal public domains unless they explicitly want a specific source list.');
-        guidance.push('- For research-backed slides, reports, and deep-research work, use Perplexity-backed `web-search` to discover candidate source URLs yourself. Take the real URLs from the search results or tool output and verify or scrape them directly instead of asking the user which websites to scrape.');
+        guidance.push('- For research-backed slides, reports, and deep-research work, use Perplexity-backed `web-search` to discover candidate source URLs yourself. Choose the strongest sites yourself, verify them with `web-fetch` first, and only use `web-scrape` when a page needs rendered or structured extraction instead of asking the user which websites to scrape.');
         guidance.push('- Use `domains` on `web-search` when the user wants official docs, a known publisher family, or a tighter authoritative source set.');
-        guidance.push('- For explicit research requests, do not stop at search snippets. Verify the strongest search results with `web-fetch` or `web-scrape` and ground the answer in those source pages.');
+        guidance.push('- For explicit research requests, do not stop at search snippets. Verify the strongest search results with `web-fetch` first and only escalate to `web-scrape` when simple retrieval is insufficient.');
         guidance.push('- For deep research, prefer broader Perplexity passes over single-source synthesis so the answer is grounded in multiple current sources.');
     }
 
@@ -2304,6 +2304,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'web-scrape')) {
         guidance.push('- Use `web-scrape` when the user asks to extract fields from a page. Set `browser: true` or `javascript: true` for dynamic sites, certificate/TLS issues, or rendered DOM content. Use `selectors` to pull structured fields and `waitForSelector` when a page must finish rendering.');
+        guidance.push('- Do not default to `web-scrape` for ordinary research verification when `web-fetch` can read the page directly.');
         guidance.push('- For search-follow-up research, use `researchSafe: true` and set `approvedDomains` from the chosen result host so the backend can skip pages that are outside the approved set or explicitly disallow bots.');
         guidance.push('- When the user wants page images from sensitive or adult sites without exposing the model to the content, use `web-scrape` with `captureImages: true` and `blindImageCapture: true` so the backend stores binary artifacts and returns only safe metadata.');
     }
@@ -2331,7 +2332,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
     if (automaticTools.some((entry) => entry.id === DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
         guidance.push('- Use `deep-research-presentation` when the user wants a research-backed slide deck or presentation built in one ordered workflow.');
         guidance.push('- `deep-research-presentation` should handle the sequence itself: plan first, then multiple research passes, then verified image sourcing, then final deck generation.');
-        guidance.push('- `deep-research-presentation` should not stop to ask the user for a public source list during normal research. It should discover source URLs through Perplexity search passes, then verify or scrape the strongest candidates itself.');
+        guidance.push('- `deep-research-presentation` should not stop to ask the user for a public source list during normal research. It should discover source URLs through Perplexity search passes, choose the strongest candidates itself, verify them with `web-fetch` first, and only scrape when a page needs rendered or structured extraction.');
         guidance.push('- Prefer `deep-research-presentation` over manually chaining `web-search`, `image-search-unsplash`, and `document-workflow` when the user explicitly asks for deep research plus a presentation deliverable.');
     }
 

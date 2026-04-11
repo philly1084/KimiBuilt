@@ -3564,6 +3564,45 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('judgment v2 keeps generic research verification on web-fetch ahead of web-scrape', () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'web-fetch', 'web-scrape'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Research managed Postgres providers for startups.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            classification: {
+                taskFamily: 'research',
+                groundingRequirement: 'required',
+                surfaceMode: 'chat',
+                preferredExecutionPath: 'plan-first',
+                checkpointNeed: 'none',
+                confidence: 0.88,
+                ambiguous: false,
+                reasons: ['Research should be grounded before synthesis.'],
+            },
+        });
+
+        expect(toolPolicy.candidateToolScores['web-fetch'].score)
+            .toBeGreaterThan(toolPolicy.candidateToolScores['web-scrape'].score);
+        expect(toolPolicy.candidateToolIds.indexOf('web-fetch'))
+            .toBeLessThan(toolPolicy.candidateToolIds.indexOf('web-scrape'));
+    });
+
     test('judgment v2 filters ungrounded planner document steps and falls back to search-first planning', async () => {
         config.config.runtime.judgmentV2Enabled = true;
 

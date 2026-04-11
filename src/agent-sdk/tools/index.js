@@ -480,7 +480,7 @@ function buildGroundedDocumentPrompt(prompt = '', sources = [], preferences = {}
     sections.push([
       'The source URLs were already discovered from verified research results.',
       'Do not ask the user to supply website lists or source URLs unless they explicitly want to constrain the source set.',
-      'If more grounding is needed, continue with Perplexity-backed search and verify or scrape the strongest public pages before drafting.',
+      'If more grounding is needed, continue with Perplexity-backed search, verify the strongest public pages with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction before drafting.',
       'Use the verified source material below as working facts and source context.',
       'Preserve concrete numbers, names, links, dates, and pricing details unless the source material conflicts.',
       normalizedSources.map((source, index) => [

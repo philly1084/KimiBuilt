@@ -59,6 +59,37 @@ class WebCLIAPI {
         return stream ? CHAT_STREAM_TIMEOUT : DEFAULT_TIMEOUT;
     }
 
+    extractStreamSessionId(payload = {}) {
+        return payload?.session_id
+            || payload?.sessionId
+            || payload?.response?.session_id
+            || payload?.response?.sessionId
+            || null;
+    }
+
+    extractStreamContent(payload = {}) {
+        if (payload?.type === 'response.output_text.delta') {
+            return String(payload.delta || '');
+        }
+
+        if (payload?.type === 'delta') {
+            return String(payload.content || payload.delta || '');
+        }
+
+        return String(
+            payload?.choices?.[0]?.delta?.content
+            || payload?.output_text_delta
+            || '',
+        );
+    }
+
+    isTerminalStreamPayload(payload = {}) {
+        const finishReason = String(payload?.choices?.[0]?.finish_reason || '').toLowerCase();
+        return payload?.type === 'done'
+            || payload?.type === 'response.completed'
+            || ['stop', 'length', 'content_filter'].includes(finishReason);
+    }
+
     /**
      * Create a fetch request with timeout support
      */
@@ -278,10 +309,16 @@ class WebCLIAPI {
                                 };
                                 return;
                             }
-                            const content = parsed.choices?.[0]?.delta?.content || '';
-                            this.sessionId = parsed.session_id || this.sessionId;
+                            const content = this.extractStreamContent(parsed);
+                            const streamSessionId = this.extractStreamSessionId(parsed);
+                            this.sessionId = streamSessionId || this.sessionId;
                             if (content) {
                                 yield { type: 'delta', content };
+                            }
+
+                            if (this.isTerminalStreamPayload(parsed)) {
+                                yield { type: 'done', sessionId: this.sessionId };
+                                return;
                             }
                         } catch (e) {
                             // Ignore parse errors for malformed chunks

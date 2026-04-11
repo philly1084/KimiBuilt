@@ -611,6 +611,16 @@
       return events;
     }
 
+    if (payload.type === 'delta') {
+      events.push({
+        type: 'text_delta',
+        content: stripNullCharacters(payload.content || payload.delta || ''),
+        raw: payload,
+        ...metadata,
+      });
+      return events;
+    }
+
     if (payload.type === 'response.reasoning_summary_text.delta') {
       const reasoning = stripNullCharacters(payload.delta || '');
       const summary = stripNullCharacters(payload.summary || payload.reasoningSummary || payload.reasoning_summary || reasoning);

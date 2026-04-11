@@ -449,7 +449,7 @@ function setSessionHeaders(res, sessionId) {
     res.setHeader('X-Thread-Id', sessionId);
 }
 
-function openSseStream(res, sessionId = null, route = 'unknown') {
+function openSseStream(req, res, sessionId = null, route = 'unknown') {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -457,6 +457,24 @@ function openSseStream(res, sessionId = null, route = 'unknown') {
     setSessionHeaders(res, sessionId);
     res.flushHeaders?.();
     res.write(': stream-open\n\n');
+
+    const keepAlive = setInterval(() => {
+        if (res.writableEnded || req.destroyed) {
+            clearInterval(keepAlive);
+            return;
+        }
+
+        res.write(': keepalive\n\n');
+    }, 15000);
+
+    const cleanup = () => {
+        clearInterval(keepAlive);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+
     console.log(`[OpenAICompat] SSE stream opened route=${route} sessionId=${sessionId || 'unknown'}`);
 }
 
@@ -744,7 +762,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 : session;
 
             if (stream) {
-                openSseStream(res, sessionId, '/v1/chat/completions#artifact');
+                openSseStream(req, res, sessionId, '/v1/chat/completions#artifact');
             }
 
             const generation = await generateOutputArtifactFromPrompt({
@@ -890,7 +908,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const input = effectiveMessages;
 
         if (stream) {
-            openSseStream(res, sessionId, '/v1/chat/completions');
+            openSseStream(req, res, sessionId, '/v1/chat/completions');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: messages.map((message) => (
@@ -1461,7 +1479,7 @@ router.post('/responses', async (req, res, next) => {
                 : session;
 
             if (stream) {
-                openSseStream(res, sessionId, '/v1/responses#artifact');
+                openSseStream(req, res, sessionId, '/v1/responses#artifact');
             }
 
             const generation = await generateOutputArtifactFromPrompt({
@@ -1602,7 +1620,7 @@ router.post('/responses', async (req, res, next) => {
         console.log(`[OpenAICompat] responses routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(responsesControlState?.lastToolIntent || responsesControlState?.lastSshTarget?.host || responsesControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(responsesControlState?.lastRemoteObjective || '')}`);
 
         if (stream) {
-            openSseStream(res, sessionId, '/v1/responses');
+            openSseStream(req, res, sessionId, '/v1/responses');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: runtimeInput,

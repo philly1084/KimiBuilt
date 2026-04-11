@@ -20,19 +20,19 @@ describe('/api/tts', () => {
         jest.clearAllMocks();
         ttsService.getPublicConfig.mockReturnValue({
             configured: true,
-            provider: 'openai',
-            defaultVoiceId: 'openai-marin-natural',
+            provider: 'piper',
+            defaultVoiceId: 'hfc-female-rich',
             diagnostics: {
                 status: 'ready',
                 binaryReachable: true,
                 voicesLoaded: true,
-                message: 'OpenAI voice playback is ready.',
+                message: 'Piper voice playback is ready.',
             },
             voices: [{
-                id: 'openai-marin-natural',
-                label: 'Marin natural',
-                description: 'Warm and natural.',
-                provider: 'openai',
+                id: 'hfc-female-rich',
+                label: 'HFC Rich',
+                description: 'Warm and natural local voice.',
+                provider: 'piper',
             }],
         });
     });
@@ -46,8 +46,8 @@ describe('/api/tts', () => {
         expect(response.status).toBe(200);
         expect(response.body).toEqual(expect.objectContaining({
             configured: true,
-            provider: 'openai',
-            defaultVoiceId: 'openai-marin-natural',
+            provider: 'piper',
+            defaultVoiceId: 'hfc-female-rich',
             diagnostics: expect.objectContaining({
                 status: 'ready',
                 binaryReachable: true,
@@ -65,10 +65,10 @@ describe('/api/tts', () => {
         ttsService.synthesize.mockResolvedValue({
             audioBuffer: buffer,
             contentType: 'audio/wav',
-            provider: 'openai',
+            provider: 'piper',
             voice: {
-                id: 'openai-marin-natural',
-                label: 'Marin natural',
+                id: 'hfc-female-rich',
+                label: 'HFC Rich',
             },
         });
 
@@ -76,13 +76,13 @@ describe('/api/tts', () => {
             .post('/api/tts/synthesize')
             .send({
                 text: 'Hello from Piper.',
-                voiceId: 'openai-marin-natural',
+                voiceId: 'hfc-female-rich',
             });
 
         expect(response.status).toBe(200);
         expect(response.headers['content-type']).toMatch(/audio\/wav/);
-        expect(response.headers['x-tts-provider']).toBe('openai');
-        expect(response.headers['x-tts-voice-id']).toBe('openai-marin-natural');
+        expect(response.headers['x-tts-provider']).toBe('piper');
+        expect(response.headers['x-tts-voice-id']).toBe('hfc-female-rich');
         expect(response.body.equals(buffer)).toBe(true);
     });
 

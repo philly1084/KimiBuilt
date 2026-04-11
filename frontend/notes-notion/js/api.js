@@ -174,6 +174,37 @@ const API = (function() {
         return '';
     }
 
+    function extractStreamSessionId(payload = {}) {
+        return payload?.session_id
+            || payload?.sessionId
+            || payload?.response?.session_id
+            || payload?.response?.sessionId
+            || null;
+    }
+
+    function extractStreamTextDelta(payload = {}) {
+        if (payload?.type === 'response.output_text.delta') {
+            return String(payload.delta || '');
+        }
+
+        if (payload?.type === 'delta') {
+            return String(payload.content || payload.delta || '');
+        }
+
+        return String(
+            payload?.choices?.[0]?.delta?.content
+            || payload?.output_text_delta
+            || '',
+        );
+    }
+
+    function isTerminalStreamPayload(payload = {}) {
+        const finishReason = String(payload?.choices?.[0]?.finish_reason || '').toLowerCase();
+        return payload?.type === 'done'
+            || payload?.type === 'response.completed'
+            || ['stop', 'length', 'content_filter'].includes(finishReason);
+    }
+
     function extractChatContent(response) {
         return extractTextFromValue(
             response?.choices?.[0]?.message?.content
@@ -311,10 +342,15 @@ const API = (function() {
                         
                         try {
                             const parsed = JSON.parse(data);
-                            const content = parsed.choices?.[0]?.delta?.content || '';
-                            currentSessionId = parsed.session_id || currentSessionId;
+                            const content = extractStreamTextDelta(parsed);
+                            currentSessionId = extractStreamSessionId(parsed) || currentSessionId;
                             if (content) {
                                 yield { type: 'delta', content };
+                            }
+
+                            if (isTerminalStreamPayload(parsed)) {
+                                yield { type: 'done', sessionId: currentSessionId };
+                                return;
                             }
                         } catch (e) {
                             // Ignore parse errors

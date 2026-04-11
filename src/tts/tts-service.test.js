@@ -1,188 +1,153 @@
 const { TtsService } = require('./tts-service');
 
-function createProvider(id, diagnosticsStatus = 'ready', synthesizeImpl = async () => ({
-    provider: id,
-    audioBuffer: Buffer.from(`${id}-audio`),
+function createProvider(diagnosticsStatus = 'ready', synthesizeImpl = async () => ({
+    provider: 'piper',
+    audioBuffer: Buffer.from('piper-audio'),
 }), publicConfigOverrides = {}) {
     return {
-        getDiagnostics: jest.fn(() => ({
-            status: diagnosticsStatus,
-        })),
         getPublicConfig: jest.fn(() => ({
             configured: diagnosticsStatus === 'ready',
-            provider: id,
-            voices: [],
+            provider: 'piper',
+            voices: [{
+                id: 'hfc-female-rich',
+                label: 'HFC Rich',
+                provider: 'piper',
+            }],
             diagnostics: {
                 status: diagnosticsStatus,
             },
             ...publicConfigOverrides,
         })),
-        resolveVoiceProfile: jest.fn(() => null),
         synthesize: jest.fn(synthesizeImpl),
     };
 }
 
 describe('TtsService', () => {
-    test('falls back to the next provider when the preferred provider fails with a retriable error', async () => {
-        const piperError = new Error('Piper failed');
-        piperError.statusCode = 502;
-        piperError.code = 'tts_failed';
-
-        const piper = createProvider('piper', 'ready', async () => {
-            throw piperError;
-        });
-        const openai = createProvider('openai');
-        const service = new TtsService({
-            provider: 'piper',
-        }, {
+    test('delegates synthesis to the Piper provider', async () => {
+        const piper = createProvider('ready');
+        const service = new TtsService({}, {
             piper,
-            openai,
         });
 
         const result = await service.synthesize({
             text: 'Hello there.',
+            voiceId: 'hfc-female-rich',
         });
 
-        expect(piper.synthesize).toHaveBeenCalledTimes(1);
-        expect(openai.synthesize).toHaveBeenCalledTimes(1);
-        expect(result.provider).toBe('openai');
-    });
-
-    test('auto mode prefers OpenAI when the OpenAI provider is ready', async () => {
-        const piper = createProvider('piper', 'ready');
-        const openai = createProvider('openai', 'ready');
-        const service = new TtsService({
-            provider: 'auto',
-        }, {
-            piper,
-            openai,
-        });
-
-        const result = await service.synthesize({
+        expect(piper.synthesize).toHaveBeenCalledWith({
             text: 'Hello there.',
+            voiceId: 'hfc-female-rich',
         });
-
-        expect(openai.synthesize).toHaveBeenCalledTimes(1);
-        expect(piper.synthesize).not.toHaveBeenCalled();
-        expect(result.provider).toBe('openai');
+        expect(result.provider).toBe('piper');
     });
 
-    test('does not fall back when the request explicitly targets a provider voice', async () => {
-        const piperError = new Error('Piper failed');
-        piperError.statusCode = 502;
-        piperError.code = 'tts_failed';
-
-        const piper = createProvider('piper', 'ready', async () => {
-            throw piperError;
-        });
-        piper.resolveVoiceProfile.mockImplementation((voiceId = '') => (
-            voiceId === 'piper-female-natural' ? { id: voiceId } : null
-        ));
-        const openai = createProvider('openai');
-        const service = new TtsService({
-            provider: 'piper',
-        }, {
-            piper,
-            openai,
-        });
-
-        await expect(service.synthesize({
-            text: 'Hello there.',
-            voiceId: 'piper-female-natural',
-        })).rejects.toThrow('Piper failed');
-
-        expect(piper.synthesize).toHaveBeenCalledTimes(1);
-        expect(openai.synthesize).not.toHaveBeenCalled();
-    });
-
-    test('returns an aggregated public voice catalog across providers', () => {
-        const piper = createProvider('piper', 'ready', undefined, {
-            defaultVoiceId: 'piper-amy',
-            voices: [
-                { id: 'piper-amy', label: 'Amy', provider: 'piper' },
-                { id: 'piper-hfc', label: 'HFC Rich', provider: 'piper' },
-            ],
-            diagnostics: {
-                status: 'ready',
-                message: '2 Piper voices ready.',
-            },
-        });
-        const openai = createProvider('openai', 'ready', undefined, {
-            defaultVoiceId: 'openai-marin-natural',
-            voices: [
-                { id: 'openai-marin-natural', label: 'Marin natural', provider: 'openai' },
-            ],
-            diagnostics: {
-                status: 'ready',
-                message: '1 OpenAI voice preset ready.',
-            },
-        });
-        const service = new TtsService({
-            provider: 'piper',
-        }, {
-            piper,
-            openai,
-        });
-
-        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
-            configured: true,
-            provider: 'piper',
-            defaultVoiceId: 'piper-amy',
-            diagnostics: expect.objectContaining({
-                status: 'ready',
-                voicesLoaded: true,
-            }),
-            voices: expect.arrayContaining([
-                expect.objectContaining({ id: 'piper-amy', provider: 'piper' }),
-                expect.objectContaining({ id: 'openai-marin-natural', provider: 'openai' }),
-            ]),
-            providers: expect.arrayContaining([
-                expect.objectContaining({ provider: 'piper', configured: true }),
-                expect.objectContaining({ provider: 'openai', configured: true }),
-            ]),
-        }));
-    });
-
-    test('does not expose voices from providers that are not configured', () => {
-        const piper = createProvider('piper', 'ready', undefined, {
+    test('returns the Piper public config plus a single-provider catalog', () => {
+        const piper = createProvider('ready', undefined, {
+            maxTextChars: 2400,
             defaultVoiceId: 'hfc-female-rich',
-            voices: [
-                { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
-            ],
             diagnostics: {
                 status: 'ready',
                 message: '1 Piper voice ready.',
+                binaryReachable: true,
+                voicesLoaded: true,
             },
         });
-        const openai = createProvider('openai', 'misconfigured', undefined, {
-            configured: false,
-            defaultVoiceId: null,
-            voices: [
-                { id: 'openai-marin-natural', label: 'Marin natural', provider: 'openai' },
-            ],
-            diagnostics: {
-                status: 'misconfigured',
-                message: 'OpenAI voice playback is enabled, but no API key is configured.',
-            },
-        });
-        const service = new TtsService({
-            provider: 'piper',
-        }, {
+        const service = new TtsService({}, {
             piper,
-            openai,
         });
 
         expect(service.getPublicConfig()).toEqual(expect.objectContaining({
             configured: true,
             provider: 'piper',
+            maxTextChars: 2400,
             defaultVoiceId: 'hfc-female-rich',
             voices: [
                 expect.objectContaining({ id: 'hfc-female-rich', provider: 'piper' }),
             ],
-            providers: expect.arrayContaining([
+            providers: [
                 expect.objectContaining({ provider: 'piper', configured: true }),
-                expect.objectContaining({ provider: 'openai', configured: false }),
-            ]),
+            ],
+            diagnostics: expect.objectContaining({
+                status: 'ready',
+                voicesLoaded: true,
+            }),
         }));
+    });
+
+    test('keeps Piper voices visible even when the provider is misconfigured', () => {
+        const piper = createProvider('misconfigured', undefined, {
+            configured: false,
+            defaultVoiceId: 'hfc-female-rich',
+            diagnostics: {
+                status: 'misconfigured',
+                message: 'Piper binary is missing.',
+                binaryReachable: false,
+                voicesLoaded: true,
+            },
+        });
+        const service = new TtsService({}, {
+            piper,
+        });
+
+        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
+            configured: false,
+            provider: 'piper',
+            defaultVoiceId: null,
+            voices: [
+                expect.objectContaining({ id: 'hfc-female-rich', provider: 'piper' }),
+            ],
+            providers: [
+                expect.objectContaining({ provider: 'piper', configured: false }),
+            ],
+            diagnostics: expect.objectContaining({
+                status: 'misconfigured',
+                voicesLoaded: true,
+            }),
+        }));
+    });
+
+    test('returns an unavailable payload when no provider is configured', async () => {
+        const service = new TtsService({}, {
+            provider: null,
+            piper: null,
+        });
+
+        expect(service.getPublicConfig()).toEqual(expect.objectContaining({
+            configured: false,
+            provider: 'none',
+            voices: [],
+            providers: [],
+            diagnostics: expect.objectContaining({
+                status: 'unavailable',
+                voicesLoaded: false,
+            }),
+        }));
+
+        await expect(service.synthesize({
+            text: 'Hello there.',
+        })).rejects.toMatchObject({
+            statusCode: 503,
+            code: 'tts_unavailable',
+        });
+    });
+
+    test('surfaces Piper synthesis errors without fallback behavior', async () => {
+        const piperError = new Error('Piper failed');
+        piperError.statusCode = 502;
+        piperError.code = 'tts_failed';
+
+        const piper = createProvider('ready', async () => {
+            throw piperError;
+        });
+        const service = new TtsService({}, {
+            piper,
+        });
+
+        await expect(service.synthesize({
+            text: 'Hello there.',
+            voiceId: 'hfc-female-rich',
+        })).rejects.toThrow('Piper failed');
+
+        expect(piper.synthesize).toHaveBeenCalledTimes(1);
     });
 });

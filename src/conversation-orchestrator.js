@@ -677,8 +677,8 @@ function buildScoredCandidateToolMap({
 
         if (classification.groundingRequirement === 'required') {
             adjustCandidateToolScore(scoreMap, 'web-search', 1.5, 'Grounding is required, so web search should lead.');
-            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 1.05 : 0.65, 'Grounded research may need verified page retrieval.');
-            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent || hasUrl ? 1.15 : 0.55, 'Grounded research may need rendered or structured extraction.');
+            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 1.15 : 0.8, 'Grounded research should verify result pages directly before considering scraping.');
+            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent ? 1.15 : (hasUrl ? 0.45 : 0.2), 'Grounded research only needs scraping when rendered or structured extraction is necessary.');
             adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, groundedResearch ? 0.95 : 0.2, groundedResearch
                 ? 'Verified research sources are ready for a grounded deliverable.'
                 : 'Document generation should wait for verified sources.');
@@ -698,8 +698,8 @@ function buildScoredCandidateToolMap({
         case 'research':
         case 'research-deliverable':
             adjustCandidateToolScore(scoreMap, 'web-search', 1.25, 'Research intent favors search-first grounding.');
-            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 0.9 : 0.35, 'Research intent benefits from verified source fetches.');
-            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent ? 1.0 : 0.45, 'Research intent may need structured page extraction.');
+            adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 0.95 : 0.55, 'Research intent benefits from direct source-page verification.');
+            adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent ? 1.0 : 0.15, 'Research intent should only escalate to scraping when extraction is necessary.');
             break;
         case 'document':
             adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, 0.95, 'A document deliverable is the primary outcome.');
@@ -6797,10 +6797,10 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not turn `user-checkpoint` into a long questionnaire, a page of questions, or more than 6 steps.',
             'When the latest user turn starts with `Survey response (`, treat that as the resolved answer to the prior checkpoint and continue the work instead of planning another survey.',
             'For research, web-search, web-fetch, or web-scrape work, avoid long scrape surveys and example-heavy intake. If clarification is truly needed, use one short choice hotlist with 2 to 4 concrete options, then continue after the answer.',
-            'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, then verify or scrape the strongest public pages yourself unless the user explicitly wants a constrained source list.',
+            'For routine public research and research-backed slides or documents, do not stop to ask which websites to scrape. Use Perplexity-backed `web-search` to discover candidate URLs, choose the strongest public sources yourself, verify them with `web-fetch` first, and use `web-scrape` only when a page needs rendered or structured extraction unless the user explicitly wants a constrained source list.',
             'Every `document-workflow` step must include `params.action` set to `recommend`, `plan`, `generate`, or `assemble`.',
             'Use `document-workflow generate` for final briefs, reports, documents, HTML pages, and slide decks.',
-            'When the user wants a research-backed deliverable, prefer `web-search` and `web-scrape` first, then `document-workflow` with grounded `sources` derived from the verified tool results.',
+            'When the user wants a research-backed deliverable, prefer `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before `document-workflow` with grounded `sources` derived from the verified tool results.',
             'Set `document-workflow.params.includeContent` to `true` only when a later step needs the full textual body for `file-write`; otherwise prefer the stored document download URL.',
             'Use `deep-research-presentation` when the user wants a research-backed deck handled as one ordered plan -> research -> images -> presentation workflow.',
             ...(toolPolicy?.userCheckpointPolicy?.enabled
@@ -7475,15 +7475,15 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (allowedToolIds.includes(DOCUMENT_WORKFLOW_TOOL_ID)) {
             parts.push('Use `document-workflow` to recommend, plan, and generate reports, briefs, HTML documents, and slide decks.');
-            parts.push('For routine public research behind those deliverables, discover candidate source URLs through Perplexity-backed `web-search` and verify or scrape them directly instead of asking the user which websites to scrape.');
-            parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-scrape` first, then call `document-workflow generate` with grounded `sources` built from those verified results.');
+            parts.push('For routine public research behind those deliverables, discover candidate source URLs through Perplexity-backed `web-search`, choose the strongest sites yourself, verify them with `web-fetch` first, and use `web-scrape` only when deeper extraction is needed instead of asking the user which websites to scrape.');
+            parts.push('For research-backed deliverables, gather verified facts with `web-search` and `web-fetch` first, then use `web-scrape` only when a page needs rendered or structured extraction before calling `document-workflow generate` with grounded `sources` built from those verified results.');
             parts.push('Use `document-workflow assemble` when the goal is to compile source material into a straightforward document without heavy rewriting.');
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
         }
 
         if (allowedToolIds.includes(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
             parts.push('Use `deep-research-presentation` when the user explicitly wants a research-backed slide deck built through one ordered workflow: planning, multiple research passes, image sourcing, then final presentation generation.');
-            parts.push('During that workflow, do not stop to ask for a routine public source list. Discover source URLs through Perplexity search passes, then verify or scrape the strongest candidates directly.');
+            parts.push('During that workflow, do not stop to ask for a routine public source list. Discover source URLs through Perplexity search passes, choose the strongest candidates yourself, verify them with `web-fetch` first, and only scrape when a page needs rendered or structured extraction.');
         }
 
         if (allowedToolIds.includes('asset-search')) {

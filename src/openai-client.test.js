@@ -693,7 +693,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(guidance).toContain('prompt for one image, not a collage');
     });
 
-    test('research guidance tells the model to discover scrape URLs itself for deep research deliverables', () => {
+    test('research guidance tells the model to discover sources itself and fetch before scraping for deep research deliverables', () => {
         const guidance = __testUtils.buildAutomaticToolGuidance([
             { id: 'web-search' },
             { id: 'web-scrape' },
@@ -701,6 +701,7 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
 
         expect(guidance).toContain('use Perplexity-backed `web-search` to discover candidate source URLs yourself');
+        expect(guidance).toContain('verify them with `web-fetch` first');
         expect(guidance).toContain('instead of asking the user which websites to scrape');
         expect(guidance).toContain('approvedDomains` from the chosen result host');
         expect(guidance).toContain('should not stop to ask the user for a public source list');

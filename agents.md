@@ -40,6 +40,12 @@ Clients (CLI / Web Chat / Canvas / Notation)
 - **Vector DB:** Qdrant for contextual memory / RAG
 - **Deployment:** ARM64 k3s cluster with Traefik ingress
 
+## Research Defaults
+
+- For routine public web research, start with Perplexity-backed `web-search`
+- Keep user intake minimal; unless the user explicitly constrains the source list, the agent should choose candidate sites and domains itself
+- Verify selected pages with `web-fetch` first; use `web-scrape` only for explicit extraction requests, JS-rendered pages, or structured field capture
+
 ---
 
 ## Build and Test Commands

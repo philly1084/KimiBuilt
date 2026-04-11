@@ -5,6 +5,7 @@ Purpose: extract named fields from a web page.
 Use when:
 - the user asks to pull headings, prices, links, labels, or repeated items
 - you need structured extraction rather than raw HTML
+- the page requires browser rendering or interaction before the data is visible
 
 Key params:
 - `url`
@@ -34,4 +35,5 @@ Selector format:
 Notes:
 - Selector support is intentionally basic.
 - Good for tags, ids, classes, and repeated simple fields.
+- Not the default follow-up for ordinary research verification; prefer `web-fetch` when simple page retrieval is enough.
 - For search-follow-up research, use `researchSafe: true` and `approvedDomains` so the backend can skip pages that are outside the approved source set or explicitly disallow bots in `robots.txt`.

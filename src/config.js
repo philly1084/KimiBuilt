@@ -277,21 +277,7 @@ const config = {
     },
 
     tts: {
-        provider: process.env.TTS_PROVIDER || 'auto',
-        openai: {
-            enabled: process.env.OPENAI_TTS_ENABLED !== 'false',
-            apiKey: process.env.OPENAI_TTS_API_KEY || process.env.OPENAI_MEDIA_API_KEY || process.env.OPENAI_API_KEY || '',
-            baseURL: process.env.OPENAI_TTS_BASE_URL || process.env.OPENAI_MEDIA_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-            model: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
-            responseFormat: process.env.OPENAI_TTS_RESPONSE_FORMAT || 'wav',
-            defaultVoiceId: process.env.OPENAI_TTS_DEFAULT_VOICE_ID || 'openai-marin-natural',
-            defaultInstructions: process.env.OPENAI_TTS_INSTRUCTIONS
-                || 'Speak with a warm, natural, feminine tone. Use expressive but grounded inflection, smooth pacing, and clean articulation without sounding theatrical.',
-            maxTextChars: Math.max(
-                200,
-                parseInt(process.env.OPENAI_TTS_MAX_TEXT_CHARS, 10) || 3600,
-            ),
-        },
+        provider: 'piper',
         piper: {
             enabled: process.env.PIPER_TTS_ENABLED !== 'false',
             binaryPath: resolveConfigPath(process.env.PIPER_TTS_BINARY_PATH || resolveBundledPiperBinaryPath() || 'piper'),

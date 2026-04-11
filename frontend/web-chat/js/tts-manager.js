@@ -318,9 +318,6 @@ class WebChatTtsManager extends EventTarget {
         if (provider === 'browser') {
             return 'Browser voice';
         }
-        if (provider === 'openai') {
-            return 'OpenAI';
-        }
         if (provider === 'piper') {
             return 'Piper';
         }
@@ -389,10 +386,6 @@ class WebChatTtsManager extends EventTarget {
 
         if (this.getProvider() === 'browser') {
             return 'System voice';
-        }
-
-        if (this.getProvider() === 'openai') {
-            return 'OpenAI voice';
         }
 
         return 'Piper voice';
@@ -522,11 +515,9 @@ class WebChatTtsManager extends EventTarget {
                 Number(manifest?.maxTextChars) || DEFAULT_TTS_MAX_TEXT_CHARS,
             );
             const manifestProvider = String(manifest?.provider || 'piper').trim() || 'piper';
-            const manifestProviderLabel = manifestProvider === 'openai'
-                ? 'OpenAI'
-                : (manifestProvider === 'browser' ? 'Browser voice' : 'Piper');
-            const manifestUnavailableMessage = manifestProvider === 'openai'
-                ? 'OpenAI voice playback is unavailable.'
+            const manifestProviderLabel = manifestProvider === 'browser' ? 'Browser voice' : 'Piper';
+            const manifestUnavailableMessage = manifestProvider === 'browser'
+                ? 'Browser voice playback is unavailable.'
                 : 'Piper voice playback is unavailable.';
             const manifestDiagnostics = manifest?.diagnostics && typeof manifest.diagnostics === 'object'
                 ? {
@@ -1035,23 +1026,11 @@ class WebChatTtsManager extends EventTarget {
         await this.preparePlayback();
 
         try {
-            if (this.getProvider() === 'piper') {
-                return await this.speakPiperChunks({
-                    messageId: normalizedMessageId,
-                    text: normalizedText,
-                    playbackToken,
-                });
-            }
-
-            const result = await this.synthesizeMessageAudio(normalizedText, normalizedMessageId, {
-                showLoading: true,
-                resetCurrentMessage: true,
+            return await this.speakPiperChunks({
+                messageId: normalizedMessageId,
+                text: normalizedText,
+                playbackToken,
             });
-            if (!this.isPlaybackRequestActive(playbackToken)) {
-                return false;
-            }
-
-            return this.playAudioBlob(result.blob, normalizedMessageId);
         } catch (error) {
             if (this.isPlaybackRequestActive(playbackToken)) {
                 this.loadingMessageId = '';

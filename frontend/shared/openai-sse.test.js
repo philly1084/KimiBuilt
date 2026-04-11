@@ -92,6 +92,21 @@ describe('openai-sse helpers', () => {
     expect(events[2].toolCalls).toHaveLength(1);
   });
 
+  test('normalizes custom /api/chat delta payloads', () => {
+    const events = normalizeGatewayEventPayload({
+      type: 'delta',
+      sessionId: 'session-123',
+      content: 'Hello from /api/chat',
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'text_delta',
+      sessionId: 'session-123',
+      content: 'Hello from /api/chat',
+    });
+  });
+
   test('normalizes final JSON chat completion fallback text', () => {
     const events = normalizeGatewayEventPayload({
       object: 'chat.completion',

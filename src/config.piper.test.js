@@ -24,6 +24,7 @@ describe('config bundled Piper defaults', () => {
     test('loads the bundled Piper voice manifest and chooses the rich default voice when explicit env overrides are absent', () => {
         const { config } = require('./config');
 
+        expect(config.tts.provider).toBe('piper');
         expect(
             config.tts.piper.binaryPath === 'piper'
             || config.tts.piper.binaryPath.includes(path.join('data', 'piper', 'runtime', 'piper')),

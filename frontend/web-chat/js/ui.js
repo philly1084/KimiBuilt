@@ -4478,9 +4478,7 @@ class UIHelpers {
             return voiceLabel;
         }
 
-        const providerLabel = providerId === 'openai'
-            ? 'OpenAI'
-            : (providerId === 'browser' ? 'Browser' : 'Piper');
+        const providerLabel = providerId === 'browser' ? 'Browser' : 'Piper';
         return `${providerLabel} - ${voiceLabel}`;
     }
 
@@ -4488,9 +4486,6 @@ class UIHelpers {
         const providerId = this.ttsManager?.getProvider?.() || '';
         if (providerId === 'browser') {
             return 'Browser voice';
-        }
-        if (providerId === 'openai') {
-            return 'OpenAI voice';
         }
         if (providerId === 'piper') {
             return 'Piper voice';

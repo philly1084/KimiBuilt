@@ -141,6 +141,37 @@ function resolveConversationTaskType(metadata = {}, session = null) {
     return candidates.find((value) => typeof value === 'string' && value.trim()) || 'chat';
 }
 
+function openSseStream(req, res, sessionId = null, route = '/api/chat') {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (sessionId) {
+        res.setHeader('X-Session-Id', sessionId);
+    }
+    res.flushHeaders?.();
+    res.write(': stream-open\n\n');
+
+    const keepAlive = setInterval(() => {
+        if (res.writableEnded || req.destroyed) {
+            clearInterval(keepAlive);
+            return;
+        }
+
+        res.write(': keepalive\n\n');
+    }, 15000);
+
+    const cleanup = () => {
+        clearInterval(keepAlive);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+
+    console.log(`[ChatRoute] SSE stream opened route=${route} sessionId=${sessionId || 'unknown'}`);
+}
+
 router.post('/', validate(chatSchema), async (req, res, next) => {
     let runtimeTask = null;
     const startedAt = Date.now();
@@ -349,10 +380,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             );
 
             if (stream) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.setHeader('X-Session-Id', sessionId);
+                openSseStream(req, res, sessionId);
             }
 
             await sessionStore.recordResponse(sessionId, generationArtifacts.responseId);
@@ -453,10 +481,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         );
 
         if (stream) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Session-Id', sessionId);
+            openSseStream(req, res, sessionId);
 
             const toolManager = await ensureRuntimeToolManager(req.app);
 

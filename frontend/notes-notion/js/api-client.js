@@ -109,6 +109,36 @@ function stripNullCharacters(value = '') {
     return String(value || '').replace(/\u0000/g, '');
 }
 
+function extractStreamSessionId(payload = {}) {
+    return payload?.session_id
+        || payload?.sessionId
+        || payload?.response?.session_id
+        || payload?.response?.sessionId
+        || null;
+}
+
+function extractStreamTextDelta(payload = {}) {
+    if (payload?.type === 'response.output_text.delta') {
+        return stripNullCharacters(payload.delta || '');
+    }
+
+    if (payload?.type === 'delta') {
+        return stripNullCharacters(payload.content || payload.delta || '');
+    }
+
+    return stripNullCharacters(
+        payload?.choices?.[0]?.delta?.content
+        || payload?.output_text_delta
+        || '',
+    );
+}
+
+function isTerminalStreamPayload(payload = {}) {
+    return payload?.type === 'done'
+        || payload?.type === 'response.completed'
+        || isTerminalFinishReason(payload?.choices?.[0]?.finish_reason);
+}
+
 function extractAssistantText(value) {
     if (typeof value === 'string') {
         const trimmed = stripNullCharacters(value).trim();
@@ -474,13 +504,14 @@ class NotesAPIClient {
                                         throw new Error(parsed.error.message || 'Stream error');
                                     }
 
-                                    if (parsed.session_id || parsed.sessionId) {
-                                        this.currentSessionId = parsed.session_id || parsed.sessionId;
+                                    const streamSessionId = extractStreamSessionId(parsed);
+                                    if (streamSessionId) {
+                                        this.currentSessionId = streamSessionId;
                                         pendingDone.sessionId = this.currentSessionId;
                                     }
                                     
                                     // Extract content from delta
-                                    const content = stripNullCharacters(parsed.choices?.[0]?.delta?.content || '');
+                                    const content = extractStreamTextDelta(parsed);
                                     if (content) {
                                         yield { type: 'delta', content };
                                     }
@@ -494,18 +525,7 @@ class NotesAPIClient {
                                         pendingDone.toolEvents = toolEvents;
                                     }
 
-                                    if (parsed.type === 'done') {
-                                        yield {
-                                            type: 'done',
-                                            sessionId: pendingDone.sessionId || this.currentSessionId,
-                                            artifacts: pendingDone.artifacts || [],
-                                            toolEvents: pendingDone.toolEvents || [],
-                                        };
-                                        return;
-                                    }
-
-                                    // Check if generation is complete
-                                    if (isTerminalFinishReason(parsed.choices?.[0]?.finish_reason)) {
+                                    if (isTerminalStreamPayload(parsed)) {
                                         yield {
                                             type: 'done',
                                             sessionId: pendingDone.sessionId || this.currentSessionId,
