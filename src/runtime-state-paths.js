@@ -5,6 +5,14 @@ const path = require('path');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_STATE_DIR = path.join(os.homedir(), '.kimibuilt');
 
+function getConfiguredStateDirectoryValue() {
+    return String(
+        process.env.KIMIBUILT_STATE_DIR
+        || process.env.KIMIBUILT_DATA_DIR
+        || '',
+    ).trim();
+}
+
 function pathExists(targetPath = '') {
     try {
         fs.accessSync(targetPath, fs.constants.F_OK);
@@ -24,11 +32,7 @@ function canWrite(targetPath = '') {
 }
 
 function getStateDirectory() {
-    const configured = String(
-        process.env.KIMIBUILT_STATE_DIR
-        || process.env.KIMIBUILT_DATA_DIR
-        || '',
-    ).trim();
+    const configured = getConfiguredStateDirectoryValue();
     if (!configured) {
         return DEFAULT_STATE_DIR;
     }
@@ -40,6 +44,9 @@ function getStateDirectory() {
 
 function resolvePreferredWritableFile(projectFilePath = '', fallbackSegments = []) {
     const fallbackPath = path.join(getStateDirectory(), ...fallbackSegments);
+    if (getConfiguredStateDirectoryValue()) {
+        return fallbackPath;
+    }
 
     if (pathExists(projectFilePath)) {
         return canWrite(projectFilePath) ? projectFilePath : fallbackPath;
@@ -51,6 +58,7 @@ function resolvePreferredWritableFile(projectFilePath = '', fallbackSegments = [
 module.exports = {
     DEFAULT_STATE_DIR,
     PROJECT_ROOT,
+    getConfiguredStateDirectoryValue,
     getStateDirectory,
     pathExists,
     resolvePreferredWritableFile,

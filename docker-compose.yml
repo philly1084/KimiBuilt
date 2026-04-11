@@ -15,6 +15,10 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-kimibuilt}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-kimibuilt}
       - DOCKER_HOST=tcp://docker-proxy:2375
+      - KIMIBUILT_DATA_DIR=/home/kimibuilt/.kimibuilt
+      - KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
+    volumes:
+      - backend_state:/home/kimibuilt/.kimibuilt
     depends_on:
       docker-proxy:
         condition: service_started
@@ -97,6 +101,7 @@ services:
         wait
 
 volumes:
+  backend_state:
   postgres_data:
   qdrant_data:
   ollama_data:

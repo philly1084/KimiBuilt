@@ -64,4 +64,29 @@ describe('runtime state path resolution', () => {
 
     expect(resolvePreferredWritableFile('/app/soul.md', ['soul.md'])).toBe('/app/soul.md');
   });
+
+  test('prefers the configured state directory even when the repo path is writable', () => {
+    process.env = {
+      ...originalEnv,
+      KIMIBUILT_STATE_DIR: '/persistent/runtime-state',
+    };
+
+    jest.doMock('os', () => ({
+      homedir: () => '/home/kimibuilt',
+    }));
+
+    jest.doMock('fs', () => ({
+      constants: {
+        F_OK: 0,
+        W_OK: 2,
+      },
+      accessSync: jest.fn(() => undefined),
+    }));
+
+    jest.doMock('path', () => jest.requireActual('path').posix);
+
+    const { resolvePreferredWritableFile } = require('./runtime-state-paths');
+
+    expect(resolvePreferredWritableFile('/app/soul.md', ['soul.md'])).toBe('/persistent/runtime-state/soul.md');
+  });
 });

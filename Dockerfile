@@ -56,12 +56,14 @@ RUN mkdir -p /app/data/piper/voices && \
     "${PIPER_VOICES_BASE_URL}/${PIPER_VOICES_REF}/en/en_US/kathleen/low/en_US-kathleen-low.onnx.json" \
     --output /app/data/piper/voices/en_US-kathleen-low.onnx.json
 
-RUN mkdir -p /home/kimibuilt/.opencode && \
+RUN mkdir -p /home/kimibuilt/.kimibuilt /home/kimibuilt/.opencode && \
   chown -R kimibuilt:kimibuilt /home/kimibuilt /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV ARTIFACT_BROWSER_PATH=/usr/bin/chromium
+ENV KIMIBUILT_DATA_DIR=/home/kimibuilt/.kimibuilt
+ENV KIMIBUILT_STATE_DIR=/home/kimibuilt/.kimibuilt
 ENV PIPER_TTS_BINARY_PATH=/usr/local/bin/piper
 ENV PIPER_TTS_VOICES_PATH=/app/data/piper/voices/manifest.json
 ENV PATH=/home/kimibuilt/.opencode/bin:$PATH
