@@ -758,8 +758,12 @@ class SessionManager extends EventTarget {
     }
 
     async syncMessageToBackend(sessionId, message) {
+        const normalizedContent = String(message?.content || '').trim();
         if (!sessionId || this.isLocalSession(sessionId) || !message?.id) {
             return false;
+        }
+        if (!normalizedContent) {
+            return true;
         }
 
         try {
