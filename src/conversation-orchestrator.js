@@ -1963,7 +1963,7 @@ function buildNotesSynthesisInstructions() {
         'When editing an existing page, preserve the strongest current icon, cover, focal block, and accent-color language unless the user explicitly asks for a new look.',
         'If a substantial notes page only uses headings, plain text, and list blocks, do a palette audit before finalizing and check whether a richer block type would improve readability or interaction.',
         'Do not ship research, dashboard, documentation, or polished briefing pages as only plain headings and paragraphs unless the user explicitly asked for a minimal layout.',
-        'Do not mention `/app`, local command execution, file-write, sandbox limits, or workspace access unless a verified tool result is directly about that and the user explicitly asked about it.',
+        'Do not mention the local CLI environment, local startup or health state, `/app`, local command execution, file-write, sandbox limits, or workspace access unless a verified tool result is directly about that and the user explicitly asked about it.',
         'Unless the user explicitly asked to export, download, save, or create a file/link, do not turn the answer into a standalone artifact or HTML file.',
     ].join('\n\n');
 }
@@ -7136,6 +7136,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not mention turn-level tool availability, missing tools, sandbox limits, or inability to execute commands.',
             'If additional work may still be needed, explain what remains based on the verified results and the user request without claiming the tool is unavailable.',
             'If a tool failed, state the exact tool failure plainly.',
+            'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
             ...(toolPolicy?.classification?.groundingRequirement === 'required'
                 ? [
                     'Do not answer with unverified current information. If the verified results are insufficient, say you were not able to verify it yet.',
@@ -7276,6 +7277,7 @@ class ConversationOrchestrator extends EventEmitter {
             'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
             'Do not wrap the final answer in code fences.',
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
+            'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
             ...(toolPolicy?.classification?.groundingRequirement === 'required'
                 ? [
                     'This request requires grounded evidence.',
@@ -7468,6 +7470,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
         }
 
+        parts.push('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown unless explicit user input, the active transcript, or verified tool results establish them.');
+        parts.push('Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability unless a verified tool result is directly about that.');
+
         if (allowedToolIds.includes('architecture-design')) {
             parts.push('Use `architecture-design` when the user asks for architecture recommendations, system design, or deployment/component overviews.');
         }
@@ -7496,12 +7501,14 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use `git-safe` for restricted local repository save flows: status, add, commit, push, and save-and-push.');
             parts.push('Use `git-safe remote-info` when you need to verify the current branch, HEAD revision, upstream tracking, or configured remotes before pushing.');
             parts.push('Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
+            parts.push('Treat that local repository rule as a default authoring target, not proof of the repository\'s current health, cleanliness, or contents. Verify those facts with tools before stating them.');
             parts.push('Do not claim generic local shell or sandbox limits for Git work when `git-safe` is available. Continue through the constrained Git tool path instead.');
         }
 
         if (allowedToolIds.includes('opencode-run')) {
             parts.push('Use `opencode-run` for long-form repository work: implementing changes, fixing bugs, refactoring, building, compiling, and testing in a codebase or workspace.');
             parts.push('Point `opencode-run` at the local workspace by default, or use `target: "remote-default"` when the request is clearly about the remote repository workspace.');
+            parts.push('Do not treat that default local workspace target as evidence about the local workspace state or CLI health unless `opencode-run`, `file-read`, `file-search`, or another verified tool result established it.');
             parts.push('Keep `remote-command` for infrastructure work such as kubectl, logs, restarts, service inspection, package installs, and deployment operations.');
         }
 

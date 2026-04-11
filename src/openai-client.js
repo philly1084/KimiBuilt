@@ -2278,6 +2278,8 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         'You can use the provided tools whenever they will improve accuracy or gather missing data.',
         'Treat the tool definitions attached to this request as the source of truth for tool availability.',
         'Do not claim tools are unavailable because of absent meta variables or guessed config names when the tool definitions are attached to the request.',
+        'Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown until a relevant tool verifies them.',
+        'Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability unless a tool result directly supports it.',
     ];
 
     if (sessionIsolation) {
@@ -2346,10 +2348,12 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
 
     if (automaticTools.some((entry) => entry.id === 'file-read')) {
         guidance.push('- Use `file-read` to inspect files from the local workspace when the user asks to read or review them.');
+        guidance.push('- Do not describe the current local files or their contents unless `file-read`, `asset-search`, or another verified tool result showed them.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-search')) {
         guidance.push('- Use `file-search` to locate files in the workspace before answering filesystem questions.');
+        guidance.push('- Do not guess that a local file or folder exists, is missing, or is in a certain state before a search or read result confirms it.');
     }
 
     if (automaticTools.some((entry) => entry.id === 'file-write')) {
@@ -2407,6 +2411,7 @@ function buildAutomaticToolGuidance(automaticTools = [], options = {}) {
         guidance.push('- Use `git-safe remote-info` before pushing when you need to verify the current branch, HEAD revision, upstream tracking, or configured remotes.');
         guidance.push('- Prefer `save-and-push` when the user clearly wants the latest local changes committed and pushed to GitHub.');
         guidance.push('- Treat the local workspace repository as the source of truth for authoring and GitHub pushes unless the user explicitly says the canonical repo lives on the server.');
+        guidance.push('- Treat that local repository rule as a default target selection, not proof of the repository\'s current health, cleanliness, or contents. Verify those facts with tools before stating them.');
         guidance.push('- Do not claim generic local shell or sandbox limits for Git work when `git-safe` is attached. Continue through the constrained Git tool path instead.');
     }
 

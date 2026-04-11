@@ -14,6 +14,8 @@ function buildContinuityInstructions(extra = '') {
         'When an image-generation tool is available, default to one generated image unless the user explicitly asks for multiple distinct images. If multiple outputs are needed, keep the prompt about a single image rather than asking for a collage or multi-panel composition.',
         'If runtime tools are attached or listed as available, treat them as available for this request and use them when relevant instead of claiming they are unavailable.',
         'Use verified tool results as the source of truth over guesses.',
+        'Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown unless the current transcript, explicit user input, or a relevant tool result verifies them.',
+        'Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability unless a tool result is directly about that.',
         'When calling file-write, always include both a path and the full file contents in the same call. Do not try to write a file from a path alone.',
         'Use file-write only for local runtime files. For remote hosts, deployed servers, or container-only paths, prefer remote-command or docker-exec.',
         'When git-safe is attached, use it for local repository inspection, staging, commit, and push instead of talking about generic shell access or sandbox limits.',

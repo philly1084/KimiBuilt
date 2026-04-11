@@ -1800,7 +1800,9 @@ describe('openai-client automatic tool orchestration helpers', () => {
             { id: 'remote-command' },
         ]);
 
+        expect(guidance).toContain('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown until a relevant tool verifies them.');
         expect(guidance).toContain('local workspace repository as the source of truth');
+        expect(guidance).toContain('default target selection, not proof of the repository\'s current health, cleanliness, or contents');
         expect(guidance).toContain('git-safe remote-info');
         expect(guidance).toContain('missing project checkout on the remote host');
         expect(guidance).toContain('Keep `remote-command` available for one-off server configuration and troubleshooting');

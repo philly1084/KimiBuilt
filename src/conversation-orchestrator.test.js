@@ -4380,7 +4380,7 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('edit the current page itself through block updates');
         expect(instructions).toContain('Prefer returning `notes-actions` or page-ready notes content');
         expect(instructions).toContain('Only stay in planning/chat mode');
-        expect(instructions).toContain('Do not mention `/app`');
+        expect(instructions).toContain('local startup or health state, `/app`, local command execution');
         expect(instructions).toContain('Do not use `file-write` or `file-mkdir`');
         expect(instructions).toContain('Available block palette includes');
         expect(instructions).toContain('Think in page roles, not just paragraphs');
@@ -4394,6 +4394,34 @@ describe('ConversationOrchestrator', () => {
         expect(instructions).toContain('preserve the strongest current icon, cover, focal block');
         expect(instructions).toContain('If a substantial notes page only uses headings');
         expect(instructions).toContain('Use `heading_3` for compact section labels or mini-subheads');
+    });
+
+    test('runtime instructions require tool-grounded claims about the local environment', () => {
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn(() => null),
+            },
+        });
+
+        const instructions = orchestrator.buildRuntimeInstructions({
+            baseInstructions: 'Base continuity',
+            executionProfile: 'default',
+            allowedToolIds: ['git-safe', 'opencode-run', 'file-read', 'file-search'],
+            toolEvents: [],
+            toolPolicy: {
+                allowedToolIds: ['git-safe', 'opencode-run', 'file-read', 'file-search'],
+                hasReachableSshTarget: false,
+            },
+        });
+
+        expect(instructions).toContain('Treat the local CLI environment, workspace state, filesystem contents, and shell behavior as unknown');
+        expect(instructions).toContain('Do not comment on local environment health, startup state, writable paths, repository cleanliness, or command availability');
+        expect(instructions).toContain('default authoring target, not proof of the repository\'s current health, cleanliness, or contents');
+        expect(instructions).toContain('Do not treat that default local workspace target as evidence about the local workspace state or CLI health');
     });
 
     test('notes tool policy is restricted to web research tools for page-edit requests', () => {
