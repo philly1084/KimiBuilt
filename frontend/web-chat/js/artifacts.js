@@ -534,9 +534,13 @@
         return `Created ${files.length} files. ${actionLabel}`;
     }
 
-    function getArtifactPreviewUrl(artifact) {
+    function getArtifactPreviewUrl(artifact, options = {}) {
+        const absolute = options && options.absolute === true;
+
         if (artifact?.previewUrl) {
-            return `${API_BASE}${artifact.previewUrl}`;
+            return absolute
+                ? `${API_BASE}${artifact.previewUrl}`
+                : artifact.previewUrl;
         }
 
         const format = String(artifact?.format || '').toLowerCase();
@@ -550,7 +554,20 @@
             return '';
         }
 
-        return `${API_BASE}${artifact.downloadUrl}?inline=1`;
+        const inlinePath = `${artifact.downloadUrl}?inline=1`;
+        return absolute ? `${API_BASE}${inlinePath}` : inlinePath;
+    }
+
+    function shouldRenderInlineArtifactPreview(artifact) {
+        if (!getArtifactPreviewUrl(artifact)) {
+            return false;
+        }
+
+        if (artifact?.bundleDownloadUrl || artifact?.preview?.type === 'site') {
+            return false;
+        }
+
+        return true;
     }
 
     function buildArtifactCardMarkup(artifact) {
@@ -563,6 +580,7 @@
             ? `${API_BASE}${artifact.downloadUrl}`
             : '';
         const htmlPreviewUrl = getArtifactPreviewUrl(artifact);
+        const inlineHtmlPreview = shouldRenderInlineArtifactPreview(artifact);
         const mermaidPreview = mermaidArtifact
             ? `
                 <div class="artifact-mermaid-preview">
@@ -577,10 +595,10 @@
                 </div>
             `
             : '';
-        const htmlPreview = htmlPreviewUrl
+        const htmlPreview = inlineHtmlPreview
             ? `
                 <div class="artifact-html-preview">
-                    <iframe src="${escapeHtmlAttr(htmlPreviewUrl)}" loading="lazy" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+                    <iframe src="${escapeHtmlAttr(htmlPreviewUrl)}" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-forms allow-modals"></iframe>
                 </div>
             `
             : '';
