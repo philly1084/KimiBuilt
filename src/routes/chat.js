@@ -104,6 +104,11 @@ async function updateSessionProjectMemory(sessionId, updates = {}, ownerId = nul
     });
 }
 
+function isResponseToolOutputItem(item = {}) {
+    const type = String(item?.type || '').trim();
+    return type === 'function_call' || type === 'custom_tool_call';
+}
+
 const chatSchema = {
     message: { required: true, type: 'string' },
     sessionId: { required: false, type: 'string' },
@@ -426,6 +431,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                     assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                 })}\n\n`);
+                res.write('data: [DONE]\n\n');
                 res.end();
                 return;
             }
@@ -496,6 +502,22 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
                     res.write(`data: ${JSON.stringify({ type: 'delta', content: event.delta })}\n\n`);
+                }
+
+                if (event.type === 'response.reasoning_summary_text.delta' && event.delta) {
+                    res.write(`data: ${JSON.stringify({
+                        type: 'response.reasoning_summary_text.delta',
+                        delta: event.delta,
+                        summary: event.summary || '',
+                    })}\n\n`);
+                }
+
+                if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
+                    && isResponseToolOutputItem(event.item)) {
+                    res.write(`data: ${JSON.stringify({
+                        type: event.type,
+                        item: event.item,
+                    })}\n\n`);
                 }
 
                 if (event.type === 'response.completed') {
@@ -602,6 +624,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                             artifacts,
                         }),
                     })}\n\n`);
+                    res.write('data: [DONE]\n\n');
                 }
             }
 

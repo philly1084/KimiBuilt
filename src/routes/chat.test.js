@@ -738,6 +738,77 @@ describe('/api/chat route', () => {
         );
     });
 
+    test('streams reasoning deltas and final reasoning metadata through /api/chat', async () => {
+        ensureRuntimeToolManager.mockResolvedValue({
+            getTool: jest.fn(),
+        });
+        resolveSshRequestContext.mockReturnValue({
+            effectivePrompt: 'Check this request.',
+        });
+        executeConversationRuntime.mockResolvedValue({
+            handledPersistence: false,
+            response: (async function* streamWithReasoning() {
+                yield {
+                    type: 'response.reasoning_summary_text.delta',
+                    delta: 'Checking the request. ',
+                    summary: 'Checking the request. ',
+                };
+                yield {
+                    type: 'response.output_text.delta',
+                    delta: 'Answer',
+                };
+                yield {
+                    type: 'response.completed',
+                    response: {
+                        id: 'resp-stream-reasoning-1',
+                        model: 'gpt-test',
+                        output: [{
+                            type: 'message',
+                            role: 'assistant',
+                            content: [{ type: 'text', text: 'Answer' }],
+                        }],
+                        metadata: {
+                            reasoningSummary: 'Checked the request and chose the direct path.',
+                            reasoningAvailable: true,
+                            toolEvents: [],
+                        },
+                    },
+                };
+            }()),
+        });
+
+        const app = express();
+        app.use(express.json());
+        app.use('/api/chat', chatRouter);
+
+        const response = await request(app)
+            .post('/api/chat')
+            .send({
+                sessionId: 'session-1',
+                message: 'Check this request.',
+                stream: true,
+            });
+
+        expect(response.status).toBe(200);
+        expect(response.headers['content-type']).toContain('text/event-stream');
+        expect(response.text).toContain('"type":"response.reasoning_summary_text.delta"');
+        expect(response.text).toContain('"delta":"Checking the request. "');
+        expect(response.text).toContain('"summary":"Checking the request. "');
+        expect(response.text).toContain('"type":"delta","content":"Answer"');
+        expect(response.text).toContain('"assistantMetadata":{"reasoningSummary":"Checked the request and chose the direct path.","reasoningAvailable":true}');
+        expect(response.text).toContain('data: [DONE]');
+        expect(sessionStore.appendMessages).toHaveBeenCalledWith('session-1', expect.arrayContaining([
+            expect.objectContaining({
+                role: 'assistant',
+                content: 'Answer',
+                metadata: expect.objectContaining({
+                    reasoningSummary: 'Checked the request and chose the direct path.',
+                    reasoningAvailable: true,
+                }),
+            }),
+        ]));
+    });
+
     test('streams the completed response text when the runtime emits no deltas', async () => {
         ensureRuntimeToolManager.mockResolvedValue({
             getTool: jest.fn(),
