@@ -47,6 +47,11 @@ const {
     USER_GLOBAL_MEMORY_NAMESPACE,
 } = require('./session-scope');
 const {
+    createZeroUsageMetadata,
+    extractResponseUsageMetadata,
+    extractUsageMetadataFromTrace,
+} = require('./utils/token-usage');
+const {
     USER_CHECKPOINT_TOOL_ID,
     buildUserCheckpointMessage,
     normalizeCheckpointRequest,
@@ -3533,6 +3538,7 @@ function appendModelResponseTrace(executionTrace = [], response = null, {
     }
 
     const endedAt = new Date().toISOString();
+    const usage = extractResponseUsageMetadata(response);
     executionTrace.push(createExecutionTraceEntry({
         type: 'model_call',
         name: `Model response (${response.model || 'unknown'})`,
@@ -3542,6 +3548,7 @@ function appendModelResponseTrace(executionTrace = [], response = null, {
             phase,
             responseId: response.id || null,
             outputPreview: truncateText(extractResponseText(response), 200),
+            ...(usage ? { usage } : {}),
         },
     }));
 }
@@ -6934,7 +6941,14 @@ class ConversationOrchestrator extends EventEmitter {
                     : []),
         ].join('\n');
 
-        const plannerOutput = await this.completeText(prompt, roleOptions);
+        const plannerStartedAt = new Date().toISOString();
+        const plannerOutput = await this.completeText(prompt, {
+            ...roleOptions,
+            onModelResponse: (response) => appendModelResponseTrace(executionTrace, response, {
+                phase: 'planner',
+                startedAt: plannerStartedAt,
+            }),
+        });
         const parsed = safeJsonParse(plannerOutput);
         const plannerReturnedSteps = Array.isArray(parsed?.steps);
         const requestedSteps = (Array.isArray(parsed?.steps) ? parsed.steps : [])
@@ -7328,6 +7342,7 @@ class ConversationOrchestrator extends EventEmitter {
 
         console.log(`[ConversationOrchestrator] Tool synthesis request: toolEvents=${toolEvents.length}, autonomyApproved=${autonomyApproved}, findingsChars=${verifiedToolFindings.length}, contextMessages=${contextMessages.length}, recentMessages=${recentMessages.length}`);
 
+        const synthesisStartedAt = new Date().toISOString();
         let response = await this.requestResponse({
             input: synthesisPrompt,
             instructions: runtimeInstructions,
@@ -7341,6 +7356,10 @@ class ConversationOrchestrator extends EventEmitter {
 
         if (!extractResponseText(response).trim()) {
             console.warn(`[ConversationOrchestrator] Tool synthesis returned empty output; retrying with compact prompt. toolEvents=${toolEvents.length}, autonomyApproved=${autonomyApproved}`);
+            appendModelResponseTrace(executionTrace, response, {
+                phase: 'tool-synthesis-empty',
+                startedAt: synthesisStartedAt,
+            });
             response = await this.requestResponse({
                 input: buildCompactToolSynthesisPrompt({
                     objective,
@@ -7635,6 +7654,12 @@ class ConversationOrchestrator extends EventEmitter {
             projectKey: toolPolicy?.projectKey || '',
             clientSurface,
         });
+        const tracedUsage = extractUsageMetadataFromTrace(executionTrace);
+        const hasModelCall = (Array.isArray(executionTrace) ? executionTrace : [])
+            .some((step) => step?.type === 'model_call');
+        const aggregatedUsage = tracedUsage
+            || extractResponseUsageMetadata(finalResponse)
+            || (!hasModelCall ? createZeroUsageMetadata() : null);
         const surfaceFinisher = inferSurfaceFinisher({
             taskType,
             clientSurface,
@@ -7664,6 +7689,7 @@ class ConversationOrchestrator extends EventEmitter {
             surfaceFinisher,
             perceivedIntelligenceScores: intelligenceSummary.perceivedIntelligenceScores,
             failureTags: intelligenceSummary.failureTags,
+            ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
         });
         if (memoryTrace && config.memory.debugTrace) {
             tracedResponse = this.withResponseMetadata(tracedResponse, {
@@ -7919,7 +7945,7 @@ class ConversationOrchestrator extends EventEmitter {
     }
 
     async completeText(prompt, options = {}) {
-        if (typeof this.llmClient?.complete === 'function') {
+        if (typeof options?.onModelResponse !== 'function' && typeof this.llmClient?.complete === 'function') {
             return this.llmClient.complete(prompt, options);
         }
 
@@ -7929,18 +7955,30 @@ class ConversationOrchestrator extends EventEmitter {
             model: options.model || null,
             reasoningEffort: options.reasoningEffort || null,
             enableAutomaticToolCalls: false,
+            onModelResponse: options.onModelResponse,
         });
 
         return extractResponseText(response);
     }
 
     async requestResponse(params = {}) {
+        const {
+            onModelResponse = null,
+            ...requestParams
+        } = params || {};
+        let response;
         if (typeof this.llmClient?.createResponse === 'function') {
-            return normalizeModelResponseShape(await this.llmClient.createResponse(params));
+            response = normalizeModelResponseShape(await this.llmClient.createResponse(requestParams));
+        } else {
+            console.warn('[ConversationOrchestrator] llmClient.createResponse is unavailable; falling back to openai-client.createResponse');
+            response = normalizeModelResponseShape(await createResponse(requestParams));
         }
 
-        console.warn('[ConversationOrchestrator] llmClient.createResponse is unavailable; falling back to openai-client.createResponse');
-        return normalizeModelResponseShape(await createResponse(params));
+        if (typeof onModelResponse === 'function') {
+            onModelResponse(response);
+        }
+
+        return response;
     }
 }
 

@@ -503,6 +503,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
                     outputFormat: effectiveOutputFormat,
                     artifactDirect: true,
                     toolEvents: preparedImages.toolEvents,
+                    ...(generation.metadata || {}),
                 },
             });
 

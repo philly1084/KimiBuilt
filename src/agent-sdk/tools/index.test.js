@@ -97,6 +97,39 @@ describe('ToolManager image tools', () => {
     expect(toolManager.getTool('k3s-deploy')).toBeTruthy();
     expect(toolManager.getTool('opencode-run')).toBeTruthy();
     expect(toolManager.getTool('agent-delegate')).toBeTruthy();
+    expect(toolManager.getTool('podcast')).toBeTruthy();
+  });
+
+  test('routes podcast through the injected podcast service', async () => {
+    const toolManager = new ToolManager();
+    await toolManager.initialize();
+
+    const service = {
+      createPodcast: jest.fn(async () => ({
+        title: 'Test podcast',
+        audio: { artifactId: 'artifact-podcast-1' },
+        script: { turns: [] },
+      })),
+    };
+
+    const result = await toolManager.executeTool('podcast', {
+      topic: 'How batteries work',
+      durationMinutes: 10,
+    }, {
+      sessionId: 'session-1',
+      podcastService: service,
+      clientSurface: 'chat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(service.createPodcast).toHaveBeenCalledWith(expect.objectContaining({
+      topic: 'How batteries work',
+      durationMinutes: 10,
+    }), expect.objectContaining({
+      sessionId: 'session-1',
+      podcastService: service,
+    }));
+    expect(result.data.audio).toEqual({ artifactId: 'artifact-podcast-1' });
   });
 
   test('routes opencode-run through the injected OpenCode service', async () => {

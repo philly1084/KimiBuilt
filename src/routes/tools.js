@@ -215,6 +215,14 @@ function buildToolRuntime(toolId, options = {}) {
     return piperTtsService.getPublicConfig();
   }
 
+  if (toolId === 'podcast') {
+    return {
+      ...piperTtsService.getPublicConfig(),
+      researchConfigured: Boolean(process.env.PERPLEXITY_API_KEY),
+      modelConfigured: Boolean(config.openai.apiKey),
+    };
+  }
+
   if ([
     'asset-search',
     'web-fetch',

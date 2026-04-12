@@ -1249,6 +1249,12 @@ async function generateOutputArtifactFromPrompt({
         artifacts: [result.artifact],
         outputText: result.outputText,
         assistantMessage: buildArtifactCompletionMessage(outputFormat, result.artifact),
+        metadata: result.usage
+            ? {
+                usage: result.usage,
+                tokenUsage: result.usage,
+            }
+            : {},
     };
 }
 

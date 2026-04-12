@@ -192,4 +192,73 @@ describe('DashboardController', () => {
     expect(timelineNames.indexOf('Tool call (ssh-execute)')).toBeLessThan(timelineNames.indexOf('Execution round 1'));
     expect(timelineNames.indexOf('Execution round 1')).toBeLessThan(timelineNames.indexOf('Model response (gpt-test)'));
   });
+
+  test('uses explicit usage metadata instead of estimating token counts', () => {
+    const controller = new DashboardController(null);
+    const task = controller.recordRuntimeTaskStart({
+      sessionId: 'session-3',
+      input: 'Inspect the deployment and summarize the result.',
+      model: 'gpt-test',
+      mode: 'chat',
+      transport: 'http',
+      metadata: {},
+    });
+
+    controller.recordRuntimeTaskComplete(task.id, {
+      responseId: 'resp-3',
+      output: 'Deployment checked.',
+      model: 'gpt-test',
+      duration: 900,
+      metadata: {
+        usage: {
+          promptTokens: 125,
+          completionTokens: 40,
+          totalTokens: 165,
+        },
+      },
+    });
+
+    const completedTask = controller.taskStore.get(task.id);
+    expect(completedTask.result.tokenUsage).toEqual({
+      promptTokens: 125,
+      completionTokens: 40,
+      totalTokens: 165,
+      inferred: false,
+    });
+  });
+
+  test('keeps explicit zero-token runs at zero for tool-only responses', () => {
+    const controller = new DashboardController(null);
+    const task = controller.recordRuntimeTaskStart({
+      sessionId: 'session-4',
+      input: 'Run the scheduled workload directly.',
+      model: 'gpt-test',
+      mode: 'chat',
+      transport: 'http',
+      metadata: {},
+    });
+
+    controller.recordRuntimeTaskComplete(task.id, {
+      responseId: 'resp-4',
+      output: 'Daily blockers summary created.',
+      model: 'gpt-test',
+      duration: 250,
+      metadata: {
+        usage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          modelCalls: 0,
+        },
+      },
+    });
+
+    const completedTask = controller.taskStore.get(task.id);
+    expect(completedTask.result.tokenUsage).toEqual({
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      inferred: false,
+    });
+  });
 });

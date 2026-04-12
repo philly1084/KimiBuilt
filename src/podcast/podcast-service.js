@@ -1,0 +1,484 @@
+const { createResponse } = require('../openai-client');
+const { piperTtsService, normalizeTextForSpeech } = require('../tts/piper-tts-service');
+const { persistGeneratedAudio } = require('../generated-audio-artifacts');
+const { concatWavBuffers, createSilenceWavBuffer, parseWavBuffer } = require('../audio/wav-utils');
+const { chunkText, normalizeWhitespace, stripHtml } = require('../utils/text');
+const { parseLenientJson } = require('../utils/lenient-json');
+
+const DEFAULT_DURATION_MINUTES = 10;
+const DEFAULT_TARGET_WPM = 145;
+const DEFAULT_MAX_SOURCES = 4;
+const DEFAULT_SILENCE_MS = 325;
+const DEFAULT_HOSTS = Object.freeze([
+  {
+    key: 'hostA',
+    name: 'Maya',
+    role: 'Lead host',
+    persona: 'Warm, curious, and good at guiding the listener through the big picture.',
+    preferredVoiceIds: ['hfc-female-rich', 'hfc-female-medium', 'kathleen-low'],
+  },
+  {
+    key: 'hostB',
+    name: 'June',
+    role: 'Co-host',
+    persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
+    preferredVoiceIds: ['amy-expressive', 'amy-medium', 'kathleen-low'],
+  },
+]);
+
+function clampNumber(value, min, max, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function estimateWordBudget(durationMinutes = DEFAULT_DURATION_MINUTES) {
+  return Math.round(durationMinutes * DEFAULT_TARGET_WPM);
+}
+
+function estimateTurnCount(durationMinutes = DEFAULT_DURATION_MINUTES) {
+  return Math.max(12, Math.min(22, Math.round(durationMinutes * 1.7)));
+}
+
+function uniqueUrls(items = []) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const url = String(item?.url || '').trim();
+    if (!url || seen.has(url)) {
+      return false;
+    }
+    seen.add(url);
+    return true;
+  });
+}
+
+function getResponseText(response = {}) {
+  if (typeof response?.output_text === 'string' && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+
+  const output = Array.isArray(response?.output) ? response.output : [];
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const chunk of content) {
+      const text = chunk?.text || chunk?.output_text || '';
+      if (typeof text === 'string' && text.trim()) {
+        return text.trim();
+      }
+    }
+  }
+
+  return '';
+}
+
+function extractFetchedText(fetchData = {}, maxChars = 2200) {
+  const body = String(fetchData?.body || '').trim();
+  if (!body) {
+    return '';
+  }
+
+  const contentType = String(fetchData?.headers?.['content-type'] || fetchData?.headers?.['Content-Type'] || '').toLowerCase();
+  const plain = contentType.includes('html') ? stripHtml(body) : body;
+  const normalized = normalizeWhitespace(plain).replace(/\n{2,}/g, '\n');
+  return normalized.slice(0, maxChars).trim();
+}
+
+function buildTranscript(turns = []) {
+  return (Array.isArray(turns) ? turns : [])
+    .map((turn) => `${turn.speaker}: ${turn.text}`)
+    .join('\n\n')
+    .trim();
+}
+
+function normalizeTurn(turn = {}, allowedSpeakers = new Set()) {
+  const speaker = String(turn?.speaker || '').trim();
+  const text = normalizeWhitespace(String(turn?.text || '').trim());
+  if (!speaker || !text || !allowedSpeakers.has(speaker)) {
+    return null;
+  }
+
+  return { speaker, text };
+}
+
+function resolveVoiceId(preferredVoiceIds = [], availableVoices = [], usedVoiceIds = new Set()) {
+  const voices = Array.isArray(availableVoices) ? availableVoices : [];
+  const firstUnusedPreferred = preferredVoiceIds.find((voiceId) => voices.some((voice) => voice.id === voiceId) && !usedVoiceIds.has(voiceId));
+  if (firstUnusedPreferred) {
+    usedVoiceIds.add(firstUnusedPreferred);
+    return firstUnusedPreferred;
+  }
+
+  const firstUnused = voices.find((voice) => !usedVoiceIds.has(voice.id));
+  if (firstUnused?.id) {
+    usedVoiceIds.add(firstUnused.id);
+    return firstUnused.id;
+  }
+
+  const fallback = voices[0]?.id || '';
+  if (fallback) {
+    usedVoiceIds.add(fallback);
+  }
+  return fallback;
+}
+
+function resolveHosts(params = {}, voiceConfig = {}) {
+  const availableVoices = Array.isArray(voiceConfig?.voices) ? voiceConfig.voices : [];
+  const usedVoiceIds = new Set();
+
+  return DEFAULT_HOSTS.map((defaultHost, index) => {
+    const suffix = index === 0 ? 'A' : 'B';
+    const providedVoiceId = String(params[`host${suffix}VoiceId`] || '').trim();
+    const voiceId = providedVoiceId
+      || resolveVoiceId(defaultHost.preferredVoiceIds, availableVoices, usedVoiceIds)
+      || voiceConfig?.defaultVoiceId
+      || '';
+
+    if (voiceId) {
+      usedVoiceIds.add(voiceId);
+    }
+
+    return {
+      name: String(params[`host${suffix}Name`] || defaultHost.name).trim() || defaultHost.name,
+      role: String(params[`host${suffix}Role`] || defaultHost.role).trim() || defaultHost.role,
+      persona: String(params[`host${suffix}Persona`] || defaultHost.persona).trim() || defaultHost.persona,
+      voiceId,
+    };
+  });
+}
+
+function buildResearchPrompt({
+  topic,
+  audience,
+  tone,
+  durationMinutes,
+  hosts,
+  sources,
+}) {
+  const wordBudget = estimateWordBudget(durationMinutes);
+  const turnCount = estimateTurnCount(durationMinutes);
+
+  const sourceText = sources.map((source, index) => [
+    `Source ${index + 1}: ${source.title || 'Untitled source'}`,
+    `URL: ${source.url}`,
+    source.snippet ? `Snippet: ${source.snippet}` : '',
+    source.content ? `Excerpt: ${source.content}` : '',
+  ].filter(Boolean).join('\n')).join('\n\n');
+
+  return `
+Create a scripted two-host podcast episode as strict JSON.
+
+Topic: ${topic}
+Audience: ${audience}
+Tone: ${tone}
+Target duration minutes: ${durationMinutes}
+Approximate total word budget: ${wordBudget}
+Target turn count: ${turnCount}
+
+Host 1:
+- name: ${hosts[0].name}
+- role: ${hosts[0].role}
+- persona: ${hosts[0].persona}
+
+Host 2:
+- name: ${hosts[1].name}
+- role: ${hosts[1].role}
+- persona: ${hosts[1].persona}
+
+Use only the sourced information below. Do not invent facts. If a point is uncertain, phrase it carefully.
+Write like a real podcast: light rapport, clean transitions, informative explanations, occasional reactions, but no filler overload.
+Keep each turn to one paragraph. No stage directions. No markdown. No URLs in spoken text.
+Open with a strong hook and end with a concise wrap-up.
+
+Return exactly this JSON shape:
+{
+  "title": "string",
+  "summary": "string",
+  "turns": [
+    { "speaker": "${hosts[0].name}", "text": "string" },
+    { "speaker": "${hosts[1].name}", "text": "string" }
+  ]
+}
+
+Research:
+${sourceText}
+  `.trim();
+}
+
+class PodcastService {
+  constructor(dependencies = {}) {
+    this.createResponse = dependencies.createResponse || createResponse;
+    this.ttsService = dependencies.ttsService || piperTtsService;
+    this.persistGeneratedAudio = dependencies.persistGeneratedAudio || persistGeneratedAudio;
+  }
+
+  async runTool(executeTool, toolId, params, context) {
+    const result = await executeTool(toolId, params, context);
+    if (!result?.success) {
+      throw new Error(result?.error || `${toolId} failed.`);
+    }
+    return result.data;
+  }
+
+  async researchTopic({ topic, searchDomains = [], sourceUrls = [], maxSources = DEFAULT_MAX_SOURCES }, context = {}) {
+    if (typeof context?.executeTool !== 'function') {
+      throw new Error('Podcast research requires tool execution support.');
+    }
+
+    const searchData = await this.runTool(context.executeTool, 'web-search', {
+      query: `${topic} explainer key facts overview`,
+      engine: 'perplexity',
+      researchMode: 'search',
+      limit: Math.max(maxSources * 2, 6),
+      includeSnippets: true,
+      includeUrls: true,
+      domains: searchDomains,
+      region: 'us-en',
+      timeRange: 'all',
+    }, context.toolContext);
+
+    const seededSources = (Array.isArray(sourceUrls) ? sourceUrls : [])
+      .map((url) => ({
+        title: url,
+        url: String(url || '').trim(),
+        snippet: '',
+      }))
+      .filter((entry) => entry.url);
+
+    const candidates = uniqueUrls([
+      ...seededSources,
+      ...(Array.isArray(searchData?.verifiedPages) ? searchData.verifiedPages : []),
+      ...(Array.isArray(searchData?.results) ? searchData.results : []),
+      ...(Array.isArray(searchData?.citations) ? searchData.citations : []),
+    ]).slice(0, maxSources);
+
+    const verifiedSources = [];
+    for (const candidate of candidates) {
+      const url = String(candidate?.url || '').trim();
+      if (!url) {
+        continue;
+      }
+
+      try {
+        const fetched = await this.runTool(context.executeTool, 'web-fetch', {
+          url,
+          timeout: 20000,
+          cache: true,
+        }, context.toolContext);
+
+        verifiedSources.push({
+          title: String(candidate?.title || url).trim() || url,
+          url,
+          snippet: String(candidate?.snippet || '').trim(),
+          content: extractFetchedText(fetched),
+        });
+      } catch (_error) {
+        verifiedSources.push({
+          title: String(candidate?.title || url).trim() || url,
+          url,
+          snippet: String(candidate?.snippet || '').trim(),
+          content: '',
+        });
+      }
+    }
+
+    if (verifiedSources.length === 0) {
+      throw new Error('Podcast research did not return any usable sources.');
+    }
+
+    return verifiedSources;
+  }
+
+  async generateScript({
+    topic,
+    audience,
+    tone,
+    durationMinutes,
+    hosts,
+    sources,
+    model,
+    reasoningEffort,
+  }) {
+    const response = await this.createResponse({
+      input: buildResearchPrompt({
+        topic,
+        audience,
+        tone,
+        durationMinutes,
+        hosts,
+        sources,
+      }),
+      instructions: 'You write polished, factual, natural-sounding podcast scripts and must return valid JSON only.',
+      stream: false,
+      model,
+      reasoningEffort,
+      enableAutomaticToolCalls: false,
+    });
+
+    const parsed = parseLenientJson(getResponseText(response));
+    const allowedSpeakers = new Set(hosts.map((host) => host.name));
+    const turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
+      .map((turn) => normalizeTurn(turn, allowedSpeakers))
+      .filter(Boolean);
+
+    if (turns.length < 8) {
+      throw new Error('Podcast script generation returned too few valid turns.');
+    }
+
+    return {
+      title: String(parsed?.title || `${topic} Podcast`).trim() || `${topic} Podcast`,
+      summary: String(parsed?.summary || '').trim(),
+      turns,
+    };
+  }
+
+  async synthesizeTurns(turns = [], hosts = [], silenceMs = DEFAULT_SILENCE_MS) {
+    const maxTextChars = Math.max(200, Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400);
+    const hostByName = new Map(hosts.map((host) => [host.name, host]));
+    const wavBuffers = [];
+
+    for (const turn of turns) {
+      const host = hostByName.get(turn.speaker);
+      if (!host?.voiceId) {
+        throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
+      }
+
+      const chunks = chunkText(turn.text, Math.max(400, maxTextChars - 120));
+      for (const chunk of chunks) {
+        const synthesis = await this.ttsService.synthesize({
+          text: chunk,
+          voiceId: host.voiceId,
+        });
+        wavBuffers.push(synthesis.audioBuffer);
+        wavBuffers.push(createSilenceWavBuffer(parseWavBuffer(synthesis.audioBuffer), silenceMs));
+      }
+    }
+
+    while (wavBuffers.length > 0) {
+      const lastBuffer = wavBuffers[wavBuffers.length - 1];
+      try {
+        const parsed = parseWavBuffer(lastBuffer);
+        if (parsed.data.every((value) => value === 0)) {
+          wavBuffers.pop();
+          continue;
+        }
+      } catch (_error) {
+        break;
+      }
+      break;
+    }
+
+    return concatWavBuffers(wavBuffers);
+  }
+
+  async createPodcast(params = {}, context = {}) {
+    const sessionId = String(context?.sessionId || '').trim();
+    if (!sessionId) {
+      throw new Error('podcast requires an active session so the audio can be saved.');
+    }
+
+    const topic = String(params.topic || params.prompt || params.subject || '').trim();
+    if (!topic) {
+      throw new Error('podcast requires a topic, prompt, or subject.');
+    }
+
+    const durationMinutes = clampNumber(params.durationMinutes, 3, 30, DEFAULT_DURATION_MINUTES);
+    const audience = String(params.audience || 'general').trim() || 'general';
+    const tone = String(params.tone || 'informative, conversational').trim() || 'informative, conversational';
+    const maxSources = clampNumber(params.maxSources, 2, 6, DEFAULT_MAX_SOURCES);
+    const voiceConfig = this.ttsService.getPublicConfig();
+    const hosts = resolveHosts(params, voiceConfig);
+    const executeTool = typeof context?.toolManager?.executeTool === 'function'
+      ? context.toolManager.executeTool.bind(context.toolManager)
+      : null;
+    const sources = await this.researchTopic({
+      topic,
+      searchDomains: params.searchDomains || params.domains || [],
+      sourceUrls: params.sourceUrls || params.urls || [],
+      maxSources,
+    }, {
+      executeTool,
+      toolContext: context,
+    });
+
+    const script = await this.generateScript({
+      topic,
+      audience,
+      tone,
+      durationMinutes,
+      hosts,
+      sources,
+      model: params.model || context.model || undefined,
+      reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
+    });
+    const transcript = buildTranscript(script.turns);
+
+    // Validate TTS compatibility before starting the full run.
+    script.turns.forEach((turn) => {
+      normalizeTextForSpeech(turn.text, Math.max(200, Number(voiceConfig.maxTextChars) || 2400));
+    });
+
+    const finalAudioBuffer = await this.synthesizeTurns(
+      script.turns,
+      hosts,
+      clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
+    );
+
+    const persistedAudio = await this.persistGeneratedAudio({
+      sessionId,
+      sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',
+      text: transcript,
+      title: params.title || script.title || `${topic} Podcast`,
+      filename: params.filename || '',
+      provider: 'piper',
+      voice: {
+        provider: 'piper',
+        episodeVoices: hosts.map((host) => ({
+          speaker: host.name,
+          voiceId: host.voiceId,
+        })),
+      },
+      audioBuffer: finalAudioBuffer,
+      mimeType: 'audio/wav',
+      metadata: {
+        createdByAgentTool: true,
+        generatedBy: 'podcast',
+        topic,
+        durationMinutes,
+        audience,
+        tone,
+        hosts,
+        sources,
+        summary: script.summary,
+        turnCount: script.turns.length,
+      },
+    });
+
+    return {
+      title: script.title,
+      summary: script.summary,
+      durationMinutes,
+      estimatedWordCount: transcript.split(/\s+/).filter(Boolean).length,
+      hosts,
+      sources,
+      script: {
+        title: script.title,
+        summary: script.summary,
+        turns: script.turns,
+        transcript,
+      },
+      artifact: persistedAudio.artifact || null,
+      artifacts: persistedAudio.artifact ? [persistedAudio.artifact] : [],
+      artifactIds: persistedAudio.artifactIds || [],
+      audio: persistedAudio.audio || null,
+    };
+  }
+}
+
+const podcastService = new PodcastService();
+
+module.exports = {
+  PodcastService,
+  podcastService,
+};

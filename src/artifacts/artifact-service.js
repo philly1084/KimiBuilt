@@ -28,6 +28,10 @@ const {
     normalizeFrontendMetadata,
     sanitizeFrontendArtifactMetadata,
 } = require('../frontend-bundles');
+const {
+    extractResponseUsageMetadata,
+    mergeUsageMetadata,
+} = require('../utils/token-usage');
 const { parseLenientJson } = require('../utils/lenient-json');
 const { resolveDocumentTheme } = require('../documents/document-design-engine');
 const MULTI_PASS_DOCUMENT_FORMATS = new Set(['html', 'pdf', 'docx']);
@@ -1861,6 +1865,7 @@ class ArtifactService {
             responseId: response.id,
             outputText: extractResponseText(response),
             rawOutputText: extractRawResponseText(response),
+            usage: extractResponseUsageMetadata(response),
         };
     }
 
@@ -2206,6 +2211,11 @@ class ArtifactService {
             responseId: compositionPass.responseId,
             title: expandedDocument.title || normalizedPlan.title,
             outputText: finalOutputText,
+            usage: mergeUsageMetadata(
+                planPass.usage,
+                expansionPass.usage,
+                compositionPass.usage,
+            ),
             metadata: {
                 generationStrategy: 'multi-pass',
                 generationPasses: ['plan', 'expand', 'compose'],
@@ -2452,6 +2462,7 @@ class ArtifactService {
             responseId: generated.responseId,
             artifact: this.serializeArtifact(artifact),
             outputText,
+            usage: generated.usage || null,
         };
     }
 

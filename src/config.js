@@ -320,6 +320,26 @@ const config = {
         ),
     },
 
+    audioProcessing: {
+        enabled: process.env.AUDIO_PROCESSING_ENABLED !== 'false',
+        ffmpegBinaryPath: resolveConfigPath(process.env.FFMPEG_BINARY_PATH || 'ffmpeg'),
+        timeoutMs: Math.max(
+            1000,
+            parseInt(process.env.AUDIO_PROCESSING_TIMEOUT_MS, 10) || 90000,
+        ),
+        mp3BitrateKbps: Math.max(
+            64,
+            parseInt(process.env.PODCAST_MP3_BITRATE_KBPS, 10) || 128,
+        ),
+        podcastIntroPath: resolveConfigPath(process.env.PODCAST_INTRO_PATH || ''),
+        podcastOutroPath: resolveConfigPath(process.env.PODCAST_OUTRO_PATH || ''),
+        podcastMusicBedPath: resolveConfigPath(process.env.PODCAST_MUSIC_BED_PATH || ''),
+        podcastSpeechVolume: parseOptionalFloat(process.env.PODCAST_SPEECH_VOLUME) ?? 1,
+        podcastMusicVolume: parseOptionalFloat(process.env.PODCAST_MUSIC_VOLUME) ?? 0.22,
+        podcastIntroVolume: parseOptionalFloat(process.env.PODCAST_INTRO_VOLUME) ?? 1,
+        podcastOutroVolume: parseOptionalFloat(process.env.PODCAST_OUTRO_VOLUME) ?? 1,
+    },
+
     auth: {
         username: process.env.LILLYBUILT_AUTH_USERNAME || process.env.KIMIBUILT_AUTH_USERNAME || '',
         password: process.env.LILLYBUILT_AUTH_PASSWORD || process.env.KIMIBUILT_AUTH_PASSWORD || '',

@@ -13,6 +13,7 @@ const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
+const { podcastService } = require('../../podcast/podcast-service');
 const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
 const { escapeHtml, normalizeWhitespace, stripHtml } = require('../../utils/text');
@@ -493,6 +494,15 @@ function resolveOpenCodeService(context = {}) {
   const service = context?.opencodeService || null;
   if (!service?.runTool || !service?.createRun) {
     throw new Error('OpenCode runtime is unavailable because the service is not initialized.');
+  }
+
+  return service;
+}
+
+function resolvePodcastService(context = {}) {
+  const service = context?.podcastService || podcastService;
+  if (!service?.createPodcast) {
+    throw new Error('Podcast workflows are unavailable because the podcast service is not initialized.');
   }
 
   return service;
@@ -2436,6 +2446,70 @@ class ToolManager {
         frontend: {
           exposeToFrontend: false,
           icon: 'volume-2',
+        },
+      },
+      {
+        id: 'podcast',
+        name: 'Podcast',
+        category: 'system',
+        description: 'Research a topic, script a two-host episode, synthesize both voices with Piper, and stitch the final podcast audio into a saved artifact.',
+        backend: {
+          handler: async (params = {}, context = {}) => {
+            const service = resolvePodcastService(context);
+            return service.createPodcast(params, context);
+          },
+          sideEffects: ['write', 'execute', 'network'],
+          timeout: 180000,
+        },
+        inputSchema: {
+          type: 'object',
+          required: ['topic'],
+          properties: {
+            topic: { type: 'string' },
+            prompt: { type: 'string' },
+            subject: { type: 'string' },
+            title: { type: 'string' },
+            filename: { type: 'string' },
+            durationMinutes: { type: 'integer', minimum: 3, maximum: 30 },
+            audience: { type: 'string' },
+            tone: { type: 'string' },
+            hostAName: { type: 'string' },
+            hostARole: { type: 'string' },
+            hostAPersona: { type: 'string' },
+            hostAVoiceId: { type: 'string' },
+            hostBName: { type: 'string' },
+            hostBRole: { type: 'string' },
+            hostBPersona: { type: 'string' },
+            hostBVoiceId: { type: 'string' },
+            sourceUrls: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            searchDomains: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            maxSources: { type: 'integer', minimum: 2, maximum: 6 },
+            pauseMs: { type: 'integer', minimum: 100, maximum: 1200 },
+            model: { type: 'string' },
+            reasoningEffort: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        skill: {
+          triggerPatterns: [
+            'podcast',
+            'podcast episode',
+            'two host podcast',
+            'research and script audio',
+            'two agent voices',
+            'podcast conversation',
+          ],
+          requiresConfirmation: false,
+        },
+        frontend: {
+          exposeToFrontend: false,
+          icon: 'mic',
         },
       },
       {

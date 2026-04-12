@@ -906,6 +906,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     outputFormat: effectiveOutputFormat,
                     artifactDirect: true,
                     toolEvents: preparedImages.toolEvents,
+                    ...(generation.metadata || {}),
                 },
             });
 
@@ -1669,6 +1670,7 @@ router.post('/responses', async (req, res, next) => {
                     outputFormat: effectiveOutputFormat,
                     artifactDirect: true,
                     toolEvents: preparedImages.toolEvents,
+                    ...(generation.metadata || {}),
                 },
             });
 

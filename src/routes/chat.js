@@ -465,6 +465,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
                     outputFormat: effectiveOutputFormat,
                     artifactDirect: true,
                     toolEvents: preparedImages.toolEvents,
+                    ...(generationArtifacts.metadata || {}),
                 },
             });
 

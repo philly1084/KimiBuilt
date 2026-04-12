@@ -9,6 +9,7 @@ const tracesController = require('./traces.controller');
 const { vectorStore } = require('../../memory/vector-store');
 const { getUnifiedRegistry } = require('../../agent-sdk/registry/UnifiedRegistry');
 const { parseLenientJson } = require('../../utils/lenient-json');
+const { normalizeUsageMetadata } = require('../../utils/token-usage');
 
 class DashboardController {
   constructor(agentOrchestrator) {
@@ -32,18 +33,32 @@ class DashboardController {
   }
 
   inferTokenUsage(input = '', output = '', explicitUsage = 0, usageMetadata = {}) {
-    const promptTokens = Number(usageMetadata.promptTokens || usageMetadata.inputTokens || 0)
-      || this.estimateTokens(input);
-    const completionTokens = Number(usageMetadata.completionTokens || usageMetadata.outputTokens || explicitUsage || 0)
-      || this.estimateTokens(output);
-    const totalTokens = Number(usageMetadata.totalTokens || usageMetadata.tokensUsed || 0)
-      || (promptTokens + completionTokens);
+    const normalizedUsage = normalizeUsageMetadata(usageMetadata) || {};
+    const hasPromptTokens = Object.prototype.hasOwnProperty.call(normalizedUsage, 'promptTokens');
+    const hasCompletionTokens = Object.prototype.hasOwnProperty.call(normalizedUsage, 'completionTokens');
+    const hasTotalTokens = Object.prototype.hasOwnProperty.call(normalizedUsage, 'totalTokens');
+    const explicitCompletion = Number(explicitUsage);
+    const hasExplicitUsage = hasPromptTokens
+      || hasCompletionTokens
+      || hasTotalTokens
+      || (Number.isFinite(explicitCompletion) && explicitCompletion > 0);
+    const promptTokens = hasPromptTokens
+      ? normalizedUsage.promptTokens
+      : (hasExplicitUsage ? 0 : this.estimateTokens(input));
+    const completionTokens = hasCompletionTokens
+      ? normalizedUsage.completionTokens
+      : ((Number.isFinite(explicitCompletion) && explicitCompletion > 0)
+        ? explicitCompletion
+        : (hasExplicitUsage ? 0 : this.estimateTokens(output)));
+    const totalTokens = hasTotalTokens
+      ? normalizedUsage.totalTokens
+      : (hasExplicitUsage ? (promptTokens + completionTokens) : (promptTokens + completionTokens));
 
     return {
       promptTokens,
       completionTokens,
       totalTokens,
-      inferred: !Number(usageMetadata.totalTokens || usageMetadata.tokensUsed || explicitUsage || 0),
+      inferred: !hasExplicitUsage,
     };
   }
 

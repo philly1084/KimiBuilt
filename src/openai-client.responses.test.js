@@ -76,9 +76,9 @@ describe('openai-client response threading', () => {
         const client = OpenAI.mock.results[0].value;
         expect(client.responses.create).toHaveBeenCalledWith(expect.objectContaining({
             previous_response_id: 'resp_prev_123',
-            input: [
+            input: expect.arrayContaining([
                 { type: 'message', role: 'user', content: 'Continue the previous reply.' },
-            ],
+            ]),
         }));
     });
 
@@ -175,5 +175,131 @@ describe('openai-client response threading', () => {
                 }),
             }),
         ]);
+    });
+
+    test('preserves exact provider usage in normalized response metadata', async () => {
+        const OpenAI = require('openai');
+        const responsesCreate = jest.fn(async (params) => ({
+            id: 'resp-usage-1',
+            model: params.model,
+            usage: {
+                input_tokens: 18,
+                output_tokens: 9,
+                total_tokens: 27,
+                input_tokens_details: {
+                    cached_tokens: 4,
+                },
+                output_tokens_details: {
+                    reasoning_tokens: 3,
+                },
+            },
+            output: [{
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: 'done' }],
+            }],
+        }));
+
+        OpenAI.mockImplementation(() => ({
+            responses: { create: responsesCreate },
+            chat: { completions: { create: jest.fn() } },
+        }));
+
+        const { createResponse } = require('./openai-client');
+        const response = await createResponse({
+            input: 'Summarize the request.',
+            stream: false,
+        });
+
+        expect(response.metadata.usage).toEqual({
+            promptTokens: 18,
+            completionTokens: 9,
+            totalTokens: 27,
+            inputTokens: 18,
+            outputTokens: 9,
+            reasoningTokens: 3,
+            cachedTokens: 4,
+            modelCalls: 1,
+        });
+        expect(response.metadata.tokenUsage).toEqual(response.metadata.usage);
+    });
+
+    test('aggregates usage across responses tool-loop rounds', async () => {
+        const { __testUtils } = require('./openai-client');
+        const openai = {
+            responses: {
+                create: jest.fn()
+                    .mockResolvedValueOnce({
+                        id: 'resp-loop-1',
+                        model: 'gpt-4o',
+                        usage: {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            total_tokens: 15,
+                        },
+                        output: [{
+                            type: 'function_call',
+                            id: 'call_1',
+                            call_id: 'call_1',
+                            name: 'web-search',
+                            arguments: JSON.stringify({ query: 'Halifax weather' }),
+                        }],
+                    })
+                    .mockResolvedValueOnce({
+                        id: 'resp-loop-2',
+                        model: 'gpt-4o',
+                        usage: {
+                            input_tokens: 4,
+                            output_tokens: 6,
+                            total_tokens: 10,
+                        },
+                        output: [{
+                            type: 'message',
+                            role: 'assistant',
+                            content: [{ type: 'output_text', text: 'Search complete.' }],
+                        }],
+                    }),
+            },
+        };
+        const toolManager = {
+            executeTool: jest.fn(async () => ({
+                success: true,
+                toolId: 'web-search',
+                data: {
+                    results: [{ title: 'Halifax weather', url: 'https://example.com' }],
+                },
+            })),
+        };
+        const response = await __testUtils.runAutomaticToolLoopWithResponses(openai, {
+            model: 'gpt-4o',
+            messages: [{ role: 'user', content: 'Use a tool if needed to verify this.' }],
+            selectedTools: [{
+                id: 'web-search',
+                responseDefinition: {
+                    type: 'function',
+                    name: 'web-search',
+                    parameters: {
+                        type: 'object',
+                        properties: {
+                            query: { type: 'string' },
+                        },
+                    },
+                },
+            }],
+            toolContext: {
+                toolManager,
+            },
+        });
+
+        expect(response._kimibuilt.toolEvents).toHaveLength(1);
+        expect(response._kimibuilt.usage).toEqual({
+            promptTokens: 14,
+            completionTokens: 11,
+            totalTokens: 25,
+            inputTokens: 14,
+            outputTokens: 11,
+            modelCalls: 2,
+        });
+        expect(response._kimibuilt.tokenUsage).toEqual(response._kimibuilt.usage);
     });
 });

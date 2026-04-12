@@ -31,6 +31,11 @@ const {
     parseUserCheckpointResponseMessage,
 } = require('./user-checkpoints');
 const { parseLenientJson } = require('./utils/lenient-json');
+const {
+    createZeroUsageMetadata,
+    extractResponseUsageMetadata,
+    mergeUsageMetadata,
+} = require('./utils/token-usage');
 const DOCUMENT_WORKFLOW_TOOL_ID = 'document-workflow';
 const DEEP_RESEARCH_PRESENTATION_TOOL_ID = 'deep-research-presentation';
 
@@ -2841,7 +2846,15 @@ function maybeRecoverUserCheckpointResponse({
         },
     };
 
-    return buildDirectToolResponse(toolEvent, model, [...(Array.isArray(toolEvents) ? toolEvents : []), toolEvent]);
+    return buildDirectToolResponse(
+        toolEvent,
+        model,
+        [...(Array.isArray(toolEvents) ? toolEvents : []), toolEvent],
+        {
+            usage: extractResponseUsageMetadata(response),
+            tokenUsage: extractResponseUsageMetadata(response),
+        },
+    );
 }
 
 async function executeAutomaticToolCall(toolManager, toolCall, context = {}) {
@@ -3031,10 +3044,14 @@ function formatDirectToolResultMessage(toolEvent = {}) {
     return JSON.stringify(result?.data || {}, null, 2);
 }
 
-function buildDirectToolResponse(toolEvent, model = null, toolEvents = []) {
+function buildDirectToolResponse(toolEvent, model = null, toolEvents = [], metadata = {}) {
     const normalizedToolEvents = Array.isArray(toolEvents) && toolEvents.length > 0
         ? toolEvents
         : [toolEvent];
+    const responseMetadata = {
+        ...(metadata && typeof metadata === 'object' ? metadata : {}),
+        toolEvents: normalizedToolEvents,
+    };
 
     return {
         id: `resp_tool_${Date.now()}`,
@@ -3054,7 +3071,7 @@ function buildDirectToolResponse(toolEvent, model = null, toolEvents = []) {
             },
         ],
         _kimibuilt: {
-            toolEvents: normalizedToolEvents,
+            ...responseMetadata,
         },
     };
 }
@@ -3110,7 +3127,10 @@ async function runDirectRequiredToolAction({
             result,
         };
 
-        return buildDirectToolResponse(toolEvent, model);
+        return buildDirectToolResponse(toolEvent, model, [toolEvent], {
+            usage: createZeroUsageMetadata(),
+            tokenUsage: createZeroUsageMetadata(),
+        });
     }
 
     const actions = buildDeterministicPreflightActions(selectedTools, prompt)
@@ -3135,7 +3155,10 @@ async function runDirectRequiredToolAction({
         result,
     };
 
-    return buildDirectToolResponse(toolEvent, model);
+    return buildDirectToolResponse(toolEvent, model, [toolEvent], {
+        usage: createZeroUsageMetadata(),
+        tokenUsage: createZeroUsageMetadata(),
+    });
 }
 
 function buildResponsesInput(messages = []) {
@@ -3214,6 +3237,21 @@ function isResponsesApiResponse(response) {
     return Boolean(response && (response.object === 'response' || Object.prototype.hasOwnProperty.call(response, 'output_text')));
 }
 
+function buildNormalizedResponseMetadata(response = null, metadata = {}) {
+    const normalizedUsage = extractResponseUsageMetadata({
+        ...(response && typeof response === 'object' ? response : {}),
+        _kimibuilt: metadata,
+    });
+
+    return normalizedUsage
+        ? {
+            ...metadata,
+            usage: normalizedUsage,
+            tokenUsage: normalizedUsage,
+        }
+        : metadata;
+}
+
 function normalizeResponsesApiResponse(response) {
     const outputText = getResponseApiText(response);
     const responseMetadata = response?._kimibuilt && typeof response._kimibuilt === 'object'
@@ -3229,6 +3267,7 @@ function normalizeResponsesApiResponse(response) {
             }
             : {}),
     };
+    const metadata = buildNormalizedResponseMetadata(response, normalizedMetadata);
 
     return {
         id: response.id,
@@ -3249,7 +3288,7 @@ function normalizeResponsesApiResponse(response) {
             },
         ],
         session_id: response.session_id,
-        metadata: normalizedMetadata,
+        metadata,
     };
 }
 
@@ -3282,6 +3321,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
     let finalResponse = null;
     const toolGuidance = buildAutomaticToolGuidance(selectedTools, { model });
     const toolEvents = [];
+    let aggregatedUsage = null;
 
     if (toolGuidance) {
         workingMessages.push({
@@ -3314,6 +3354,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             tool_choice: 'none',
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
         });
+        aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
             response: finalResponse,
@@ -3329,6 +3370,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
         if (toolEvents.length > 0) {
             finalResponse._kimibuilt = {
                 toolEvents,
+                ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
             };
         }
 
@@ -3351,6 +3393,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             parallel_tool_calls: false,
             ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
         });
+        aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const toolCalls = getResponseFunctionCalls(finalResponse);
 
@@ -3369,6 +3412,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
             if (toolEvents.length > 0) {
                 finalResponse._kimibuilt = {
                     toolEvents,
+                    ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
                 };
             }
             return finalResponse;
@@ -3392,7 +3436,10 @@ async function runAutomaticToolLoopWithResponses(openai, {
             }
 
             if (toolEvents.length > 0) {
-                finalResponse._kimibuilt = { toolEvents };
+                finalResponse._kimibuilt = {
+                    toolEvents,
+                    ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
+                };
             }
             return finalResponse;
         }
@@ -3423,7 +3470,10 @@ async function runAutomaticToolLoopWithResponses(openai, {
             toolEvents.push(toolEvent);
 
             if (toolCall.name === USER_CHECKPOINT_TOOL_ID && result.success !== false) {
-                return buildDirectToolResponse(toolEvent, model, toolEvents);
+                return buildDirectToolResponse(toolEvent, model, toolEvents, {
+                    usage: aggregatedUsage,
+                    tokenUsage: aggregatedUsage,
+                });
             }
         }
 
@@ -3439,6 +3489,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
         tool_choice: 'none',
         ...(normalizedReasoningEffort ? { reasoning: { effort: normalizedReasoningEffort } } : {}),
     });
+    aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
     const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
         response: finalResponse,
@@ -3454,6 +3505,7 @@ async function runAutomaticToolLoopWithResponses(openai, {
     if (toolEvents.length > 0) {
         finalResponse._kimibuilt = {
             toolEvents,
+            ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
         };
     }
 
@@ -3481,6 +3533,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     let finalResponse = null;
     const toolGuidance = buildAutomaticToolGuidance(selectedTools, { model });
     const toolEvents = [];
+    let aggregatedUsage = null;
 
     if (toolGuidance) {
         workingMessages.push({
@@ -3513,6 +3566,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             stream: false,
             ...chatReasoningParams,
         });
+        aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
             response: finalResponse,
@@ -3528,6 +3582,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         if (toolEvents.length > 0) {
             finalResponse._kimibuilt = {
                 toolEvents,
+                ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
             };
         }
 
@@ -3547,6 +3602,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             stream: false,
             ...chatReasoningParams,
         });
+        aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
         const assistantMessage = finalResponse.choices[0]?.message || {};
         const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
@@ -3566,6 +3622,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             if (toolEvents.length > 0) {
                 finalResponse._kimibuilt = {
                     toolEvents,
+                    ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
                 };
             }
             return finalResponse;
@@ -3586,7 +3643,10 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             }
 
             if (toolEvents.length > 0) {
-                finalResponse._kimibuilt = { toolEvents };
+                finalResponse._kimibuilt = {
+                    toolEvents,
+                    ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
+                };
             }
             return finalResponse;
         }
@@ -3612,7 +3672,10 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
             });
 
             if (toolCall.function?.name === USER_CHECKPOINT_TOOL_ID && result.success !== false) {
-                return buildDirectToolResponse(toolEvent, model, toolEvents);
+                return buildDirectToolResponse(toolEvent, model, toolEvents, {
+                    usage: aggregatedUsage,
+                    tokenUsage: aggregatedUsage,
+                });
             }
         }
     }
@@ -3623,6 +3686,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
         stream: false,
         ...chatReasoningParams,
     });
+    aggregatedUsage = mergeUsageMetadata(aggregatedUsage, extractResponseUsageMetadata(finalResponse));
 
     const recoveredCheckpointResponse = maybeRecoverUserCheckpointResponse({
         response: finalResponse,
@@ -3638,6 +3702,7 @@ async function runAutomaticToolLoopWithChatCompletions(openai, {
     if (toolEvents.length > 0) {
         finalResponse._kimibuilt = {
             toolEvents,
+            ...(aggregatedUsage ? { usage: aggregatedUsage, tokenUsage: aggregatedUsage } : {}),
         };
     }
 
@@ -3739,6 +3804,8 @@ function normalizeChatResponse(response) {
         })}`);
     }
 
+    const metadata = buildNormalizedResponseMetadata(response, response?._kimibuilt || {});
+
     return {
         id: response.id,
         object: 'response',
@@ -3757,7 +3824,7 @@ function normalizeChatResponse(response) {
             },
         ],
         session_id: response.session_id,
-        metadata: response?._kimibuilt || {},
+        metadata,
     };
 }
 
@@ -3772,6 +3839,7 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
     let model = null;
     let created = null;
     let outputText = '';
+    let usageMetadata = null;
 
     for await (const chunk of stream) {
         if (!responseId && chunk.id) {
@@ -3782,6 +3850,9 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
         }
         if (!created && chunk.created) {
             created = chunk.created;
+        }
+        if (chunk?.usage) {
+            usageMetadata = mergeUsageMetadata(usageMetadata, chunk.usage);
         }
 
         const delta = chunk.choices[0]?.delta?.content || '';
@@ -3796,6 +3867,13 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
         }
 
         if (isTerminalFinishReason(finishReason)) {
+            const finalMetadata = usageMetadata
+                ? {
+                    ...metadata,
+                    usage: usageMetadata,
+                    tokenUsage: usageMetadata,
+                }
+                : metadata;
             yield {
                 type: 'response.completed',
                 response: normalizeChatResponse(attachKimibuiltMetadata({
@@ -3809,7 +3887,7 @@ async function* normalizeChatCompletionsStream(stream, metadata = {}) {
                         },
                         finish_reason: finishReason,
                     }],
-                }, metadata)),
+                }, finalMetadata)),
             };
         }
     }
@@ -4226,7 +4304,9 @@ module.exports = {
         getChatCompletionText,
         hashPromptText,
         mergeInstructions,
+        mergeUsageMetadata,
         normalizeOpenAIApiMode,
+        extractResponseUsageMetadata,
         normalizeMessageContent,
         normalizeChatCompletionsStream,
         normalizeModelResponse,
@@ -4237,6 +4317,7 @@ module.exports = {
         resolveOpenAIApiMode,
         runDeterministicToolPreflight,
         runDirectRequiredToolAction,
+        runAutomaticToolLoopWithResponses,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,
         shouldSendReasoningEffort,

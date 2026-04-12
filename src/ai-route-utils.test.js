@@ -180,6 +180,7 @@ describe('ai-route-utils', () => {
             }],
             outputText: '<html><body>Space zine</body></html>',
             assistantMessage: 'Created the PDF artifact (space-zine.pdf).',
+            metadata: {},
         });
 
         expect(artifactService.generateArtifact).toHaveBeenCalledWith(expect.objectContaining({
@@ -190,6 +191,46 @@ describe('ai-route-utils', () => {
             artifactIds: ['artifact-a'],
             model: 'gpt-test',
         }));
+    });
+
+    test('generateOutputArtifactFromPrompt carries exact token usage metadata when artifact generation reports it', async () => {
+        artifactService.generateArtifact.mockResolvedValue({
+            responseId: 'resp-2',
+            artifact: {
+                id: 'artifact-2',
+                filename: 'deep-dive.pdf',
+            },
+            outputText: '<html><body>Deep dive</body></html>',
+            usage: {
+                promptTokens: 120,
+                completionTokens: 80,
+                totalTokens: 200,
+                modelCalls: 3,
+            },
+        });
+
+        await expect(generateOutputArtifactFromPrompt({
+            sessionId: 'session-2',
+            mode: 'chat',
+            outputFormat: 'pdf',
+            prompt: 'Build a research PDF',
+        })).resolves.toMatchObject({
+            responseId: 'resp-2',
+            metadata: {
+                usage: {
+                    promptTokens: 120,
+                    completionTokens: 80,
+                    totalTokens: 200,
+                    modelCalls: 3,
+                },
+                tokenUsage: {
+                    promptTokens: 120,
+                    completionTokens: 80,
+                    totalTokens: 200,
+                    modelCalls: 3,
+                },
+            },
+        });
     });
 
     test('inferOutputFormatFromSession keeps artifact workflows sticky on continuation turns', () => {

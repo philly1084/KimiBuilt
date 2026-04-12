@@ -1,0 +1,130 @@
+jest.mock('../openai-client', () => ({
+  createResponse: jest.fn(),
+}));
+
+jest.mock('../tts/piper-tts-service', () => ({
+  piperTtsService: {
+    getPublicConfig: jest.fn(() => ({
+      configured: true,
+      provider: 'piper',
+      maxTextChars: 2400,
+      defaultVoiceId: 'hfc-female-rich',
+      voices: [
+        { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
+        { id: 'amy-expressive', label: 'Amy Expressive', provider: 'piper' },
+      ],
+    })),
+    synthesize: jest.fn(),
+  },
+  normalizeTextForSpeech: jest.fn((text) => text),
+}));
+
+jest.mock('../generated-audio-artifacts', () => ({
+  persistGeneratedAudio: jest.fn(),
+}));
+
+const { createResponse } = require('../openai-client');
+const { piperTtsService } = require('../tts/piper-tts-service');
+const { persistGeneratedAudio } = require('../generated-audio-artifacts');
+const { writeWavBuffer } = require('../audio/wav-utils');
+const { PodcastService } = require('./podcast-service');
+
+function createTestWav(bytes) {
+  return writeWavBuffer({
+    sampleRate: 22050,
+    bitsPerSample: 16,
+    numChannels: 1,
+    data: Buffer.from(bytes),
+  });
+}
+
+describe('PodcastService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    createResponse.mockResolvedValue({
+      output_text: JSON.stringify({
+        title: 'The Battery Breakdown',
+        summary: 'A practical conversation about how battery storage works.',
+        turns: [
+          { speaker: 'Maya', text: 'Welcome in. Today we are unpacking grid batteries and why they matter.' },
+          { speaker: 'June', text: 'The core idea is simple: they store energy when supply is abundant and release it when demand rises.' },
+          { speaker: 'Maya', text: 'That flexibility helps balance solar and wind output instead of wasting it.' },
+          { speaker: 'June', text: 'It also supports the grid during short spikes, which is where response speed matters.' },
+          { speaker: 'Maya', text: 'Different chemistries have different strengths, and lithium-ion is only one piece of the picture.' },
+          { speaker: 'June', text: 'Exactly, and project economics depend on cycle life, safety, and the duration the system needs to cover.' },
+          { speaker: 'Maya', text: 'So the interesting question is less whether batteries matter and more where they fit best.' },
+          { speaker: 'June', text: 'And that is where careful system design and policy choices start to shape outcomes.' },
+        ],
+      }),
+    });
+    piperTtsService.synthesize.mockResolvedValue({
+      audioBuffer: createTestWav([1, 2, 3, 4]),
+      voice: { provider: 'piper' },
+      contentType: 'audio/wav',
+      text: 'segment',
+    });
+    persistGeneratedAudio.mockResolvedValue({
+      artifact: { id: 'artifact-podcast-1', filename: 'battery-breakdown.wav' },
+      artifactIds: ['artifact-podcast-1'],
+      audio: { artifactId: 'artifact-podcast-1', downloadUrl: '/api/artifacts/artifact-podcast-1/download' },
+    });
+  });
+
+  test('creates a researched two-host podcast and persists the final audio', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Grid battery guide', url: 'https://example.com/batteries', snippet: 'Battery storage helps balance power systems.' },
+              { title: 'Storage economics', url: 'https://example.com/economics', snippet: 'Costs vary by chemistry and duration.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><h1>Battery storage</h1><p>Battery systems absorb excess power and discharge it later.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+      durationMinutes: 10,
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(executeTool).toHaveBeenCalledWith('web-search', expect.objectContaining({
+      query: expect.stringContaining('How grid batteries work'),
+    }), expect.any(Object));
+    expect(createResponse).toHaveBeenCalled();
+    expect(piperTtsService.synthesize).toHaveBeenCalled();
+    expect(persistGeneratedAudio).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      mimeType: 'audio/wav',
+      metadata: expect.objectContaining({
+        generatedBy: 'podcast',
+        topic: 'How grid batteries work',
+      }),
+    }));
+    expect(result.audio).toEqual(expect.objectContaining({
+      artifactId: 'artifact-podcast-1',
+    }));
+    expect(result.script.turns).toHaveLength(8);
+    expect(result.hosts).toHaveLength(2);
+    expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
+  });
+});
