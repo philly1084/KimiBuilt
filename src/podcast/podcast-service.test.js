@@ -21,11 +21,29 @@ jest.mock('../tts/piper-tts-service', () => ({
 
 jest.mock('../generated-audio-artifacts', () => ({
   persistGeneratedAudio: jest.fn(),
+  updateGeneratedAudioSessionState: jest.fn(),
+}));
+
+jest.mock('../audio/audio-processing-service', () => ({
+  audioProcessingService: {
+    getPublicConfig: jest.fn(() => ({
+      configured: true,
+      provider: 'ffmpeg',
+      supportsMp3: true,
+      supportsMixing: true,
+      diagnostics: {
+        status: 'ready',
+      },
+    })),
+    composePodcastAudio: jest.fn(async ({ speechWavBuffer }) => speechWavBuffer),
+    transcodeWavToMp3: jest.fn(async () => Buffer.from('mp3-bytes')),
+  },
 }));
 
 const { createResponse } = require('../openai-client');
 const { piperTtsService } = require('../tts/piper-tts-service');
-const { persistGeneratedAudio } = require('../generated-audio-artifacts');
+const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
+const { audioProcessingService } = require('../audio/audio-processing-service');
 const { writeWavBuffer } = require('../audio/wav-utils');
 const { PodcastService } = require('./podcast-service');
 
@@ -68,6 +86,7 @@ describe('PodcastService', () => {
       artifactIds: ['artifact-podcast-1'],
       audio: { artifactId: 'artifact-podcast-1', downloadUrl: '/api/artifacts/artifact-podcast-1/download' },
     });
+    updateGeneratedAudioSessionState.mockResolvedValue({});
   });
 
   test('creates a researched two-host podcast and persists the final audio', async () => {
@@ -126,5 +145,59 @@ describe('PodcastService', () => {
     expect(result.script.turns).toHaveLength(8);
     expect(result.hosts).toHaveLength(2);
     expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
+  });
+
+  test('exports mp3 and applies optional audio mixing when requested', async () => {
+    persistGeneratedAudio
+      .mockResolvedValueOnce({
+        artifact: { id: 'artifact-podcast-wav', filename: 'battery-breakdown.wav' },
+        artifactIds: ['artifact-podcast-wav'],
+        audio: { artifactId: 'artifact-podcast-wav', downloadUrl: '/api/artifacts/artifact-podcast-wav/download' },
+      })
+      .mockResolvedValueOnce({
+        artifact: { id: 'artifact-podcast-mp3', filename: 'battery-breakdown.mp3' },
+        artifactIds: ['artifact-podcast-mp3'],
+        audio: { artifactId: 'artifact-podcast-mp3', downloadUrl: '/api/artifacts/artifact-podcast-mp3/download' },
+      });
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return { success: true, data: { results: [{ title: 'A', url: 'https://example.com/a', snippet: 'A' }] } };
+      }
+      if (toolId === 'web-fetch') {
+        return { success: true, data: { headers: { 'content-type': 'text/html' }, body: '<p>Battery systems store energy.</p>' } };
+      }
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+      exportMp3: true,
+      includeIntro: true,
+      includeMusicBed: true,
+      musicBedPath: 'C:\\audio\\bed.wav',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
+      includeIntro: true,
+      includeMusicBed: true,
+      musicBedPath: 'C:\\audio\\bed.wav',
+    }));
+    expect(audioProcessingService.transcodeWavToMp3).toHaveBeenCalled();
+    expect(updateGeneratedAudioSessionState).toHaveBeenCalledWith('session-1', [
+      expect.objectContaining({ id: 'artifact-podcast-wav' }),
+      expect.objectContaining({ id: 'artifact-podcast-mp3' }),
+    ]);
+    expect(result.audio).toEqual(expect.objectContaining({
+      artifactId: 'artifact-podcast-mp3',
+    }));
+    expect(result.audioVariants).toHaveLength(2);
+    expect(result.processing.mp3Exported).toBe(true);
+    expect(result.processing.mixed).toBe(true);
   });
 });

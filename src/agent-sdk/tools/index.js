@@ -13,6 +13,7 @@ const { persistGeneratedAudio } = require('../../generated-audio-artifacts');
 const { artifactService } = require('../../artifacts/artifact-service');
 const { assetManager } = require('../../asset-manager');
 const { piperTtsService } = require('../../tts/piper-tts-service');
+const { audioProcessingService } = require('../../audio/audio-processing-service');
 const { podcastService } = require('../../podcast/podcast-service');
 const { config } = require('../../config');
 const { isDashboardRequest } = require('../../dashboard-template-catalog');
@@ -2491,6 +2492,19 @@ class ToolManager {
             },
             maxSources: { type: 'integer', minimum: 2, maximum: 6 },
             pauseMs: { type: 'integer', minimum: 100, maximum: 1200 },
+            includeIntro: { type: 'boolean' },
+            includeOutro: { type: 'boolean' },
+            includeMusicBed: { type: 'boolean' },
+            introPath: { type: 'string' },
+            outroPath: { type: 'string' },
+            musicBedPath: { type: 'string' },
+            speechVolume: { type: 'number' },
+            musicVolume: { type: 'number' },
+            introVolume: { type: 'number' },
+            outroVolume: { type: 'number' },
+            exportMp3: { type: 'boolean' },
+            outputFormat: { type: 'string' },
+            mp3BitrateKbps: { type: 'integer', minimum: 64, maximum: 320 },
             model: { type: 'string' },
             reasoningEffort: { type: 'string' },
           },

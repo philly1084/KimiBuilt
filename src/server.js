@@ -21,7 +21,9 @@ const preferencesRouter = require('./routes/preferences');
 const modelsRouter = require('./routes/models');
 const ttsRouter = require('./routes/tts');
 const audioRouter = require('./routes/audio');
+const podcastRouter = require('./routes/podcast');
 const { ttsService } = require('./tts/tts-service');
+const { audioProcessingService } = require('./audio/audio-processing-service');
 const imagesRouter = require('./routes/images');
 const artifactsRouter = require('./routes/artifacts');
 const { artifactService } = require('./artifacts/artifact-service');
@@ -46,6 +48,7 @@ const { AgentWorkloadRunner } = require('./workloads/runner');
 const { OpenCodeService } = require('./opencode/service');
 const { ProviderSessionService } = require('./provider-session-service');
 const { TemplateStore } = require('./template-store');
+const { podcastService } = require('./podcast/podcast-service');
 
 // Document Service
 const { DocumentService } = require('./documents/document-service');
@@ -233,6 +236,7 @@ app.use('/api/preferences', preferencesRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/tts', ttsRouter);
 app.use('/api/audio', audioRouter);
+app.use('/api/podcast', podcastRouter);
 app.use('/api/images', imagesRouter);
 app.use('/api/artifacts', artifactsRouter);
 app.use('/api/documents', documentsRouter);
@@ -336,6 +340,7 @@ async function start() {
         const documentService = new DocumentService(openaiClient);
         app.locals.documentService = documentService;
         app.locals.artifactService = artifactService;
+        app.locals.podcastService = podcastService;
         console.log('[Boot] Document service ready');
 
         console.log('[Boot] Initializing conversation orchestrator...');
@@ -371,6 +376,8 @@ async function start() {
         setDashboardController(app.locals.dashboardController);
         const ttsConfig = ttsService.getPublicConfig();
         console.log(`[Boot] TTS ${ttsConfig.provider || 'unknown'} ${ttsConfig.diagnostics?.status || 'unknown'}: ${ttsConfig.diagnostics?.message || 'No details available.'}`);
+        const audioProcessingConfig = audioProcessingService.getPublicConfig();
+        console.log(`[Boot] Audio processing ${audioProcessingConfig.provider || 'unknown'} ${audioProcessingConfig.diagnostics?.status || 'unknown'}: ${audioProcessingConfig.diagnostics?.message || 'No details available.'}`);
         startupState.ready = true;
     } catch (err) {
         console.warn('[Boot] Service init failed (will retry on first use):', err.message);

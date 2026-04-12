@@ -5,6 +5,12 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { config } = require('../config');
 const { parseWavBuffer } = require('./wav-utils');
+let ffmpegStaticPath = '';
+try {
+  ffmpegStaticPath = require('ffmpeg-static') || '';
+} catch (_error) {
+  ffmpegStaticPath = '';
+}
 
 function createServiceError(statusCode, message, code = 'audio_processing_error') {
   const error = new Error(message);
@@ -20,15 +26,6 @@ function isExplicitPath(value = '') {
       || normalized.includes('/')
       || normalized.includes('\\')
       || /\.[a-z0-9]+$/i.test(normalized));
-}
-
-function resolveOptionalPath(value = '') {
-  const normalized = String(value || '').trim();
-  if (!normalized) {
-    return '';
-  }
-
-  return isExplicitPath(normalized) ? path.resolve(normalized) : normalized;
 }
 
 function escapeFilterValue(value = '') {
@@ -51,6 +48,19 @@ class AudioProcessingService {
     this.spawnSync = dependencies.spawnSync || spawnSync;
   }
 
+  getEffectiveBinaryPath() {
+    const configured = String(this.audioProcessingConfig.ffmpegBinaryPath || '').trim();
+    if (configured && configured !== 'ffmpeg') {
+      return configured;
+    }
+
+    if (ffmpegStaticPath) {
+      return ffmpegStaticPath;
+    }
+
+    return configured || 'ffmpeg';
+  }
+
   pathExists(targetPath = '') {
     const normalized = String(targetPath || '').trim();
     if (!normalized) {
@@ -70,7 +80,7 @@ class AudioProcessingService {
 
   getDiagnostics() {
     const enabled = this.audioProcessingConfig.enabled !== false;
-    const binaryPath = String(this.audioProcessingConfig.ffmpegBinaryPath || '').trim();
+    const binaryPath = this.getEffectiveBinaryPath();
     if (!enabled) {
       return {
         status: 'unavailable',
@@ -168,8 +178,8 @@ class AudioProcessingService {
       return '';
     }
 
-    const resolved = resolveOptionalPath(candidate);
-    if (!this.pathExists(resolved)) {
+    const resolved = path.resolve(candidate);
+    if (!fsSync.existsSync(resolved)) {
       throw createServiceError(400, `${label} was not found at "${resolved}".`, 'audio_asset_missing');
     }
 
@@ -178,11 +188,12 @@ class AudioProcessingService {
 
   async runFfmpeg(args = [], errorCode = 'audio_processing_failed', failureMessage = 'ffmpeg failed.') {
     this.assertConfigured();
+    const binaryPath = this.getEffectiveBinaryPath();
 
     return new Promise((resolve, reject) => {
       const stderr = [];
       const stdout = [];
-      const child = this.spawn(String(this.audioProcessingConfig.ffmpegBinaryPath || 'ffmpeg'), args, {
+      const child = this.spawn(binaryPath, args, {
         windowsHide: true,
       });
 
@@ -283,13 +294,13 @@ class AudioProcessingService {
     const bedLevel = Number.isFinite(Number(musicVolume))
       ? Number(musicVolume)
       : (Number(this.audioProcessingConfig.podcastMusicVolume) || 0.22);
-    const resolvedIntroPath = includeIntro
+    const resolvedIntroPath = (includeIntro || Boolean(String(introPath || '').trim()))
       ? this.resolveAssetPath(introPath, this.audioProcessingConfig.podcastIntroPath, 'Podcast intro audio')
       : '';
-    const resolvedOutroPath = includeOutro
+    const resolvedOutroPath = (includeOutro || Boolean(String(outroPath || '').trim()))
       ? this.resolveAssetPath(outroPath, this.audioProcessingConfig.podcastOutroPath, 'Podcast outro audio')
       : '';
-    const resolvedBedPath = includeMusicBed
+    const resolvedBedPath = (includeMusicBed || Boolean(String(musicBedPath || '').trim()))
       ? this.resolveAssetPath(musicBedPath, this.audioProcessingConfig.podcastMusicBedPath, 'Podcast music bed audio')
       : '';
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-podcast-compose-'));

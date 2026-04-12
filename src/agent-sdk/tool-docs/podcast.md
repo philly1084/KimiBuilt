@@ -6,7 +6,9 @@
 2. Verify and extract source material with `web-fetch`
 3. Generate a scripted two-host conversation with the configured model
 4. Synthesize each host with Piper using separate voices
-5. Stitch the WAV segments together and save the final audio as a session artifact
+5. Optionally mix in intro/outro/music-bed audio with ffmpeg
+6. Optionally export MP3 with ffmpeg
+7. Save the final audio artifacts into the active session
 
 Required input:
 
@@ -22,9 +24,13 @@ Useful optional inputs:
 - `hostAPersona`, `hostBPersona`
 - `sourceUrls`
 - `searchDomains`
+- `includeIntro`, `includeOutro`, `includeMusicBed`
+- `introPath`, `outroPath`, `musicBedPath`
+- `exportMp3`, `outputFormat`, `mp3BitrateKbps`
 
 Notes:
 
 - The tool requires an active session because it persists the final audio artifact.
 - Research quality depends on `web-search` availability and source accessibility.
-- Audio stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
+- Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
+- MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.

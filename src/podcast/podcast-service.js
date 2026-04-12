@@ -1,6 +1,7 @@
 const { createResponse } = require('../openai-client');
 const { piperTtsService, normalizeTextForSpeech } = require('../tts/piper-tts-service');
-const { persistGeneratedAudio } = require('../generated-audio-artifacts');
+const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
+const { audioProcessingService } = require('../audio/audio-processing-service');
 const { concatWavBuffers, createSilenceWavBuffer, parseWavBuffer } = require('../audio/wav-utils');
 const { chunkText, normalizeWhitespace, stripHtml } = require('../utils/text');
 const { parseLenientJson } = require('../utils/lenient-json');
@@ -40,6 +41,38 @@ function estimateWordBudget(durationMinutes = DEFAULT_DURATION_MINUTES) {
 
 function estimateTurnCount(durationMinutes = DEFAULT_DURATION_MINUTES) {
   return Math.max(12, Math.min(22, Math.round(durationMinutes * 1.7)));
+}
+
+function normalizeVariantFilename(filename = '', extension = 'wav') {
+  const normalizedFilename = String(filename || '').trim();
+  const normalizedExtension = String(extension || '').trim().replace(/^\./, '').toLowerCase() || 'wav';
+  if (!normalizedFilename) {
+    return '';
+  }
+
+  if (/\.[a-z0-9]+$/i.test(normalizedFilename)) {
+    return normalizedFilename.replace(/\.[a-z0-9]+$/i, `.${normalizedExtension}`);
+  }
+
+  return `${normalizedFilename}.${normalizedExtension}`;
+}
+
+function prefersMp3(params = {}) {
+  if (params.exportMp3 === true) {
+    return true;
+  }
+
+  const outputFormat = String(params.outputFormat || params.format || '').trim().toLowerCase();
+  return outputFormat === 'mp3';
+}
+
+function requestedMixing(params = {}) {
+  return params.includeIntro === true
+    || params.includeOutro === true
+    || params.includeMusicBed === true
+    || Boolean(String(params.introPath || '').trim())
+    || Boolean(String(params.outroPath || '').trim())
+    || Boolean(String(params.musicBedPath || '').trim());
 }
 
 function uniqueUrls(items = []) {
@@ -211,6 +244,8 @@ class PodcastService {
     this.createResponse = dependencies.createResponse || createResponse;
     this.ttsService = dependencies.ttsService || piperTtsService;
     this.persistGeneratedAudio = dependencies.persistGeneratedAudio || persistGeneratedAudio;
+    this.updateGeneratedAudioSessionState = dependencies.updateGeneratedAudioSessionState || updateGeneratedAudioSessionState;
+    this.audioProcessingService = dependencies.audioProcessingService || audioProcessingService;
   }
 
   async runTool(executeTool, toolId, params, context) {
@@ -413,24 +448,45 @@ class PodcastService {
       reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
     });
     const transcript = buildTranscript(script.turns);
+    const wantsMp3 = prefersMp3(params);
+    const wantsMixing = requestedMixing(params);
+    const audioProcessingConfig = this.audioProcessingService?.getPublicConfig?.() || null;
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
       normalizeTextForSpeech(turn.text, Math.max(200, Number(voiceConfig.maxTextChars) || 2400));
     });
 
-    const finalAudioBuffer = await this.synthesizeTurns(
+    const speechWavBuffer = await this.synthesizeTurns(
       script.turns,
       hosts,
       clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
     );
+    const finalAudioBuffer = wantsMixing
+      ? await this.audioProcessingService.composePodcastAudio({
+        speechWavBuffer,
+        includeIntro: params.includeIntro === true,
+        includeOutro: params.includeOutro === true,
+        includeMusicBed: params.includeMusicBed === true,
+        introPath: params.introPath || '',
+        outroPath: params.outroPath || '',
+        musicBedPath: params.musicBedPath || '',
+        speechVolume: params.speechVolume,
+        musicVolume: params.musicVolume,
+        introVolume: params.introVolume,
+        outroVolume: params.outroVolume,
+      })
+      : speechWavBuffer;
+    const episodeTitle = params.title || script.title || `${topic} Podcast`;
+    const persistedArtifacts = [];
+    const audioVariants = [];
 
-    const persistedAudio = await this.persistGeneratedAudio({
+    const persistedWav = await this.persistGeneratedAudio({
       sessionId,
       sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',
       text: transcript,
-      title: params.title || script.title || `${topic} Podcast`,
-      filename: params.filename || '',
+      title: episodeTitle,
+      filename: normalizeVariantFilename(params.filename || '', 'wav'),
       provider: 'piper',
       voice: {
         provider: 'piper',
@@ -452,8 +508,77 @@ class PodcastService {
         sources,
         summary: script.summary,
         turnCount: script.turns.length,
+        processing: {
+          mixed: wantsMixing,
+          mp3Exported: wantsMp3,
+        },
       },
     });
+    if (persistedWav.artifact) {
+      persistedArtifacts.push(persistedWav.artifact);
+    }
+    if (persistedWav.audio) {
+      audioVariants.push({
+        format: 'wav',
+        ...persistedWav.audio,
+      });
+    }
+
+    let persistedMp3 = null;
+    if (wantsMp3) {
+      const mp3Buffer = await this.audioProcessingService.transcodeWavToMp3({
+        wavBuffer: finalAudioBuffer,
+        bitrateKbps: params.mp3BitrateKbps,
+      });
+      persistedMp3 = await this.persistGeneratedAudio({
+        sessionId,
+        sourceMode: String(context?.clientSurface || context?.taskType || 'chat').trim() || 'chat',
+        text: transcript,
+        title: episodeTitle,
+        filename: normalizeVariantFilename(params.filename || '', 'mp3'),
+        provider: 'ffmpeg',
+        voice: {
+          provider: 'ffmpeg',
+          episodeVoices: hosts.map((host) => ({
+            speaker: host.name,
+            voiceId: host.voiceId,
+          })),
+        },
+        audioBuffer: mp3Buffer,
+        mimeType: 'audio/mpeg',
+        metadata: {
+          createdByAgentTool: true,
+          generatedBy: 'podcast',
+          topic,
+          durationMinutes,
+          audience,
+          tone,
+          hosts,
+          sources,
+          summary: script.summary,
+          turnCount: script.turns.length,
+          processing: {
+            mixed: wantsMixing,
+            mp3Exported: true,
+          },
+        },
+      });
+      if (persistedMp3.artifact) {
+        persistedArtifacts.push(persistedMp3.artifact);
+      }
+      if (persistedMp3.audio) {
+        audioVariants.push({
+          format: 'mp3',
+          ...persistedMp3.audio,
+        });
+      }
+    }
+
+    if (persistedArtifacts.length > 0) {
+      await this.updateGeneratedAudioSessionState(sessionId, persistedArtifacts);
+    }
+    const primaryAudio = persistedMp3?.audio || persistedWav.audio || null;
+    const primaryArtifact = persistedMp3?.artifact || persistedWav.artifact || null;
 
     return {
       title: script.title,
@@ -468,10 +593,16 @@ class PodcastService {
         turns: script.turns,
         transcript,
       },
-      artifact: persistedAudio.artifact || null,
-      artifacts: persistedAudio.artifact ? [persistedAudio.artifact] : [],
-      artifactIds: persistedAudio.artifactIds || [],
-      audio: persistedAudio.audio || null,
+      processing: {
+        mixed: wantsMixing,
+        mp3Exported: wantsMp3,
+        audioProcessing: audioProcessingConfig,
+      },
+      artifact: primaryArtifact,
+      artifacts: persistedArtifacts,
+      artifactIds: persistedArtifacts.map((artifact) => artifact.id).filter(Boolean),
+      audio: primaryAudio,
+      audioVariants,
     };
   }
 }

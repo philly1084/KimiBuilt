@@ -11,6 +11,7 @@ const { readToolDoc, getToolDocMetadata } = require('../agent-sdk/tool-docs');
 const settingsController = require('./admin/settings.controller');
 const { config } = require('../config');
 const { piperTtsService } = require('../tts/piper-tts-service');
+const { audioProcessingService } = require('../audio/audio-processing-service');
 const {
   resolveOpenCodeGatewayBaseURL,
 } = require('../opencode/gateway');
@@ -217,7 +218,8 @@ function buildToolRuntime(toolId, options = {}) {
 
   if (toolId === 'podcast') {
     return {
-      ...piperTtsService.getPublicConfig(),
+      tts: piperTtsService.getPublicConfig(),
+      audioProcessing: audioProcessingService.getPublicConfig(),
       researchConfigured: Boolean(process.env.PERPLEXITY_API_KEY),
       modelConfigured: Boolean(config.openai.apiKey),
     };
