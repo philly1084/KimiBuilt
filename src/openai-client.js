@@ -1224,6 +1224,21 @@ function hasExplicitMermaidArtifactIntentForPreflight(text = '') {
         || /\b(diagram|flowchart|sequence diagram|erd|entity relationship|class diagram|state diagram)\s+(?:file|artifact|export)\b/i.test(normalized);
 }
 
+function isWebsiteDesignExampleRequestForPreflight(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const hasWebsiteImplementationCue = /\b(web page|webpage|website|site|frontend|ui|vite|react|nextjs|microsite|landing page)\b/.test(normalized);
+    const hasDesignPrototypeCue = /\b(template|prototype|mockup|example|demo|starter|boilerplate|layout|wireframe|design system|component)\b/.test(normalized);
+    const hasPresentationOrDocumentCue = /\b(slides|slide deck|deck|presentation|storyboard|report|brief|document|doc)\b/.test(normalized);
+    const hasWebsiteDesignCue = /\b(website design|web design|site design|product design|ui design|design reference|design example|design template)\b/.test(normalized);
+
+    return (hasWebsiteImplementationCue && hasDesignPrototypeCue)
+        || (hasPresentationOrDocumentCue && (hasWebsiteImplementationCue || hasWebsiteDesignCue));
+}
+
 function inferRequestedOutputFormatForPreflight(text = '') {
     const normalized = String(text || '').toLowerCase();
     if (!normalized) {
@@ -1264,6 +1279,10 @@ function inferRequestedOutputFormatForPreflight(text = '') {
             /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|frontend demo|front-end demo|site mockup|site prototype)\b/.test(normalized)
             || isDashboardRequest(normalized)
         )) {
+        return 'html';
+    }
+
+    if ((hasArtifactIntent || hasBuildIntent) && isWebsiteDesignExampleRequestForPreflight(normalized)) {
         return 'html';
     }
 

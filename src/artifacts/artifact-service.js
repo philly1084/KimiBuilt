@@ -1256,7 +1256,11 @@ function isFrontendDemoArtifactRequest(prompt = '') {
     }
 
     return /\b(website|web page|webpage|landing page|homepage|microsite|marketing site|product page|campaign page|frontend demo|front-end demo|site prototype|site mockup)\b/.test(normalized)
-        || isDashboardRequest(normalized);
+        || isDashboardRequest(normalized)
+        || (
+            /\b(slides|slide deck|deck|presentation|storyboard|report|brief|document|doc)\b/.test(normalized)
+            && /\b(website|web page|webpage|site|frontend|ui|vite|react|nextjs|template|prototype|mockup|example|design system|web design|website design)\b/.test(normalized)
+        );
 }
 
 function isResearchBackedArtifactRequest(prompt = '', format = '') {
@@ -1362,6 +1366,8 @@ function buildFrontendBundleGenerationInstructions({
         'Every HTML page must feel complete and intentionally designed, not like filler placeholders around a shared shell.',
         'Include shared assets such as CSS, JSON fixtures, and JavaScript modules in `metadata.bundle.files` when they support the site.',
         'If you choose `frameworkTarget: "vite"`, keep the preview dependency-free and browser-runnable with native ES modules so it still works without install or build steps. You may include `package.json` and `vite.config.js` as handoff files, but do not depend on npm packages for the sandbox preview.',
+        'Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or a clearly swappable data adapter.',
+        'Favor real interactions such as filters, tab switches, drill-down panels, carousels, sticky nav, or chart toggles over static decoration.',
         'Use stable ids or data-component attributes on major sections to support later repo extraction.',
         'Keep the content grounded, concrete, and production-like.',
         buildDocumentImageInstructions(),
@@ -1759,6 +1765,8 @@ class ArtifactService {
                 'Aim for a strong visual thesis, deliberate layout hierarchy, and a premium landing-page, editorial site, or microsite feel.',
                 'Use semantic sections, responsive CSS, and purposeful but restrained interaction.',
                 'Keep the result portable so it can be moved into a real frontend repository later.',
+                'Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or a clearly swappable data adapter.',
+                'Favor real interactions such as filters, tab switches, drill-down panels, carousels, sticky nav, or chart toggles over static decoration.',
                 'Use stable ids or data-component attributes on major sections to help later component extraction.',
                 'Prefer realistic copy, concrete sections, and clean calls to action over filler cards or placeholder boxes.',
                 'When the request asks for a full website, news site, or multi-page experience, return a linked bundle with multiple HTML pages plus shared assets instead of a single-page mockup.',

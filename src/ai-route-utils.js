@@ -354,6 +354,21 @@ function shouldSuppressWebChatImplicitHtmlArtifact({
     return hasPlanningConversationIntent(text);
 }
 
+function isWebsiteDesignExampleRequest(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const hasWebsiteImplementationCue = /\b(web page|webpage|website|site|frontend|ui|vite|react|nextjs|microsite|landing page)\b/.test(normalized);
+    const hasDesignPrototypeCue = /\b(template|prototype|mockup|example|demo|starter|boilerplate|layout|wireframe|design system|component)\b/.test(normalized);
+    const hasPresentationOrDocumentCue = /\b(slides|slide deck|deck|presentation|storyboard|report|brief|document|doc)\b/.test(normalized);
+    const hasWebsiteDesignCue = /\b(website design|web design|site design|product design|ui design|design reference|design example|design template)\b/.test(normalized);
+
+    return (hasWebsiteImplementationCue && hasDesignPrototypeCue)
+        || (hasPresentationOrDocumentCue && (hasWebsiteImplementationCue || hasWebsiteDesignCue));
+}
+
 function inferRequestedOutputFormat(text = '') {
     const normalized = String(text || '').toLowerCase();
     if (!normalized) {
@@ -400,6 +415,10 @@ function inferRequestedOutputFormat(text = '') {
         || (hasExplicitHtmlCue && hasBuildIntent)
         || (hasPrototypeHtmlCue && hasBuildIntent)
     )) {
+        return 'html';
+    }
+
+    if ((hasArtifactIntent || hasBuildIntent) && isWebsiteDesignExampleRequest(normalized)) {
         return 'html';
     }
 
@@ -1257,6 +1276,7 @@ module.exports = {
     shouldSuppressNotesSurfaceArtifact,
     shouldSuppressImplicitMermaidArtifact,
     shouldSuppressWebChatImplicitHtmlArtifact,
+    isWebsiteDesignExampleRequest,
     normalizeReasoningEffort,
     resolveReasoningEffort,
     resolveSshRequestContext,

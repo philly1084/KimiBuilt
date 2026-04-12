@@ -216,6 +216,8 @@ describe('ai-route-utils', () => {
         expect(inferRequestedOutputFormat('Create a frontend demo microsite for our product launch')).toBe('html');
         expect(inferRequestedOutputFormat('Create an admin dashboard HTML for customer support ops')).toBe('html');
         expect(inferRequestedOutputFormat('Make a website mockup for a fintech launch')).toBe('html');
+        expect(inferRequestedOutputFormat('Create website slides for a fintech launch that I can reuse as a Vite template')).toBe('html');
+        expect(inferRequestedOutputFormat('Build an executive brief template as a frontend example for our web design system')).toBe('html');
     });
 
     test('hasExplicitMermaidFileIntent only returns true for file-like Mermaid requests', () => {

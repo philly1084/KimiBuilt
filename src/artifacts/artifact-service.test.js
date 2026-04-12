@@ -355,6 +355,7 @@ describe('ArtifactService', () => {
 
         expect(createResponse).toHaveBeenCalledTimes(1);
         expect(createResponse.mock.calls[0][0]?.instructions).toContain('Build a polished frontend demo instead of a plain document.');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Use realistic example data by default');
         expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
             format: 'html',
             title: expect.stringContaining('Nova Studio'),
@@ -655,6 +656,76 @@ describe('ArtifactService', () => {
                         label: expect.any(String),
                     }),
                 ]),
+            }),
+        }));
+    });
+
+    test('treats website-slide design examples as frontend website bundle artifacts', async () => {
+        createResponse.mockResolvedValueOnce({
+            id: 'resp-slides-frontend-1',
+            output: [{
+                type: 'message',
+                content: [{
+                    text: JSON.stringify({
+                        content: '<!DOCTYPE html><html><body><nav><a href="story.html">Story</a></nav><main data-component="storyboard"><section id="scene-1"><h1>Launch Story</h1></section></main></body></html>',
+                        metadata: {
+                            title: 'Launch Storyboard',
+                            frameworkTarget: 'vite',
+                            bundle: {
+                                entry: 'index.html',
+                                files: [
+                                    {
+                                        path: 'index.html',
+                                        language: 'html',
+                                        purpose: 'Launch story opener',
+                                        content: '<!DOCTYPE html><html><body><nav><a href="story.html">Story</a></nav><main data-component="storyboard"><section id="scene-1"><h1>Launch Story</h1></section></main></body></html>',
+                                    },
+                                    {
+                                        path: 'story.html',
+                                        language: 'html',
+                                        purpose: 'Story continuation',
+                                        content: '<!DOCTYPE html><html><body><main><section id="scene-2"><h1>Momentum</h1></section></main></body></html>',
+                                    },
+                                    {
+                                        path: 'app.js',
+                                        language: 'javascript',
+                                        purpose: 'Scene interactions',
+                                        content: 'document.documentElement.dataset.ready = "true";',
+                                    },
+                                ],
+                            },
+                        },
+                    }),
+                }],
+            }],
+        });
+
+        await artifactService.generateArtifact({
+            session: { previousResponseId: 'prev-slides-1', metadata: {} },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create website slides for our launch story that I can reuse as a Vite template.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        expect(createResponse).toHaveBeenCalledTimes(1);
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('You are generating a full website preview bundle');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Use realistic example data by default');
+        expect(renderArtifact).not.toHaveBeenCalled();
+        expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({
+            extension: 'zip',
+            metadata: expect.objectContaining({
+                frameworkTarget: 'vite',
+                bundle: expect.objectContaining({
+                    files: expect.arrayContaining([
+                        expect.objectContaining({ path: 'index.html' }),
+                        expect.objectContaining({ path: 'story.html' }),
+                        expect.objectContaining({ path: 'app.js' }),
+                    ]),
+                }),
             }),
         }));
     });
