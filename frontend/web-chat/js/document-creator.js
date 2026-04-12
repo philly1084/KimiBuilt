@@ -25,6 +25,57 @@ class DocumentCreator {
       : '';
   }
 
+  async ensureBackendSession() {
+    const currentSessionId = String(
+      window.sessionManager?.currentSessionId
+      || this.api?.getSessionId?.()
+      || '',
+    ).trim();
+
+    if (currentSessionId && !window.sessionManager?.isLocalSession?.(currentSessionId)) {
+      return currentSessionId;
+    }
+
+    const response = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        taskType: 'chat',
+        clientSurface: 'web-chat',
+        metadata: {
+          mode: 'chat',
+          taskType: 'chat',
+          clientSurface: 'web-chat',
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to create backend session (${response.status})`);
+    }
+
+    const session = await response.json();
+    const backendSessionId = String(session?.id || '').trim();
+    if (!backendSessionId) {
+      throw new Error('Backend session response did not include an id');
+    }
+
+    if (window.sessionManager?.promoteSessionId) {
+      window.sessionManager.promoteSessionId(currentSessionId, backendSessionId);
+    } else if (window.sessionManager) {
+      window.sessionManager.currentSessionId = backendSessionId;
+    }
+
+    if (typeof window.chatApp?.syncBackendSession === 'function') {
+      window.chatApp.syncBackendSession(backendSessionId);
+    } else if (this.api?.setSessionId) {
+      this.api.setSessionId(backendSessionId);
+    }
+
+    return backendSessionId;
+  }
+
   async refreshArtifactInventory() {
     try {
       await window.artifactManager?.refresh?.();
@@ -740,12 +791,12 @@ class DocumentCreator {
     
     // Get selected format
     const format = document.querySelector('input[name="doc-format"]:checked')?.value || 'docx';
-    const sessionId = this.getActiveSessionId();
     
     // Show loading
     this.showLoading('Generating document...');
     
     try {
+      const sessionId = await this.ensureBackendSession();
       const response = await fetch('/api/documents/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -809,11 +860,11 @@ class DocumentCreator {
     const length = document.getElementById('doc-ai-length').value;
     const style = document.getElementById('doc-ai-style').value;
     const format = document.getElementById('doc-ai-format').value;
-    const sessionId = this.getActiveSessionId();
     
     this.showLoading('AI is generating your document...');
     
     try {
+      const sessionId = await this.ensureBackendSession();
       const response = await fetch('/api/documents/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

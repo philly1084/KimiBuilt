@@ -909,6 +909,10 @@
             renderSelectedChips();
             fetchArtifacts();
         });
+
+        window.sessionManager.addEventListener('sessionPromoted', () => {
+            fetchArtifacts();
+        });
         
         window.sessionManager.addEventListener('sessionDeleted', () => {
             state.selectedArtifactIds = [];

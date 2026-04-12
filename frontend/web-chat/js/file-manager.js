@@ -20,6 +20,7 @@ class FileManager {
     this.createModal();
     this.injectStyles();
     this.setupKeyboardShortcuts();
+    this.setupSessionListeners();
     
     // Listen for connection status changes
     window.addEventListener('online', () => this.handleConnectionRestored());
@@ -30,6 +31,28 @@ class FileManager {
       if (!document.hidden && this.isOpen) {
         this.refreshFiles();
       }
+    });
+  }
+
+  setupSessionListeners() {
+    if (!window.sessionManager?.addEventListener) {
+      return;
+    }
+
+    window.sessionManager.addEventListener('sessionCreated', () => {
+      this.refreshFiles();
+    });
+
+    window.sessionManager.addEventListener('sessionSwitched', () => {
+      this.refreshFiles();
+    });
+
+    window.sessionManager.addEventListener('sessionPromoted', () => {
+      this.refreshFiles();
+    });
+
+    window.sessionManager.addEventListener('sessionDeleted', () => {
+      this.refreshFiles();
     });
   }
 
