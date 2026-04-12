@@ -176,6 +176,7 @@ const AUTO_TOOL_ALLOWLIST = new Set([
     'web-fetch',
     'web-search',
     'web-scrape',
+    'podcast',
     'image-generate',
     'image-search-unsplash',
     'image-from-url',
@@ -1042,6 +1043,52 @@ function hasExplicitWebResearchIntent(prompt = '') {
     ].some((pattern) => pattern.test(text));
 }
 
+function hasExplicitPodcastIntent(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+
+    return [
+        /\bpodcast\b/i,
+        /\bpodcast episode\b/i,
+        /\btwo[- ]host podcast\b/i,
+        /\btwo[- ]agent podcast\b/i,
+        /\brecord\b[\s\S]{0,40}\bpodcast\b/i,
+        /\bmake\b[\s\S]{0,40}\bpodcast\b/i,
+        /\bcreate\b[\s\S]{0,40}\bpodcast\b/i,
+        /\bgenerate\b[\s\S]{0,40}\bpodcast\b/i,
+    ].some((pattern) => pattern.test(text));
+}
+
+function extractExplicitPodcastTopic(prompt = '') {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    const normalized = text
+        .replace(/\b(can you|could you|please|let'?s|lets|i want|we need to|help me)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const topicMatchers = [
+        /\bpodcast(?: episode)?\b[\s\S]{0,30}\b(?:about|on|regarding|covering)\b\s+(.+)$/i,
+        /\b(?:make|create|generate|record|produce)\b[\s\S]{0,20}\bpodcast\b[\s\S]{0,20}\b(?:about|on)\b\s+(.+)$/i,
+        /\b(?:about|on)\b\s+(.+?)\s*\b(?:for a podcast|in a podcast)\b/i,
+    ];
+
+    for (const pattern of topicMatchers) {
+        const match = normalized.match(pattern);
+        const candidate = String(match?.[1] || '').trim();
+        if (candidate) {
+            return candidate.replace(/[.?!]+$/, '').trim();
+        }
+    }
+
+    return normalized.replace(/[.?!]+$/, '').trim() || null;
+}
+
 function hasDeepResearchPresentationIntent(prompt = '') {
     const text = String(prompt || '').trim();
     if (!text) {
@@ -1388,6 +1435,18 @@ function buildDeterministicPreflightActions(automaticTools = [], prompt = '') {
     const sshTarget = remoteToolId
         ? extractExplicitSshTarget(prompt)
         : null;
+    const podcastTopic = availableToolIds.has('podcast') && hasExplicitPodcastIntent(prompt)
+        ? extractExplicitPodcastTopic(prompt)
+        : null;
+
+    if (podcastTopic) {
+        actions.push({
+            toolId: 'podcast',
+            params: {
+                topic: podcastTopic,
+            },
+        });
+    }
 
     if (webQuery) {
         actions.push({
@@ -1977,6 +2036,7 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
     const hasApiDesignIntent = /\b(api design|design api|openapi|swagger|graphql schema|rest api|grpc)\b/i.test(normalizedPrompt);
     const hasSchemaIntent = /\b(database schema|design database|generate ddl|ddl\b|er diagram|entity relationship|orm schema)\b/i.test(normalizedPrompt);
     const hasMigrationIntent = /\b(create migration|generate migration|schema migration|database change|schema diff|migration)\b/i.test(normalizedPrompt);
+    const hasPodcastIntent = hasExplicitPodcastIntent(prompt);
     const hasDocumentWorkflowIntent = (
         /\b(document|doc|report|brief|proposal|guide|summary|one-pager|whitepaper|slides|presentation|deck|pptx|docx|pdf|html page|html document|web page)\b/i.test(normalizedPrompt)
         && /\b(create|make|generate|build|prepare|draft|write|assemble|compile|organize|inject|turn|convert|export)\b/i.test(normalizedPrompt)
@@ -2024,6 +2084,10 @@ function selectAutomaticToolDefinitions(automaticTools = [], prompt = '', option
 
     if (hasSubAgentIntent && availableToolIds.has('agent-delegate')) {
         selectedIds.add('agent-delegate');
+    }
+
+    if (hasPodcastIntent && availableToolIds.has('podcast')) {
+        selectedIds.add('podcast');
     }
 
     if (hasDeepResearchDeckIntent && availableToolIds.has(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
@@ -2241,6 +2305,10 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
     if (availableToolIds.has(DEEP_RESEARCH_PRESENTATION_TOOL_ID)
         && hasDeepResearchPresentationIntent(prompt)) {
         return DEEP_RESEARCH_PRESENTATION_TOOL_ID;
+    }
+
+    if (availableToolIds.has('podcast') && hasExplicitPodcastIntent(prompt)) {
+        return 'podcast';
     }
 
     if (hasExplicitWebResearchIntent(prompt)) {
@@ -3006,6 +3074,27 @@ function formatDirectToolResultMessage(toolEvent = {}) {
         return sections.join('\n\n');
     }
 
+    if (toolId === 'podcast') {
+        const data = result?.data || {};
+        const sections = [
+            `Podcast generated for ${data.title || data.topic || 'the requested topic'}.`,
+        ];
+
+        if (data.audio?.artifactId) {
+            sections.push(`Primary audio artifact: ${data.audio.artifactId}`);
+        }
+
+        if (Array.isArray(data.audioVariants) && data.audioVariants.length > 0) {
+            sections.push(`Available audio variants: ${data.audioVariants.map((variant) => variant.label || variant.format || variant.artifactId).filter(Boolean).join(', ')}`);
+        }
+
+        if (data.script?.artifactId) {
+            sections.push(`Script artifact: ${data.script.artifactId}`);
+        }
+
+        return sections.join('\n\n');
+    }
+
     if (toolId === 'agent-workload') {
         if (!result.success) {
             return `Workload request failed: ${result.error || 'Unknown error'}`;
@@ -3084,7 +3173,7 @@ async function runDirectRequiredToolAction({
     toolContext = {},
     model = null,
 }) {
-    if (!['ssh-execute', 'remote-command', 'web-scrape', 'agent-workload'].includes(requiredToolId)) {
+    if (!['ssh-execute', 'remote-command', 'web-scrape', 'agent-workload', 'podcast'].includes(requiredToolId)) {
         return null;
     }
 
@@ -4320,10 +4409,13 @@ module.exports = {
         runAutomaticToolLoopWithResponses,
         sanitizeToolSchema,
         selectAutomaticToolDefinitions,
+        inferRequiredAutomaticToolId,
         shouldSendReasoningEffort,
         shouldAutoUseTool,
         shouldUseResponsesAPI,
         promptHasExplicitSshIntent,
+        hasExplicitPodcastIntent,
+        extractExplicitPodcastTopic,
         hasExplicitUserCheckpointInteractionIntent,
         extractQuestionnaireCheckpointFromText,
         maybeRecoverUserCheckpointResponse,

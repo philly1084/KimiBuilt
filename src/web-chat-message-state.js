@@ -529,6 +529,7 @@ function buildWebChatAssistantEnvelope({
     artifacts = [],
     parentMessageId = '',
     timestamp = null,
+    preferArtifactSummary = true,
 } = {}) {
     const normalizedTimestamp = timestamp || new Date().toISOString();
     const surveyDisplayContent = buildSurveyDisplayContentFromToolEvents(toolEvents);
@@ -538,7 +539,7 @@ function buildWebChatAssistantEnvelope({
 
     if (surveyDisplayContent) {
         assistantMetadata.displayContent = surveyDisplayContent;
-    } else if (artifactSummary) {
+    } else if (preferArtifactSummary && artifactSummary) {
         assistantMetadata.displayContent = artifactSummary;
     }
 
@@ -575,16 +576,20 @@ function buildWebChatSessionMessages({
     const resolvedUserTimestamp = userTimestamp || offsetIsoTimestamp(timestamp, 0);
     const resolvedAssistantTimestamp = assistantTimestamp || offsetIsoTimestamp(resolvedUserTimestamp, 1);
     const assistantMessageId = String(inputAssistantMessageId || '').trim() || uuidv4();
+    const normalizedAssistantText = stripNullCharacters(String(assistantText || '')).trim();
     const { assistantMetadata, auxiliaryMessages } = buildWebChatAssistantEnvelope({
         toolEvents,
         artifacts,
         parentMessageId: assistantMessageId,
         timestamp: resolvedAssistantTimestamp,
+        preferArtifactSummary: !normalizedAssistantText,
     });
     const mergedAssistantMetadata = {
         ...assistantMetadata,
         ...buildFrontendAssistantMetadata(inputAssistantMetadata),
     };
+    const assistantContent = normalizedAssistantText
+        || stripNullCharacters(String(mergedAssistantMetadata.displayContent || '')).trim();
     const sequencedAuxiliaryMessages = auxiliaryMessages.map((message, index) => ({
         ...message,
         timestamp: offsetIsoTimestamp(resolvedAssistantTimestamp, index + 1),
@@ -600,7 +605,7 @@ function buildWebChatSessionMessages({
         {
             id: assistantMessageId,
             role: 'assistant',
-            content: stripNullCharacters(String(assistantText || '')).trim(),
+            content: assistantContent,
             timestamp: resolvedAssistantTimestamp,
             metadata: mergedAssistantMetadata,
         },

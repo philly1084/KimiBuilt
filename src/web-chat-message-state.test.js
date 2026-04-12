@@ -52,6 +52,26 @@ describe('buildWebChatSessionMessages', () => {
                 downloadUrl: '/api/artifacts/artifact-1/download',
             }),
         ]);
+        expect(messages[1].content).toBe('Answer second');
+        expect(messages[1].metadata.displayContent).toBeUndefined();
+    });
+
+    test('falls back to an artifact summary only when the assistant text is empty', () => {
+        const messages = buildWebChatSessionMessages({
+            userText: 'Make the deck.',
+            assistantText: '',
+            artifacts: [{
+                id: 'artifact-pptx-2',
+                filename: 'launch-plan.pptx',
+                format: 'pptx',
+                downloadUrl: '/api/documents/deck-2/download',
+            }],
+            timestamp: '2026-04-11T12:15:00.000Z',
+        });
+
+        expect(messages).toHaveLength(2);
+        expect(messages[1].content).toBe('Created launch-plan.pptx. Use Download below.');
+        expect(messages[1].metadata.displayContent).toBe('Created launch-plan.pptx. Use Download below.');
     });
 
     test('stores checkpoint fallback display content as a bare survey fence without duplicated prose', () => {

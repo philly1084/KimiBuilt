@@ -85,6 +85,21 @@ function createToolManager() {
                 },
             },
         }],
+        ['podcast', {
+            id: 'podcast',
+            name: 'Podcast',
+            description: 'Research a topic, script a two-host episode, and synthesize podcast audio.',
+            inputSchema: {
+                type: 'object',
+                required: ['topic'],
+                properties: {
+                    topic: { type: 'string' },
+                    durationMinutes: { type: 'integer' },
+                    audience: { type: 'string' },
+                    tone: { type: 'string' },
+                },
+            },
+        }],
         ['asset-search', {
             id: 'asset-search',
             name: 'Asset Search',
@@ -347,6 +362,7 @@ function createToolManager() {
         ['image-generate', { enabled: true, triggerPatterns: ['generate image', 'create image'], requiresConfirmation: false }],
         ['image-search-unsplash', { enabled: true, triggerPatterns: ['unsplash', 'image search'], requiresConfirmation: false }],
         ['image-from-url', { enabled: true, triggerPatterns: ['image url', 'embed image'], requiresConfirmation: false }],
+        ['podcast', { enabled: true, triggerPatterns: ['podcast', 'podcast episode', 'two host podcast'], requiresConfirmation: false }],
         ['asset-search', { enabled: true, triggerPatterns: ['search assets', 'find earlier document'], requiresConfirmation: false }],
         ['file-read', { enabled: true, triggerPatterns: ['read file', 'open file'], requiresConfirmation: false }],
         ['file-write', { enabled: true, triggerPatterns: ['write file', 'save file'], requiresConfirmation: true }],
@@ -407,6 +423,30 @@ function createToolManager() {
                             filename: 'brief.html',
                             mimeType: 'text/html',
                             downloadUrl: '/api/documents/doc-1/download',
+                        },
+                    },
+                };
+            }
+
+            if (id === 'podcast') {
+                return {
+                    success: true,
+                    toolId: id,
+                    data: {
+                        title: `Podcast: ${params.topic}`,
+                        topic: params.topic,
+                        audio: {
+                            artifactId: 'artifact-podcast-1',
+                        },
+                        audioVariants: [
+                            {
+                                label: 'WAV master',
+                                format: 'wav',
+                                artifactId: 'artifact-podcast-1',
+                            },
+                        ],
+                        script: {
+                            artifactId: 'artifact-script-1',
                         },
                     },
                 };
@@ -888,6 +928,30 @@ describe('openai-client automatic tool orchestration helpers', () => {
         ]);
     });
 
+    test('treats podcast wording as an explicit intent and extracts the requested topic', () => {
+        expect(__testUtils.hasExplicitPodcastIntent('podcast')).toBe(true);
+        expect(__testUtils.hasExplicitPodcastIntent('Make a podcast about battery storage.')).toBe(true);
+        expect(__testUtils.extractExplicitPodcastTopic('Make a podcast about battery storage.')).toBe('battery storage');
+    });
+
+    test('builds deterministic podcast preflight actions for explicit podcast prompts', () => {
+        const actions = __testUtils.buildDeterministicPreflightActions(
+            [
+                { id: 'podcast' },
+            ],
+            'Make a podcast about battery storage.',
+        );
+
+        expect(actions).toEqual([
+            {
+                toolId: 'podcast',
+                params: {
+                    topic: 'battery storage',
+                },
+            },
+        ]);
+    });
+
     test('prefers remote-command for deterministic ssh preflight when both SSH tools are available', () => {
         const actions = __testUtils.buildDeterministicPreflightActions(
             [
@@ -922,6 +986,17 @@ describe('openai-client automatic tool orchestration helpers', () => {
         );
 
         expect(selectedTools.map((tool) => tool.id)).toEqual(['web-search', 'file-mkdir']);
+    });
+
+    test('includes podcast in the automatic tool catalog for default sessions and selects it from podcast prompts', () => {
+        const toolManager = createToolManager();
+        const prompt = 'Make a podcast about battery storage.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(toolManager, prompt);
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(automaticTools, prompt);
+
+        expect(automaticTools.map((tool) => tool.id)).toContain('podcast');
+        expect(selectedTools.map((tool) => tool.id)).toContain('podcast');
+        expect(__testUtils.inferRequiredAutomaticToolId(prompt, automaticTools.map((tool) => tool.id))).toBe('podcast');
     });
 
     test('offers user-checkpoint alongside normal tools for web-chat when checkpoint budget remains', () => {
@@ -1902,6 +1977,38 @@ describe('openai-client automatic tool orchestration helpers', () => {
                 host: '77.42.44.98',
                 username: 'root',
                 command: 'hostname && uptime && (df -h / || true) && (free -m || true)',
+            }),
+            expect.any(Object),
+        );
+    });
+
+    test('runs podcast requests directly when podcast is the required tool', async () => {
+        const toolManager = createToolManager();
+        const prompt = 'Make a podcast about battery storage.';
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+        );
+
+        const response = await __testUtils.runDirectRequiredToolAction({
+            toolManager,
+            requiredToolId: 'podcast',
+            selectedTools,
+            prompt,
+            toolContext: {},
+            model: 'gpt-4o',
+        });
+
+        expect(response.output[0].content[0].text).toContain('Podcast generated for Podcast: battery storage.');
+        expect(response.output[0].content[0].text).toContain('artifact-podcast-1');
+        expect(toolManager.executeTool).toHaveBeenCalledWith(
+            'podcast',
+            expect.objectContaining({
+                topic: 'battery storage',
             }),
             expect.any(Object),
         );

@@ -2402,7 +2402,7 @@ class UIHelpers {
 
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
         const summary = this.getMessageReasoningSummary(message);
-        const content = String(message?.displayContent ?? message?.content ?? '').trim();
+        const content = this.resolveAssistantVisibleContent(message);
         const displaySource = String(message?.reasoningDisplaySource || '').trim();
         const displayText = String(message?.reasoningDisplayText || '').trim();
         const displayFullText = String(message?.reasoningDisplayFullText || '').trim();
@@ -2537,7 +2537,7 @@ class UIHelpers {
             ? messageOrContent
             : { content: messageOrContent };
         const effectiveStreaming = isStreaming === true || message?.isStreaming === true;
-        const content = message.displayContent ?? message.content;
+        const content = this.resolveAssistantVisibleContent(message);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
             return {
@@ -2648,7 +2648,7 @@ class UIHelpers {
 
         const renderedContent = isUser ? 
             message.content :
-            (message.displayContent ?? message.content);
+            this.resolveAssistantVisibleContent(message);
 
         const inlineArtifacts = !isUser && message.type !== 'artifact-gallery' && Array.isArray(message.artifacts)
             ? message.artifacts.filter((artifact) => artifact?.id && artifact?.downloadUrl)
@@ -4860,12 +4860,49 @@ class UIHelpers {
         return parts.join('\n\n').trim();
     }
 
+    shouldPreferAssistantContentOverDisplayContent(message = null) {
+        if (!message || message.role !== 'assistant') {
+            return false;
+        }
+
+        const displayContent = String(message.displayContent ?? '').trim();
+        const content = String(message.content ?? '').trim();
+        if (!displayContent || !content || displayContent === content) {
+            return false;
+        }
+
+        if (this.extractSurveyDefinitionFromContent(displayContent, message.id || '')) {
+            return false;
+        }
+
+        const artifacts = Array.isArray(message.artifacts) ? message.artifacts : [];
+        const artifactSummary = String(window.artifactManager?.buildArtifactSummary?.(artifacts) || '').trim();
+        return Boolean(artifactSummary) && displayContent === artifactSummary;
+    }
+
+    resolveAssistantVisibleContent(message = null) {
+        if (!message || message.role !== 'assistant') {
+            return String(message?.displayContent ?? message?.content ?? '').trim();
+        }
+
+        if (this.shouldPreferAssistantContentOverDisplayContent(message)) {
+            return String(message.content || '').trim();
+        }
+
+        const displayContent = String(message.displayContent ?? '').trim();
+        if (displayContent) {
+            return displayContent;
+        }
+
+        return String(message.content || '').trim();
+    }
+
     buildSpeakableMessageText(message = null) {
         if (!message || message.role !== 'assistant') {
             return '';
         }
 
-        const source = String(message.displayContent ?? message.content ?? '').trim();
+        const source = this.resolveAssistantVisibleContent(message);
         if (!source) {
             return '';
         }

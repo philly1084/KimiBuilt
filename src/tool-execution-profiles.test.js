@@ -16,6 +16,7 @@ describe('tool execution profiles', () => {
             'agent-workload',
             'asset-search',
             'speech-generate',
+            'podcast',
             'deep-research-presentation',
             'security-scan',
             'architecture-design',
@@ -42,6 +43,7 @@ describe('tool execution profiles', () => {
         expect(toolIds).toContain('k3s-deploy');
         expect(toolIds).toContain('opencode-run');
         expect(toolIds).toContain('code-sandbox');
+        expect(toolIds).toContain('podcast');
         expect(toolIds).not.toContain('code-execute');
         expect(HIDDEN_FRONTEND_TOOL_IDS).toContain('code-execute');
     });

@@ -24,6 +24,7 @@ const BASE_SHARED_TOOL_IDS = Object.freeze([
     'image-search-unsplash',
     'image-from-url',
     'speech-generate',
+    'podcast',
     'asset-search',
     'file-read',
     'file-write',
