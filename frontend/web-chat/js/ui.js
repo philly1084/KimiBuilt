@@ -2411,7 +2411,7 @@ class UIHelpers {
         const displayAnimated = message?.reasoningDisplayAnimated === true;
 
         if (isStreaming && displaySource === 'synthetic' && displayText) {
-            if (content) {
+            if (content || summary) {
                 return null;
             }
 

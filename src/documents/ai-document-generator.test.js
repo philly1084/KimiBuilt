@@ -52,4 +52,39 @@ describe('AIDocumentGenerator', () => {
     }));
     expect(result.metadata.parseRecovery).toBe('plain-text-fallback');
   });
+
+  test('presentation prompt includes template-gallery guidance and treats templates as examples', async () => {
+    const createResponse = jest.fn(async () => buildResponse(
+      JSON.stringify({
+        title: 'Launch Story',
+        theme: 'executive',
+        slides: [
+          { layout: 'title', title: 'Launch Story', subtitle: 'Q2' },
+          { layout: 'content', title: 'Momentum', bullets: ['Pipeline is growing'] },
+        ],
+      }),
+    ));
+    const generator = new AIDocumentGenerator({ createResponse });
+
+    await generator.generatePresentationContent('Build a launch deck', {
+      documentType: 'presentation',
+      slideCount: 2,
+      designPlan: {
+        recommendedTemplates: [
+          {
+            id: 'board-update-deck',
+            name: 'Board Update Deck',
+            description: 'Leadership-ready presentation template',
+            useCases: ['board update'],
+          },
+        ],
+      },
+    });
+
+    const prompt = createResponse.mock.calls[0][0].input[0].content;
+    expect(prompt).toContain('<template_gallery>');
+    expect(prompt).toContain('examples and building blocks, not hard rules');
+    expect(prompt).toContain('Board Update Deck');
+    expect(prompt).toContain('If the request would benefit from a hybrid structure, combine patterns from multiple templates');
+  });
 });

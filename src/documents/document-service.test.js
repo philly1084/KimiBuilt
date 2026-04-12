@@ -226,6 +226,12 @@ describe('DocumentService', () => {
       'pitch-deck-story',
       'data-story-report',
       'website-slides-storyboard',
+      'board-update-deck',
+      'product-roadmap-deck',
+      'training-workshop-deck',
+      'case-study-deck',
+      'conference-keynote-deck',
+      'campaign-storyboard-deck',
     ]));
   });
 
@@ -266,6 +272,35 @@ describe('DocumentService', () => {
         id: 'website-slides-storyboard',
         formats: expect.arrayContaining(['html', 'pptx']),
       }),
+      expect.objectContaining({
+        id: 'campaign-storyboard-deck',
+        formats: expect.arrayContaining(['html', 'pptx']),
+      }),
+    ]));
+  });
+
+  test('recommends a broader pool of templates for general presentation prompts', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const recommendation = service.recommendDocumentWorkflow({
+      prompt: 'Build a presentation for our quarterly company update',
+      documentType: 'presentation',
+      format: 'pptx',
+      limit: 8,
+    });
+
+    expect(recommendation.recommendedTemplates.length).toBeGreaterThanOrEqual(5);
+    expect(recommendation.recommendedTemplates.map((template) => template.id)).toEqual(expect.arrayContaining([
+      'presentation-bullet-points',
+      'board-update-deck',
+      'product-roadmap-deck',
+      'training-workshop-deck',
+      'case-study-deck',
+      'conference-keynote-deck',
     ]));
   });
 

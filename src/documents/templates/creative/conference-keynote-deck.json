@@ -1,0 +1,30 @@
+{
+  "id": "conference-keynote-deck",
+  "name": "Conference Keynote Deck",
+  "category": "creative",
+  "description": "High-impact presentation template for keynote talks, launches, and big-stage storytelling.",
+  "icon": "keynote",
+  "tags": ["presentation", "slides", "keynote", "conference", "stage", "launch"],
+  "blueprint": "presentation",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["conference talk", "keynote", "big reveal"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["hero moments", "big-stage pacing", "visual contrast"],
+    "bestFor": ["keynotes", "launch decks", "event presentations"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Deck Title", "required": true },
+    "speaker": { "type": "text", "label": "Speaker", "required": false },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "itemFields": {
+        "title": { "type": "text", "label": "Slide Title", "required": true },
+        "imagePrompt": { "type": "textarea", "label": "Visual Direction", "required": false },
+        "content": { "type": "textarea", "label": "Narrative", "required": false }
+      }
+    }
+  }
+}

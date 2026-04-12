@@ -282,6 +282,17 @@ class DocumentService {
    */
   async generatePresentation(content, options = {}) {
     const format = String(options.format || 'pptx').toLowerCase();
+    const designPlan = options.designPlan || (typeof content === 'string'
+      ? this.buildDocumentPlan({
+        prompt: content,
+        documentType: options.documentType || 'presentation',
+        format,
+        tone: options.tone || 'professional',
+        length: options.length || 'medium',
+        existingContent: options.existingContent || '',
+        session: options.session || null,
+      })
+      : null);
 
     // Build presentation structure
     let presentationContent;
@@ -291,6 +302,7 @@ class DocumentService {
       } else {
         presentationContent = await this.aiGenerator.generatePresentationContent(content, {
           ...options,
+          designPlan,
           slideCount: options.slideCount || this.inferSlideCount(options.length),
         });
       }
@@ -332,6 +344,7 @@ class DocumentService {
         format,
         generatedAt: new Date().toISOString(),
         aiGenerated: typeof content === 'string',
+        designPlan,
         slideCount: presentationContent.slides?.length,
         theme: presentationContent.theme || options.theme || 'editorial',
         ...document.metadata

@@ -1,0 +1,31 @@
+{
+  "id": "product-roadmap-deck",
+  "name": "Product Roadmap Deck",
+  "category": "business",
+  "description": "Presentation template for product strategy, milestones, dependencies, and next bets.",
+  "icon": "roadmap",
+  "tags": ["presentation", "slides", "product", "roadmap", "planning", "milestones"],
+  "blueprint": "presentation",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["roadmap review", "product planning", "strategy deck"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["roadmap pacing", "milestone storytelling", "decision visibility"],
+    "bestFor": ["product reviews", "planning decks", "quarterly strategy"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Deck Title", "required": true },
+    "subtitle": { "type": "text", "label": "Subtitle", "required": false },
+    "timeframe": { "type": "text", "label": "Roadmap Window", "required": false },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "itemFields": {
+        "title": { "type": "text", "label": "Slide Title", "required": true },
+        "content": { "type": "textarea", "label": "Narrative", "required": false },
+        "bullets": { "type": "textarea", "label": "Bullets", "required": false }
+      }
+    }
+  }
+}

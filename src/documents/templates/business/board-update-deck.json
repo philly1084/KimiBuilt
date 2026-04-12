@@ -1,0 +1,31 @@
+{
+  "id": "board-update-deck",
+  "name": "Board Update Deck",
+  "category": "business",
+  "description": "Leadership-ready presentation template for concise status, risks, metrics, and decisions.",
+  "icon": "slides",
+  "tags": ["presentation", "slides", "board", "leadership", "status", "metrics"],
+  "blueprint": "presentation",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["board update", "leadership review", "quarterly update"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["executive pacing", "metric-led narrative", "clear decision framing"],
+    "bestFor": ["board decks", "leadership updates", "decision reviews"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Deck Title", "required": true },
+    "subtitle": { "type": "text", "label": "Subtitle", "required": false },
+    "headline": { "type": "textarea", "label": "Headline Summary", "required": false },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "itemFields": {
+        "title": { "type": "text", "label": "Slide Title", "required": true },
+        "bullets": { "type": "textarea", "label": "Bullets", "required": false },
+        "stats": { "type": "textarea", "label": "Metrics", "required": false }
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "campaign-storyboard-deck",
+  "name": "Campaign Storyboard Deck",
+  "category": "creative",
+  "description": "Narrative website-slide style template for campaign concepts, launches, and visual storyboards.",
+  "icon": "storyboard",
+  "tags": ["presentation", "slides", "website slides", "campaign", "storyboard", "visual"],
+  "blueprint": "website-slides",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["campaign storyboard", "launch narrative", "visual concept deck"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["scene-based rhythm", "visual-first slides", "strong CTA endings"],
+    "bestFor": ["website slides", "creative decks", "campaign narratives"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Deck Title", "required": true },
+    "subtitle": { "type": "text", "label": "Subtitle", "required": false },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "itemFields": {
+        "title": { "type": "text", "label": "Slide Title", "required": true },
+        "imagePrompt": { "type": "textarea", "label": "Image Prompt", "required": false },
+        "caption": { "type": "text", "label": "Caption", "required": false },
+        "content": { "type": "textarea", "label": "Narrative", "required": false }
+      }
+    }
+  }
+}

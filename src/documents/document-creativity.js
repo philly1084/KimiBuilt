@@ -131,6 +131,90 @@ const CREATIVE_DIRECTIONS = {
       'Make the closing feel chosen, not auto-generated.',
     ],
   },
+  'analyst-briefing': {
+    id: 'analyst-briefing',
+    label: 'Analyst Briefing',
+    preferredTheme: 'executive',
+    rationale: 'Frame the deck like a sharp market or strategy briefing with visible logic, evidence, and calm authority.',
+    voice: [
+      'Use concise analytical language with explicit takeaways.',
+      'Keep claims grounded and decision-oriented.',
+      'Prefer signal over flourish, but do not sound sterile.',
+    ],
+    layout: [
+      'Use section resets, charts, and comparison slides to pace the argument.',
+      'Let proof slides do real work instead of acting as decoration.',
+      'Keep the story tight and cumulative from slide to slide.',
+    ],
+    humanFeel: [
+      'Interpret evidence instead of just presenting it.',
+      'Avoid generic consulting filler and obvious transitions.',
+      'Let the deck feel authored by someone who understands the material.',
+    ],
+  },
+  'immersive-storyboard': {
+    id: 'immersive-storyboard',
+    label: 'Immersive Storyboard',
+    preferredTheme: 'product',
+    rationale: 'Treat the deck as a sequence of visual scenes with stronger image-led pacing and sharper contrast.',
+    voice: [
+      'Write short, high-conviction lines that leave room for visuals.',
+      'Use fewer words and more deliberate reveals.',
+      'Keep copy precise instead of drifting into brand cliches.',
+    ],
+    layout: [
+      'Favor hero scenes, image-led slides, and strong section markers.',
+      'Use whitespace and contrast as part of the storytelling rhythm.',
+      'Alternate proof moments with atmospheric visual scenes.',
+    ],
+    humanFeel: [
+      'Let some lines feel cinematic without becoming vague.',
+      'Avoid samey slide shapes and repeated bullet stacks.',
+      'Use scene changes that feel chosen rather than templated.',
+    ],
+  },
+  'systems-minimal': {
+    id: 'systems-minimal',
+    label: 'Systems Minimal',
+    preferredTheme: 'executive',
+    rationale: 'Keep the deck minimal, modular, and system-like so the structure feels intentional and highly controlled.',
+    voice: [
+      'Use clean, direct language with minimal ornament.',
+      'Keep slide titles functional but not dead.',
+      'Reduce narrative clutter and focus on sequence.',
+    ],
+    layout: [
+      'Use modular grids, sparse bullets, and strong hierarchy.',
+      'Let one visual system repeat with small purposeful variations.',
+      'Reserve dense information for only the slides that need it.',
+    ],
+    humanFeel: [
+      'Avoid generic minimalist emptiness by keeping the content specific.',
+      'Use crisp phrasing that sounds edited, not generated.',
+      'Keep repetition intentional rather than accidental.',
+    ],
+  },
+  'campaign-sprint': {
+    id: 'campaign-sprint',
+    label: 'Campaign Sprint',
+    preferredTheme: 'bold',
+    rationale: 'Make the deck feel fast, persuasive, and launch-oriented with assertive headlines and visible momentum.',
+    voice: [
+      'Use punchy, directional language with controlled energy.',
+      'Keep slide copy lean and audience-aware.',
+      'Favor commitment and clarity over hedging.',
+    ],
+    layout: [
+      'Use bold hero slides, contrast blocks, and quick proof moments.',
+      'Let CTA and milestone slides land cleanly.',
+      'Use comparison and roadmap slides to keep momentum visible.',
+    ],
+    humanFeel: [
+      'Avoid startup cliches and empty hype.',
+      'Let the ask feel precise and owned.',
+      'Give the deck a sense of forward motion without rushing the logic.',
+    ],
+  },
 };
 
 const BLUEPRINT_DIRECTION_MAP = {
@@ -141,9 +225,9 @@ const BLUEPRINT_DIRECTION_MAP = {
   letter: ['editorial-feature', 'field-guide'],
   'executive-brief': ['boardroom-brief', 'signal-journal'],
   'data-story': ['signal-journal', 'editorial-feature'],
-  presentation: ['launch-manifesto', 'studio-casefile', 'editorial-feature'],
-  'pitch-deck': ['launch-manifesto', 'studio-casefile'],
-  'website-slides': ['launch-manifesto', 'editorial-feature', 'studio-casefile'],
+  presentation: ['launch-manifesto', 'analyst-briefing', 'studio-casefile', 'systems-minimal', 'editorial-feature', 'campaign-sprint'],
+  'pitch-deck': ['launch-manifesto', 'campaign-sprint', 'studio-casefile', 'analyst-briefing'],
+  'website-slides': ['immersive-storyboard', 'launch-manifesto', 'editorial-feature', 'studio-casefile', 'campaign-sprint'],
 };
 
 const GENERIC_ANCHORS = new Set([

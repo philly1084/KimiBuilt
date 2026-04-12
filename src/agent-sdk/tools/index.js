@@ -2015,6 +2015,7 @@ class ToolManager {
               tone,
               length,
               audience: params.audience || 'general audience',
+              designPlan: plan,
               theme,
               style: params.style || theme,
               slideCount: params.slideCount || inferredSlideCount,

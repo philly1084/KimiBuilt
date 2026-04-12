@@ -129,6 +129,35 @@ const AMBIENT_REASONING_STARTS = [
     'Re-keying the gull workshop lockers',
     'Clearing steam from the otter signal tunnel',
     'Balancing lunch trays for the penguin design review',
+    'Packing spare chalk for the badger courtroom sketch artist',
+    'Resetting the pigeon tram timetable',
+    'Unjamming the goose confetti cannon',
+    'Checking rail ties beneath the marmot commuter loop',
+    'Rinsing coffee cups in the fox weather bunker',
+    'Tightening clamps on the raven echo bridge',
+    'Sorting acorns for the squirrel pension office',
+    'Measuring candlelight in the elk drafting hall',
+    'Cooling the cod lantern forge',
+    'Straightening pamphlets in the seal transit kiosk',
+    'Repacking rope coils for the heron freight elevator',
+    'Testing whistles in the otter shift tunnel',
+    'Brushing chalk dust off the loon debate podium',
+    'Refilling glue jars in the possum repair shed',
+    'Reindexing the bat observatory notebooks',
+    'Counting aprons in the beaver machine canteen',
+    'Adjusting shutters on the fox weather camera',
+    'Inspecting ladders in the puffin relay tower',
+    'Folding spare maps for the wolf courier bench',
+    'Re-centering dials on the goose barometer cart',
+    'Labeling bins in the marmot parts library',
+    'Debris-sweeping the narwhal dockside rail',
+    'Pacing out chalk lines in the raccoon testing yard',
+    'Untwisting cables in the otter projection booth',
+    'Checking gasket seals on the badger steam kettle',
+    'Rehanging curtains in the heron planning room',
+    'Rotating bulbs in the owl archive corridor',
+    'Inspecting bolts on the fox rooftop pulley',
+    'Fanning smoke out of the penguin tool loft',
 ];
 const AMBIENT_REASONING_ENDINGS = [
     'while the answer sharpens',
@@ -181,6 +210,18 @@ const AMBIENT_REASONING_ENDINGS = [
     'before the obvious route gets stuck behind a goose',
     'so the final wording quits pacing the hallway',
     'while the real point climbs onto the stage',
+    'until the steady version takes the wheel',
+    'so the final draft stops wearing roller skates',
+    'before the neat solution wanders into traffic',
+    'while the useful details stop hiding behind curtains',
+    'so the right sentence can clock in on time',
+    'before the practical answer misses roll call',
+    'while the clean explanation finds its footing',
+    'so the final shape stops wobbling on stilts',
+    'before the good answer gets buried under glitter',
+    'while the sensible route untangles itself from the side quest',
+    'so the real signal can get above the static',
+    'until the durable answer clears its throat',
 ];
 
 function shuffleArray(items = []) {
@@ -4493,6 +4534,26 @@ class ChatApp {
             const message = this.getSessionMessage(sessionId, this.currentStreamingMessageId);
             if (!message || message.isStreaming !== true) {
                 this.clearAmbientReasoningTimer();
+                return;
+            }
+
+            const liveContent = String(message.displayContent ?? message.content ?? '').trim();
+            if (liveContent) {
+                if (String(message.reasoningDisplaySource || '').trim() === 'synthetic') {
+                    this.updateStreamingMessageState({
+                        reasoningDisplaySource: '',
+                        reasoningDisplayText: '',
+                        reasoningDisplayFullText: '',
+                        reasoningDisplayTitle: '',
+                        reasoningDisplayIcon: '',
+                        reasoningDisplayAnimated: false,
+                    }, {
+                        render: true,
+                        scroll: false,
+                    });
+                }
+
+                this.ambientReasoningTimer = window.setTimeout(tick, 1000);
                 return;
             }
 

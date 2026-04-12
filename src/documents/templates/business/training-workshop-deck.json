@@ -1,0 +1,30 @@
+{
+  "id": "training-workshop-deck",
+  "name": "Training Workshop Deck",
+  "category": "business",
+  "description": "Structured presentation template for teaching flows, enablement sessions, and workshops.",
+  "icon": "training",
+  "tags": ["presentation", "slides", "training", "enablement", "workshop", "teaching"],
+  "blueprint": "presentation",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["training session", "workshop", "onboarding deck"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["step-by-step pacing", "educational clarity", "action-oriented wrap-up"],
+    "bestFor": ["enablement decks", "training", "instructional slides"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Deck Title", "required": true },
+    "audience": { "type": "text", "label": "Audience", "required": false },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "itemFields": {
+        "title": { "type": "text", "label": "Slide Title", "required": true },
+        "content": { "type": "textarea", "label": "Teaching Notes", "required": false },
+        "bullets": { "type": "textarea", "label": "Key Points", "required": false }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "case-study-deck",
+  "name": "Case Study Deck",
+  "category": "business",
+  "description": "Proof-oriented presentation template for customer stories, before/after change, and outcomes.",
+  "icon": "case-study",
+  "tags": ["presentation", "slides", "case study", "customer", "proof", "outcomes"],
+  "blueprint": "presentation",
+  "recommendedFormats": ["pptx", "html"],
+  "useCases": ["customer story", "before-after deck", "proof presentation"],
+  "formats": ["pptx", "html"],
+  "productionProfile": {
+    "workflow": "template-first",
+    "strengths": ["before/after structure", "evidence-led pacing", "outcome storytelling"],
+    "bestFor": ["case studies", "sales proof", "customer presentations"]
+  },
+  "variables": {
+    "title": { "type": "text", "label": "Deck Title", "required": true },
+    "customer": { "type": "text", "label": "Customer", "required": false },
+    "slides": {
+      "type": "array",
+      "label": "Slides",
+      "itemFields": {
+        "title": { "type": "text", "label": "Slide Title", "required": true },
+        "content": { "type": "textarea", "label": "Narrative", "required": false },
+        "stats": { "type": "textarea", "label": "Outcome Metrics", "required": false }
+      }
+    }
+  }
+}

@@ -8,6 +8,149 @@ const {
   renderBlueprintPrompt,
 } = require('./document-design-blueprints');
 
+const PRESENTATION_TEMPLATE_CATALOG = [
+  {
+    id: 'editorial-opener',
+    name: 'Editorial Opener',
+    bestFor: 'Thought leadership, narrative explainers, polished story arcs',
+    cues: 'Bold title slide, evidence beats, spacious content slides, composed close',
+    theme: 'editorial',
+  },
+  {
+    id: 'board-update',
+    name: 'Board Update',
+    bestFor: 'Leadership reviews, status decks, decision readouts',
+    cues: 'Executive summary slide, metrics proof, risks, recommendation, next step',
+    theme: 'executive',
+  },
+  {
+    id: 'product-reveal',
+    name: 'Product Reveal',
+    bestFor: 'Launches, product demos, feature storytelling',
+    cues: 'Hero reveal, problem/solution contrast, feature scenes, momentum CTA',
+    theme: 'product',
+  },
+  {
+    id: 'pitch-narrative',
+    name: 'Pitch Narrative',
+    bestFor: 'Investor decks, startup fundraising, market storytelling',
+    cues: 'Problem, solution, traction, GTM, roadmap, ask',
+    theme: 'bold',
+  },
+  {
+    id: 'visual-storyboard',
+    name: 'Visual Storyboard',
+    bestFor: 'Website slides, campaign concepts, cinematic decks',
+    cues: 'Image-led scenes, sparse copy, bold transitions, strong visual direction',
+    theme: 'product',
+  },
+  {
+    id: 'analyst-briefing',
+    name: 'Analyst Briefing',
+    bestFor: 'Market analysis, research-backed strategy, comparison-heavy decks',
+    cues: 'Takeaway-led titles, chart slides, comparison layouts, restrained copy',
+    theme: 'executive',
+  },
+  {
+    id: 'workshop-teaching',
+    name: 'Workshop Teaching',
+    bestFor: 'Training, enablement, internal education',
+    cues: 'Agenda/title slide, step-by-step builds, examples, recap and actions',
+    theme: 'editorial',
+  },
+  {
+    id: 'roadmap-review',
+    name: 'Roadmap Review',
+    bestFor: 'Quarterly planning, product roadmap, milestone decks',
+    cues: 'Now/next/later framing, milestone slides, dependencies, decisions',
+    theme: 'executive',
+  },
+  {
+    id: 'case-study',
+    name: 'Case Study',
+    bestFor: 'Customer stories, before/after narratives, proof decks',
+    cues: 'Context, challenge, intervention, measured outcome, testimonial-style proof',
+    theme: 'editorial',
+  },
+  {
+    id: 'campaign-sprint',
+    name: 'Campaign Sprint',
+    bestFor: 'Marketing launches, partnerships, event decks',
+    cues: 'High-contrast opener, audience tension, proof moments, CTA close',
+    theme: 'bold',
+  },
+  {
+    id: 'sales-proof',
+    name: 'Sales Proof',
+    bestFor: 'Prospect meetings, solution selling, objection handling',
+    cues: 'Problem framing, capability proof, ROI slide, customer evidence, close',
+    theme: 'executive',
+  },
+  {
+    id: 'customer-onboarding',
+    name: 'Customer Onboarding',
+    bestFor: 'Enablement, rollout plans, adoption walkthroughs',
+    cues: 'Outcome framing, step-by-step phases, responsibilities, recap actions',
+    theme: 'editorial',
+  },
+  {
+    id: 'ops-war-room',
+    name: 'Ops War Room',
+    bestFor: 'Incident reviews, operations planning, performance turnarounds',
+    cues: 'Current state, pressure points, metrics, response plan, owners',
+    theme: 'executive',
+  },
+  {
+    id: 'research-lab',
+    name: 'Research Lab',
+    bestFor: 'Technical explainers, innovation updates, concept walkthroughs',
+    cues: 'Hypothesis slide, method, findings, implications, next experiment',
+    theme: 'product',
+  },
+  {
+    id: 'partner-brief',
+    name: 'Partner Brief',
+    bestFor: 'Alliances, channel planning, co-marketing strategy',
+    cues: 'Shared opportunity, fit, mutual value, plan, joint next steps',
+    theme: 'executive',
+  },
+  {
+    id: 'community-rally',
+    name: 'Community Rally',
+    bestFor: 'Internal all-hands, community updates, ambassador programs',
+    cues: 'Mission opener, momentum highlights, member stories, clear call to action',
+    theme: 'bold',
+  },
+  {
+    id: 'trend-radar',
+    name: 'Trend Radar',
+    bestFor: 'Industry trend decks, category overviews, signal mapping',
+    cues: 'Topline thesis, trend clusters, evidence snapshots, implications, response',
+    theme: 'editorial',
+  },
+  {
+    id: 'financial-briefing',
+    name: 'Financial Briefing',
+    bestFor: 'Budget reviews, board finance updates, planning cycles',
+    cues: 'Headline numbers, variance slides, drivers, risks, recommendation',
+    theme: 'executive',
+  },
+  {
+    id: 'talent-story',
+    name: 'Talent Story',
+    bestFor: 'Hiring plans, org design, culture or people updates',
+    cues: 'Team context, hiring gaps, role priorities, timeline, leadership ask',
+    theme: 'editorial',
+  },
+  {
+    id: 'event-run-of-show',
+    name: 'Event Run of Show',
+    bestFor: 'Conference planning, live event pacing, launch day coordination',
+    cues: 'Timeline slide, segment breakdowns, dependencies, responsibilities, contingencies',
+    theme: 'product',
+  },
+];
+
 class AIDocumentGenerator {
   constructor(openaiClient) {
     this.openai = openaiClient;
@@ -519,6 +662,37 @@ Return JSON:
       .slice(0, 80);
   }
 
+  renderPresentationTemplateGuidance(designPlan = null) {
+    const lines = [
+      '<template_gallery>',
+      'Use these deck archetypes as examples and building blocks, not hard rules.',
+      'You may adapt, combine, or ignore them when the request calls for a better structure.',
+      ...PRESENTATION_TEMPLATE_CATALOG.map((template) => (
+        `- ${template.name} [${template.id}] :: best for ${template.bestFor} :: cues ${template.cues} :: default render theme ${template.theme}`
+      )),
+    ];
+
+    const recommendedTemplates = Array.isArray(designPlan?.recommendedTemplates)
+      ? designPlan.recommendedTemplates
+      : [];
+
+    if (recommendedTemplates.length > 0) {
+      lines.push('Request-specific built-in templates to consider:');
+      recommendedTemplates.forEach((template) => {
+        const details = [
+          template.description,
+          Array.isArray(template.useCases) && template.useCases.length > 0
+            ? `use cases=${template.useCases.join(', ')}`
+            : '',
+        ].filter(Boolean).join(' :: ');
+        lines.push(`- ${template.name || template.id}${details ? ` :: ${details}` : ''}`);
+      });
+    }
+
+    lines.push('</template_gallery>');
+    return lines.join('\n');
+  }
+
   /**
    * Normalize document structure
    * @param {Object} content - Raw AI response
@@ -603,6 +777,7 @@ Return JSON:
     const includeImages = options.includeImages !== false;
     const includeCharts = options.includeCharts !== false;
     const blueprint = resolveDocumentBlueprint(options.documentType || 'presentation');
+    const designPlan = options.designPlan || null;
 
     const prompt = [
       `<task>Create a ${blueprint.label} about: ${topic}</task>`,
@@ -618,8 +793,10 @@ Return JSON:
       includeImages ? '- For visual or high-emotion slides, add a strong imagePrompt.' : null,
       includeCharts ? '- Use chart slides when comparison or trend data helps the story, and provide explicit chart series values.' : null,
       '</requirements>',
+      this.renderPresentationTemplateGuidance(designPlan),
       options.templateContext || null,
       renderBlueprintPrompt(blueprint),
+      this.renderDesignPlanPrompt(designPlan),
       '<output_contract>',
       'Return JSON with this structure:',
       '{',
@@ -666,6 +843,8 @@ Return JSON:
       '- Use "image" layout for slides that benefit from visuals.',
       '- Use "content" layout for explanation slides and "two-column" for comparisons or parallel tracks.',
       '- Use "chart" only when you can provide explicit series data.',
+      '- Treat template names, examples, and sample structures as inspiration. Do not rigidly clone one template unless the request explicitly asks for it.',
+      '- If the request would benefit from a hybrid structure, combine patterns from multiple templates into one coherent deck.',
       '- Keep bullet points concise, roughly 10-15 words max.',
       '- Image prompts should be vivid, specific, and visually directive.',
       '- Slides should feel presentation-ready, not like a memo split into pages.',
