@@ -6732,6 +6732,7 @@ class ConversationOrchestrator extends EventEmitter {
         taskType = 'chat',
         toolEvents = [],
         autonomyApproved = false,
+        executionTrace = [],
     }) {
         if (!toolPolicy.candidateToolIds.length) {
             return [];

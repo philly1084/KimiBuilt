@@ -3904,13 +3904,67 @@ describe('ConversationOrchestrator', () => {
             toolPolicy,
         });
 
-        expect(llmClient.complete).toHaveBeenCalledWith(
-            expect.any(String),
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.any(String),
+            enableAutomaticToolCalls: false,
+            stream: false,
+            model: 'gpt-planner',
+            reasoningEffort: 'high',
+        }));
+    });
+
+    test('planner model responses can append to executionTrace without throwing', async () => {
+        const executionTrace = [];
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(
+                buildResponse(JSON.stringify({ steps: [] }), 'resp_planner_trace'),
+            ),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['web-search', 'document-workflow'].includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: 'Research managed Postgres providers and draft a comparison report.',
+            executionProfile: 'default',
+            toolManager: orchestrator.toolManager,
+            classification: {
+                taskFamily: 'research-deliverable',
+                groundingRequirement: 'required',
+                surfaceMode: 'chat',
+                preferredExecutionPath: 'plan-first',
+                checkpointNeed: 'none',
+                confidence: 0.84,
+                ambiguous: false,
+                reasons: ['Grounded deliverable request.'],
+            },
+        });
+
+        await expect(orchestrator.planToolUse({
+            objective: 'Research managed Postgres providers and draft a comparison report.',
+            executionProfile: 'default',
+            toolPolicy,
+            executionTrace,
+        })).resolves.toEqual([]);
+
+        expect(executionTrace).toEqual([
             expect.objectContaining({
-                model: 'gpt-planner',
-                reasoningEffort: 'high',
+                type: 'model_call',
+                name: 'Model response (gpt-test)',
+                details: expect.objectContaining({
+                    phase: 'planner',
+                    responseId: 'resp_planner_trace',
+                }),
             }),
-        );
+        ]);
     });
 
     test('judgment v2 adds classification and finalization metadata to the trace', async () => {
