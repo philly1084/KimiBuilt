@@ -386,6 +386,67 @@ function hasCurrentInfoIntentText(text = '') {
     return /\b(latest|current|today|news|headlines?|weather|forecast|temperature)\b/.test(normalized);
 }
 
+function hasExplicitPodcastIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\bpodcast\b/,
+        /\bpodcast episode\b/,
+        /\btwo[- ]host podcast\b/,
+        /\btwo[- ]agent podcast\b/,
+        /\brecord\b[\s\S]{0,40}\bpodcast\b/,
+        /\bmake\b[\s\S]{0,40}\bpodcast\b/,
+        /\bcreate\b[\s\S]{0,40}\bpodcast\b/,
+        /\bgenerate\b[\s\S]{0,40}\bpodcast\b/,
+        /\bproduce\b[\s\S]{0,40}\bpodcast\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function extractExplicitPodcastTopic(text = '') {
+    const normalized = String(text || '').trim();
+    if (!normalized) {
+        return null;
+    }
+
+    const cleaned = normalized
+        .replace(/\b(can you|could you|please|let'?s|lets|i want|we need to|help me)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const matchers = [
+        /\bpodcast(?: episode)?\b[\s\S]{0,30}\b(?:about|on|regarding|covering)\b\s+(.+)$/i,
+        /\b(?:make|create|generate|record|produce)\b[\s\S]{0,20}\bpodcast\b[\s\S]{0,20}\b(?:about|on)\b\s+(.+)$/i,
+        /\b(?:about|on)\b\s+(.+?)\s*\b(?:for a podcast|in a podcast)\b/i,
+    ];
+
+    for (const matcher of matchers) {
+        const candidate = String(cleaned.match(matcher)?.[1] || '').trim();
+        if (candidate) {
+            return candidate.replace(/[.?!]+$/, '').trim();
+        }
+    }
+
+    return cleaned.replace(/[.?!]+$/, '').trim() || null;
+}
+
+function extractRequestedPodcastDurationMinutes(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    const match = normalized.match(/\b(\d{1,2})\s*(?:-|–|—)?\s*minutes?\b/);
+    const numeric = Number(match?.[1] || 0);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return null;
+    }
+
+    return Math.max(3, Math.min(30, Math.round(numeric)));
+}
+
 function hasDocumentWorkflowIntentText(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -552,6 +613,12 @@ function classifyRequestIntent({
         preferredExecutionPath = hasProjectContinuation ? 'workflow' : 'plan-first';
         confidence = hasProjectContinuation ? 0.88 : 0.81;
         pushReason(reasons, 'The request is about remote infrastructure, deployment, or server operations.');
+    } else if (hasExplicitPodcastIntentText(normalized)) {
+        taskFamily = 'podcast';
+        groundingRequirement = 'required';
+        preferredExecutionPath = 'direct-tool';
+        confidence = 0.93;
+        pushReason(reasons, 'The request explicitly asks for a podcast workflow, so the runtime should use the dedicated podcast tool rather than freeform scripting.');
     } else if (hasExplicitWebResearchIntentText(normalized) || hasCurrentInfoIntentText(normalized)) {
         taskFamily = hasDocumentWorkflowIntentText(normalized) ? 'research-deliverable' : 'research';
         groundingRequirement = 'required';
@@ -590,6 +657,7 @@ function classifyRequestIntent({
     }
 
     const ambiguousSignals = [
+        hasExplicitPodcastIntentText(normalized),
         hasDocumentWorkflowIntentText(normalized),
         hasExplicitWebResearchIntentText(normalized) || hasCurrentInfoIntentText(normalized),
         hasOpencodeRepoWorkIntent(normalized),
@@ -651,6 +719,7 @@ function buildScoredCandidateToolMap({
     hasImageUrlIntent = false,
     hasDirectImageUrl = false,
     hasAssetCatalogIntent = false,
+    hasPodcastIntent = false,
     hasDocumentWorkflowIntent = false,
     hasSubAgentIntent = false,
     hasOpencodeUsageIntent = false,
@@ -715,6 +784,10 @@ function buildScoredCandidateToolMap({
             adjustCandidateToolScore(scoreMap, 'web-fetch', hasUrl ? 0.95 : 0.55, 'Research intent benefits from direct source-page verification.');
             adjustCandidateToolScore(scoreMap, 'web-scrape', hasExplicitScrapeIntent ? 1.0 : 0.15, 'Research intent should only escalate to scraping when extraction is necessary.');
             break;
+        case 'podcast':
+            adjustCandidateToolScore(scoreMap, 'podcast', 1.75, 'Podcast requests should use the dedicated podcast workflow tool for research, scripting, voices, and audio output.');
+            adjustCandidateToolScore(scoreMap, 'web-search', 0.2, 'Podcast work may still need research fallback if the dedicated workflow is unavailable.');
+            break;
         case 'document':
             adjustCandidateToolScore(scoreMap, DOCUMENT_WORKFLOW_TOOL_ID, 0.95, 'A document deliverable is the primary outcome.');
             break;
@@ -766,6 +839,10 @@ function buildScoredCandidateToolMap({
     }
     if (hasAssetCatalogIntent) {
         adjustCandidateToolScore(scoreMap, 'asset-search', 0.95, 'The request refers to a prior or indexed asset.');
+    }
+    if (hasPodcastIntent) {
+        adjustCandidateToolScore(scoreMap, 'podcast', 1.4, 'Explicit podcast wording should keep the podcast workflow tool in the candidate set.');
+        adjustCandidateToolScore(scoreMap, 'web-search', 0.25, 'Podcast production may still need a research fallback when the podcast tool is unavailable.');
     }
     if (hasOpencodeUsageIntent) {
         adjustCandidateToolScore(scoreMap, 'tool-doc-read', 1.15, 'Tool usage questions should read docs before execution.');
@@ -854,6 +931,10 @@ function shouldAllowDirectAction(action = null, { toolPolicy = {}, toolEvents = 
 
     if (classification.groundingRequirement === 'required') {
         if (['web-search', 'web-fetch', 'web-scrape'].includes(action.tool)) {
+            return true;
+        }
+
+        if (action.tool === 'podcast') {
             return true;
         }
 
@@ -5866,6 +5947,7 @@ class ConversationOrchestrator extends EventEmitter {
         const hasUnsplashIntent = /\bunsplash\b/.test(prompt);
         const hasImageUrlIntent = hasImageIntent && /\b(url|link)\b/.test(prompt);
         const hasDirectImageUrl = /https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?/i.test(prompt);
+        const hasPodcastIntent = hasExplicitPodcastIntentText(prompt);
         const hasArchitectureIntent = hasArchitectureDesignIntent(prompt);
         const hasUmlIntent = hasUmlDiagramIntent(prompt);
         const hasApiIntent = hasApiDesignIntent(prompt);
@@ -5970,6 +6052,7 @@ class ConversationOrchestrator extends EventEmitter {
                 hasImageUrlIntent,
                 hasDirectImageUrl,
                 hasAssetCatalogIntent,
+                hasPodcastIntent,
                 hasDocumentWorkflowIntent,
                 hasSubAgentIntent,
                 hasOpencodeUsageIntent,
@@ -6067,6 +6150,9 @@ class ConversationOrchestrator extends EventEmitter {
             if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
                 candidates.add('image-from-url');
             }
+            if (hasPodcastIntent && allowedToolIds.includes('podcast')) {
+                candidates.add('podcast');
+            }
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
             }
@@ -6126,6 +6212,9 @@ class ConversationOrchestrator extends EventEmitter {
             }
             if ((hasImageUrlIntent || hasDirectImageUrl) && allowedToolIds.includes('image-from-url')) {
                 candidates.add('image-from-url');
+            }
+            if (hasPodcastIntent && allowedToolIds.includes('podcast')) {
+                candidates.add('podcast');
             }
             if (hasAssetCatalogIntent && allowedToolIds.includes('asset-search')) {
                 candidates.add('asset-search');
@@ -6257,6 +6346,12 @@ class ConversationOrchestrator extends EventEmitter {
         });
         const hasGroundedDocumentSources = Array.isArray(documentWorkflowParams.sources)
             && documentWorkflowParams.sources.length > 0;
+        const podcastTopic = toolPolicy.candidateToolIds.includes('podcast') && hasExplicitPodcastIntentText(objective)
+            ? extractExplicitPodcastTopic(objective)
+            : null;
+        const podcastDurationMinutes = podcastTopic
+            ? extractRequestedPodcastDurationMinutes(objective)
+            : null;
         const shouldForcePlannerForMultiWorkload = toolPolicy.candidateToolIds.includes('agent-workload')
             && hasMultiWorkloadSchedulingIntent(objective);
         const hasActiveForegroundWorkflow = toolPolicy?.workflow?.status === 'active';
@@ -6346,6 +6441,17 @@ class ConversationOrchestrator extends EventEmitter {
                 reason: 'OpenCode usage or command requests should load the tool documentation instead of executing repository work.',
                 params: {
                     toolId: 'opencode-run',
+                },
+            });
+        }
+
+        if (podcastTopic) {
+            return finalizeAction({
+                tool: 'podcast',
+                reason: 'Explicit podcast request should start with the podcast workflow tool.',
+                params: {
+                    topic: podcastTopic,
+                    ...(podcastDurationMinutes ? { durationMinutes: podcastDurationMinutes } : {}),
                 },
             });
         }
@@ -7549,6 +7655,11 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Set `document-workflow includeContent: true` only when a later `file-write` step needs the full HTML or markdown body.');
         }
 
+        if (allowedToolIds.includes('podcast')) {
+            parts.push('Use `podcast` when the user wants a researched podcast episode, two-host script, voice synthesis, or final stitched podcast audio.');
+            parts.push('Do not treat podcast generation as plain chat writing. Prefer the `podcast` tool over separate `web-search` plus ad hoc scripting when the user is asking for the actual podcast deliverable.');
+        }
+
         if (allowedToolIds.includes(DEEP_RESEARCH_PRESENTATION_TOOL_ID)) {
             parts.push('Use `deep-research-presentation` when the user explicitly wants a research-backed slide deck built through one ordered workflow: planning, multiple research passes, image sourcing, then final presentation generation.');
             parts.push('During that workflow, do not stop to ask for a routine public source list. Discover source URLs through Perplexity search passes, choose the strongest candidates yourself, verify them with `web-fetch` first, and only scrape when a page needs rendered or structured extraction.');
@@ -7564,6 +7675,12 @@ class ConversationOrchestrator extends EventEmitter {
             parts.push('Use the verified tool results as the source of truth over guesses.');
             parts.push('When a verified tool result includes image URLs or markdown image snippets, you may embed them with standard markdown image syntax.');
             parts.push('Do not fabricate SVG overlays, inline HTML image placeholders, or other visual stand-ins when verified image URLs are available.');
+            if (toolEvents.some((event) => {
+                const toolId = String(event?.result?.toolId || event?.toolCall?.function?.name || '').trim();
+                return toolId === 'podcast' && event?.result?.success !== false;
+            })) {
+                parts.push('If the `podcast` tool already succeeded, do not draft a brand-new podcast script in chat. Confirm completion, summarize the generated episode, and point the user to the produced audio and script artifacts.');
+            }
         }
 
         if (remoteToolId && toolPolicy.hasReachableSshTarget) {
