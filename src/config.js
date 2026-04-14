@@ -344,8 +344,11 @@ const config = {
         ),
         mp3BitrateKbps: Math.max(
             64,
-            parseInt(process.env.PODCAST_MP3_BITRATE_KBPS, 10) || 128,
+            parseInt(process.env.PODCAST_MP3_BITRATE_KBPS, 10) || 192,
         ),
+        podcastMasteringEnabled: process.env.PODCAST_MASTERING_ENABLED !== 'false',
+        podcastMasteringLufs: parseOptionalFloat(process.env.PODCAST_MASTERING_LOUDNESS_LUFS) ?? -16,
+        podcastMasteringTruePeakDb: parseOptionalFloat(process.env.PODCAST_MASTERING_TRUE_PEAK_DB) ?? -1.5,
         podcastIntroPath: resolveConfigPath(process.env.PODCAST_INTRO_PATH || ''),
         podcastOutroPath: resolveConfigPath(process.env.PODCAST_OUTRO_PATH || ''),
         podcastMusicBedPath: resolveConfigPath(process.env.PODCAST_MUSIC_BED_PATH || ''),

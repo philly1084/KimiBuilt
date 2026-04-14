@@ -2502,6 +2502,7 @@ class ToolManager {
             musicVolume: { type: 'number' },
             introVolume: { type: 'number' },
             outroVolume: { type: 'number' },
+            enhanceSpeech: { type: 'boolean' },
             exportMp3: { type: 'boolean' },
             outputFormat: { type: 'string' },
             mp3BitrateKbps: { type: 'integer', minimum: 64, maximum: 320 },

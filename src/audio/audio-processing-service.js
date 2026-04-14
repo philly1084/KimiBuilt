@@ -154,9 +154,28 @@ class AudioProcessingService {
         introPathConfigured: Boolean(this.audioProcessingConfig.podcastIntroPath),
         outroPathConfigured: Boolean(this.audioProcessingConfig.podcastOutroPath),
         musicBedPathConfigured: Boolean(this.audioProcessingConfig.podcastMusicBedPath),
-        mp3BitrateKbps: Math.max(64, Number(this.audioProcessingConfig.mp3BitrateKbps) || 128),
+        masteringEnabled: this.audioProcessingConfig.podcastMasteringEnabled !== false,
+        masteringLufs: Number.isFinite(Number(this.audioProcessingConfig.podcastMasteringLufs))
+          ? Number(this.audioProcessingConfig.podcastMasteringLufs)
+          : -16,
+        mp3BitrateKbps: Math.max(64, Number(this.audioProcessingConfig.mp3BitrateKbps) || 192),
       },
     };
+  }
+
+  buildPodcastMasteringFilter() {
+    const targetLufs = Number.isFinite(Number(this.audioProcessingConfig.podcastMasteringLufs))
+      ? Number(this.audioProcessingConfig.podcastMasteringLufs)
+      : -16;
+    const truePeakDb = Number.isFinite(Number(this.audioProcessingConfig.podcastMasteringTruePeakDb))
+      ? Number(this.audioProcessingConfig.podcastMasteringTruePeakDb)
+      : -1.5;
+
+    return [
+      'highpass=f=55',
+      'lowpass=f=14000',
+      `loudnorm=I=${targetLufs}:TP=${truePeakDb}:LRA=7`,
+    ].join(',');
   }
 
   assertConfigured() {
@@ -239,7 +258,7 @@ class AudioProcessingService {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-podcast-mp3-'));
     const inputPath = path.join(tempDir, 'episode.wav');
     const outputPath = path.join(tempDir, 'episode.mp3');
-    const bitrate = Math.max(64, Number(bitrateKbps || this.audioProcessingConfig.mp3BitrateKbps) || 128);
+    const bitrate = Math.max(64, Number(bitrateKbps || this.audioProcessingConfig.mp3BitrateKbps) || 192);
 
     try {
       await fs.writeFile(inputPath, wavBuffer);
@@ -261,6 +280,7 @@ class AudioProcessingService {
     includeIntro = false,
     includeOutro = false,
     includeMusicBed = false,
+    enhanceSpeech = null,
     introPath = '',
     outroPath = '',
     musicBedPath = '',
@@ -273,8 +293,11 @@ class AudioProcessingService {
       throw createServiceError(400, 'A speech WAV buffer is required for podcast composition.', 'audio_processing_invalid_input');
     }
 
+    const shouldEnhanceSpeech = enhanceSpeech === false
+      ? false
+      : this.audioProcessingConfig.podcastMasteringEnabled !== false;
     const needsMix = includeIntro || includeOutro || includeMusicBed || introPath || outroPath || musicBedPath;
-    if (!needsMix) {
+    if (!needsMix && !shouldEnhanceSpeech) {
       return speechWavBuffer;
     }
 
@@ -307,6 +330,7 @@ class AudioProcessingService {
     const speechPath = path.join(tempDir, 'speech.wav');
     const mixedSpeechPath = path.join(tempDir, 'speech-mixed.wav');
     const finalPath = path.join(tempDir, 'podcast-final.wav');
+    const masteredPath = path.join(tempDir, 'podcast-mastered.wav');
 
     try {
       await fs.writeFile(speechPath, speechWavBuffer);
@@ -345,29 +369,41 @@ class AudioProcessingService {
         concatLevels.push(outroLevel);
       }
 
-      if (concatInputs.length === 1) {
-        return await fs.readFile(currentPath);
+      let assembledPath = currentPath;
+      if (concatInputs.length > 1) {
+        const filterParts = concatInputs.map((_, index) => (
+          `[${index}:a]volume=${escapeFilterValue(concatLevels[index])},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout}[a${index}]`
+        ));
+        const concatRefs = concatInputs.map((_, index) => `[a${index}]`).join('');
+        filterParts.push(`${concatRefs}concat=n=${concatInputs.length}:v=0:a=1[a]`);
+
+        const args = ['-y'];
+        concatInputs.forEach((inputPath) => {
+          args.push('-i', inputPath);
+        });
+        args.push(
+          '-filter_complex', filterParts.join(';'),
+          '-map', '[a]',
+          '-c:a', 'pcm_s16le',
+          finalPath,
+        );
+
+        await this.runFfmpeg(args, 'audio_concat_failed', 'ffmpeg failed to assemble the podcast intro/outro.');
+        assembledPath = finalPath;
       }
 
-      const filterParts = concatInputs.map((_, index) => (
-        `[${index}:a]volume=${escapeFilterValue(concatLevels[index])},aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=${channelLayout}[a${index}]`
-      ));
-      const concatRefs = concatInputs.map((_, index) => `[a${index}]`).join('');
-      filterParts.push(`${concatRefs}concat=n=${concatInputs.length}:v=0:a=1[a]`);
+      if (!shouldEnhanceSpeech) {
+        return await fs.readFile(assembledPath);
+      }
 
-      const args = ['-y'];
-      concatInputs.forEach((inputPath) => {
-        args.push('-i', inputPath);
-      });
-      args.push(
-        '-filter_complex', filterParts.join(';'),
-        '-map', '[a]',
+      await this.runFfmpeg([
+        '-y',
+        '-i', assembledPath,
+        '-af', this.buildPodcastMasteringFilter(),
         '-c:a', 'pcm_s16le',
-        finalPath,
-      );
-
-      await this.runFfmpeg(args, 'audio_concat_failed', 'ffmpeg failed to assemble the podcast intro/outro.');
-      return await fs.readFile(finalPath);
+        masteredPath,
+      ], 'audio_mastering_failed', 'ffmpeg failed to master the podcast audio.');
+      return await fs.readFile(masteredPath);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

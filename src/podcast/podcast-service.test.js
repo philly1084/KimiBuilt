@@ -34,6 +34,10 @@ jest.mock('../audio/audio-processing-service', () => ({
       provider: 'ffmpeg',
       supportsMp3: true,
       supportsMixing: true,
+      defaults: {
+        masteringEnabled: true,
+        mp3BitrateKbps: 192,
+      },
       diagnostics: {
         status: 'ready',
       },
@@ -134,6 +138,9 @@ describe('PodcastService', () => {
     }), expect.any(Object));
     expect(createResponse).toHaveBeenCalled();
     expect(piperTtsService.synthesize).toHaveBeenCalled();
+    expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
+      enhanceSpeech: true,
+    }));
     expect(persistGeneratedAudio).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       mimeType: 'audio/wav',
@@ -189,6 +196,7 @@ describe('PodcastService', () => {
     expect(audioProcessingService.composePodcastAudio).toHaveBeenCalledWith(expect.objectContaining({
       includeIntro: true,
       includeMusicBed: true,
+      enhanceSpeech: true,
       musicBedPath: 'C:\\audio\\bed.wav',
     }));
     expect(audioProcessingService.transcodeWavToMp3).toHaveBeenCalled();
@@ -202,6 +210,7 @@ describe('PodcastService', () => {
     expect(result.audioVariants).toHaveLength(2);
     expect(result.processing.mp3Exported).toBe(true);
     expect(result.processing.mixed).toBe(true);
+    expect(result.processing.enhanced).toBe(true);
   });
 
   test('passes podcast-specific Piper timeout settings into synthesis and retries timed out chunks with smaller splits', async () => {

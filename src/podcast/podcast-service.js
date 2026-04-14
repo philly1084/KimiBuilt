@@ -16,14 +16,14 @@ const DEFAULT_HOSTS = Object.freeze([
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['hfc-female-rich', 'hfc-female-medium', 'kathleen-low'],
+    preferredVoiceIds: ['hfc-female-rich', 'amy-medium', 'hfc-female-medium', 'kathleen-low'],
   },
   {
     key: 'hostB',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['amy-expressive', 'amy-medium', 'kathleen-low'],
+    preferredVoiceIds: ['amy-medium', 'amy-expressive', 'hfc-female-medium', 'kathleen-low'],
   },
 ]);
 
@@ -247,6 +247,9 @@ Use only the sourced information below. Do not invent facts. If a point is uncer
 Write like a real podcast: light rapport, clean transitions, informative explanations, occasional reactions, but no filler overload.
 Keep each turn to one paragraph. No stage directions. No markdown. No URLs in spoken text.
 Open with a strong hook and end with a concise wrap-up.
+Write for speech delivery, not for reading: use contractions, shorter sentences, and natural hand-offs.
+Avoid stacked statistics, semicolons, parenthetical asides, and phrasing that sounds like a report being read aloud.
+Spell out or rephrase awkward abbreviations and symbols so Piper can read them smoothly.
 
 Return exactly this JSON shape:
 {
@@ -532,6 +535,7 @@ class PodcastService {
     const wantsMp3 = prefersMp3(params);
     const wantsMixing = requestedMixing(params);
     const audioProcessingConfig = this.audioProcessingService?.getPublicConfig?.() || null;
+    const wantsEnhancement = params.enhanceSpeech !== false && audioProcessingConfig?.configured === true;
 
     // Validate TTS compatibility before starting the full run.
     script.turns.forEach((turn) => {
@@ -547,12 +551,13 @@ class PodcastService {
         chunkMaxChars: podcastChunkMaxChars,
       },
     );
-    const finalAudioBuffer = wantsMixing
+    const finalAudioBuffer = (wantsMixing || wantsEnhancement)
       ? await this.audioProcessingService.composePodcastAudio({
         speechWavBuffer,
         includeIntro: params.includeIntro === true,
         includeOutro: params.includeOutro === true,
         includeMusicBed: params.includeMusicBed === true,
+        enhanceSpeech: wantsEnhancement,
         introPath: params.introPath || '',
         outroPath: params.outroPath || '',
         musicBedPath: params.musicBedPath || '',
@@ -595,6 +600,7 @@ class PodcastService {
         turnCount: script.turns.length,
         processing: {
           mixed: wantsMixing,
+          enhanced: wantsEnhancement,
           mp3Exported: wantsMp3,
           ttsTimeoutMs: podcastTtsTimeoutMs,
           ttsChunkMaxChars: podcastChunkMaxChars,
@@ -646,6 +652,7 @@ class PodcastService {
           turnCount: script.turns.length,
           processing: {
             mixed: wantsMixing,
+            enhanced: wantsEnhancement,
             mp3Exported: true,
             ttsTimeoutMs: podcastTtsTimeoutMs,
             ttsChunkMaxChars: podcastChunkMaxChars,
@@ -684,6 +691,7 @@ class PodcastService {
       },
       processing: {
         mixed: wantsMixing,
+        enhanced: wantsEnhancement,
         mp3Exported: wantsMp3,
         ttsTimeoutMs: podcastTtsTimeoutMs,
         ttsChunkMaxChars: podcastChunkMaxChars,

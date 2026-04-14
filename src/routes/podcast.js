@@ -22,6 +22,7 @@ const generateSchema = {
   includeIntro: { required: false, type: 'boolean' },
   includeOutro: { required: false, type: 'boolean' },
   includeMusicBed: { required: false, type: 'boolean' },
+  enhanceSpeech: { required: false, type: 'boolean' },
   introPath: { required: false, type: 'string' },
   outroPath: { required: false, type: 'string' },
   musicBedPath: { required: false, type: 'string' },
