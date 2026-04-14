@@ -8,6 +8,9 @@ jest.mock('../tts/piper-tts-service', () => ({
       configured: true,
       provider: 'piper',
       maxTextChars: 2400,
+      timeoutMs: 45000,
+      podcastTimeoutMs: 180000,
+      podcastChunkChars: 900,
       defaultVoiceId: 'hfc-female-rich',
       voices: [
         { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
@@ -199,5 +202,50 @@ describe('PodcastService', () => {
     expect(result.audioVariants).toHaveLength(2);
     expect(result.processing.mp3Exported).toBe(true);
     expect(result.processing.mixed).toBe(true);
+  });
+
+  test('passes podcast-specific Piper timeout settings into synthesis and retries timed out chunks with smaller splits', async () => {
+    const timeoutError = new Error('Piper TTS timed out before audio generation completed.');
+    timeoutError.statusCode = 504;
+    timeoutError.code = 'tts_timeout';
+
+    piperTtsService.synthesize
+      .mockRejectedValueOnce(timeoutError)
+      .mockResolvedValue({
+        audioBuffer: createTestWav([1, 2, 3, 4]),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text: 'segment',
+      });
+
+    const service = new PodcastService();
+    const longTurn = 'Battery storage helps the grid absorb extra power. '.repeat(30).trim();
+    const result = await service.synthesizeTurns(
+      [{ speaker: 'Maya', text: longTurn }],
+      [{ name: 'Maya', voiceId: 'hfc-female-rich' }],
+      {
+        silenceMs: 250,
+        chunkMaxChars: 1600,
+        ttsTimeoutMs: 180000,
+      },
+    );
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(3);
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      text: longTurn,
+      voiceId: 'hfc-female-rich',
+      timeoutMs: 180000,
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+      timeoutMs: 180000,
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+      timeoutMs: 180000,
+    }));
+    expect(piperTtsService.synthesize.mock.calls[1][0].text.length).toBeLessThan(longTurn.length);
+    expect(piperTtsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
   });
 });

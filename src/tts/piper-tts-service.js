@@ -229,10 +229,26 @@ class PiperTtsService {
         const voiceProfiles = this.getVoiceProfiles();
         const voices = voiceProfiles.map((voice) => this.toPublicVoiceProfile(voice));
         const defaultVoice = configured ? this.resolveVoiceProfile() : null;
+        const maxTextChars = Math.max(200, Number(this.ttsConfig.maxTextChars) || 2400);
+        const timeoutMs = Math.max(1000, Number(this.ttsConfig.timeoutMs) || 45000);
+        const podcastTimeoutMs = Math.max(
+            timeoutMs,
+            Number(this.ttsConfig.podcastTimeoutMs) || timeoutMs,
+        );
+        const podcastChunkChars = Math.max(
+            250,
+            Math.min(
+                maxTextChars,
+                Number(this.ttsConfig.podcastChunkChars) || Math.min(900, maxTextChars),
+            ),
+        );
         return {
             configured,
             provider: 'piper',
-            maxTextChars: Math.max(200, Number(this.ttsConfig.maxTextChars) || 2400),
+            maxTextChars,
+            timeoutMs,
+            podcastTimeoutMs,
+            podcastChunkChars,
             defaultVoiceId: configured ? (defaultVoice?.id || voices[0]?.id || null) : null,
             voices,
             diagnostics,
@@ -282,7 +298,7 @@ class PiperTtsService {
         return args;
     }
 
-    async synthesize({ text = '', voiceId = '' } = {}) {
+    async synthesize({ text = '', voiceId = '', timeoutMs } = {}) {
         this.assertConfigured();
 
         const selectedVoice = this.resolveVoiceProfile(voiceId);
@@ -299,7 +315,7 @@ class PiperTtsService {
         );
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kimibuilt-piper-'));
         const outputFile = path.join(tempDir, 'speech.wav');
-        const timeoutMs = Math.max(1000, Number(this.ttsConfig.timeoutMs) || 45000);
+        const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || Number(this.ttsConfig.timeoutMs) || 45000);
         const stderrChunks = [];
         let didTimeout = false;
 
@@ -322,7 +338,7 @@ class PiperTtsService {
                 const timeoutId = setTimeout(() => {
                     didTimeout = true;
                     child.kill();
-                }, timeoutMs);
+                }, effectiveTimeoutMs);
 
                 child.on('error', (error) => {
                     clearTimeout(timeoutId);

@@ -181,6 +181,30 @@ function resolveHosts(params = {}, voiceConfig = {}) {
   });
 }
 
+function resolvePodcastTtsTimeoutMs(params = {}, voiceConfig = {}) {
+  const configuredTimeoutMs = Math.max(
+    1000,
+    Number(voiceConfig?.podcastTimeoutMs)
+      || Number(voiceConfig?.timeoutMs)
+      || 45000,
+  );
+
+  return clampNumber(params.ttsTimeoutMs, 1000, 15 * 60 * 1000, configuredTimeoutMs);
+}
+
+function resolvePodcastChunkMaxChars(params = {}, voiceConfig = {}) {
+  const maxTextChars = Math.max(200, Number(voiceConfig?.maxTextChars) || 2400);
+  const safeMaxChunkChars = Math.max(250, maxTextChars - 160);
+  const configuredChunkChars = clampNumber(
+    voiceConfig?.podcastChunkChars,
+    250,
+    safeMaxChunkChars,
+    Math.min(900, safeMaxChunkChars),
+  );
+
+  return clampNumber(params.ttsChunkMaxChars, 250, safeMaxChunkChars, configuredChunkChars);
+}
+
 function buildResearchPrompt({
   topic,
   audience,
@@ -368,8 +392,61 @@ class PodcastService {
     };
   }
 
-  async synthesizeTurns(turns = [], hosts = [], silenceMs = DEFAULT_SILENCE_MS) {
+  async synthesizeChunkBuffer(text = '', host = {}, options = {}, splitDepth = 0) {
+    const timeoutMs = Math.max(1000, Number(options.ttsTimeoutMs) || 45000);
+    const minimumChunkChars = Math.max(250, Number(options.minimumChunkChars) || 350);
+
+    try {
+      const synthesis = await this.ttsService.synthesize({
+        text,
+        voiceId: host.voiceId,
+        timeoutMs,
+      });
+      return [synthesis];
+    } catch (error) {
+      if (error?.code !== 'tts_timeout' || splitDepth >= 2 || text.length <= minimumChunkChars) {
+        throw error;
+      }
+
+      const nextChunkSize = Math.max(minimumChunkChars, Math.floor(text.length / 2));
+      if (nextChunkSize >= text.length) {
+        throw error;
+      }
+
+      const retryChunks = chunkText(text, nextChunkSize);
+      if (retryChunks.length <= 1) {
+        throw error;
+      }
+
+      const syntheses = [];
+      for (const retryChunk of retryChunks) {
+        const nestedSyntheses = await this.synthesizeChunkBuffer(
+          retryChunk,
+          host,
+          options,
+          splitDepth + 1,
+        );
+        syntheses.push(...nestedSyntheses);
+      }
+      return syntheses;
+    }
+  }
+
+  async synthesizeTurns(turns = [], hosts = [], options = {}) {
     const maxTextChars = Math.max(200, Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400);
+    const silenceMs = clampNumber(options.silenceMs, 100, 1200, DEFAULT_SILENCE_MS);
+    const chunkMaxChars = clampNumber(
+      options.chunkMaxChars,
+      250,
+      Math.max(250, maxTextChars - 160),
+      Math.min(900, Math.max(250, maxTextChars - 160)),
+    );
+    const minimumChunkChars = clampNumber(
+      options.minimumChunkChars,
+      250,
+      chunkMaxChars,
+      Math.max(350, Math.floor(chunkMaxChars / 2)),
+    );
     const hostByName = new Map(hosts.map((host) => [host.name, host]));
     const wavBuffers = [];
 
@@ -379,14 +456,16 @@ class PodcastService {
         throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
       }
 
-      const chunks = chunkText(turn.text, Math.max(400, maxTextChars - 120));
+      const chunks = chunkText(turn.text, chunkMaxChars);
       for (const chunk of chunks) {
-        const synthesis = await this.ttsService.synthesize({
-          text: chunk,
-          voiceId: host.voiceId,
+        const syntheses = await this.synthesizeChunkBuffer(chunk, host, {
+          ttsTimeoutMs: options.ttsTimeoutMs,
+          minimumChunkChars,
         });
-        wavBuffers.push(synthesis.audioBuffer);
-        wavBuffers.push(createSilenceWavBuffer(parseWavBuffer(synthesis.audioBuffer), silenceMs));
+        for (const synthesis of syntheses) {
+          wavBuffers.push(synthesis.audioBuffer);
+          wavBuffers.push(createSilenceWavBuffer(parseWavBuffer(synthesis.audioBuffer), silenceMs));
+        }
       }
     }
 
@@ -424,6 +503,8 @@ class PodcastService {
     const maxSources = clampNumber(params.maxSources, 2, 6, DEFAULT_MAX_SOURCES);
     const voiceConfig = this.ttsService.getPublicConfig();
     const hosts = resolveHosts(params, voiceConfig);
+    const podcastTtsTimeoutMs = resolvePodcastTtsTimeoutMs(params, voiceConfig);
+    const podcastChunkMaxChars = resolvePodcastChunkMaxChars(params, voiceConfig);
     const executeTool = typeof context?.toolManager?.executeTool === 'function'
       ? context.toolManager.executeTool.bind(context.toolManager)
       : null;
@@ -460,7 +541,11 @@ class PodcastService {
     const speechWavBuffer = await this.synthesizeTurns(
       script.turns,
       hosts,
-      clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
+      {
+        silenceMs: clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
+        ttsTimeoutMs: podcastTtsTimeoutMs,
+        chunkMaxChars: podcastChunkMaxChars,
+      },
     );
     const finalAudioBuffer = wantsMixing
       ? await this.audioProcessingService.composePodcastAudio({
@@ -511,6 +596,8 @@ class PodcastService {
         processing: {
           mixed: wantsMixing,
           mp3Exported: wantsMp3,
+          ttsTimeoutMs: podcastTtsTimeoutMs,
+          ttsChunkMaxChars: podcastChunkMaxChars,
         },
       },
     });
@@ -560,6 +647,8 @@ class PodcastService {
           processing: {
             mixed: wantsMixing,
             mp3Exported: true,
+            ttsTimeoutMs: podcastTtsTimeoutMs,
+            ttsChunkMaxChars: podcastChunkMaxChars,
           },
         },
       });
@@ -596,6 +685,8 @@ class PodcastService {
       processing: {
         mixed: wantsMixing,
         mp3Exported: wantsMp3,
+        ttsTimeoutMs: podcastTtsTimeoutMs,
+        ttsChunkMaxChars: podcastChunkMaxChars,
         audioProcessing: audioProcessingConfig,
       },
       artifact: primaryArtifact,

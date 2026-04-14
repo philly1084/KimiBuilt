@@ -899,8 +899,14 @@ function hasRemoteWebsiteUpdateIntent(prompt = '') {
         return false;
     }
 
-    const hasWebsiteTarget = /\b(website|web site|webpage|web page|landing page|homepage|home page|site|html|index\.html|page)\b/.test(normalized);
-    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|kubectl|pod|deployment|deployed|workload|rollout|restart|redeploy|configmap|container|ingress|live|public|production|hosted|online)\b/.test(normalized);
+    const hasWebsiteTarget = /\b(website|web site|webpage|web page|landing page|homepage|home page|site|index\.html)\b/.test(normalized)
+        || (
+            /\bhtml\b/.test(normalized)
+            && /\b(current|existing|deployed|live|website|web ?page|site|homepage|landing page|index\.html)\b/.test(normalized)
+        );
+    const hasRemoteTarget = /\b(remote|server|cluster|k3s|k8s|kubernetes|kubectl|pod|deployment|deployed|workload|rollout|restart|redeploy|configmap|container|ingress)\b/.test(normalized)
+        || /\b(live|online|public|hosted|production)\b[\s\S]{0,20}\b(site|website|web ?page|webpage|homepage|landing page|app|service|index\.html)\b/.test(normalized)
+        || /\b(site|website|web ?page|webpage|homepage|landing page|app|service|index\.html)\b[\s\S]{0,20}\b(live|online|public|hosted|production)\b/.test(normalized);
     const hasWriteIntent = /\b(write|replace|overwrite|update|edit|change|deploy|redeploy|restart|publish|push|apply|rollout|create|generate|make)\b/.test(normalized);
 
     return hasWebsiteTarget && hasRemoteTarget && hasWriteIntent;
@@ -2231,7 +2237,7 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
     const availableToolIds = new Set(Array.isArray(availableToolIdsInput) ? availableToolIdsInput : []);
     const remoteToolId = availableToolIds.has('remote-command')
         ? 'remote-command'
-        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : 'remote-command');
+        : (availableToolIds.has('ssh-execute') ? 'ssh-execute' : null);
     const explicitK3sDeployIntent = hasExplicitK3sDeployIntent(prompt);
     const explicitGitIntent = hasExplicitGitIntent(prompt);
     const explicitSubAgentIntent = hasExplicitSubAgentIntent(prompt);
@@ -2298,7 +2304,7 @@ function inferRequiredAutomaticToolId(prompt = '', availableToolIdsInput = [], o
         return remoteToolId;
     }
 
-    if (promptHasExplicitSshIntent(prompt)) {
+    if (remoteToolId && promptHasExplicitSshIntent(prompt)) {
         return remoteToolId;
     }
 

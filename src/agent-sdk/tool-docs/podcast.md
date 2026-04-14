@@ -27,10 +27,12 @@ Useful optional inputs:
 - `includeIntro`, `includeOutro`, `includeMusicBed`
 - `introPath`, `outroPath`, `musicBedPath`
 - `exportMp3`, `outputFormat`, `mp3BitrateKbps`
+- `ttsTimeoutMs`, `ttsChunkMaxChars`
 
 Notes:
 
 - The tool requires an active session because it persists the final audio artifact.
 - Research quality depends on `web-search` availability and source accessibility.
 - Speech stitching is native PCM WAV concatenation, so the selected Piper voices must emit compatible WAV output.
+- Long-form episodes use podcast-specific Piper chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.

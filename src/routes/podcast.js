@@ -26,6 +26,8 @@ const generateSchema = {
   outroPath: { required: false, type: 'string' },
   musicBedPath: { required: false, type: 'string' },
   exportMp3: { required: false, type: 'boolean' },
+  ttsTimeoutMs: { required: false, type: 'number' },
+  ttsChunkMaxChars: { required: false, type: 'number' },
 };
 
 function getRequestOwnerId(req) {

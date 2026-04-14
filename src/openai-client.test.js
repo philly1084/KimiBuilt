@@ -2212,6 +2212,55 @@ describe('openai-client automatic tool orchestration helpers', () => {
         expect(selectedTools.map((tool) => tool.id)).not.toContain('file-write');
     });
 
+    test('does not misclassify research html documents about public or live events as remote website work', () => {
+        jest.spyOn(settingsController, 'getEffectiveSshConfig').mockReturnValue({
+            enabled: true,
+            host: '77.42.44.98',
+            port: 22,
+            username: 'root',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const toolManager = createToolManager();
+        const prompt = [
+            'Original request:',
+            'Can you turn this research on Calgary into a formal html document with visuals of Calgary or the events?',
+            '',
+            'Approved outline:',
+            JSON.stringify({
+                title: 'Calgary Events Brief',
+                sections: [
+                    {
+                        heading: 'Festival Snapshot',
+                        purpose: 'Create a concise overview of public events and live music hosted across Calgary.',
+                        keyPoints: ['Calgary Stampede', 'Seasonal festivals'],
+                        targetLength: 'medium',
+                    },
+                ],
+            }, null, 2),
+        ].join('\n');
+        const automaticTools = __testUtils.buildAutomaticToolDefinitions(
+            toolManager,
+            prompt,
+            { executionProfile: 'remote-build' },
+        );
+        const selectedTools = __testUtils.selectAutomaticToolDefinitions(
+            automaticTools,
+            prompt,
+            { toolContext: { executionProfile: 'remote-build' } },
+        );
+
+        expect(__testUtils.inferRequiredAutomaticToolId(
+            prompt,
+            automaticTools.map((tool) => tool.id),
+            { executionProfile: 'remote-build' },
+        )).not.toBe('remote-command');
+        expect(selectedTools.map((tool) => tool.id)).toContain('web-search');
+        expect(selectedTools.map((tool) => tool.id)).toContain('web-fetch');
+        expect(selectedTools.map((tool) => tool.id)).not.toContain('remote-command');
+    });
+
     test('treats tool_calls as non-terminal in streaming normalization logic', () => {
         expect(__testUtils.isTerminalFinishReason('tool_calls')).toBe(false);
         expect(__testUtils.isTerminalFinishReason('stop')).toBe(true);

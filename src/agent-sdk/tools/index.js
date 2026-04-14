@@ -2460,7 +2460,7 @@ class ToolManager {
             return service.createPodcast(params, context);
           },
           sideEffects: ['write', 'execute', 'network'],
-          timeout: 180000,
+          timeout: 900000,
         },
         inputSchema: {
           type: 'object',
@@ -2507,6 +2507,8 @@ class ToolManager {
             mp3BitrateKbps: { type: 'integer', minimum: 64, maximum: 320 },
             model: { type: 'string' },
             reasoningEffort: { type: 'string' },
+            ttsTimeoutMs: { type: 'integer', minimum: 1000, maximum: 900000 },
+            ttsChunkMaxChars: { type: 'integer', minimum: 250, maximum: 2400 },
           },
           additionalProperties: false,
         },

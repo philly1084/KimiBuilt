@@ -219,6 +219,25 @@ const piperVoiceDefaults = {
 };
 const configuredPiperVoices = loadConfiguredPiperVoices(piperVoiceDefaults);
 const configuredAudioProviders = buildAudioProviderCandidates();
+const normalizedPiperMaxTextChars = Math.max(
+    200,
+    parseInt(process.env.PIPER_TTS_MAX_TEXT_CHARS, 10) || 2400,
+);
+const normalizedPiperTimeoutMs = Math.max(
+    1000,
+    parseInt(process.env.PIPER_TTS_TIMEOUT_MS, 10) || 45000,
+);
+const normalizedPiperPodcastTimeoutMs = Math.max(
+    normalizedPiperTimeoutMs,
+    parseInt(process.env.PIPER_TTS_PODCAST_TIMEOUT_MS, 10) || 180000,
+);
+const normalizedPiperPodcastChunkChars = Math.max(
+    250,
+    Math.min(
+        normalizedPiperMaxTextChars,
+        parseInt(process.env.PIPER_TTS_PODCAST_CHUNK_CHARS, 10) || Math.min(900, normalizedPiperMaxTextChars),
+    ),
+);
 
 const config = {
     // Server
@@ -297,14 +316,10 @@ const config = {
             noiseScale: parseOptionalFloat(process.env.PIPER_TTS_NOISE_SCALE) ?? 0.55,
             noiseW: parseOptionalFloat(process.env.PIPER_TTS_NOISE_W) ?? 0.8,
             sentenceSilence: parseOptionalFloat(process.env.PIPER_TTS_SENTENCE_SILENCE) ?? 0.24,
-            maxTextChars: Math.max(
-                200,
-                parseInt(process.env.PIPER_TTS_MAX_TEXT_CHARS, 10) || 2400,
-            ),
-            timeoutMs: Math.max(
-                1000,
-                parseInt(process.env.PIPER_TTS_TIMEOUT_MS, 10) || 45000,
-            ),
+            maxTextChars: normalizedPiperMaxTextChars,
+            timeoutMs: normalizedPiperTimeoutMs,
+            podcastTimeoutMs: normalizedPiperPodcastTimeoutMs,
+            podcastChunkChars: normalizedPiperPodcastChunkChars,
         },
     },
 

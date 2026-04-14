@@ -5337,6 +5337,57 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).not.toContain('file-write');
     });
 
+    test('keeps research html documents about public events on the document research path', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'web-search', 'web-fetch', 'file-read', 'file-search', 'file-write', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective: [
+                'Original request:',
+                'Can you turn this research on Calgary into a formal html document with visuals of Calgary or the events?',
+                '',
+                'Approved outline:',
+                JSON.stringify({
+                    title: 'Calgary Events Brief',
+                    sections: [
+                        {
+                            heading: 'Festival Snapshot',
+                            purpose: 'Create a concise overview of public events and live music hosted across Calgary.',
+                            keyPoints: ['Calgary Stampede', 'Seasonal festivals'],
+                            targetLength: 'medium',
+                        },
+                    ],
+                }, null, 2),
+            ].join('\n'),
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+        });
+
+        expect(toolPolicy.candidateToolIds).toContain('web-search');
+        expect(toolPolicy.candidateToolIds).toContain('web-fetch');
+    });
+
     test('prefers opencode-run for repo-level remote build work', () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,

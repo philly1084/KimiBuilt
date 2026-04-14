@@ -42,6 +42,12 @@ class TtsService {
         const providerId = String(publicConfig.provider || 'piper').trim() || 'piper';
         const voices = Array.isArray(publicConfig.voices) ? publicConfig.voices : [];
         const maxTextChars = Math.max(200, Number(publicConfig.maxTextChars) || 2400);
+        const timeoutMs = Math.max(1000, Number(publicConfig.timeoutMs) || 45000);
+        const podcastTimeoutMs = Math.max(timeoutMs, Number(publicConfig.podcastTimeoutMs) || timeoutMs);
+        const podcastChunkChars = Math.max(
+            250,
+            Math.min(maxTextChars, Number(publicConfig.podcastChunkChars) || Math.min(900, maxTextChars)),
+        );
         const defaultVoiceId = configured
             ? (String(publicConfig.defaultVoiceId || '').trim() || voices[0]?.id || null)
             : null;
@@ -61,6 +67,9 @@ class TtsService {
             configured,
             provider: providerId,
             maxTextChars,
+            timeoutMs,
+            podcastTimeoutMs,
+            podcastChunkChars,
             defaultVoiceId,
             voices,
             diagnostics,
