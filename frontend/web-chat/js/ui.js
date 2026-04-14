@@ -2400,6 +2400,32 @@ class UIHelpers {
         );
     }
 
+    buildGeneratedReasoningText(message = null, isStreaming = false) {
+        if (!isStreaming) {
+            return '';
+        }
+
+        const meta = this.getLivePhaseMeta(message?.liveState?.phase || 'thinking');
+        const detail = String(message?.liveState?.detail || '').trim();
+        const phaseSummaryById = {
+            thinking: 'Reviewing the request and lining up the response plan.',
+            reasoning: 'Working through the answer path before finalizing it.',
+            'checking-tools': 'Checking tool calls and folding their results back into the reply.',
+            writing: 'Turning the working state into the final response.',
+        };
+        const phaseSummary = String(phaseSummaryById[meta.phase] || meta.detail || '').trim();
+
+        if (!detail) {
+            return phaseSummary;
+        }
+
+        if (!phaseSummary || detail === phaseSummary || detail === meta.detail) {
+            return detail;
+        }
+
+        return `${phaseSummary} ${detail}`;
+    }
+
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
         const summary = this.getMessageReasoningSummary(message);
         const displaySource = String(message?.reasoningDisplaySource || '').trim();
@@ -2430,6 +2456,19 @@ class UIHelpers {
                 bodyText: summary,
                 animated: false,
                 live: isStreaming,
+            };
+        }
+
+        const generatedReasoning = this.buildGeneratedReasoningText(message, isStreaming);
+        if (generatedReasoning) {
+            return {
+                source: 'generated',
+                title: 'Generated reasoning',
+                icon: 'sparkles',
+                previewText: this.buildReasoningSummaryPreview(generatedReasoning, isStreaming ? 168 : 132),
+                bodyText: generatedReasoning,
+                animated: false,
+                live: true,
             };
         }
 
@@ -2467,7 +2506,7 @@ class UIHelpers {
         const bodyHtml = `${this.escapeHtml(visibleText).replace(/\n/g, '<br>')}${reasoningState.animated ? '<span class="streaming-cursor" aria-hidden="true"></span>' : ''}`;
 
         return `
-            <div class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'synthetic' ? ' is-synthetic' : ''}">
+            <div class="assistant-reasoning-ribbon${isStreaming ? ' is-live' : ''}${reasoningState.source === 'generated' ? ' is-synthetic' : ''}">
                 <div class="assistant-reasoning-ribbon__surface" aria-live="polite">
                     <div class="assistant-reasoning-ribbon__header">
                     <span class="assistant-reasoning-ribbon__main">
@@ -2484,7 +2523,7 @@ class UIHelpers {
                         </span>
                     </span>
                     </div>
-                    <div class="assistant-reasoning-ribbon__body assistant-reasoning-ribbon__body--inline${reasoningState.source === 'synthetic' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${bodyHtml}</div>
+                    <div class="assistant-reasoning-ribbon__body assistant-reasoning-ribbon__body--inline${reasoningState.source === 'generated' ? ' assistant-reasoning-ribbon__body--synthetic' : ''}">${bodyHtml}</div>
                 </div>
             </div>
         `;
@@ -2522,8 +2561,9 @@ class UIHelpers {
         const content = this.resolveAssistantVisibleContent(message);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
+            const placeholderMarkup = effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : '';
             return {
-                html: reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : ''),
+                html: `${reasoningRibbon}${placeholderMarkup}`,
                 variant: 'default',
             };
         }

@@ -1529,6 +1529,100 @@ describe('ConversationOrchestrator', () => {
         }));
     });
 
+    test('notes tool synthesis prompt allows notes-actions after verified tool use', async () => {
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('{"assistant_reply":"Built the cats and dogs page.","actions":[]}', 'resp_notes_tool_synthesis_prompt')),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        await orchestrator.buildFinalResponse({
+            input: 'Finish building up this page on cats and dogs.',
+            objective: 'Finish building up this page on cats and dogs.',
+            taskType: 'notes',
+            executionProfile: 'notes',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'web-search',
+                    },
+                },
+                result: {
+                    success: true,
+                    data: {
+                        query: 'cats and dogs',
+                        results: [],
+                    },
+                },
+            }],
+        });
+
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.stringContaining('you may return a valid `notes-actions` JSON payload'),
+        }));
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.stringContaining('Do not stop to ask the user for raw search output or a manual source dump'),
+        }));
+        expect(llmClient.createResponse).toHaveBeenCalledWith(expect.objectContaining({
+            input: expect.not.stringContaining('Return plain user-facing text only.'),
+        }));
+    });
+
+    test('notes tool synthesis compact retry keeps notes-actions instructions', async () => {
+        const llmClient = {
+            createResponse: jest.fn()
+                .mockResolvedValueOnce({
+                    id: 'resp_empty_notes_tool_synthesis',
+                    model: 'gpt-test',
+                    choices: [{ message: {} }],
+                    metadata: {},
+                })
+                .mockResolvedValueOnce(buildResponse('{"assistant_reply":"Built the cats and dogs page.","actions":[]}', 'resp_notes_compact_retry')),
+            complete: jest.fn(),
+        };
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager: null,
+            sessionStore: null,
+            memoryService: null,
+        });
+
+        await orchestrator.buildFinalResponse({
+            input: 'Finish building up this page on cats and dogs.',
+            objective: 'Finish building up this page on cats and dogs.',
+            taskType: 'notes',
+            executionProfile: 'notes',
+            toolEvents: [{
+                toolCall: {
+                    function: {
+                        name: 'web-search',
+                    },
+                },
+                result: {
+                    success: true,
+                    data: {
+                        query: 'cats and dogs',
+                        results: [],
+                    },
+                },
+            }],
+        });
+
+        expect(llmClient.createResponse).toHaveBeenCalledTimes(2);
+        expect(llmClient.createResponse.mock.calls[1][0]).toEqual(expect.objectContaining({
+            instructions: 'Return only a valid `notes-actions` payload or page-ready notes content for the current notes page.',
+            contextMessages: [],
+            recentMessages: [],
+        }));
+        expect(llmClient.createResponse.mock.calls[1][0].input).toContain('return only a valid `notes-actions` payload or page-ready notes content');
+        expect(llmClient.createResponse.mock.calls[1][0].input).toContain('If verified research is incomplete, still build the page structure');
+    });
+
     test('tool synthesis prompt uses compact verified findings instead of raw tool result json blobs', async () => {
         const llmClient = {
             createResponse: jest.fn().mockResolvedValue(buildResponse('Compact synthesis answer', 'resp_compact_prompt')),

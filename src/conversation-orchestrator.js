@@ -2071,6 +2071,10 @@ function buildNotesSynthesisInstructions() {
     ].join('\n\n');
 }
 
+function isNotesSurfaceTask({ taskType = '', executionProfile = '' } = {}) {
+    return taskType === NOTES_EXECUTION_PROFILE || executionProfile === NOTES_EXECUTION_PROFILE;
+}
+
 function hasAutonomyRevocation(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -3808,14 +3812,30 @@ function buildVerifiedToolFindingsText(toolEvents = []) {
         .join('\n');
 }
 
-function buildCompactToolSynthesisPrompt({ objective = '', taskType = 'chat', toolEvents = [] } = {}) {
+function buildCompactToolSynthesisPrompt({
+    objective = '',
+    taskType = 'chat',
+    executionProfile = DEFAULT_EXECUTION_PROFILE,
+    toolEvents = [],
+} = {}) {
     const events = Array.isArray(toolEvents) ? toolEvents : [];
     const researchDossier = buildResearchDossierFromToolEvents({ objective, toolEvents: events });
     const conciseFindings = buildVerifiedToolFindingsText(events);
+    const notesSurfaceTask = isNotesSurfaceTask({ taskType, executionProfile });
 
     return [
-        'Write the final user-facing answer using only these verified tool results.',
-        'Return plain text only.',
+        notesSurfaceTask
+            ? 'Write the final notes-page answer using only these verified tool results.'
+            : 'Write the final user-facing answer using only these verified tool results.',
+        ...(notesSurfaceTask
+            ? [
+                'If the user is editing the page, return only a valid `notes-actions` payload or page-ready notes content.',
+                'Do not return standalone HTML, artifact/download language, workspace/file instructions, or shell commentary.',
+                'If verified research is incomplete, still build the page structure and any safe stable content you can support. Only include source bookmarks or citations that are actually present in the verified tool results.',
+            ]
+            : [
+                'Return plain text only.',
+            ]),
         'If a tool failed, state the exact failure plainly.',
         `Task type: ${taskType}`,
         '',
@@ -7384,6 +7404,7 @@ class ConversationOrchestrator extends EventEmitter {
             toolPolicy,
             toolEvents,
         });
+        const notesSurfaceTask = isNotesSurfaceTask({ taskType, executionProfile });
 
         if (toolEvents.length === 0) {
             const response = recoverEmptyModelResponse(await this.requestResponse({
@@ -7418,9 +7439,21 @@ class ConversationOrchestrator extends EventEmitter {
         const synthesisPrompt = [
             'Use the verified tool results below to answer the user.',
             'If a tool failed, state the exact failure plainly.',
-            'Return plain user-facing text only.',
-            'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
-            'Do not wrap the final answer in code fences.',
+            ...(notesSurfaceTask
+                ? [
+                    'This is a notes-surface request.',
+                    'If the user is editing the page, you may return a valid `notes-actions` JSON payload or a fenced ```notes-actions payload instead of plain prose.',
+                    'If you return `notes-actions`, return only the payload with no assistant wrapper fields.',
+                    'Do not stop to ask the user for raw search output or a manual source dump when verified tool results are partial.',
+                    'If verified research is incomplete, still build the page structure and any safe stable content you can support. Only include source bookmarks, citations, or image URLs that are actually present in the verified tool results.',
+                    'For current or time-sensitive claims, omit unsupported details rather than guessing.',
+                    'Do not return standalone HTML, artifact/download language, workspace/file instructions, or shell commentary.',
+                ]
+                : [
+                    'Return plain user-facing text only.',
+                    'Do not return JSON, assistant wrapper objects, tool call objects, or fields like `role`, `content`, `type`, `name`, `parameters`, `output_text`, or `finish_reason`.',
+                    'Do not wrap the final answer in code fences.',
+                ]),
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
             'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
             ...(toolPolicy?.classification?.groundingRequirement === 'required'
@@ -7431,9 +7464,8 @@ class ConversationOrchestrator extends EventEmitter {
                 ]
                 : []),
             'If the request is research-heavy, synthesize across the verified sources with concrete detail, cross-source comparison, and caveats instead of flattening the findings into one thin paragraph.',
-            ...(taskType === NOTES_EXECUTION_PROFILE
+            ...(notesSurfaceTask
                 ? [
-                    'This is a notes-surface request.',
                     'If the user is editing the page, return `notes-actions` or page-ready notes content, not raw standalone HTML or workspace/file instructions.',
                     'Do not mention local workspace writes, `/app`, shell startup problems, or generic sandbox limitations unless a verified tool result is directly about that.',
                 ]
@@ -7494,9 +7526,12 @@ class ConversationOrchestrator extends EventEmitter {
                 input: buildCompactToolSynthesisPrompt({
                     objective,
                     taskType,
+                    executionProfile,
                     toolEvents,
                 }),
-                instructions: 'Return plain user-facing text only.',
+                instructions: notesSurfaceTask
+                    ? 'Return only a valid `notes-actions` payload or page-ready notes content for the current notes page.'
+                    : 'Return plain user-facing text only.',
                 contextMessages: [],
                 recentMessages: [],
                 stream: false,
