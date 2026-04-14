@@ -2402,29 +2402,11 @@ class UIHelpers {
 
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
         const summary = this.getMessageReasoningSummary(message);
-        const content = this.resolveAssistantVisibleContent(message);
         const displaySource = String(message?.reasoningDisplaySource || '').trim();
         const displayText = String(message?.reasoningDisplayText || '').trim();
         const displayFullText = String(message?.reasoningDisplayFullText || '').trim();
         const displayTitle = String(message?.reasoningDisplayTitle || '').trim();
         const displayIcon = String(message?.reasoningDisplayIcon || '').trim();
-        const displayAnimated = message?.reasoningDisplayAnimated === true;
-
-        if (isStreaming && displaySource === 'synthetic' && displayText) {
-            if (content || summary) {
-                return null;
-            }
-
-            return {
-                source: 'synthetic',
-                title: displayTitle || 'Thinking',
-                icon: displayIcon || 'sparkles',
-                previewText: displayText,
-                bodyText: displayAnimated ? displayText : (displayFullText || displayText),
-                animated: displayAnimated,
-                live: true,
-            };
-        }
 
         if (displayText && (displaySource === 'stream' || displaySource === 'final')) {
             const fullText = displayFullText || summary || displayText;
@@ -2541,7 +2523,7 @@ class UIHelpers {
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
             return {
-                html: reasoningRibbon,
+                html: reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : ''),
                 variant: 'default',
             };
         }
@@ -2684,7 +2666,7 @@ class UIHelpers {
         }
 
         messageEl.classList.toggle('message--streaming', effectiveStreaming);
-        messageEl.classList.toggle('message--has-reasoning', !isUser && this.hasMessageReasoning(message));
+        messageEl.classList.toggle('message--has-reasoning', !isUser && this.hasMessageReasoning(message, effectiveStreaming));
         if (!isUser) {
             if (message?.liveState?.phase) {
                 messageEl.dataset.livePhase = String(message.liveState.phase).trim();
@@ -3450,7 +3432,7 @@ class UIHelpers {
         }
 
         messageEl.classList.toggle('message--streaming', !isUser && effectiveStreaming);
-        messageEl.classList.toggle('message--has-reasoning', !isUser && this.hasMessageReasoning(nextMessage));
+        messageEl.classList.toggle('message--has-reasoning', !isUser && this.hasMessageReasoning(nextMessage, effectiveStreaming));
         if (!isUser) {
             if (nextMessage?.liveState?.phase) {
                 messageEl.dataset.livePhase = String(nextMessage.liveState.phase).trim();

@@ -3,7 +3,6 @@
  * API endpoints for template-based, AI-powered, and assembly document generation
  */
 
-const { randomUUID } = require('crypto');
 const { Router } = require('express');
 const { sessionStore } = require('../session-store');
 const { artifactService } = require('../artifacts/artifact-service');
@@ -156,42 +155,6 @@ function normalizeTemplateIds(value) {
   }
 
   return [];
-}
-
-function shouldUseArtifactHtmlPipeline(documentService, documentType = '', format = '') {
-  const normalizedFormat = normalizeFormat(format);
-  if (normalizedFormat !== 'html') {
-    return false;
-  }
-
-  if (typeof documentService?.shouldUsePresentationPipeline === 'function') {
-    return !documentService.shouldUsePresentationPipeline(documentType, normalizedFormat);
-  }
-
-  return true;
-}
-
-function buildArtifactContextMessages({
-  documentType = '',
-  tone = 'professional',
-  length = 'medium',
-  theme = '',
-  templateContext = '',
-  productionPlan = null,
-} = {}) {
-  const preferenceContext = [
-    '[Document route preferences]',
-    documentType ? `- Document type: ${documentType}` : '',
-    tone ? `- Tone: ${tone}` : '',
-    length ? `- Length: ${length}` : '',
-    theme ? `- Visual theme: ${theme}` : '',
-  ].filter(Boolean).join('\n');
-
-  return [
-    preferenceContext,
-    templateContext,
-    productionPlan ? `[Document production plan]\n${JSON.stringify(productionPlan, null, 2)}` : '',
-  ].filter(Boolean);
 }
 
 function serializeArtifactAsDocument(artifact = null) {
@@ -534,7 +497,6 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
     } = req.body;
 
     const documentService = req.app.locals.documentService;
-    const runtimeArtifactService = req.app.locals.artifactService || artifactService;
     const templateSelection = await buildDocumentTemplateSelection(req.app.locals.templateStore, {
       prompt,
       documentType,
@@ -550,58 +512,22 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       length,
     });
 
-    let document = null;
-    let downloadUrl = null;
-
-    if (shouldUseArtifactHtmlPipeline(documentService, documentType, format)) {
-      try {
-        const generated = await runtimeArtifactService.generateArtifact({
-          session: {
-            previousResponseId: null,
-            metadata: {},
-          },
-          sessionId: `document-ai-${randomUUID()}`,
-          mode: 'document',
-          prompt,
-          format: normalizeFormat(format) || 'html',
-          model,
-          contextMessages: buildArtifactContextMessages({
-            documentType,
-            tone,
-            length,
-            theme: options.theme || '',
-            templateContext: templateSelection.context,
-            productionPlan,
-          }),
-        });
-
-        document = serializeArtifactAsDocument(generated.artifact);
-        downloadUrl = document.downloadUrl;
-      } catch (error) {
-        if (error?.statusCode !== 503) {
-          throw error;
-        }
-      }
-    }
-
-    if (!document) {
-      document = await documentService.aiGenerate(prompt, {
-        documentType,
-        tone,
-        length,
-        format,
-        model,
-        designPlan: productionPlan,
-        templateContext: templateSelection.context,
-        ...options,
-      });
-      const persistedArtifact = await maybePersistDocumentArtifact(req, document, sessionId, 'document-ai');
-      if (persistedArtifact) {
-        document = serializeArtifactAsDocument(persistedArtifact);
-        downloadUrl = document.downloadUrl;
-      } else {
-        downloadUrl = `/api/documents/${document.id}/download`;
-      }
+    let document = await documentService.aiGenerate(prompt, {
+      documentType,
+      tone,
+      length,
+      format,
+      model,
+      designPlan: productionPlan,
+      templateContext: templateSelection.context,
+      ...options,
+    });
+    const persistedArtifact = await maybePersistDocumentArtifact(req, document, sessionId, 'document-ai');
+    const downloadUrl = persistedArtifact
+      ? persistedArtifact.downloadUrl
+      : `/api/documents/${document.id}/download`;
+    if (persistedArtifact) {
+      document = serializeArtifactAsDocument(persistedArtifact);
     }
 
     res.json({

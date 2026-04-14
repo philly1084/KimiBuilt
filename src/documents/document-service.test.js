@@ -1,6 +1,20 @@
+jest.mock('../artifacts/artifact-renderer', () => {
+  const actual = jest.requireActual('../artifacts/artifact-renderer');
+  return {
+    ...actual,
+    renderPdfViaBrowser: jest.fn(),
+  };
+});
+
+const { renderPdfViaBrowser } = require('../artifacts/artifact-renderer');
 const { DocumentService } = require('./document-service');
 
 describe('DocumentService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    renderPdfViaBrowser.mockResolvedValue(null);
+  });
+
   test('generates html documents from templates with unique filenames', async () => {
     const service = new DocumentService({
       responses: {
@@ -22,13 +36,64 @@ describe('DocumentService', () => {
     expect(String(document.content)).toContain('Production Lens');
   });
 
-  test('routes pdf generation through the shared document design plan', async () => {
+  test('uses browser-rendered HTML as the primary PDF pipeline for structured documents', async () => {
     const service = new DocumentService({
       responses: {
         create: jest.fn(),
       },
     });
 
+    renderPdfViaBrowser.mockResolvedValue(Buffer.from('browser-pdf-bytes'));
+    jest.spyOn(service.generators.pdf, 'generateFromContent').mockResolvedValue({
+      buffer: Buffer.from('pdf-bytes'),
+      metadata: {
+        format: 'pdf',
+        design: {
+          blueprint: 'executive-brief',
+          theme: 'executive',
+          outlineItems: 3,
+        },
+      },
+    });
+
+    const document = await service.generateFromTemplate('executive-brief', {
+      title: 'Q2 Decision Brief',
+      subtitle: 'Expansion review',
+      audience: 'Leadership',
+      headline_summary: 'Approve the expansion plan.',
+      current_state: 'Pipeline is ahead of target.',
+      recommendation: 'Fund the launch and assign an owner.',
+      key_metrics: 'Revenue growth: 18%\nCAC payback: 7 months',
+      next_steps: 'Approve budget\nAssign owner',
+    }, 'pdf', {
+      tone: 'professional',
+      length: 'medium',
+    });
+
+    expect(renderPdfViaBrowser).toHaveBeenCalledWith(
+      expect.stringContaining('<!DOCTYPE html>'),
+      'Q2 Decision Brief',
+    );
+    expect(service.generators.pdf.generateFromContent).not.toHaveBeenCalled();
+    expect(document.metadata).toEqual(expect.objectContaining({
+      renderEngine: 'browser-html',
+      sourceHtml: expect.stringContaining('<!DOCTYPE html>'),
+      design: expect.objectContaining({
+        blueprint: 'executive-brief',
+        theme: 'executive',
+      }),
+    }));
+    expect(document.previewHtml).toContain('document-shell');
+  });
+
+  test('falls back to the PDF generator when browser PDF export is unavailable', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    renderPdfViaBrowser.mockResolvedValue(null);
     jest.spyOn(service.generators.pdf, 'generateFromContent').mockResolvedValue({
       buffer: Buffer.from('pdf-bytes'),
       metadata: {
@@ -65,8 +130,13 @@ describe('DocumentService', () => {
           blueprint: expect.objectContaining({ id: 'executive-brief' }),
           theme: expect.objectContaining({ id: 'executive' }),
         }),
+        sourceHtml: expect.stringContaining('<!DOCTYPE html>'),
       }),
     );
+    expect(document.metadata).toEqual(expect.objectContaining({
+      renderEngine: 'pdfmake',
+      sourceHtml: expect.stringContaining('<!DOCTYPE html>'),
+    }));
     expect(document.metadata.design).toEqual(expect.objectContaining({
       blueprint: 'executive-brief',
       theme: 'executive',
@@ -210,6 +280,33 @@ describe('DocumentService', () => {
     expect(String(document.content)).toContain('presentation-deck');
     expect(String(document.content)).toContain('Launch Storyboard');
     expect(String(document.content)).toContain('Design moves at the speed of thought');
+  });
+
+  test('generates xlsx workbooks with section and chart sheets for structured reports', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.generateFromTemplate('data-story-report', {
+      title: 'Calgary Activity Pulse',
+      timeframe: 'April 2026',
+      headline_insight: 'Riverfront activity and downtown foot traffic are leading the week.',
+      data_points: 'River paths: 82\nMuseums: 61\nNeighborhood food stops: 74',
+      drivers: 'Mild weather and concentrated downtown cultural venues keep movement easy.',
+      comparisons: 'Bow River loop vs. museum day\nInglewood vs. Kensington evening mix',
+      recommendations: 'Book one anchor activity per day\nLeave river timing flexible for weather',
+    }, 'xlsx');
+
+    expect(document.mimeType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(document.filename).toMatch(/\.xlsx$/);
+    expect(document.metadata).toEqual(expect.objectContaining({
+      sheetCount: expect.any(Number),
+      sheets: expect.arrayContaining(['Overview', 'Sections', 'Topline Insight Chart']),
+    }));
+    expect(document.previewHtml).toContain('Topline Insight Chart');
+    expect(document.extractedText).toContain('River paths');
   });
 
   test('discovers premium built-in templates for briefs, data stories, and decks', async () => {

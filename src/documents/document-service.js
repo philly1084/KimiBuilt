@@ -6,9 +6,10 @@
 const { DocxGenerator } = require('./generators/docx-generator');
 const { PdfGenerator } = require('./generators/pdf-generator');
 const { PptxGenerator } = require('./generators/pptx-generator');
+const { XlsxGenerator } = require('./generators/xlsx-generator');
 const { TemplateEngine } = require('./template-engine');
 const { AIDocumentGenerator } = require('./ai-document-generator');
-const { ensureHtmlDocument } = require('../artifacts/artifact-renderer');
+const { ensureHtmlDocument, renderPdfViaBrowser } = require('../artifacts/artifact-renderer');
 const { createUniqueFilename, stripHtml } = require('../utils/text');
 const {
   BLUEPRINTS,
@@ -29,6 +30,7 @@ class DocumentService {
       docx: new DocxGenerator(),
       pdf: new PdfGenerator(),
       pptx: new PptxGenerator(),
+      xlsx: new XlsxGenerator(),
     };
 
     this.templateEngine = new TemplateEngine();
@@ -63,18 +65,15 @@ class DocumentService {
       options,
     });
 
-    return this.storeDocument({
-      id: this.generateId(),
-      content: document.buffer || document.content,
+    return this.storeGeneratedDocument({
+      document,
       filename: this.generateFilename(template.name, format),
-      mimeType: document.mimeType,
-      size: document.buffer?.length || document.content?.length,
       metadata: {
         template: templateId,
         format,
         generatedAt: new Date().toISOString(),
         ...document.metadata
-      }
+      },
     });
   }
 
@@ -118,12 +117,9 @@ class DocumentService {
       },
     });
 
-    return this.storeDocument({
-      id: this.generateId(),
-      content: document.buffer || document.content,
+    return this.storeGeneratedDocument({
+      document,
       filename: this.generateFilename(content.title || 'document', format),
-      mimeType: document.mimeType,
-      size: document.buffer?.length || document.content?.length,
       metadata: {
         format,
         generatedAt: new Date().toISOString(),
@@ -133,10 +129,10 @@ class DocumentService {
         ...content.metadata,
         ...document.metadata
       },
-      preview: content.sections?.map(s => ({
-        heading: s.heading,
-        preview: s.content?.substring(0, 200) + '...'
-      }))
+      preview: content.sections?.map((section) => ({
+        heading: section.heading,
+        preview: `${String(section.content || '').substring(0, 200)}...`
+      })),
     });
   }
 
@@ -163,18 +159,15 @@ class DocumentService {
       options,
     });
 
-    return this.storeDocument({
-      id: this.generateId(),
-      content: document.buffer || document.content,
+    return this.storeGeneratedDocument({
+      document,
       filename: this.generateFilename(content.title || 'document', format),
-      mimeType: document.mimeType,
-      size: document.buffer?.length || document.content?.length,
       metadata: {
         format,
         generatedAt: new Date().toISOString(),
         aiGenerated: true,
         ...document.metadata
-      }
+      },
     });
   }
 
@@ -224,12 +217,9 @@ class DocumentService {
       rawText: combined,
     });
 
-    return this.storeDocument({
-      id: this.generateId(),
-      content: document.buffer || document.content,
+    return this.storeGeneratedDocument({
+      document,
       filename: this.generateFilename(options.title || 'document', format),
-      mimeType: document.mimeType,
-      size: document.buffer?.length || document.content?.length,
       metadata: {
         format,
         generatedAt: new Date().toISOString(),
@@ -334,12 +324,18 @@ class DocumentService {
       generatedContent = document.buffer;
     }
 
-    return this.storeDocument({
-      id: this.generateId(),
-      content: generatedContent,
+    return this.storeGeneratedDocument({
+      document: {
+        ...document,
+        buffer: generatedContent,
+        mimeType,
+        preview: previewHtml
+          ? { type: 'html', content: previewHtml }
+          : null,
+        previewHtml,
+        extractedText,
+      },
       filename: this.generateFilename(presentationContent.title || 'presentation', format),
-      mimeType,
-      size: document.buffer?.length || document.content?.length,
       metadata: {
         format,
         generatedAt: new Date().toISOString(),
@@ -349,11 +345,6 @@ class DocumentService {
         theme: presentationContent.theme || options.theme || 'editorial',
         ...document.metadata
       },
-      preview: previewHtml
-        ? { type: 'html', content: previewHtml }
-        : null,
-      previewHtml,
-      extractedText,
     });
   }
 
@@ -741,6 +732,7 @@ class DocumentService {
       { id: 'docx', name: 'Word Document', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', extension: '.docx' },
       { id: 'pdf', name: 'PDF Document', mimeType: 'application/pdf', extension: '.pdf' },
       { id: 'pptx', name: 'PowerPoint', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', extension: '.pptx' },
+      { id: 'xlsx', name: 'Excel Workbook', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', extension: '.xlsx' },
       { id: 'html', name: 'HTML Document', mimeType: 'text/html', extension: '.html' },
       { id: 'md', name: 'Markdown', mimeType: 'text/markdown', extension: '.md' }
     ];
@@ -762,6 +754,38 @@ class DocumentService {
    */
   generateFilename(name, format) {
     return createUniqueFilename(name, format, 'document');
+  }
+
+  storeGeneratedDocument({ document = {}, filename, mimeType, metadata = {}, preview = null }) {
+    const content = document.buffer || document.content || '';
+    const normalizedMimeType = mimeType || document.mimeType || 'application/octet-stream';
+    const contentSize = Buffer.isBuffer(document.buffer)
+      ? document.buffer.length
+      : Buffer.isBuffer(document.content)
+        ? document.content.length
+        : Buffer.byteLength(String(document.content || ''), 'utf8');
+    const previewHtml = typeof document.previewHtml === 'string' && document.previewHtml.trim()
+      ? document.previewHtml
+      : (normalizedMimeType === 'text/html'
+        ? (Buffer.isBuffer(document.content) ? document.content.toString('utf8') : String(document.content || ''))
+        : '');
+    const extractedText = typeof document.extractedText === 'string' && document.extractedText.trim()
+      ? document.extractedText
+      : (previewHtml ? stripHtml(previewHtml) : '');
+    const normalizedPreview = document.preview
+      || (previewHtml ? { type: 'html', content: previewHtml } : preview);
+
+    return this.storeDocument({
+      id: this.generateId(),
+      content,
+      filename,
+      mimeType: normalizedMimeType,
+      size: contentSize,
+      metadata,
+      preview: normalizedPreview,
+      previewHtml,
+      extractedText,
+    });
   }
 
   storeDocument(document) {
@@ -829,6 +853,8 @@ class DocumentService {
       return {
         content: rendered.content,
         mimeType: rendered.mimeType,
+        previewHtml: normalizedFormat === 'html' ? rendered.content : '',
+        extractedText: stripHtml(rendered.content),
         metadata: {
           format: normalizedFormat === 'markdown' ? 'md' : normalizedFormat,
           title: structuredContent.title || title,
@@ -847,7 +873,52 @@ class DocumentService {
       throw new Error(`Unsupported format: ${format}`);
     }
 
-    if ((content || template) && typeof generator.generateFromContent === 'function' && normalizedFormat === 'pdf') {
+    if ((content || template) && normalizedFormat === 'pdf') {
+      const renderedHtml = this.renderTextDocument(structuredContent, 'html', designPlan);
+      const previewHtml = renderedHtml.content;
+      const extractedText = stripHtml(previewHtml);
+      const browserBuffer = await renderPdfViaBrowser(previewHtml, structuredContent.title || title);
+
+      if (browserBuffer) {
+        return {
+          buffer: browserBuffer,
+          mimeType: generator.mimeType,
+          previewHtml,
+          extractedText,
+          metadata: {
+            format: 'pdf',
+            title: structuredContent.title || title,
+            sections: structuredContent.sections?.length || 0,
+            renderEngine: 'browser-html',
+            sourceHtml: previewHtml,
+            design: {
+              blueprint: designPlan.blueprint.id,
+              theme: designPlan.theme.id,
+              outlineItems: designPlan.outline.length,
+            },
+          },
+        };
+      }
+
+      const fallbackPdf = await generator.generateFromContent(structuredContent, {
+        ...options,
+        designPlan,
+        sourceHtml: previewHtml,
+      });
+
+      return {
+        ...fallbackPdf,
+        previewHtml,
+        extractedText,
+        metadata: {
+          ...(fallbackPdf.metadata || {}),
+          renderEngine: 'pdfmake',
+          sourceHtml: previewHtml,
+        },
+      };
+    }
+
+    if ((content || template) && normalizedFormat === 'xlsx' && typeof generator.generateFromContent === 'function') {
       return generator.generateFromContent(structuredContent, {
         ...options,
         designPlan,
@@ -855,7 +926,10 @@ class DocumentService {
     }
 
     if (content && typeof generator.generateFromContent === 'function') {
-      return generator.generateFromContent(content, options);
+      return generator.generateFromContent(content, {
+        ...options,
+        designPlan,
+      });
     }
 
     if (template && typeof generator.generate === 'function') {

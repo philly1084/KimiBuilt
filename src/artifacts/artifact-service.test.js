@@ -1371,4 +1371,88 @@ describe('ArtifactService', () => {
         expect(renderedHtml).not.toContain('Source: tool');
         expect(renderedHtml).not.toContain('bokeh, bible');
     });
+
+    test('recovers outline-style composition output without leaking planning labels or artifact source captions', async () => {
+        createResponse
+            .mockResolvedValueOnce({
+                id: 'resp-plan-calgary',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Calgary This Week',
+                        sections: [
+                            { heading: 'Calgary, Right Now', purpose: 'Establish the weekly angle', keyPoints: ['Downtown and riverfront'], targetLength: 'short' },
+                            { heading: 'A Practical 7-Day Calgary Plan', purpose: 'Lay out the city week rhythm', keyPoints: ['Morning and evening pacing'], targetLength: 'medium' },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-expand-calgary',
+                output: [{
+                    type: 'message',
+                    content: [{ text: JSON.stringify({
+                        title: 'Calgary This Week',
+                        sections: [
+                            {
+                                heading: 'Calgary, Right Now',
+                                content: 'Calgary works best when you treat the Bow River paths, downtown architecture, and neighborhood food stops as one connected loop.',
+                                level: 1,
+                                kicker: 'This week',
+                            },
+                            {
+                                heading: 'A Practical 7-Day Calgary Plan',
+                                content: 'Use river walks and East Village early, then swap in Studio Bell, the Central Library, or other indoor anchors when the weather turns.',
+                                level: 1,
+                            },
+                        ],
+                    }) }],
+                }],
+            })
+            .mockResolvedValueOnce({
+                id: 'resp-compose-calgary',
+                output: [{
+                    type: 'message',
+                    content: [{ text: [
+                        'Editorial Feature',
+                        '7 sections',
+                        'story block',
+                        'Calgary, Right Now',
+                        'can you do some research on what to do in calgary and Source: artifact',
+                        'A Practical 7-Day Calgary Plan',
+                    ].join('\n\n') }],
+                }],
+            });
+
+        await artifactService.generateArtifact({
+            session: {
+                previousResponseId: 'prev-calgary',
+                metadata: {
+                    projectMemory: {
+                        urls: [{
+                            url: '/api/artifacts/calgary-hero/download?inline=1',
+                            kind: 'image',
+                            title: 'can you do some research on what to do in calgary and',
+                            source: 'artifact',
+                        }],
+                    },
+                },
+            },
+            sessionId: 'session-1',
+            mode: 'chat',
+            prompt: 'Create a practical HTML city guide for Calgary this week.',
+            format: 'html',
+            artifactIds: [],
+            existingContent: '',
+            model: 'gpt-5.3',
+        });
+
+        const renderedHtml = renderArtifact.mock.calls[0][0]?.content || '';
+        expect(renderedHtml).toContain('Calgary works best when you treat the Bow River paths, downtown architecture, and neighborhood food stops as one connected loop.');
+        expect(renderedHtml).toContain('A Practical 7-Day Calgary Plan');
+        expect(renderedHtml).not.toContain('Editorial Feature');
+        expect(renderedHtml).not.toContain('story block');
+        expect(renderedHtml).not.toContain('Source: artifact');
+        expect(renderedHtml).not.toContain('can you do some research on what to do in calgary and');
+    });
 });

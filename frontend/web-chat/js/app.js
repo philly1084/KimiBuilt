@@ -4622,7 +4622,6 @@ class ChatApp {
     beginAssistantStream(options = {}) {
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
-        const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
         this.liveResponseState = {
             phase: 'thinking',
             detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
@@ -4640,19 +4639,18 @@ class ChatApp {
                 detail: this.liveResponseState.detail,
             },
             reasoningSummary: '',
-            reasoningDisplaySource: 'synthetic',
-            reasoningDisplayText: initialAmbientFrame.visibleText,
-            reasoningDisplayFullText: initialAmbientFrame.fullText,
-            reasoningDisplayTitle: 'Thinking',
-            reasoningDisplayIcon: 'sparkles',
-            reasoningDisplayAnimated: initialAmbientFrame.isTyping,
+            reasoningDisplaySource: '',
+            reasoningDisplayText: '',
+            reasoningDisplayFullText: '',
+            reasoningDisplayTitle: '',
+            reasoningDisplayIcon: '',
+            reasoningDisplayAnimated: false,
             reasoningAvailable: false,
             isStreaming: true,
         }, {
             render: true,
             scroll: false,
         });
-        this.startAmbientReasoningLoop();
     }
 
     scheduleLiveIndicatorHide(delayMs = 900) {
@@ -5941,7 +5939,6 @@ class ChatApp {
         this.retryAttempt = 0;
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
-        const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
         this.liveResponseState = {
             phase: 'thinking',
             detail,
@@ -5971,18 +5968,17 @@ class ChatApp {
                     reasoningDisplayAnimated: false,
                 }
                 : {
-                    reasoningDisplaySource: 'synthetic',
-                    reasoningDisplayText: initialAmbientFrame.visibleText,
-                    reasoningDisplayFullText: initialAmbientFrame.fullText,
-                    reasoningDisplayTitle: 'Thinking',
-                    reasoningDisplayIcon: 'sparkles',
-                    reasoningDisplayAnimated: initialAmbientFrame.isTyping,
+                    reasoningDisplaySource: '',
+                    reasoningDisplayText: '',
+                    reasoningDisplayFullText: '',
+                    reasoningDisplayTitle: '',
+                    reasoningDisplayIcon: '',
+                    reasoningDisplayAnimated: false,
                 }),
         }, {
             render: true,
             scroll: false,
         });
-        this.startAmbientReasoningLoop();
 
         if (savedMessage) {
             trackedRequest.lastVisibleAssistantMessage = {

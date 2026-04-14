@@ -168,105 +168,6 @@ const Agent = (function() {
             ],
         }),
     ]);
-    const NOTES_BLOCK_PLAYBOOK = Object.freeze([
-        Object.freeze({
-            type: 'callout',
-            whenToUse: 'Key takeaways, warnings, decisions, definitions, highlighted facts, project snapshots.',
-            guidance: 'Use near the top or at turning points so the page has an obvious focal point.',
-        }),
-        Object.freeze({
-            type: 'heading_2 / heading_3',
-            whenToUse: 'Major sections, compact section labels, mini themes, question-led subsections, and in-flow structure markers.',
-            guidance: 'Use `heading_2` for major sections and `heading_3` for smaller Notion-style labels. Give short labels their own block instead of leaving them bolded or buried at the start of a paragraph.',
-        }),
-        Object.freeze({
-            type: 'database',
-            whenToUse: 'Comparisons, trackers, status boards, matrices, owners, metrics, timelines, repeated fields.',
-            guidance: 'Prefer this over long repeated bullet lists when content is tabular or operational.',
-        }),
-        Object.freeze({
-            type: 'bookmark',
-            whenToUse: 'Sources, references, products, articles, documentation links, research citations.',
-            guidance: 'When web research produced useful links, surface the best ones as page blocks instead of hiding them in prose.',
-        }),
-        Object.freeze({
-            type: 'image / ai_image',
-            whenToUse: 'Hero visuals, reference photos, concept visuals, mood-setting illustrations, explainer diagrams.',
-            guidance: 'Use `image` for known URLs and `ai_image` for generated or curated visual ideas that belong on the page.',
-        }),
-        Object.freeze({
-            type: 'mermaid',
-            whenToUse: 'Processes, systems, workflows, relationships, architectures, state changes, decision paths.',
-            guidance: 'Prefer a Mermaid block when the user is describing flow or structure that is easier to scan visually than in paragraphs.',
-        }),
-        Object.freeze({
-            type: 'toggle',
-            whenToUse: 'FAQs, optional details, appendix material, deep dives, raw notes beneath a clean summary.',
-            guidance: 'Use toggles to keep the page compact while still preserving detail for interactive reading.',
-        }),
-        Object.freeze({
-            type: 'quote',
-            whenToUse: 'Excerpts, notable lines, testimonials, definitions, memorable phrasing, cited statements.',
-            guidance: 'Use for emphasis when a line should stand apart from the surrounding copy.',
-        }),
-        Object.freeze({
-            type: 'todo',
-            whenToUse: 'Action items, next steps, follow-ups, checklists, punch lists.',
-            guidance: 'Prefer todo blocks over plain bullets when the page should remain actionable.',
-        }),
-        Object.freeze({
-            type: 'code / math',
-            whenToUse: 'Examples, commands, formulas, equations, technical references.',
-            guidance: 'Do not bury technical snippets inside text blocks when dedicated blocks would read better.',
-        }),
-        Object.freeze({
-            type: 'divider',
-            whenToUse: 'Separating major sections or changing page rhythm on dense pages.',
-            guidance: 'Use sparingly to create breathing room, not after every heading.',
-        }),
-    ]);
-    const NOTES_FRONTEND_FEATURE_PLAYBOOK = Object.freeze([
-        Object.freeze({
-            area: 'Page metadata',
-            guidance: 'Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel` when the page should feel complete, branded, or easier to scan.',
-        }),
-        Object.freeze({
-            area: 'Cover image',
-            guidance: 'If you have a direct image URL or a resolved image block, you may set `cover` to give the page a true hero treatment instead of leaving the top visually empty.',
-        }),
-        Object.freeze({
-            area: 'Properties',
-            guidance: '`properties` accepts an array of `{key, value}` pairs shown under the title. Use them for page type, status, mode, audience, or other compact metadata.',
-        }),
-        Object.freeze({
-            area: 'Block styling',
-            guidance: 'All inserted or replaced blocks may use `color` and `textColor`. Use accent colors for focal blocks and muted gray for secondary notes or appendix material.',
-        }),
-        Object.freeze({
-            area: 'Inline formatting',
-            guidance: 'Text-like blocks may include `formatting` such as `{bold, italic, underline, strikethrough, code}` when a line needs emphasis without becoming a separate block.',
-        }),
-        Object.freeze({
-            area: 'Nested structure',
-            guidance: 'Blocks can include `children`. Use nested content especially under toggles or other parent blocks when the page should feel interactive instead of flat.',
-        }),
-        Object.freeze({
-            area: 'Visuals',
-            guidance: 'Use `image` for known URLs and `ai_image` for AI generation or Unsplash search. `ai_image` supports `source`, `prompt`, `imageUrl`, `size`, `quality`, and `style`.',
-        }),
-        Object.freeze({
-            area: 'Source cards',
-            guidance: 'Use `bookmark` blocks for real links. They render as rich cards with title, description, favicon, and optional preview image.',
-        }),
-        Object.freeze({
-            area: 'Structured data',
-            guidance: 'Use `database` with `{columns, rows, sortColumn, sortDirection}` for trackers, comparisons, owners, metrics, and matrices instead of long repeated lists.',
-        }),
-        Object.freeze({
-            area: 'Diagrams and equations',
-            guidance: 'Use `mermaid` for flows, systems, and sequences, and `math` for LaTeX equations or formulas.',
-        }),
-    ]);
     const NOTES_TEMPLATE_DESIGN_PRESETS = Object.freeze({
         brief: Object.freeze({
             pageIcon: '📌',
@@ -1090,19 +991,6 @@ const Agent = (function() {
             `- Header rule: ${leadScheme.headerTreatment}`,
             `- Editing rule: ${leadScheme.editingRule}`,
         ].join('\n');
-    }
-
-    function buildBlockCapabilityPlaybook() {
-        return NOTES_BLOCK_PLAYBOOK.map((entry) => [
-            `- ${entry.type}: ${entry.whenToUse}`,
-            `  Use guidance: ${entry.guidance}`,
-        ].join('\n')).join('\n');
-    }
-
-    function buildFrontendFeatureGuide() {
-        return NOTES_FRONTEND_FEATURE_PLAYBOOK.map((entry) => [
-            `- ${entry.area}: ${entry.guidance}`,
-        ].join('\n')).join('\n');
     }
 
     function buildTemplateRequiredPalette(templateId = 'brief') {
@@ -2486,8 +2374,6 @@ const Agent = (function() {
         const pageContent = buildFullPageContentFromContext(pageContext).slice(0, 6000);
         const topLevelLayout = buildTopLevelLayoutSnapshot(pageContext);
         const visualAnchors = buildVisualAnchorSnapshot(pageContext);
-        const blockPlaybook = buildBlockCapabilityPlaybook();
-        const frontendFeatureGuide = buildFrontendFeatureGuide();
         const blockOpportunities = buildBlockOpportunityGuidance(question, pageContext, templateMatches);
         const designManual = buildNotesPageDesignManual();
         const templateChecklist = buildTemplateExecutionChecklist(templateMatches);
@@ -2527,6 +2413,11 @@ ${pageContent || '(page is empty)'}
 PAGE STATS:
 ${pageSetup}
 
+ROUTING PRIORITY:
+- If the user is asking to build, fill, rewrite, reorganize, or polish the current notes page, prefer notes-actions that update the page blocks instead of artifact, file, or export output.
+- Only switch to artifact, download, export, link, or standalone-file behavior when the user explicitly asks for that delivery mode.
+- Supporting research is allowed only to improve the page; it should not replace page edits.
+
 CURRENT VISUAL ANCHORS:
 ${visualAnchors}
 
@@ -2539,11 +2430,114 @@ ${visualRecipeGuidance}
 DESIGN SCHEMES:
 ${designSchemeGuidance}
 
-BLOCK CAPABILITY PLAYBOOK:
-${blockPlaybook}
+PAGE DESIGN MANUAL:
+${designManual}
 
-FRONTEND FEATURES YOU CAN USE:
-${frontendFeatureGuide}
+BLOCK OPPORTUNITIES FOR THIS REQUEST:
+${blockOpportunities}
+
+TEMPLATE EXECUTION CHECKLIST:
+${templateChecklist}
+
+VISUAL DESIGN CHECKLIST:
+${visualRecipeChecklist}
+
+DESIGN SCHEME CHECKLIST:
+${designSchemeChecklist}
+
+PAGE DESIGN CRITERIA:
+${designCriteria}
+
+AVAILABLE ACTIONS - Respond with JSON:
+When the user asks you to edit, create, delete, or reorganize content, respond with a JSON action block like this:
+
+\`\`\`notes-actions
+{
+  "assistant_reply": "Brief, friendly explanation of what I did",
+  "actions": [
+    { "op": "update_page", "title": "Research Brief", "icon": "brief" },
+    { "op": "update_block", "blockId": "block_abc123", "type": "text", "content": "New content here" },
+    { "op": "move_block", "blockId": "block_abc123", "targetBlockId": "block_xyz789", "position": "before" },
+    { "op": "insert_after", "blockId": "block_abc123", "blocks": [{ "type": "heading_2", "content": "New Section" }] },
+    { "op": "rebuild_page", "blocks": [{ "type": "heading_1", "content": "New Structure" }, { "type": "text", "content": "Fresh opening" }] },
+    { "op": "delete_block", "blockId": "block_def456" },
+    { "op": "append_to_page", "blocks": [{ "type": "text", "content": "Added at end" }] }
+  ]
+}
+\`\`\`
+
+VALID OPERATIONS:
+- update_page: Update page-level metadata like title, icon, cover, properties, or page default model
+- update_block: Change content of an existing block and optionally change its type in place (requires blockId; may include type and content)
+- replace_block: Replace block with new block(s) (requires blockId, blocks array)
+- move_block: Reorder an existing block relative to another block (requires blockId, targetBlockId, optional position "before"|"after")
+- insert_after: Add new block(s) after specified block (requires blockId, blocks array)
+- insert_before: Add new block(s) before specified block (requires blockId, blocks array)
+- append_to_page: Add block(s) at end of page (requires blocks array)
+- prepend_to_page: Add block(s) at start of page (requires blocks array)
+- rebuild_page: Replace the full page body with a new block structure when a clean rebuild is better than incremental edits (requires blocks array)
+- delete_block: Remove a block (requires blockId)
+
+GUIDELINES:
+- Always reference blocks by their exact ID in [brackets]
+- assistant_reply should be brief and user-friendly
+- The editor will automatically apply your actions and show the assistant_reply to the user
+- Your default job in this interface is to edit the current notes page itself through block updates.
+- Use any gathered web information only to improve the current page blocks or to answer the user in chat while planning.
+- Only stay in planning/chat mode when the user is explicitly brainstorming, outlining, asking for options, or says not to edit the page yet.
+- In this notes interface, "page" means the current notes document unless the user explicitly says web page, site page, route, component, repo file, or server page.
+- For substantial page-writing requests such as briefs, reports, specs, plans, guides, proposals, or polished notes pages, work in passes: decide the sections first, then expand each section, then polish the full page before returning the final answer or notes-actions block.
+- Choose a best-fit page template from the template guidance above and adapt it to the user's request instead of inventing the page layout from scratch every time.
+- Also choose a matching visual recipe from the recipe guidance above so the page has a clear opening cluster, body rhythm, and support cluster.
+- Also choose a dominant design scheme from the scheme guidance above so the page has a coherent palette and header treatment.
+- When building a full page, prefer a clear structure with headings first and then supporting blocks under each heading instead of one long undifferentiated dump.
+- For non-trivial page builds, returns should usually involve multiple blocks with hierarchy, not a single oversized text block.
+- If a generated text block would carry multiple sections, multiple ideas, or more than a short paragraph, split it into separate blocks before returning notes-actions.
+- Do not invent block IDs - only use IDs that exist in the page
+- Keep assistant_reply concise unless the user asks for detailed explanation
+- When the user asks for a redesign, dashboard, brief, report, or polished layout, consider updating the page title, icon, or cover with update_page in addition to the blocks.
+- If the user asks for color or visual design, explicitly consider both block background colors ("color") and text colors ("textColor") where they improve readability.
+- When improving layout or variety, prefer mixing headings, callouts, quotes, lists, databases, images, dividers, and tasteful color/textColor choices instead of only plain paragraphs`;
+
+        return `You are an AI assistant editing a Lilly-style block-based document.
+
+CURRENT PAGE: "${pageContext?.title || 'Untitled'}"
+
+PAGE STRUCTURE:
+The document is organized into blocks. Each block has a unique ID shown in brackets like [block_abc123].
+Reference blocks by their ID when editing or inserting content.
+
+BLOCKS IN THIS PAGE:
+${blockMap || '(page is empty)'}
+
+TOP-LEVEL LAYOUT:
+${topLevelLayout}
+
+OUTLINE (Headings):
+${outline}
+
+CURRENT PAGE CONTENT (excerpt):
+${pageContent || '(page is empty)'}
+
+PAGE STATS:
+${pageSetup}
+
+ROUTING PRIORITY:
+- If the user is asking to build, fill, rewrite, reorganize, or polish the current notes page, prefer notes-actions that update the page blocks instead of artifact, file, or export output.
+- Only switch to artifact, download, export, link, or standalone-file behavior when the user explicitly asks for that delivery mode.
+- Supporting research is allowed only to improve the page; it should not replace page edits.
+
+CURRENT VISUAL ANCHORS:
+${visualAnchors}
+
+BEST-FIT PAGE TEMPLATES:
+${templateGuidance}
+
+VISUAL PAGE RECIPES:
+${visualRecipeGuidance}
+
+DESIGN SCHEMES:
+${designSchemeGuidance}
 
 PAGE DESIGN MANUAL:
 ${designManual}
@@ -2828,7 +2822,7 @@ GUIDELINES:
         }
 
         return hasExplicitExternalPageIntent(normalized)
-            || /\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|container|ingress|traefik|dns|tls|acme|cert|debug|troubleshoot|logs|research|search the web|browse|scrape|tool call|tool use)\b/.test(normalized);
+            || /\b(ssh|remote|server|cluster|k8s|kubernetes|kubectl|deploy|deployment|docker|container|ingress|traefik|dns|tls|acme|cert|debug|troubleshoot|logs|tool call|tool use)\b/.test(normalized);
     }
 
     function isImplicitPageBuildIntent(question = '', context = null, requestOptions = {}) {

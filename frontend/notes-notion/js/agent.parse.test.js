@@ -266,6 +266,18 @@ Approved page plan:
         expect(agent._shouldForcePageEditActions(question, context, {})).toBe(true);
     });
 
+    test('keeps research-backed page builds on the notes page-edit path', () => {
+        const agent = loadAgent();
+        const question = 'Create a research brief about penguins with sources and key findings.';
+        const context = {
+            blockCount: 5,
+            outline: [{ id: 'h1' }],
+        };
+
+        expect(agent._hasNonPageRuntimeIntent(question, {})).toBe(false);
+        expect(agent._shouldForcePageEditActions(question, context, {})).toBe(true);
+    });
+
     test('includes page content and design criteria in the system prompt', () => {
         const agent = loadAgent();
         const prompt = agent._buildSystemPrompt({
@@ -292,13 +304,12 @@ Approved page plan:
         });
 
         expect(prompt).toContain('CURRENT PAGE CONTENT (excerpt):');
+        expect(prompt).toContain('ROUTING PRIORITY:');
         expect(prompt).toContain('PAGE DESIGN CRITERIA:');
         expect(prompt).toContain('CURRENT VISUAL ANCHORS:');
         expect(prompt).toContain('BEST-FIT PAGE TEMPLATES:');
         expect(prompt).toContain('VISUAL PAGE RECIPES:');
         expect(prompt).toContain('DESIGN SCHEMES:');
-        expect(prompt).toContain('BLOCK CAPABILITY PLAYBOOK:');
-        expect(prompt).toContain('FRONTEND FEATURES YOU CAN USE:');
         expect(prompt).toContain('PAGE DESIGN MANUAL:');
         expect(prompt).toContain('BLOCK OPPORTUNITIES FOR THIS REQUEST:');
         expect(prompt).toContain('TEMPLATE EXECUTION CHECKLIST:');
@@ -308,20 +319,12 @@ Approved page plan:
         expect(prompt).toContain('Do not return a single giant text block');
         expect(prompt).toContain('Think in page roles, not just paragraphs');
         expect(prompt).toContain('Treat style as part of the page system');
-        expect(prompt).toContain('visual hierarchy as required work');
         expect(prompt).toContain('Editorial Explainer [editorial-explainer]');
         expect(prompt).toContain('Cool Knowledge [cool-knowledge]');
         expect(prompt).toContain('Avoid more than two plain text blocks in a row');
-        expect(prompt).toContain('Choose one dominant design scheme');
         expect(prompt).toContain('Lead focal blocks');
-        expect(prompt).toContain('Page metadata: Use `update_page` to set `title`, `icon`, `cover`, `properties`, and `defaultModel`');
-        expect(prompt).toContain('Properties: `properties` accepts an array of `{key, value}` pairs');
-        expect(prompt).toContain('Nested structure: Blocks can include `children`');
-        expect(prompt).toContain('Use todo blocks for real checkboxes');
-        expect(prompt).toContain('Do not leave markdown markers like `##`, `-`, `--`, `[ ]`, or `**bold**`');
-        expect(prompt).toContain('Use heading blocks for headings, list blocks for bullets, todo blocks for checkboxes');
-        expect(prompt).toContain('Use `heading_3` for compact section labels, mini-subheads');
-        expect(prompt).toContain('heading_2 / heading_3: Major sections, compact section labels');
+        expect(prompt).toContain('prefer notes-actions that update the page blocks instead of artifact, file, or export output');
+        expect(prompt).toContain('VALID OPERATIONS:');
         expect(prompt).toContain('Recommended metadata: Evidence: Source-linked');
         expect(prompt).not.toContain('Recommended metadata: Type: Research');
         expect(prompt).not.toContain('Audience: General reader');
@@ -329,8 +332,9 @@ Approved page plan:
         expect(prompt).toContain('Required palette: callout + hero image/ai_image + bookmark source cluster + toggle for deep detail');
         expect(prompt).toContain('Executive Brief [brief]');
         expect(prompt).toContain('Research Page [research]');
-        expect(prompt).toContain('callout: Key takeaways');
-        expect(prompt).toContain('database: Comparisons, trackers');
+        expect(prompt).not.toContain('BLOCK CAPABILITY PLAYBOOK:');
+        expect(prompt).not.toContain('FRONTEND FEATURES YOU CAN USE:');
+        expect(prompt).not.toContain('BLOCK TYPES:');
     });
 
     test('selects a project-oriented template for project planning requests', () => {

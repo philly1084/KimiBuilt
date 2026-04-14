@@ -259,6 +259,9 @@ router.get('/:id/download', async (req, res, next) => {
             'Content-Disposition',
             `${inlineRequested ? 'inline' : 'attachment'}; filename="${artifact.filename}"`,
         );
+        if (inlineRequested) {
+            applyPreviewResponseHeaders(res);
+        }
         res.send(artifact.contentBuffer);
     } catch (err) {
         next(err);

@@ -83,6 +83,27 @@ describe('/api/artifacts route', () => {
         expect(response.text).toBe('hello');
     });
 
+    test('applies preview-safe headers to inline artifact downloads', async () => {
+        artifactService.getArtifact.mockResolvedValue({
+            id: 'artifact-1',
+            sessionId: 'session-1',
+            filename: 'report.png',
+            mimeType: 'image/png',
+            contentBuffer: Buffer.from('png-bytes'),
+        });
+        sessionStore.getOwned.mockResolvedValue({
+            id: 'session-1',
+            metadata: { ownerId: 'phill' },
+        });
+
+        const response = await request(buildApp()).get('/api/artifacts/artifact-1/download?inline=1');
+
+        expect(response.status).toBe(200);
+        expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+        expect(response.headers['origin-agent-cluster']).toBe('?0');
+        expect(response.headers['content-disposition']).toContain('inline;');
+    });
+
     test('serves stored preview html for non-html artifacts', async () => {
         artifactService.getArtifact.mockResolvedValue({
             id: 'artifact-text-1',

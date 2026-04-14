@@ -4540,6 +4540,64 @@ describe('ConversationOrchestrator', () => {
         expect(toolPolicy.candidateToolIds).toEqual([]);
     });
 
+    test('notes surface treats implicit page builds as notes edits instead of document outputs', async () => {
+        config.config.runtime.judgmentV2Enabled = true;
+
+        const llmClient = {
+            createResponse: jest.fn().mockResolvedValue(buildResponse('Updated the penguin research brief.', 'resp_notes_trace')),
+            complete: jest.fn(),
+        };
+        const toolManager = {
+            getTool: jest.fn((toolId) => (
+                ['web-search', 'web-fetch', 'web-scrape', 'document-workflow'].includes(toolId)
+                    ? { id: toolId, description: toolId }
+                    : null
+            )),
+        };
+        const sessionStore = {
+            get: jest.fn().mockResolvedValue({ id: 'session-notes-trace', metadata: { clientSurface: 'notes', taskType: 'notes' } }),
+            getRecentMessages: jest.fn().mockResolvedValue([]),
+            recordResponse: jest.fn().mockResolvedValue(undefined),
+            appendMessages: jest.fn().mockResolvedValue(undefined),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        const memoryService = {
+            process: jest.fn().mockResolvedValue({
+                contextMessages: [],
+                bundles: { fact: [], artifact: [], skill: [], research: [] },
+                trace: {
+                    query: 'Create a research brief about penguins with sources and key findings.',
+                    matchedKeywords: ['research', 'brief', 'penguins'],
+                    counts: { fact: 0, artifact: 0, skill: 0, research: 0 },
+                    bundles: { fact: 0, artifact: 0, skill: 0, research: 0 },
+                    selected: [],
+                },
+            }),
+            rememberResponse: jest.fn(),
+        };
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient,
+            toolManager,
+            sessionStore,
+            memoryService,
+        });
+
+        const result = await orchestrator.executeConversation({
+            input: 'Create a research brief about penguins with sources and key findings.',
+            sessionId: 'session-notes-trace',
+            stream: false,
+            executionProfile: 'notes',
+            taskType: 'notes',
+            clientSurface: 'notes',
+        });
+
+        expect(result.trace.classification).toEqual(expect.objectContaining({
+            taskFamily: 'notes-edit',
+            surfaceMode: 'notes-page',
+        }));
+    });
+
     test('falls back to web-search planning when planner output is not valid json', async () => {
         const llmClient = {
             createResponse: jest.fn(),

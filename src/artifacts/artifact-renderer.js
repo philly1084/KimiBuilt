@@ -11,18 +11,84 @@ const { artifactStore } = require('./artifact-store');
 const { config } = require('../config');
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_BROWSER_CANDIDATES = [
-    config.artifacts.browserPath,
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/snap/bin/chromium',
-    'chromium',
-    'chromium-browser',
-    'google-chrome',
-    'google-chrome-stable',
+const PLAYWRIGHT_BROWSER_ARGS = [
+    '--allow-file-access-from-files',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-sandbox',
 ];
+
+function splitArgs(value = '') {
+    return String(value || '')
+        .trim()
+        .split(/\s+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
+function getBrowserCandidates() {
+    const candidates = [
+        process.env.PLAYWRIGHT_EXECUTABLE_PATH,
+        config.artifacts.browserPath,
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        process.env.BROWSER_EXECUTABLE_PATH,
+        process.env.CHROME_BIN,
+    ];
+
+    if (process.platform === 'win32') {
+        const programFiles = process.env.ProgramFiles || '';
+        const programFilesX86 = process.env['ProgramFiles(x86)'] || '';
+        const localAppData = process.env.LOCALAPPDATA || '';
+        candidates.push(
+            path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        );
+    } else if (process.platform === 'darwin') {
+        candidates.push(
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        );
+    } else {
+        candidates.push(
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/snap/bin/chromium',
+            'chromium',
+            'chromium-browser',
+            'google-chrome',
+            'google-chrome-stable',
+        );
+    }
+
+    return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function loadPlaywrightPackage() {
+    const moduleNames = ['playwright', 'playwright-core'];
+
+    for (const moduleName of moduleNames) {
+        try {
+            const loaded = require(moduleName);
+            if (loaded?.chromium) {
+                return { moduleName, chromium: loaded.chromium };
+            }
+        } catch (error) {
+            const missingModule = error?.code === 'MODULE_NOT_FOUND'
+                && String(error.message || '').includes(moduleName);
+            if (!missingModule) {
+                throw error;
+            }
+        }
+    }
+
+    return null;
+}
 
 function detectMermaidDiagramType(text = '') {
     const source = String(text || '').trim();
@@ -662,7 +728,7 @@ async function fileExists(filePath) {
 }
 
 async function resolveBrowserPath() {
-    for (const candidate of DEFAULT_BROWSER_CANDIDATES) {
+    for (const candidate of getBrowserCandidates()) {
         if (!candidate) continue;
         if (candidate.includes(path.sep)) {
             if (await fileExists(candidate)) {
@@ -676,8 +742,7 @@ async function resolveBrowserPath() {
 }
 
 function getBrowserArgs(outputPath, inputPath, html = '') {
-    const configuredArgs = String(config.artifacts.browserArgs || '').trim();
-    const extraArgs = configuredArgs ? configuredArgs.split(/\s+/).filter(Boolean) : [];
+    const extraArgs = splitArgs(config.artifacts.browserArgs);
     const htmlSource = String(html || '');
     const imageCount = (htmlSource.match(/<img\b/ig) || []).length;
     let virtualTimeBudget = 5000;
@@ -702,11 +767,64 @@ function getBrowserArgs(outputPath, inputPath, html = '') {
     ];
 }
 
-async function renderPdfViaBrowser(html, title) {
-    const browserPath = await resolveBrowserPath();
-    if (!browserPath) {
+async function renderPdfViaPlaywright(htmlPath, pdfPath, browserPath = null) {
+    const loaded = loadPlaywrightPackage();
+    if (!loaded) {
         return null;
     }
+
+    if (loaded.moduleName === 'playwright-core' && !browserPath) {
+        return null;
+    }
+
+    const timeout = Math.max(1000, Number(config.artifacts.pdfTimeoutMs) || 15000);
+    const launchOptions = {
+        headless: true,
+        timeout,
+        args: [...PLAYWRIGHT_BROWSER_ARGS, ...splitArgs(config.artifacts.browserArgs)],
+    };
+
+    if (browserPath) {
+        launchOptions.executablePath = browserPath;
+    }
+
+    const browser = await loaded.chromium.launch(launchOptions);
+    let context;
+    let page;
+
+    try {
+        context = await browser.newContext({
+            ignoreHTTPSErrors: true,
+            viewport: { width: 1440, height: 960 },
+        });
+        page = await context.newPage();
+        await page.goto(pathToFileURL(htmlPath).href, {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        });
+        await page.emulateMedia({ media: 'screen' });
+        await page.waitForLoadState('load', {
+            timeout: Math.min(timeout, 5000),
+        }).catch(() => {});
+        await page.waitForLoadState('networkidle', {
+            timeout: Math.min(timeout, 5000),
+        }).catch(() => {});
+        await page.waitForTimeout(250);
+
+        return page.pdf({
+            path: pdfPath,
+            printBackground: true,
+            preferCSSPageSize: true,
+        });
+    } finally {
+        await page?.close().catch(() => {});
+        await context?.close().catch(() => {});
+        await browser.close().catch(() => {});
+    }
+}
+
+async function renderPdfViaBrowser(html, title) {
+    const browserPath = await resolveBrowserPath();
 
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lillybuilt-pdf-'));
     const baseName = createFriendlyFilenameBase(title || 'document', 'document');
@@ -717,6 +835,17 @@ async function renderPdfViaBrowser(html, title) {
         const resolvedHtml = await inlineRenderableImagesForPdf(html);
         const pdfHtml = injectArtifactBaseForPdf(resolvedHtml);
         await fs.writeFile(htmlPath, pdfHtml, 'utf8');
+        const playwrightBuffer = await renderPdfViaPlaywright(htmlPath, pdfPath, browserPath)
+            .catch((error) => {
+                console.warn('[Artifacts] Playwright PDF rendering failed:', error.message);
+                return null;
+            });
+        if (playwrightBuffer) {
+            return Buffer.from(playwrightBuffer);
+        }
+        if (!browserPath) {
+            return null;
+        }
         await execFileAsync(browserPath, getBrowserArgs(pdfPath, htmlPath, pdfHtml), {
             timeout: config.artifacts.pdfTimeoutMs,
             windowsHide: true,
@@ -814,6 +943,7 @@ async function renderArtifact({ format, content, title = 'artifact', workbookSpe
 }
 
 module.exports = {
+    buildXlsxBufferFromWorkbookSpec,
     ensureHtmlDocument,
     extractCompositeDocumentParts,
     inlineExternalImagesForPdf,
@@ -821,4 +951,5 @@ module.exports = {
     inlineInternalArtifactImagesForPdf,
     normalizeMermaidSource,
     renderArtifact,
+    renderPdfViaBrowser,
 };

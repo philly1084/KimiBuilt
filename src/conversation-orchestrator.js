@@ -555,6 +555,23 @@ function hasNotesPageEditIntentText(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasNotesPageBuildIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const explicitDeliveryIntent = /\b(export|download|save|artifact|file|link|attachment|standalone html|shareable html)\b/.test(normalized);
+    const explicitExternalSurface = /\b(site|website|web\s*page|landing\s*page|homepage|route|component|repo file|server page)\b/.test(normalized);
+    const pageWritingVerb = /\b(create|make|build|draft|write|expand|fill out|flesh out|continue|finish|polish|rewrite|turn|convert|organize|restructure|rework|improve|work on)\b/.test(normalized);
+    const pageTarget = /\b(page|notes|note|document|doc|brief|report|spec|plan|guide|proposal|outline|section|content|dashboard|playbook|summary|research brief)\b/.test(normalized);
+
+    return !explicitDeliveryIntent
+        && !explicitExternalSurface
+        && pageWritingVerb
+        && pageTarget;
+}
+
 function classifyRequestIntent({
     objective = '',
     executionProfile = DEFAULT_EXECUTION_PROFILE,
@@ -603,7 +620,7 @@ function classifyRequestIntent({
         preferredExecutionPath = 'direct-tool';
         confidence = 0.9;
         pushReason(reasons, 'The request is about later or recurring work, so workload creation is the primary path.');
-    } else if (surfaceMode === 'notes-page' && hasNotesPageEditIntentText(normalized)) {
+    } else if (surfaceMode === 'notes-page' && (hasNotesPageEditIntentText(normalized) || hasNotesPageBuildIntentText(normalized))) {
         taskFamily = 'notes-edit';
         preferredExecutionPath = 'plan-first';
         confidence = 0.9;

@@ -51,6 +51,12 @@ const COMPOSITION_META_PHRASES = [
     /\bthe final pass should\b/i,
     /\bverification date used for the build\b/i,
 ];
+const COMPOSITION_OUTLINE_PATTERNS = [
+    /\b\d+\s+sections\b/i,
+    /\bstory block\b/i,
+    /\bsource:\s*(artifact|tool|unsplash|prompt|session)(?:\s+via\s+[\w-]+)?\b/i,
+    /\b(best for|day type|morning, afternoon, and evening)\b/i,
+];
 const DOCUMENT_CONTENT_NOISE_PATTERNS = [
     /^\[research workflow\]$/i,
     /^\[verified image references\]$/i,
@@ -63,6 +69,8 @@ const DOCUMENT_CONTENT_NOISE_PATTERNS = [
     /^prefer standard html <img src=".*"> elements.*$/i,
     /^source:\s*(tool|unsplash|artifact|prompt|session)(?:\s+via\s+[\w-]+)?$/i,
     /^.*\s+source:\s*(tool|unsplash|artifact|prompt|session)(?:\s+via\s+[\w-]+)?$/i,
+    /^\d+\s+sections$/i,
+    /^story block$/i,
     /^<\/?(?:creative_direction|sample_handling|continuity)>$/i,
     /^(?:blueprint|direction|rationale|voice cues|layout cues|human feel cues|preferred theme|recent related tasks|recent related artifacts|recent creative directions|recent dialog context):/i,
 ];
@@ -567,6 +575,10 @@ function sanitizeImageReferenceTitle(title = '', fallback = 'Document image') {
         return fallback;
     }
 
+    if (/^(can you|could you|would you|please|make|create|generate|build|draft|write|do)\b/i.test(normalized)) {
+        return fallback;
+    }
+
     if (looksLikeKeywordStuffing(normalized)) {
         const commaSegments = normalized
             .split(',')
@@ -618,7 +630,7 @@ function normalizeDocumentSections(sections = [], fallbackSections = []) {
             heading: sanitizeDocumentText(String(section?.heading || section?.title || fallbackByIndex[index]?.heading || `Section ${index + 1}`)).trim(),
             content: sanitizeDocumentText(String(section?.content || section?.body || '')).trim(),
             level: Number(section?.level) > 0 ? Number(section.level) : 1,
-            kicker: sanitizeDocumentText(String(section?.kicker || fallbackByIndex[index]?.tone || '')).trim(),
+            kicker: sanitizeDocumentText(String(section?.kicker || '')).trim(),
             visualIntent: sanitizeDocumentText(String(section?.visualIntent || fallbackByIndex[index]?.visualIntent || '')).trim(),
         }))
         .filter((section) => section.heading && section.content);
@@ -901,11 +913,25 @@ function buildImageFigureHtml(imageReference, fallbackAlt = 'Document image') {
     const alt = escapeHtml(sanitizeImageReferenceTitle(String(imageReference?.title || fallbackAlt || 'Document image').trim(), fallbackAlt || 'Document image'));
     const sourceLabel = escapeHtml(String(imageReference?.source || 'source').trim());
     const safeUrl = escapeHtml(url);
+    const visibleCaption = sanitizeDocumentText(String(
+        imageReference?.caption
+        || imageReference?.description
+        || ''
+    )).trim();
+    const showSourceCredit = isExternalImageReferenceUrl(url);
+    const captionParts = [];
+
+    if (visibleCaption && visibleCaption.toLowerCase() !== alt.toLowerCase()) {
+        captionParts.push(escapeHtml(visibleCaption));
+    }
+    if (showSourceCredit) {
+        captionParts.push(`<span class="document-credit">Source: <a href="${safeUrl}" target="_blank" rel="noreferrer">${sourceLabel}</a></span>`);
+    }
 
     return [
         '<figure class="document-image">',
         `  <img src="${safeUrl}" alt="${alt}" loading="eager">`,
-        `  <figcaption>${alt} <span class="document-credit">Source: <a href="${safeUrl}" target="_blank" rel="noreferrer">${sourceLabel}</a></span></figcaption>`,
+        captionParts.length > 0 ? `  <figcaption>${captionParts.join(' ')}</figcaption>` : '',
         '</figure>',
     ].join('\n');
 }
@@ -1038,29 +1064,46 @@ function diversifyBundleImageReferences(bundle = {}, imageReferences = []) {
     };
 }
 
+function extractLeadSummaryText(content = '', maxLength = 240) {
+    const plain = sanitizeDocumentText(stripHtml(String(content || '')))
+        .replace(/^[-*]\s+/gm, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!plain) {
+        return '';
+    }
+
+    const sentences = plain.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const lead = sentences.slice(0, 2).join(' ').trim() || plain;
+    if (lead.length <= maxLength) {
+        return lead;
+    }
+
+    return `${lead.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
 function buildExpandedDocumentHtml(title = 'Document', sections = [], imageReferences = [], creativePlan = null) {
     const safeTitle = escapeHtml(title);
     const normalizedSections = Array.isArray(sections) ? sections : [];
     const normalizedImages = Array.isArray(imageReferences) ? imageReferences : [];
     const theme = resolveDocumentTheme(creativePlan?.themeSuggestion || 'editorial');
     const heroImage = pickImageReference(normalizedImages, 0);
-    const accentPills = [
-        creativePlan?.label || 'Crafted document',
-        `${normalizedSections.length || 1} section${normalizedSections.length === 1 ? '' : 's'}`,
-        creativePlan?.rationale || '',
-    ].filter(Boolean).slice(0, 3);
-    const humanNotes = Array.isArray(creativePlan?.humanizationNotes)
-        ? creativePlan.humanizationNotes.slice(0, 3)
-        : [];
+    const leadSection = normalizedSections[0] || null;
+    const heroEyebrow = escapeHtml(String(leadSection?.kicker || '').trim());
+    const standfirst = escapeHtml(
+        extractLeadSummaryText(
+            leadSection?.content
+            || normalizedSections.slice(0, 2).map((section) => section?.content || '').join('\n\n'),
+        ),
+    );
 
     const heroMarkup = [
         '<section class="document-hero-shell">',
         '  <div class="document-hero-copy">',
-        `    <p class="document-eyebrow">${escapeHtml(creativePlan?.label || 'Crafted document')}</p>`,
+        heroEyebrow ? `    <p class="document-eyebrow">${heroEyebrow}</p>` : '',
         `    <h1>${safeTitle}</h1>`,
-        creativePlan?.rationale ? `    <p class="document-standfirst">${escapeHtml(creativePlan.rationale)}</p>` : '',
-        accentPills.length > 0 ? `    <div class="document-pill-row">${accentPills.map((pill) => `<span class="document-pill">${escapeHtml(pill)}</span>`).join('')}</div>` : '',
-        humanNotes.length > 0 ? `    <div class="document-human-notes">${humanNotes.map((note) => `<p>${escapeHtml(note)}</p>`).join('')}</div>` : '',
+        standfirst ? `    <p class="document-standfirst">${standfirst}</p>` : '',
         '  </div>',
         heroImage
             ? `  <div class="document-hero-media">${buildImageFigureHtml(heroImage, `${title} hero image`).replace(/\n/g, '\n    ')}</div>`
@@ -1090,20 +1133,19 @@ function buildExpandedDocumentHtml(title = 'Document', sections = [], imageRefer
         const kicker = section?.kicker
             ? `<p class="document-section-kicker">${escapeHtml(section.kicker)}</p>`
             : '';
-        const aside = section?.visualIntent
-            ? `<aside class="document-section-aside">${escapeHtml(section.visualIntent)}</aside>`
+        const sectionTag = section?.kicker
+            ? `<span class="document-section-tag">${escapeHtml(section.kicker)}</span>`
             : '';
 
         return [
             `<section class="document-section" data-section-index="${index + 1}">`,
             '  <div class="document-section-chrome">',
             `    <span class="document-section-number">${String(index + 1).padStart(2, '0')}</span>`,
-            `    <span class="document-section-tag">${escapeHtml(section?.visualIntent || section?.kicker || 'story block')}</span>`,
+            sectionTag ? `    ${sectionTag}` : '',
             '  </div>',
             '  <div class="document-section-body">',
             kicker ? `    ${kicker}` : '',
             `    <h2>${safeHeading}</h2>`,
-            aside ? `    ${aside}` : '',
             imageRailMarkup ? `    ${imageRailMarkup.replace(/\n/g, '\n    ')}` : '',
             `    <div class="document-copy">${bodyMarkup}</div>`,
             '  </div>',
@@ -1206,13 +1248,17 @@ function shouldRecoverCompositionOutput(outputText = '', expandedDocument = null
         return true;
     }
 
+    const htmlLike = looksLikeStandaloneHtml(raw);
     let score = 0;
-    if (!looksLikeStandaloneHtml(raw)) {
+    if (!htmlLike) {
         score += 2;
     }
 
     score += COMPOSITION_PLANNING_PATTERNS.filter((pattern) => pattern.test(plain)).length * 2;
     score += Math.min(2, COMPOSITION_META_PHRASES.filter((pattern) => pattern.test(plain)).length);
+    if (!htmlLike) {
+        score += Math.min(4, COMPOSITION_OUTLINE_PATTERNS.filter((pattern) => pattern.test(plain)).length * 2);
+    }
 
     const expectedHeadings = Array.isArray(expandedDocument?.sections)
         ? expandedDocument.sections
