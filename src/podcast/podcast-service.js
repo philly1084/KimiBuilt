@@ -10,6 +10,8 @@ const DEFAULT_DURATION_MINUTES = 10;
 const DEFAULT_TARGET_WPM = 145;
 const DEFAULT_MAX_SOURCES = 4;
 const DEFAULT_SILENCE_MS = 325;
+const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
+const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
 const DEFAULT_HOSTS = Object.freeze([
   {
     key: 'hostA',
@@ -57,6 +59,10 @@ function normalizeVariantFilename(filename = '', extension = 'wav') {
   return `${normalizedFilename}.${normalizedExtension}`;
 }
 
+function wait(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
 function prefersMp3(params = {}) {
   if (params.exportMp3 === true) {
     return true;
@@ -85,6 +91,30 @@ function uniqueUrls(items = []) {
     seen.add(url);
     return true;
   });
+}
+
+function isTransientPodcastError(error = {}) {
+  const message = String(error?.message || '').trim().toLowerCase();
+  const code = String(error?.code || '').trim().toLowerCase();
+  const statusCode = Number(error?.statusCode || error?.status || 0);
+
+  if (statusCode >= 500 || statusCode === 408 || statusCode === 429) {
+    return true;
+  }
+
+  return [
+    'connection terminated unexpectedly',
+    'socket hang up',
+    'fetch failed',
+    'econnreset',
+    'etimedout',
+    'timed out',
+    'eai_again',
+    'temporarily unavailable',
+    'service unavailable',
+    'bad gateway',
+    'gateway timeout',
+  ].some((pattern) => message.includes(pattern) || code.includes(pattern));
 }
 
 function getResponseText(response = {}) {
@@ -275,12 +305,43 @@ class PodcastService {
     this.audioProcessingService = dependencies.audioProcessingService || audioProcessingService;
   }
 
-  async runTool(executeTool, toolId, params, context) {
-    const result = await executeTool(toolId, params, context);
-    if (!result?.success) {
-      throw new Error(result?.error || `${toolId} failed.`);
+  async retryTransientOperation(operation, { label = 'podcast operation', retries = DEFAULT_TRANSIENT_RETRY_ATTEMPTS } = {}) {
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (!isTransientPodcastError(error) || attempt >= retries) {
+          throw error;
+        }
+
+        console.warn(`[PodcastService] Retrying ${label} after transient failure: ${error.message}`);
+        await wait(DEFAULT_TRANSIENT_RETRY_DELAY_MS * (attempt + 1));
+      }
     }
-    return result.data;
+
+    throw lastError || new Error(`${label} failed.`);
+  }
+
+  async runTool(executeTool, toolId, params, context) {
+    return this.retryTransientOperation(async () => {
+      const result = await executeTool(toolId, params, context);
+      if (!result?.success) {
+        const error = new Error(result?.error || `${toolId} failed.`);
+        if (result?.errorCode) {
+          error.code = result.errorCode;
+        }
+        if (Number.isFinite(Number(result?.statusCode))) {
+          error.statusCode = Number(result.statusCode);
+        }
+        throw error;
+      }
+      return result.data;
+    }, {
+      label: toolId,
+    });
   }
 
   async researchTopic({ topic, searchDomains = [], sourceUrls = [], maxSources = DEFAULT_MAX_SOURCES }, context = {}) {
@@ -362,7 +423,7 @@ class PodcastService {
     model,
     reasoningEffort,
   }) {
-    const response = await this.createResponse({
+    const response = await this.retryTransientOperation(() => this.createResponse({
       input: buildResearchPrompt({
         topic,
         audience,
@@ -376,6 +437,8 @@ class PodcastService {
       model,
       reasoningEffort,
       enableAutomaticToolCalls: false,
+    }), {
+      label: 'podcast script generation',
     });
 
     const parsed = parseLenientJson(getResponseText(response));

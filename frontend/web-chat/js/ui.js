@@ -2447,7 +2447,7 @@ class UIHelpers {
             };
         }
 
-        if (summary || message?.reasoningAvailable === true || message?.metadata?.reasoningAvailable === true) {
+        if (summary) {
             return {
                 source: 'reasoning',
                 title: 'Reasoning',
@@ -2561,9 +2561,8 @@ class UIHelpers {
         const content = this.resolveAssistantVisibleContent(message);
         const reasoningRibbon = this.buildReasoningRibbonMarkup(message, effectiveStreaming);
         if (!content) {
-            const placeholderMarkup = effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : '';
             return {
-                html: `${reasoningRibbon}${placeholderMarkup}`,
+                html: reasoningRibbon || (effectiveStreaming ? this.buildStreamingPlaceholderMarkup(message) : ''),
                 variant: 'default',
             };
         }

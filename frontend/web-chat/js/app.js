@@ -4723,22 +4723,29 @@ class ChatApp {
             ...(currentMessage.metadata || {}),
             ...(patch.metadata || {}),
         };
-        const nextReasoningSummary = patch.reasoningSummary !== undefined
+        const hasPatchedReasoningSummary = Object.prototype.hasOwnProperty.call(patch, 'reasoningSummary');
+        const hasPatchedReasoningAvailable = Object.prototype.hasOwnProperty.call(patch, 'reasoningAvailable');
+        const nextReasoningSummary = hasPatchedReasoningSummary
             ? String(patch.reasoningSummary || '').trim()
             : String(currentMessage.reasoningSummary || currentMessage.metadata?.reasoningSummary || '').trim();
-        const nextReasoningAvailable = patch.reasoningAvailable === true
-            || currentMessage.reasoningAvailable === true
-            || currentMessage.metadata?.reasoningAvailable === true
-            || Boolean(nextReasoningSummary);
+        const currentReasoningAvailable = currentMessage.reasoningAvailable === true
+            || currentMessage.metadata?.reasoningAvailable === true;
+        const nextReasoningAvailable = hasPatchedReasoningAvailable
+            ? (patch.reasoningAvailable === true || Boolean(nextReasoningSummary))
+            : (hasPatchedReasoningSummary
+                ? Boolean(nextReasoningSummary)
+                : (currentReasoningAvailable || Boolean(nextReasoningSummary)));
 
         if (nextReasoningSummary) {
             nextMetadata.reasoningSummary = nextReasoningSummary;
             nextMetadata.reasoningAvailable = true;
-        } else if (patch.reasoningSummary !== undefined) {
+        } else if (hasPatchedReasoningSummary) {
             delete nextMetadata.reasoningSummary;
         }
         if (nextReasoningAvailable) {
             nextMetadata.reasoningAvailable = true;
+        } else if (hasPatchedReasoningAvailable || hasPatchedReasoningSummary) {
+            delete nextMetadata.reasoningAvailable;
         }
 
         const nextMessage = {

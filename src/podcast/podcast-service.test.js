@@ -257,4 +257,63 @@ describe('PodcastService', () => {
     expect(piperTtsService.synthesize.mock.calls[1][0].text.length).toBeLessThan(longTurn.length);
     expect(piperTtsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
   });
+
+  test('retries transient script-generation connection failures before succeeding', async () => {
+    const transientError = new Error('Connection terminated unexpectedly.');
+    createResponse
+      .mockRejectedValueOnce(transientError)
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          title: 'Pets at Home',
+          summary: 'A calmer take on pets clashing indoors.',
+          turns: [
+            { speaker: 'Maya', text: 'Today we are talking about what is really happening when cats and dogs clash in the house.' },
+            { speaker: 'June', text: 'A lot of the time it is not pure aggression. It is stress, guarding, confusion, or over-arousal.' },
+            { speaker: 'Maya', text: 'That matters because the fix depends on the trigger, not just the noise level of the conflict.' },
+            { speaker: 'June', text: 'Owners often miss the early warning signs, like staring, blocking, stalking, or crowding around food and rest spots.' },
+            { speaker: 'Maya', text: 'Management usually starts with creating distance and predictable routines so neither animal feels trapped.' },
+            { speaker: 'June', text: 'Then you work on controlled exposure, reward calm behavior, and reduce the situations that keep setting them off.' },
+            { speaker: 'Maya', text: 'The main takeaway is that coexistence gets better when the environment gets clearer and safer.' },
+            { speaker: 'June', text: 'And if the fights are intense or escalating, that is the point to bring in a qualified behavior professional.' },
+          ],
+        }),
+      });
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Pet behavior guide', url: 'https://example.com/pets', snippet: 'Behavior conflicts often come from stress and guarding.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Stress, resource guarding, and poor introductions can trigger conflict between household pets.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'cats and dogs fighting in the house',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    expect(result.script.turns).toHaveLength(8);
+  });
 });
