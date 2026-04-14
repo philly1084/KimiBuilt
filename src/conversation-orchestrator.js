@@ -3690,9 +3690,10 @@ function summarizeToolEventForUser(event = {}) {
     }
 
     if (!success) {
+        const shouldIncludeReason = !error && !stdout && !stderr;
         return [
             `- ${tool}: failed`,
-            reason ? `Reason: ${reason}.` : '',
+            shouldIncludeReason && reason ? `Reason: ${reason}.` : '',
             error ? `Error: ${error}.` : '',
             stderr && !error ? `Details: ${truncateText(normalizeInlineText(stderr), 220)}.` : '',
         ].filter(Boolean).join(' ');

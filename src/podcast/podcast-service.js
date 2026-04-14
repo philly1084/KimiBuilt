@@ -148,6 +148,7 @@ function isTransientPodcastError(error = {}) {
 
   return [
     'connection terminated unexpectedly',
+    'terminated',
     'socket hang up',
     'fetch failed',
     'econnreset',
