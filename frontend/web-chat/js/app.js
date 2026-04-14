@@ -984,11 +984,31 @@ class ChatApp {
 
     toggleWorkloadsPanel() {
         this.workloadsOpen = !this.workloadsOpen;
-        this.workloadsPanel?.classList.toggle('hidden', !this.workloadsOpen);
+        this.syncWorkloadsPanelState();
 
         if (this.workloadsOpen) {
             this.loadSessionWorkloads(sessionManager.currentSessionId, { force: true });
+            window.requestAnimationFrame(() => {
+                this.workloadsPanel?.scrollIntoView({
+                    block: 'start',
+                    behavior: uiHelpers.isMinimalistMode() ? 'smooth' : 'auto',
+                });
+                if (typeof this.workloadsPanel?.focus === 'function') {
+                    try {
+                        this.workloadsPanel.focus({ preventScroll: true });
+                    } catch (_error) {
+                        this.workloadsPanel.focus();
+                    }
+                }
+            });
         }
+    }
+
+    syncWorkloadsPanelState() {
+        const isOpen = this.workloadsOpen === true;
+        this.workloadsPanel?.classList.toggle('hidden', !isOpen);
+        this.workloadsPanel?.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+        this.workloadsBtn?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     }
 
     renderWorkloadsPanel() {

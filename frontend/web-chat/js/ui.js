@@ -4893,6 +4893,10 @@ class UIHelpers {
             return false;
         }
 
+        if (/^working in background\b/i.test(content)) {
+            return false;
+        }
+
         if (this.extractSurveyDefinitionFromContent(displayContent, message.id || '')) {
             return false;
         }
@@ -5735,7 +5739,7 @@ class UIHelpers {
             if (appInstance?.workloadsOpen) {
                 appInstance.workloadsOpen = false;
             }
-            appInstance?.workloadsPanel?.classList.add('hidden');
+            appInstance?.syncWorkloadsPanelState?.();
         }
 
         this.syncSidebarState();
@@ -6947,8 +6951,35 @@ class UIHelpers {
     // Toast Notifications
     // ============================================
 
+    shouldSuppressToast(message = '', type = 'info', title = '') {
+        const normalizedTitle = String(title || '').trim().toLowerCase();
+        const normalizedMessage = String(message || '').trim().toLowerCase();
+        const combined = `${normalizedTitle} ${normalizedMessage}`.trim();
+
+        if (!combined) {
+            return false;
+        }
+
+        return [
+            /\btask completed\b/,
+            /\btask failed\b/,
+            /\bworkload completed\b/,
+            /\bworkload failed\b/,
+            /\bworkload action failed\b/,
+            /^workload (updated|created|queued|paused|resumed|deleted)\b/,
+        ].some((pattern) => pattern.test(combined));
+    }
+
     showToast(message, type = 'info', title = '') {
+        if (this.shouldSuppressToast(message, type, title)) {
+            return;
+        }
+
         const container = document.getElementById('toast-container');
+        if (!container) {
+            return;
+        }
+
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         toast.setAttribute('role', 'alert');

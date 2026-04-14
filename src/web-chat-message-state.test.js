@@ -74,6 +74,25 @@ describe('buildWebChatSessionMessages', () => {
         expect(messages[1].metadata.displayContent).toBe('Created launch-plan.pptx. Use Download below.');
     });
 
+    test('replaces the background placeholder with an artifact summary when files were created', () => {
+        const messages = buildWebChatSessionMessages({
+            userText: 'Make the Calgary guide.',
+            assistantText: 'Working in background...',
+            artifacts: [{
+                id: 'artifact-html-2',
+                filename: 'calgary-guide.html',
+                format: 'html',
+                downloadUrl: '/api/artifacts/artifact-html-2/download',
+                previewUrl: '/api/artifacts/artifact-html-2/preview',
+            }],
+            timestamp: '2026-04-13T12:15:00.000Z',
+        });
+
+        expect(messages).toHaveLength(2);
+        expect(messages[1].content).toBe('Created calgary-guide.html. Preview and Download below.');
+        expect(messages[1].metadata.displayContent).toBe('Created calgary-guide.html. Preview and Download below.');
+    });
+
     test('stores checkpoint fallback display content as a bare survey fence without duplicated prose', () => {
         const messages = buildWebChatSessionMessages({
             userText: 'Please redesign the page.',

@@ -4,6 +4,7 @@ const { parseLenientJson } = require('./utils/lenient-json');
 
 const COLLAPSIBLE_ARTIFACT_FORMATS = new Set(['pdf', 'docx', 'xlsx', 'xml', 'html', 'mermaid', 'power-query', 'pptx', 'ppt']);
 const COLLAPSIBLE_ARTIFACT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.xml', '.html', '.htm', '.mmd', '.mermaid', '.pq', '.m', '.ppt', '.pptx'];
+const BACKGROUND_PLACEHOLDER_PATTERN = /^working in background\b/i;
 
 function offsetIsoTimestamp(timestamp = null, offsetMs = 0) {
     const parsed = timestamp ? new Date(timestamp) : new Date();
@@ -144,6 +145,12 @@ function buildArtifactSummary(artifacts = []) {
     }
 
     return `Created ${files.length} files. ${actionLabel}`;
+}
+
+function isBackgroundPlaceholderText(value = '') {
+    return BACKGROUND_PLACEHOLDER_PATTERN.test(
+        stripNullCharacters(String(value || '')).trim(),
+    );
 }
 
 function buildFrontendAssistantMetadata(metadata = null) {
@@ -577,19 +584,22 @@ function buildWebChatSessionMessages({
     const resolvedAssistantTimestamp = assistantTimestamp || offsetIsoTimestamp(resolvedUserTimestamp, 1);
     const assistantMessageId = String(inputAssistantMessageId || '').trim() || uuidv4();
     const normalizedAssistantText = stripNullCharacters(String(assistantText || '')).trim();
+    const placeholderAssistantText = isBackgroundPlaceholderText(normalizedAssistantText);
     const { assistantMetadata, auxiliaryMessages } = buildWebChatAssistantEnvelope({
         toolEvents,
         artifacts,
         parentMessageId: assistantMessageId,
         timestamp: resolvedAssistantTimestamp,
-        preferArtifactSummary: !normalizedAssistantText,
+        preferArtifactSummary: !normalizedAssistantText || placeholderAssistantText,
     });
     const mergedAssistantMetadata = {
         ...assistantMetadata,
         ...buildFrontendAssistantMetadata(inputAssistantMetadata),
     };
-    const assistantContent = normalizedAssistantText
-        || stripNullCharacters(String(mergedAssistantMetadata.displayContent || '')).trim();
+    const normalizedDisplayContent = stripNullCharacters(String(mergedAssistantMetadata.displayContent || '')).trim();
+    const assistantContent = placeholderAssistantText
+        ? (normalizedDisplayContent || 'Completed.')
+        : (normalizedAssistantText || normalizedDisplayContent);
     const sequencedAuxiliaryMessages = auxiliaryMessages.map((message, index) => ({
         ...message,
         timestamp: offsetIsoTimestamp(resolvedAssistantTimestamp, index + 1),

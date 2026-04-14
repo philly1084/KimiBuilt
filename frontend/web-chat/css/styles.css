@@ -3517,6 +3517,11 @@ body.mobile-chat-menu-open {
     padding-right: 0.45rem;
 }
 
+.workloads-toggle-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+}
+
 .minimalist-toggle-btn {
     width: auto;
     gap: 0.5rem;
@@ -3567,7 +3572,6 @@ body.layout-minimal .main-shell {
 }
 
 body.layout-minimal #sidebar-overlay,
-body.layout-minimal #workloads-panel,
 body.layout-minimal .full-shell-control {
     display: none !important;
 }
@@ -3614,6 +3618,18 @@ body.layout-minimal .chat-brand-mark {
 
 body.layout-minimal .chat-header-brand h1 {
     font-size: 1rem;
+}
+
+body.layout-minimal #workloads-panel {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-top: 0.85rem;
+    border-bottom-color: transparent;
+    background: transparent;
+}
+
+body.layout-minimal .workloads-panel {
+    max-height: min(56vh, 30rem);
 }
 
 body.layout-minimal #messages-container {
@@ -7231,6 +7247,11 @@ code[class*="language-"] {
 
     body.layout-minimal .chat-header-actions {
         margin-left: 0.5rem;
+    }
+
+    body.layout-minimal #workloads-panel {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
     }
 
     #input-area {

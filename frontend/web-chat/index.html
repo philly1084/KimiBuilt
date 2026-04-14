@@ -94,7 +94,7 @@
 
     
     <!-- Custom styles -->
-    <link rel="stylesheet" href="css/styles.css?v=20260411a">
+    <link rel="stylesheet" href="css/styles.css?v=20260413b">
 </head>
 <body class="bg-bg-primary text-text-primary h-screen overflow-hidden">
     <!-- Skip to main content link for accessibility -->
@@ -654,6 +654,9 @@
                     <button id="mobile-chat-menu-btn" class="mobile-header-btn mobile-only" title="Chat controls" aria-label="Open chat controls" aria-haspopup="dialog" aria-expanded="false">
                         <i data-lucide="ellipsis" class="w-5 h-5" aria-hidden="true"></i>
                     </button>
+                    <button id="workloads-btn" class="btn-icon p-2 rounded-lg workloads-toggle-btn" title="Agent workloads" aria-label="Agent workloads" aria-expanded="false" aria-controls="workloads-panel">
+                        <i data-lucide="calendar-clock" class="w-5 h-5" aria-hidden="true"></i>
+                    </button>
                     <div class="header-control-group header-control-group--workspace">
                         <button id="minimalist-toggle-btn" class="btn-icon minimalist-toggle-btn px-3 rounded-lg" title="Enter minimalist mode" aria-label="Enter minimalist mode" aria-pressed="false">
                             <i data-lucide="minimize-2" class="w-4 h-4" id="minimalist-toggle-icon" aria-hidden="true"></i>
@@ -677,9 +680,6 @@
                         <button id="search-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Search messages (Ctrl+F)" onclick="app.openSearch()" aria-label="Search messages (Ctrl+F)">
                             <i data-lucide="search" class="w-5 h-5" aria-hidden="true"></i>
                         </button>
-                        <button id="workloads-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Agent workloads" aria-label="Agent workloads">
-                            <i data-lucide="calendar-clock" class="w-5 h-5" aria-hidden="true"></i>
-                        </button>
                         <button id="export-chat-btn" class="btn-icon p-2 rounded-lg hidden sm:flex full-shell-control" title="Export conversation" onclick="uiHelpers.openExportModal()" aria-label="Export conversation">
                             <i data-lucide="download" class="w-5 h-5" aria-hidden="true"></i>
                         </button>
@@ -690,7 +690,7 @@
                 </div>
             </header>
 
-            <section id="workloads-panel" class="workloads-panel hidden border-b border-border px-6 py-4 bg-bg-secondary/60">
+            <section id="workloads-panel" class="workloads-panel hidden border-b border-border px-6 py-4 bg-bg-secondary/60" tabindex="-1" aria-hidden="true">
                 <div class="workloads-panel__header">
                     <div>
                         <h2 class="workloads-panel__title">Agent Workloads</h2>
@@ -1063,8 +1063,8 @@
     <script src="js/import-export.js?v=20260406a"></script>
     <script src="js/file-manager.js?v=20260410k"></script>
     <script src="js/sidebar-resize.js?v=20260411c"></script>
-    <script src="js/ui.js?v=20260411d"></script>
-    <script src="js/app.js?v=20260411c"></script>
+    <script src="js/ui.js?v=20260413b"></script>
+    <script src="js/app.js?v=20260413b"></script>
     <script src="js/artifacts.js?v=20260411d"></script>
 </body>
 </html>
