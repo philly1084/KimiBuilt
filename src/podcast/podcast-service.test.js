@@ -316,4 +316,48 @@ describe('PodcastService', () => {
     expect(createResponse).toHaveBeenCalledTimes(2);
     expect(result.script.turns).toHaveLength(8);
   });
+
+  test('sanitizes malformed unicode from topics and fetched source text before script generation', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              {
+                title: `Pet conflicts \uD800 at home`,
+                url: 'https://example.com/pets',
+                snippet: `Stress signals can spike \uD800 before a fight.`,
+              },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: `<article><p>Watch for crowding\uD800, blocking, and guarding around food.</p></article>`,
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: `cats and dogs fighting \uD800 in the house`,
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    const requestInput = createResponse.mock.calls[0][0].input;
+    expect(requestInput).toContain('cats and dogs fighting in the house');
+    expect(requestInput).not.toContain('\uD800');
+  });
 });

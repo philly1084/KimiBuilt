@@ -92,6 +92,24 @@ describe('openai-sse helpers', () => {
     expect(events[2].toolCalls).toHaveLength(1);
   });
 
+  test('normalizes reasoning items embedded in response chunk output arrays', () => {
+    const events = normalizeGatewayEventPayload({
+      object: 'response.chunk',
+      id: 'resp_234',
+      output: [
+        {
+          type: 'reasoning',
+          summary: [{ text: 'Checking the request. ' }],
+          content: [{ type: 'output_text', text: 'Choosing the direct path.' }],
+        },
+      ],
+    });
+
+    expect(events.map((event) => event.type)).toEqual(['reasoning_delta']);
+    expect(events[0].content).toBe('Checking the request. Choosing the direct path.');
+    expect(events[0].summary).toBe('Checking the request. Choosing the direct path.');
+  });
+
   test('normalizes custom /api/chat delta payloads', () => {
     const events = normalizeGatewayEventPayload({
       type: 'delta',
@@ -153,6 +171,32 @@ describe('openai-sse helpers', () => {
       'finish',
       'final',
     ]);
+    expect(events[1].content).toBe('Checked the request. Chose the direct path.');
+  });
+
+  test('normalizes final JSON response reasoning items from output arrays', () => {
+    const events = normalizeGatewayEventPayload({
+      object: 'response',
+      id: 'resp_789',
+      output: [
+        {
+          type: 'reasoning',
+          summary: [{ text: 'Checked the request. ' }],
+          text: 'Chose the direct path.',
+        },
+        {
+          type: 'message',
+          content: [{ type: 'output_text', text: 'Final answer' }],
+        },
+      ],
+    }, { allowFinalText: true });
+
+    expect(events.map((event) => event.type)).toEqual([
+      'text_delta',
+      'reasoning_delta',
+      'final',
+    ]);
+    expect(events[0].content).toBe('Final answer');
     expect(events[1].content).toBe('Checked the request. Chose the direct path.');
   });
 

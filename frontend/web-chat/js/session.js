@@ -71,6 +71,23 @@ function extractSessionReasoningSummary(value) {
         return '';
     }
 
+    if (value.type === 'reasoning') {
+        const segments = [
+            value.summary,
+            value.summary_text,
+            value.reasoning_content,
+            value.reasoning,
+            value.text,
+            value.content,
+            value.output_text,
+            value.value,
+        ]
+            .map((candidate) => extractSessionReasoningSummary(candidate))
+            .filter(Boolean);
+
+        return [...new Set(segments)].join(' ').replace(/\s+/g, ' ').trim();
+    }
+
     const leafCandidates = [
         value.text,
         value.output_text,
@@ -81,20 +98,6 @@ function extractSessionReasoningSummary(value) {
         if (typeof candidate === 'string' && candidate.trim()) {
             return candidate.trim();
         }
-    }
-
-    if (value.type === 'reasoning') {
-        return extractSessionReasoningSummary(
-            value.summary
-            || value.summary_text
-            || value.reasoning_content
-            || value.reasoning
-            || value.text
-            || value.content
-            || value.output_text
-            || value.value
-            || '',
-        );
     }
 
     const directCandidates = [
@@ -143,6 +146,8 @@ function normalizeSessionMessage(message = {}) {
         || message?.reasoning_text
         || message?.reasoning_content
         || message?.reasoning_details
+        || message?.output
+        || message?.response?.output
         || '',
     );
     const reasoningAvailable = Boolean(reasoningSummary)

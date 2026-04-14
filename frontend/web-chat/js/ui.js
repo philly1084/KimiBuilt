@@ -2400,32 +2400,6 @@ class UIHelpers {
         );
     }
 
-    buildGeneratedReasoningText(message = null, isStreaming = false) {
-        if (!isStreaming) {
-            return '';
-        }
-
-        const meta = this.getLivePhaseMeta(message?.liveState?.phase || 'thinking');
-        const detail = String(message?.liveState?.detail || '').trim();
-        const phaseSummaryById = {
-            thinking: 'Reviewing the request and lining up the response plan.',
-            reasoning: 'Working through the answer path before finalizing it.',
-            'checking-tools': 'Checking tool calls and folding their results back into the reply.',
-            writing: 'Turning the working state into the final response.',
-        };
-        const phaseSummary = String(phaseSummaryById[meta.phase] || meta.detail || '').trim();
-
-        if (!detail) {
-            return phaseSummary;
-        }
-
-        if (!phaseSummary || detail === phaseSummary || detail === meta.detail) {
-            return detail;
-        }
-
-        return `${phaseSummary} ${detail}`;
-    }
-
     getMessageReasoningDisplayState(message = null, isStreaming = false) {
         const summary = this.getMessageReasoningSummary(message);
         const displaySource = String(message?.reasoningDisplaySource || '').trim();
@@ -2433,16 +2407,20 @@ class UIHelpers {
         const displayFullText = String(message?.reasoningDisplayFullText || '').trim();
         const displayTitle = String(message?.reasoningDisplayTitle || '').trim();
         const displayIcon = String(message?.reasoningDisplayIcon || '').trim();
+        const displayAnimated = message?.reasoningDisplayAnimated === true;
 
-        if (displayText && (displaySource === 'stream' || displaySource === 'final')) {
+        if (displayText && (displaySource === 'stream' || displaySource === 'final' || displaySource === 'generated')) {
             const fullText = displayFullText || summary || displayText;
+            const isGenerated = displaySource === 'generated';
             return {
-                source: 'reasoning',
-                title: displayTitle || 'Reasoning',
-                icon: displayIcon || 'brain',
-                previewText: this.buildReasoningSummaryPreview(displayText, isStreaming ? 168 : 132),
+                source: isGenerated ? 'generated' : 'reasoning',
+                title: displayTitle || (isGenerated ? 'Generated reasoning' : 'Reasoning'),
+                icon: displayIcon || (isGenerated ? 'sparkles' : 'brain'),
+                previewText: isGenerated
+                    ? displayText
+                    : this.buildReasoningSummaryPreview(displayText, isStreaming ? 168 : 132),
                 bodyText: fullText,
-                animated: false,
+                animated: displayAnimated,
                 live: isStreaming,
             };
         }
@@ -2456,19 +2434,6 @@ class UIHelpers {
                 bodyText: summary,
                 animated: false,
                 live: isStreaming,
-            };
-        }
-
-        const generatedReasoning = this.buildGeneratedReasoningText(message, isStreaming);
-        if (generatedReasoning) {
-            return {
-                source: 'generated',
-                title: 'Generated reasoning',
-                icon: 'sparkles',
-                previewText: this.buildReasoningSummaryPreview(generatedReasoning, isStreaming ? 168 : 132),
-                bodyText: generatedReasoning,
-                animated: false,
-                live: true,
             };
         }
 

@@ -190,6 +190,10 @@
       return '';
     }
 
+    if (value.type === 'reasoning') {
+      return '';
+    }
+
     const functionPayloadSources = [
       value.parameters,
       value.arguments,
@@ -255,11 +259,21 @@
   }
 
   function normalizeAssistantMetadata(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!value || typeof value !== 'object') {
       return null;
     }
 
     const nextMetadata = {};
+
+    if (Array.isArray(value)) {
+      const reasoningSummary = extractReasoningSummary(value);
+      if (reasoningSummary) {
+        nextMetadata.reasoningSummary = reasoningSummary;
+        nextMetadata.reasoningAvailable = true;
+      }
+
+      return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+    }
 
     if (value.agentExecutor === true) {
       nextMetadata.agentExecutor = true;
@@ -307,6 +321,23 @@
       return '';
     }
 
+    if (value.type === 'reasoning') {
+      const segments = [
+        value.summary,
+        value.summary_text,
+        value.reasoning_content,
+        value.reasoning,
+        value.text,
+        value.content,
+        value.output_text,
+        value.value,
+      ]
+        .map((candidate) => extractReasoningSummary(candidate))
+        .filter(Boolean);
+
+      return [...new Set(segments)].join(' ').replace(/\s+/g, ' ').trim();
+    }
+
     const leafTextCandidates = [
       value.text,
       value.output_text,
@@ -317,20 +348,6 @@
       if (typeof candidate === 'string' && candidate.trim()) {
         return stripNullCharacters(candidate).trim();
       }
-    }
-
-    if (value.type === 'reasoning') {
-      return extractReasoningSummary(
-        value.summary
-        || value.summary_text
-        || value.reasoning_content
-        || value.reasoning
-        || value.text
-        || value.content
-        || value.output_text
-        || value.value
-        || '',
-      );
     }
 
     const directCandidates = [
@@ -399,8 +416,10 @@
     const sources = [
       value.assistantMetadata,
       value.assistant_metadata,
+      value.output,
       value.response?.assistantMetadata,
       value.response?.assistant_metadata,
+      value.response?.output,
       value.choices?.[0]?.message,
       value.response?.choices?.[0]?.message,
       value.response?.metadata,
@@ -575,6 +594,7 @@
         || payload.reasoning_text
         || payload.reasoning_content
         || payload.reasoning_details
+        || payload.output
         || '',
       );
       if (reasoning) {

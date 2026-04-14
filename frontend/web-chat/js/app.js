@@ -4,10 +4,10 @@
  * Now using OpenAI SDK for API communication
  */
 
-const AMBIENT_REASONING_ROTATE_MIN_MS = 12000;
-const AMBIENT_REASONING_ROTATE_MAX_MS = 18000;
+const AMBIENT_REASONING_ROTATE_MIN_MS = 20000;
+const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
 const AMBIENT_REASONING_TYPE_TICK_MS = 120;
-const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 10000;
+const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 20000;
 const AMBIENT_REASONING_STARTS = [
     'Just milking the moose',
     'Running with a fowl',
@@ -4541,6 +4541,13 @@ class ChatApp {
             && (now - this.lastReasoningDeltaAt) < AMBIENT_REASONING_IDLE_THRESHOLD_MS;
     }
 
+    isGeneratedReasoningFallbackPhase(phase = '') {
+        const normalizedPhase = String(phase || '').trim().toLowerCase();
+        return normalizedPhase === 'thinking'
+            || normalizedPhase === 'reasoning'
+            || normalizedPhase === 'checking-tools';
+    }
+
     startAmbientReasoningLoop() {
         this.clearAmbientReasoningTimer();
 
@@ -4559,7 +4566,7 @@ class ChatApp {
 
             const liveContent = String(message.displayContent ?? message.content ?? '').trim();
             if (liveContent) {
-                if (String(message.reasoningDisplaySource || '').trim() === 'synthetic') {
+                if (String(message.reasoningDisplaySource || '').trim() === 'generated') {
                     this.updateStreamingMessageState({
                         reasoningDisplaySource: '',
                         reasoningDisplayText: '',
@@ -4584,10 +4591,16 @@ class ChatApp {
                 || this.liveResponseState.reasoningSummary
                 || '',
             ).trim();
+            const activePhase = String(
+                message.liveState?.phase
+                || this.liveResponseState.phase
+                || 'thinking'
+            ).trim();
+            const allowGeneratedFallback = this.isGeneratedReasoningFallbackPhase(activePhase);
+            const hasFreshReasoning = this.hasRecentReasoningStream(now);
             const shouldPreferRealReasoning = Boolean(liveSummary) && (
-                this.liveResponseState.hasRealReasoning === true
-                || this.hasRecentReasoningStream(now)
-                || (this.connectionStatus !== 'disconnected' && message.reasoningDisplaySource === 'stream')
+                hasFreshReasoning
+                || (!allowGeneratedFallback && String(message.reasoningDisplaySource || '').trim() === 'stream')
             );
             if (shouldPreferRealReasoning) {
                 if (liveSummary && message.reasoningDisplaySource !== 'stream') {
@@ -4609,17 +4622,17 @@ class ChatApp {
             }
 
             const frame = this.getAmbientReasoningFrame(now);
-            const needsUpdate = message.reasoningDisplaySource !== 'synthetic'
+            const needsUpdate = message.reasoningDisplaySource !== 'generated'
                 || String(message.reasoningDisplayText || '') !== frame.visibleText
                 || String(message.reasoningDisplayFullText || '') !== frame.fullText
                 || Boolean(message.reasoningDisplayAnimated) !== frame.isTyping;
 
             if (needsUpdate) {
                 this.updateStreamingMessageState({
-                    reasoningDisplaySource: 'synthetic',
+                    reasoningDisplaySource: 'generated',
                     reasoningDisplayText: frame.visibleText,
                     reasoningDisplayFullText: frame.fullText,
-                    reasoningDisplayTitle: 'Thinking',
+                    reasoningDisplayTitle: 'Generated reasoning',
                     reasoningDisplayIcon: 'sparkles',
                     reasoningDisplayAnimated: frame.isTyping,
                 }, {
@@ -4642,6 +4655,7 @@ class ChatApp {
     beginAssistantStream(options = {}) {
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
+        const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
         this.liveResponseState = {
             phase: 'thinking',
             detail: String(options.detail || 'Gathering context and preparing the reply.').trim(),
@@ -4659,18 +4673,19 @@ class ChatApp {
                 detail: this.liveResponseState.detail,
             },
             reasoningSummary: '',
-            reasoningDisplaySource: '',
-            reasoningDisplayText: '',
-            reasoningDisplayFullText: '',
-            reasoningDisplayTitle: '',
-            reasoningDisplayIcon: '',
-            reasoningDisplayAnimated: false,
+            reasoningDisplaySource: 'generated',
+            reasoningDisplayText: initialAmbientFrame.visibleText,
+            reasoningDisplayFullText: initialAmbientFrame.fullText,
+            reasoningDisplayTitle: 'Generated reasoning',
+            reasoningDisplayIcon: 'sparkles',
+            reasoningDisplayAnimated: initialAmbientFrame.isTyping,
             reasoningAvailable: false,
             isStreaming: true,
         }, {
             render: true,
             scroll: false,
         });
+        this.startAmbientReasoningLoop();
     }
 
     scheduleLiveIndicatorHide(delayMs = 900) {
@@ -5966,6 +5981,8 @@ class ChatApp {
         this.retryAttempt = 0;
         this.clearLiveIndicatorTimer();
         this.resetAmbientReasoningState();
+        const initialAmbientFrame = this.getAmbientReasoningFrame(Date.now());
+        this.lastReasoningDeltaAt = shouldPreserveRealReasoning ? Date.now() : 0;
         this.liveResponseState = {
             phase: 'thinking',
             detail,
@@ -5995,17 +6012,18 @@ class ChatApp {
                     reasoningDisplayAnimated: false,
                 }
                 : {
-                    reasoningDisplaySource: '',
-                    reasoningDisplayText: '',
-                    reasoningDisplayFullText: '',
-                    reasoningDisplayTitle: '',
-                    reasoningDisplayIcon: '',
-                    reasoningDisplayAnimated: false,
+                    reasoningDisplaySource: 'generated',
+                    reasoningDisplayText: initialAmbientFrame.visibleText,
+                    reasoningDisplayFullText: initialAmbientFrame.fullText,
+                    reasoningDisplayTitle: 'Generated reasoning',
+                    reasoningDisplayIcon: 'sparkles',
+                    reasoningDisplayAnimated: initialAmbientFrame.isTyping,
                 }),
         }, {
             render: true,
             scroll: false,
         });
+        this.startAmbientReasoningLoop();
 
         if (savedMessage) {
             trackedRequest.lastVisibleAssistantMessage = {

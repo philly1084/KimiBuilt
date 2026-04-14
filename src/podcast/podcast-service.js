@@ -3,7 +3,7 @@ const { piperTtsService, normalizeTextForSpeech } = require('../tts/piper-tts-se
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
 const { concatWavBuffers, createSilenceWavBuffer, parseWavBuffer } = require('../audio/wav-utils');
-const { chunkText, normalizeWhitespace, stripHtml } = require('../utils/text');
+const { chunkText, normalizeWhitespace, stripHtml, stripNullCharacters } = require('../utils/text');
 const { parseLenientJson } = require('../utils/lenient-json');
 
 const DEFAULT_DURATION_MINUTES = 10;
@@ -35,6 +35,50 @@ function clampNumber(value, min, max, fallback) {
     return fallback;
   }
   return Math.max(min, Math.min(max, numeric));
+}
+
+function stripUnpairedSurrogates(value = '') {
+  const input = String(value || '');
+  let output = '';
+
+  for (let index = 0; index < input.length; index += 1) {
+    const codeUnit = input.charCodeAt(index);
+
+    if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      const nextCodeUnit = input.charCodeAt(index + 1);
+      if (nextCodeUnit >= 0xDC00 && nextCodeUnit <= 0xDFFF) {
+        output += input[index] + input[index + 1];
+        index += 1;
+      }
+      continue;
+    }
+
+    if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      continue;
+    }
+
+    output += input[index];
+  }
+
+  return output;
+}
+
+function sanitizePodcastText(value = '', { preserveNewlines = false } = {}) {
+  const base = stripUnpairedSurrogates(stripNullCharacters(value || ''))
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ');
+
+  let normalized = '';
+  try {
+    normalized = base.normalize('NFKC');
+  } catch (_error) {
+    normalized = base;
+  }
+
+  const whitespaceNormalized = preserveNewlines
+    ? normalizeWhitespace(normalized).replace(/\n{3,}/g, '\n\n')
+    : normalized.replace(/\s+/g, ' ').trim();
+
+  return whitespaceNormalized.trim();
 }
 
 function estimateWordBudget(durationMinutes = DEFAULT_DURATION_MINUTES) {
@@ -137,27 +181,27 @@ function getResponseText(response = {}) {
 }
 
 function extractFetchedText(fetchData = {}, maxChars = 2200) {
-  const body = String(fetchData?.body || '').trim();
+  const body = sanitizePodcastText(fetchData?.body || '', { preserveNewlines: true });
   if (!body) {
     return '';
   }
 
   const contentType = String(fetchData?.headers?.['content-type'] || fetchData?.headers?.['Content-Type'] || '').toLowerCase();
   const plain = contentType.includes('html') ? stripHtml(body) : body;
-  const normalized = normalizeWhitespace(plain).replace(/\n{2,}/g, '\n');
+  const normalized = sanitizePodcastText(plain, { preserveNewlines: true }).replace(/\n{2,}/g, '\n');
   return normalized.slice(0, maxChars).trim();
 }
 
 function buildTranscript(turns = []) {
   return (Array.isArray(turns) ? turns : [])
-    .map((turn) => `${turn.speaker}: ${turn.text}`)
+    .map((turn) => `${sanitizePodcastText(turn.speaker)}: ${sanitizePodcastText(turn.text)}`)
     .join('\n\n')
     .trim();
 }
 
 function normalizeTurn(turn = {}, allowedSpeakers = new Set()) {
-  const speaker = String(turn?.speaker || '').trim();
-  const text = normalizeWhitespace(String(turn?.text || '').trim());
+  const speaker = sanitizePodcastText(turn?.speaker || '');
+  const text = sanitizePodcastText(turn?.text || '', { preserveNewlines: true });
   if (!speaker || !text || !allowedSpeakers.has(speaker)) {
     return null;
   }
@@ -203,9 +247,9 @@ function resolveHosts(params = {}, voiceConfig = {}) {
     }
 
     return {
-      name: String(params[`host${suffix}Name`] || defaultHost.name).trim() || defaultHost.name,
-      role: String(params[`host${suffix}Role`] || defaultHost.role).trim() || defaultHost.role,
-      persona: String(params[`host${suffix}Persona`] || defaultHost.persona).trim() || defaultHost.persona,
+      name: sanitizePodcastText(params[`host${suffix}Name`] || defaultHost.name) || defaultHost.name,
+      role: sanitizePodcastText(params[`host${suffix}Role`] || defaultHost.role) || defaultHost.role,
+      persona: sanitizePodcastText(params[`host${suffix}Persona`] || defaultHost.persona) || defaultHost.persona,
       voiceId,
     };
   });
@@ -247,31 +291,31 @@ function buildResearchPrompt({
   const turnCount = estimateTurnCount(durationMinutes);
 
   const sourceText = sources.map((source, index) => [
-    `Source ${index + 1}: ${source.title || 'Untitled source'}`,
-    `URL: ${source.url}`,
-    source.snippet ? `Snippet: ${source.snippet}` : '',
-    source.content ? `Excerpt: ${source.content}` : '',
+    `Source ${index + 1}: ${sanitizePodcastText(source.title || 'Untitled source')}`,
+    `URL: ${sanitizePodcastText(source.url)}`,
+    source.snippet ? `Snippet: ${sanitizePodcastText(source.snippet, { preserveNewlines: true })}` : '',
+    source.content ? `Excerpt: ${sanitizePodcastText(source.content, { preserveNewlines: true })}` : '',
   ].filter(Boolean).join('\n')).join('\n\n');
 
   return `
 Create a scripted two-host podcast episode as strict JSON.
 
-Topic: ${topic}
-Audience: ${audience}
-Tone: ${tone}
+Topic: ${sanitizePodcastText(topic)}
+Audience: ${sanitizePodcastText(audience)}
+Tone: ${sanitizePodcastText(tone)}
 Target duration minutes: ${durationMinutes}
 Approximate total word budget: ${wordBudget}
 Target turn count: ${turnCount}
 
 Host 1:
-- name: ${hosts[0].name}
-- role: ${hosts[0].role}
-- persona: ${hosts[0].persona}
+- name: ${sanitizePodcastText(hosts[0].name)}
+- role: ${sanitizePodcastText(hosts[0].role)}
+- persona: ${sanitizePodcastText(hosts[0].persona)}
 
 Host 2:
-- name: ${hosts[1].name}
-- role: ${hosts[1].role}
-- persona: ${hosts[1].persona}
+- name: ${sanitizePodcastText(hosts[1].name)}
+- role: ${sanitizePodcastText(hosts[1].role)}
+- persona: ${sanitizePodcastText(hosts[1].persona)}
 
 Use only the sourced information below. Do not invent facts. If a point is uncertain, phrase it carefully.
 Write like a real podcast: light rapport, clean transitions, informative explanations, occasional reactions, but no filler overload.
@@ -559,13 +603,14 @@ class PodcastService {
     }
 
     const topic = String(params.topic || params.prompt || params.subject || '').trim();
-    if (!topic) {
+    const normalizedTopic = sanitizePodcastText(topic);
+    if (!normalizedTopic) {
       throw new Error('podcast requires a topic, prompt, or subject.');
     }
 
     const durationMinutes = clampNumber(params.durationMinutes, 3, 30, DEFAULT_DURATION_MINUTES);
-    const audience = String(params.audience || 'general').trim() || 'general';
-    const tone = String(params.tone || 'informative, conversational').trim() || 'informative, conversational';
+    const audience = sanitizePodcastText(params.audience || 'general') || 'general';
+    const tone = sanitizePodcastText(params.tone || 'informative, conversational') || 'informative, conversational';
     const maxSources = clampNumber(params.maxSources, 2, 6, DEFAULT_MAX_SOURCES);
     const voiceConfig = this.ttsService.getPublicConfig();
     const hosts = resolveHosts(params, voiceConfig);
@@ -575,7 +620,7 @@ class PodcastService {
       ? context.toolManager.executeTool.bind(context.toolManager)
       : null;
     const sources = await this.researchTopic({
-      topic,
+      topic: normalizedTopic,
       searchDomains: params.searchDomains || params.domains || [],
       sourceUrls: params.sourceUrls || params.urls || [],
       maxSources,
@@ -585,7 +630,7 @@ class PodcastService {
     });
 
     const script = await this.generateScript({
-      topic,
+      topic: normalizedTopic,
       audience,
       tone,
       durationMinutes,
@@ -630,7 +675,7 @@ class PodcastService {
         outroVolume: params.outroVolume,
       })
       : speechWavBuffer;
-    const episodeTitle = params.title || script.title || `${topic} Podcast`;
+    const episodeTitle = sanitizePodcastText(params.title || script.title || `${normalizedTopic} Podcast`);
     const persistedArtifacts = [];
     const audioVariants = [];
 
@@ -653,7 +698,7 @@ class PodcastService {
       metadata: {
         createdByAgentTool: true,
         generatedBy: 'podcast',
-        topic,
+        topic: normalizedTopic,
         durationMinutes,
         audience,
         tone,
@@ -705,7 +750,7 @@ class PodcastService {
         metadata: {
           createdByAgentTool: true,
           generatedBy: 'podcast',
-          topic,
+          topic: normalizedTopic,
           durationMinutes,
           audience,
           tone,
@@ -740,7 +785,7 @@ class PodcastService {
     const primaryArtifact = persistedMp3?.artifact || persistedWav.artifact || null;
 
     return {
-      title: script.title,
+      title: sanitizePodcastText(script.title),
       summary: script.summary,
       durationMinutes,
       estimatedWordCount: transcript.split(/\s+/).filter(Boolean).length,
