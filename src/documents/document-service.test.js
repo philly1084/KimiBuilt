@@ -429,6 +429,58 @@ describe('DocumentService', () => {
     expect(plan.humanizationNotes.length).toBeGreaterThan(0);
   });
 
+  test('builds approved document layout options and honors an explicit selection', () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const plan = service.buildDocumentPlan({
+      prompt: 'Create an executive brief for our expansion decision',
+      documentType: 'executive-brief',
+      format: 'html',
+      designOptionId: 'briefing-grid',
+    });
+
+    expect(plan.designOptions.length).toBeGreaterThan(0);
+    expect(plan.selectedDesignOption).toEqual(expect.objectContaining({
+      id: 'briefing-grid',
+      label: 'Briefing Grid',
+    }));
+    expect(plan.themeSuggestion).toBe('executive');
+  });
+
+  test('renders selected document layout shells for html documents', async () => {
+    const service = new DocumentService({
+      responses: {
+        create: jest.fn(),
+      },
+    });
+
+    const document = await service.generateFromTemplate('executive-brief', {
+      title: 'Q2 Decision Brief',
+      subtitle: 'Expansion review',
+      audience: 'Leadership',
+      headline_summary: 'Approve the expansion plan.',
+      current_state: 'Pipeline is ahead of target.',
+      recommendation: 'Fund the launch and assign an owner.',
+      key_metrics: 'Revenue growth: 18%\nCAC payback: 7 months',
+      next_steps: 'Approve budget\nAssign owner',
+    }, 'html', {
+      designPlan: {
+        selectedDesignOption: { id: 'briefing-grid' },
+        creativeDirection: { id: 'boardroom-brief' },
+        themeSuggestion: 'executive',
+      },
+    });
+
+    expect(String(document.content)).toContain('document-layout-briefing-grid');
+    expect(document.metadata.design).toEqual(expect.objectContaining({
+      layout: 'briefing-grid',
+    }));
+  });
+
   test('treats scaffold-like existing content as structure rather than final copy in production plans', () => {
     const service = new DocumentService({
       responses: {

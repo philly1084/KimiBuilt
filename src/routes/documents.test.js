@@ -203,6 +203,7 @@ describe('/api/documents route', () => {
         inferredType: 'report',
         outlineType: 'document',
         blueprint: { id: 'report' },
+        selectedDesignOption: { id: 'briefing-grid', label: 'Briefing Grid' },
       }),
       aiGenerate: jest.fn().mockResolvedValue({
         id: 'doc-html-1',
@@ -234,8 +235,10 @@ describe('/api/documents route', () => {
         prompt: 'Create a visual HTML brief with multiple images for the campaign launch.',
         format: 'html',
         documentType: 'report',
+        designOptionId: 'briefing-grid',
         tone: 'professional',
         length: 'medium',
+        style: 'executive',
         options: {
           theme: 'editorial',
         },
@@ -247,9 +250,11 @@ describe('/api/documents route', () => {
       expect.objectContaining({
         documentType: 'report',
         format: 'html',
+        designOptionId: 'briefing-grid',
         templateContext: expect.any(String),
         designPlan: expect.objectContaining({
           blueprint: expect.objectContaining({ id: 'report' }),
+          selectedDesignOption: expect.objectContaining({ id: 'briefing-grid' }),
         }),
       }),
     );

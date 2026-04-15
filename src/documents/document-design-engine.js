@@ -1,6 +1,9 @@
 const {
   resolveDocumentBlueprint,
 } = require('./document-design-blueprints');
+const {
+  getDocumentLayoutOptions,
+} = require('./document-layout-catalog');
 
 const DOCUMENT_THEMES = {
   editorial: {
@@ -184,7 +187,25 @@ function buildDocumentDesignPlan({
   theme: requestedTheme = '',
 } = {}) {
   const blueprint = resolveDocumentBlueprint(documentType || requestedPlan?.inferredType || content.documentType);
-  const theme = resolveDocumentTheme(requestedTheme || content.theme || 'editorial');
+  const requestedLayoutId = requestedPlan?.selectedDesignOption?.id
+    || requestedPlan?.layoutChoice?.id
+    || requestedPlan?.designOptionId
+    || '';
+  const layoutOptions = getDocumentLayoutOptions({
+    blueprintId: blueprint.id,
+    directionId: requestedPlan?.creativeDirection?.id || '',
+    format,
+    selectedId: requestedLayoutId,
+    limit: 4,
+  });
+  const layoutChoice = layoutOptions[0] || null;
+  const theme = resolveDocumentTheme(
+    requestedTheme
+    || content.theme
+    || requestedPlan?.themeSuggestion
+    || layoutChoice?.defaultTheme
+    || 'editorial',
+  );
   const sections = normalizeSections(content.sections);
   const outline = buildOutlineItems(sections);
   const insightCards = buildInsightCards({
@@ -216,6 +237,8 @@ function buildDocumentDesignPlan({
     },
     insightCards,
     outline: outline.length >= 3 ? outline : [],
+    designOptions: layoutOptions,
+    layoutChoice,
     sections: sections.map((section, index) => ({
       ...section,
       number: String(index + 1).padStart(2, '0'),

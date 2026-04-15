@@ -23,6 +23,10 @@ const {
 const {
   buildDocumentCreativityPacket,
 } = require('./document-creativity');
+const {
+  getDocumentLayoutOptions,
+  findDocumentLayout,
+} = require('./document-layout-catalog');
 
 class DocumentService {
   constructor(openaiClient) {
@@ -91,6 +95,8 @@ class DocumentService {
       format,
       tone: options.tone || 'professional',
       length: options.length || 'medium',
+      theme: options.theme || options.style || '',
+      designOptionId: options.designOptionId || '',
     });
 
     if (this.shouldUsePresentationPipeline(options.documentType, format)) {
@@ -125,6 +131,11 @@ class DocumentService {
         generatedAt: new Date().toISOString(),
         aiGenerated: true,
         prompt,
+        creativeDirectionId: designPlan?.creativeDirection?.id || '',
+        creativeDirection: designPlan?.creativeDirection?.label || '',
+        themeSuggestion: designPlan?.themeSuggestion || '',
+        designOptionId: designPlan?.selectedDesignOption?.id || '',
+        designOptionLabel: designPlan?.selectedDesignOption?.label || '',
         designPlan,
         ...content.metadata,
         ...document.metadata
@@ -608,6 +619,12 @@ class DocumentService {
         useCases: template.useCases || [],
         score: template.score,
       }));
+    const designOptions = getDocumentLayoutOptions({
+      blueprintId: blueprint.id,
+      format: recommendedFormat,
+      limit: 3,
+    });
+    const selectedDesignOption = designOptions[0] || null;
 
     return {
       requestedType: String(documentType || '').trim() || null,
@@ -622,6 +639,8 @@ class DocumentService {
       recommendedFormat,
       recommendedFormats,
       recommendedTemplates,
+      designOptions,
+      selectedDesignOption,
       checklist: [...blueprint.requiredElements],
       structurePatterns: [...blueprint.structurePatterns],
       nextAction: pipeline === 'presentation'
@@ -684,6 +703,8 @@ class DocumentService {
     format = '',
     tone = 'professional',
     length = 'medium',
+    theme = '',
+    designOptionId = '',
     limit = 4,
     existingContent = '',
     session = null,
@@ -699,6 +720,15 @@ class DocumentService {
       existingContent,
       session,
     });
+    const designOptions = getDocumentLayoutOptions({
+      blueprintId: blueprint.id,
+      directionId: creativity.direction.id,
+      format: recommendation.recommendedFormat || format,
+      selectedId: designOptionId,
+      limit: 3,
+    });
+    const selectedDesignOption = designOptions[0] || null;
+    const themeSuggestion = theme || selectedDesignOption?.defaultTheme || creativity.themeSuggestion;
 
     return {
       ...recommendation,
@@ -707,7 +737,10 @@ class DocumentService {
       titleSuggestion: title,
       outlineType,
       outline: this.buildPlanItemsFromBlueprint(blueprint, recommendation.pipeline),
-      themeSuggestion: creativity.themeSuggestion,
+      themeSuggestion,
+      designOptions,
+      selectedDesignOption,
+      designOptionId: selectedDesignOption?.id || '',
       creativeDirection: {
         id: creativity.direction.id,
         label: creativity.direction.label,
@@ -863,6 +896,7 @@ class DocumentService {
             blueprint: designPlan.blueprint.id,
             theme: designPlan.theme.id,
             outlineItems: designPlan.outline.length,
+            layout: designPlan.layoutChoice?.id || null,
           },
         },
       };
@@ -895,6 +929,7 @@ class DocumentService {
               blueprint: designPlan.blueprint.id,
               theme: designPlan.theme.id,
               outlineItems: designPlan.outline.length,
+              layout: designPlan.layoutChoice?.id || null,
             },
           },
         };
@@ -949,10 +984,28 @@ class DocumentService {
     const subtitle = plan.subtitle ? `<p class="document-subtitle">${this.escapeHtml(plan.subtitle)}</p>` : '';
     const sections = Array.isArray(content?.sections) ? content.sections : [];
     const normalizedFormat = format === 'markdown' ? 'md' : format;
+    const layoutChoice = plan.layoutChoice
+      || findDocumentLayout(plan.selectedDesignOption?.id || '')
+      || getDocumentLayoutOptions({
+        blueprintId: plan.blueprint?.id || content?.documentType || 'document',
+        directionId: plan.creativeDirection?.id || '',
+        format: normalizedFormat,
+        limit: 1,
+      })[0]
+      || findDocumentLayout('editorial-rhythm');
 
     if (normalizedFormat === 'html') {
+      const showOutline = Boolean(layoutChoice?.showOutline !== false && plan.outline.length > 0);
+      const layoutIdeas = Array.isArray(layoutChoice?.minorIdeas)
+        ? layoutChoice.minorIdeas.slice(0, 2)
+        : [];
+      const outlineHtml = showOutline
+        ? `<nav class="document-outline"><div class="document-outline-header"><span>${this.escapeHtml(layoutChoice?.navigationLabel || 'Plan')}</span><strong>${this.escapeHtml(layoutChoice?.navigationTitle || 'Structured flow')}</strong></div><ol>${plan.outline.map((item) => `
+          <li><a href="#${this.escapeHtml(`section-${item.index}`)}"><span>${this.escapeHtml(item.number)}</span><strong>${this.escapeHtml(item.heading)}</strong><em>${this.escapeHtml(item.layout)}</em></a></li>
+        `).join('')}</ol></nav>`
+        : '';
       const body = [
-        `<div class="document-shell document-theme-${this.escapeHtml(plan.theme.id)}">`,
+        `<div class="document-shell document-theme-${this.escapeHtml(plan.theme.id)} document-layout-${this.escapeHtml(layoutChoice?.id || 'editorial-rhythm')}">`,
         `<header class="document-hero">`,
         `<div class="document-hero-copy">`,
         `<p class="document-eyebrow">${this.escapeHtml(plan.hero.eyebrow)}</p>`,
@@ -962,8 +1015,11 @@ class DocumentService {
         `</div>`,
         `<aside class="document-summary-panel">`,
         `<span class="summary-panel-label">Production Lens</span>`,
-        `<strong>${this.escapeHtml(plan.hero.summary)}</strong>`,
-        `<p>${this.escapeHtml(plan.blueprint.goal)}</p>`,
+        `<strong>${this.escapeHtml(layoutChoice?.label || plan.hero.summary)}</strong>`,
+        `<p>${this.escapeHtml(layoutChoice?.summary || plan.blueprint.goal)}</p>`,
+        layoutIdeas.length > 0
+          ? `<div class="summary-panel-ideas">${layoutIdeas.map((idea) => `<span>${this.escapeHtml(idea)}</span>`).join('')}</div>`
+          : '',
         `</aside>`,
         `</header>`,
         plan.insightCards.length > 0 ? `<section class="document-insight-strip">${plan.insightCards.map((card) => `
@@ -973,12 +1029,12 @@ class DocumentService {
             <p>${this.escapeHtml(card.detail)}</p>
           </article>
         `).join('')}</section>` : '',
-        plan.outline.length > 0 ? `<nav class="document-outline"><div class="document-outline-header"><span>Plan</span><strong>Structured flow</strong></div><ol>${plan.outline.map((item) => `
-          <li><a href="#${this.escapeHtml(`section-${item.index}`)}"><span>${this.escapeHtml(item.number)}</span><strong>${this.escapeHtml(item.heading)}</strong><em>${this.escapeHtml(item.layout)}</em></a></li>
-        `).join('')}</ol></nav>` : '',
+        `<div class="document-layout-frame">`,
+        outlineHtml,
         `<main class="document-flow">`,
-        ...sections.map((section, index) => this.renderSectionHtml(section, plan.sections[index])),
+        ...sections.map((section, index) => this.renderSectionHtml(section, plan.sections[index], layoutChoice)),
         `</main>`,
+        `</div>`,
         '</div>',
       ].join('\n');
 
@@ -1002,9 +1058,10 @@ class DocumentService {
     };
   }
 
-  renderSectionHtml(section = {}, sectionPlan = {}) {
+  renderSectionHtml(section = {}, sectionPlan = {}, layoutChoice = null) {
     const level = Math.min(Math.max(Number(section.level) || 1, 1), 6);
     const heading = section.heading ? `<h${level + 1}>${this.escapeHtml(section.heading)}</h${level + 1}>` : '';
+    const chromeLabel = sectionPlan.layout || 'narrative';
     const blocks = [
       this.renderRichTextBlocks(String(section.content || '')),
       this.renderBulletListHtml(section.bullets),
@@ -1017,7 +1074,7 @@ class DocumentService {
       <section class="document-section layout-${this.escapeHtml(sectionPlan.layout || 'narrative')}" id="${this.escapeHtml(sectionPlan.anchor || '')}">
         <div class="section-chrome">
           <span class="section-number">${this.escapeHtml(sectionPlan.number || '')}</span>
-          <span class="section-layout">${this.escapeHtml(sectionPlan.layout || 'narrative')}</span>
+          <span class="section-layout">${this.escapeHtml(chromeLabel)}</span>
         </div>
         <div class="section-content">
           ${heading}
@@ -1587,9 +1644,12 @@ class DocumentService {
         .document-hero-narrative { font-size: 1rem; line-height: 1.7; max-width: 54ch; margin: 16px 0 0; }
         .document-summary-panel { border-radius: 22px; background: linear-gradient(180deg, var(--doc-panel-alt), var(--doc-panel)); padding: 18px; border: 1px solid var(--doc-border); display: flex; flex-direction: column; gap: 10px; }
         .document-summary-panel strong { font-size: 1.1rem; }
+        .summary-panel-ideas { display: flex; flex-wrap: wrap; gap: 8px; }
+        .summary-panel-ideas span { font-size: 0.82rem; color: var(--doc-muted); background: rgba(255,255,255,0.65); border: 1px solid var(--doc-border); border-radius: 999px; padding: 6px 9px; }
         .document-insight-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: 18px 0; }
         .insight-card { border-radius: 20px; background: rgba(255,255,255,0.72); border: 1px solid var(--doc-border); padding: 18px; backdrop-filter: blur(8px); }
         .insight-card strong { display: block; font-size: 1.3rem; margin-top: 8px; }
+        .document-layout-frame { display: grid; gap: 18px; }
         .document-outline { background: var(--doc-page); border: 1px solid var(--doc-border); border-radius: 22px; padding: 22px; margin: 14px 0 20px; }
         .document-outline-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
         .document-outline-header span { color: var(--doc-accent); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.78rem; font-weight: 700; }
@@ -1620,9 +1680,38 @@ class DocumentService {
         .chart-label, .chart-value { font-size: 0.92rem; }
         .chart-bar { background: var(--doc-border); border-radius: 999px; height: 12px; overflow: hidden; }
         .chart-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--doc-chart-start), var(--doc-chart-end)); border-radius: 999px; }
+        .document-layout-briefing-grid .document-outline,
+        .document-layout-chapter-bands .document-outline,
+        .document-layout-casefile-panels .document-outline { display: none; }
+        .document-layout-briefing-grid .document-flow { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: stretch; }
+        .document-layout-briefing-grid .document-section { grid-template-columns: 1fr; min-height: 100%; }
+        .document-layout-briefing-grid .document-section.layout-lead,
+        .document-layout-briefing-grid .document-section.layout-evidence,
+        .document-layout-briefing-grid .document-section.layout-chart { grid-column: 1 / -1; }
+        .document-layout-briefing-grid .section-chrome { flex-direction: row; align-items: center; justify-content: space-between; }
+        .document-layout-briefing-grid .section-number { display: none; }
+        .document-layout-briefing-grid .section-layout { padding: 6px 10px; border-radius: 999px; background: var(--doc-accent-soft); }
+        .document-layout-chapter-bands .document-hero { grid-template-columns: 1fr; }
+        .document-layout-chapter-bands .document-section { grid-template-columns: 1fr; padding: 0; background: transparent; border: 0; box-shadow: none; overflow: hidden; }
+        .document-layout-chapter-bands .section-chrome { flex-direction: row; align-items: center; justify-content: space-between; padding: 18px 22px; background: linear-gradient(135deg, var(--doc-accent-soft), var(--doc-page)); border: 1px solid var(--doc-border); border-radius: 24px 24px 0 0; }
+        .document-layout-chapter-bands .section-number { display: none; }
+        .document-layout-chapter-bands .section-content { padding: 22px; background: var(--doc-page); border: 1px solid var(--doc-border); border-top: 0; border-radius: 0 0 24px 24px; }
+        .document-layout-field-guide-rail .document-hero { grid-template-columns: 1fr; }
+        .document-layout-field-guide-rail .document-layout-frame { grid-template-columns: 280px minmax(0, 1fr); align-items: start; }
+        .document-layout-field-guide-rail .document-outline { position: sticky; top: 24px; margin: 0; }
+        .document-layout-field-guide-rail .document-section { grid-template-columns: 1fr; }
+        .document-layout-field-guide-rail .section-chrome { flex-direction: row; align-items: center; gap: 10px; }
+        .document-layout-field-guide-rail .section-number { display: none; }
+        .document-layout-field-guide-rail .section-layout { padding: 6px 10px; border-radius: 999px; background: var(--doc-panel-alt); border: 1px solid var(--doc-border); }
+        .document-layout-casefile-panels .document-flow { gap: 22px; }
+        .document-layout-casefile-panels .document-section { grid-template-columns: minmax(0, 1fr) 170px; }
+        .document-layout-casefile-panels .section-chrome { order: 2; align-items: flex-end; justify-content: flex-start; }
+        .document-layout-casefile-panels .section-number { font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 6px 8px; border-radius: 999px; background: var(--doc-accent-soft); }
+        .document-layout-casefile-panels .section-layout { text-align: right; }
         @media (max-width: 860px) {
-          .document-hero, .document-section { grid-template-columns: 1fr; }
+          .document-hero, .document-section, .document-layout-field-guide-rail .document-layout-frame, .document-layout-casefile-panels .document-section { grid-template-columns: 1fr; }
           .document-outline a, .chart-row { grid-template-columns: 1fr; }
+          .document-layout-field-guide-rail .document-outline { position: static; }
         }
       </style>
     `;

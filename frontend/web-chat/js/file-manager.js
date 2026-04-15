@@ -12,6 +12,7 @@ class FileManager {
     this.downloadQueue = new Map(); // Track ongoing downloads
     this.retryAttempts = new Map(); // Track retry counts
     this.maxRetries = 3;
+    this.downloadTimeoutMs = 5 * 60 * 1000;
     
     this.init();
   }
@@ -654,6 +655,22 @@ class FileManager {
     return date.toLocaleDateString();
   }
 
+  triggerBlobDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+
+    // Large downloads can fail in some browsers if the blob URL is revoked
+    // immediately after click().
+    setTimeout(() => {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }, 60 * 1000);
+  }
+
   /**
    * Load files from API
    */
@@ -931,9 +948,10 @@ class FileManager {
 
       // Fetch with timeout and retry logic
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      const timeoutId = setTimeout(() => controller.abort(), this.downloadTimeoutMs);
 
       const response = await fetch(file.downloadUrl || `/api/artifacts/${fileId}/download`, {
+        credentials: 'same-origin',
         signal: controller.signal
       });
       
@@ -951,14 +969,7 @@ class FileManager {
       this.renderFiles();
 
       // Trigger download
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file.filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      this.triggerBlobDownload(blob, file.filename);
 
       // Success status
       file.status = 'success';

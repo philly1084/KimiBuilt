@@ -27,9 +27,11 @@ const aiGenerateSchema = {
   documentType: { required: false, type: 'string' },
   tone: { required: false, type: 'string' },
   length: { required: false, type: 'string' },
+  style: { required: false, type: 'string' },
   format: { required: false, type: 'string' },
   options: { required: false, type: 'object' },
   model: { required: false, type: 'string' },
+  designOptionId: { required: false, type: 'string' },
   templateId: { required: false, type: 'string' },
   templateIds: { required: false, type: 'array' },
   templateVariables: { required: false, type: 'object' }
@@ -48,6 +50,8 @@ const planSchema = {
   format: { required: false, type: 'string' },
   tone: { required: false, type: 'string' },
   length: { required: false, type: 'string' },
+  style: { required: false, type: 'string' },
+  designOptionId: { required: false, type: 'string' },
   limit: { required: false, type: 'number' }
 };
 
@@ -427,7 +431,12 @@ router.post('/recommend', validate(recommendSchema), async (req, res, next) => {
 router.post('/plan', validate(planSchema), async (req, res, next) => {
   try {
     const documentService = req.app.locals.documentService;
-    const plan = documentService.buildDocumentPlan(req.body || {});
+    const body = req.body || {};
+    const plan = documentService.buildDocumentPlan({
+      ...body,
+      theme: body.style || body.theme || '',
+      designOptionId: body.designOptionId || '',
+    });
 
     res.json({
       success: true,
@@ -488,9 +497,11 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       documentType,
       tone = 'professional',
       length = 'medium',
+      style = '',
       format = 'docx',
       options = {},
       model,
+      designOptionId = '',
       templateId = null,
       templateIds = [],
       templateVariables = {},
@@ -510,6 +521,8 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       format,
       tone,
       length,
+      theme: style || options.theme || options.style || '',
+      designOptionId: designOptionId || options.designOptionId || '',
     });
 
     let document = await documentService.aiGenerate(prompt, {
@@ -517,7 +530,9 @@ router.post('/ai-generate', validate(aiGenerateSchema), async (req, res, next) =
       tone,
       length,
       format,
+      style,
       model,
+      designOptionId: designOptionId || options.designOptionId || '',
       designPlan: productionPlan,
       templateContext: templateSelection.context,
       ...options,

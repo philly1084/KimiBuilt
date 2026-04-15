@@ -7,6 +7,9 @@ const {
   resolveDocumentBlueprint,
   renderBlueprintPrompt,
 } = require('./document-design-blueprints');
+const {
+  renderDocumentLayoutPromptContext,
+} = require('./document-layout-catalog');
 
 const PRESENTATION_TEMPLATE_CATALOG = [
   {
@@ -446,6 +449,7 @@ Return JSON:
       '</writing_style>',
       options.templateContext || null,
       renderBlueprintPrompt(blueprint),
+      renderDocumentLayoutPromptContext(options.designPlan, options.format),
       planPrompt,
       '<output_contract>',
       'Return a JSON object with this exact structure:',

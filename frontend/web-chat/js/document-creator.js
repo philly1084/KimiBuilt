@@ -11,6 +11,8 @@ class DocumentCreator {
     this.currentTemplate = null;
     this.modalElement = null;
     this.planRefreshTimer = null;
+    this.currentProductionPlan = null;
+    this.selectedDesignOptionId = '';
     
     this.init();
   }
@@ -351,6 +353,7 @@ class DocumentCreator {
     }
     
     this.modalElement.classList.remove('hidden');
+    this.selectedDesignOptionId = '';
     this.clearProductionPlan();
     
     // If a template hint was provided, try to find and select it
@@ -375,6 +378,8 @@ class DocumentCreator {
     if (this.modalElement) {
       this.modalElement.classList.add('hidden');
     }
+    this.selectedDesignOptionId = '';
+    this.currentProductionPlan = null;
     clearTimeout(this.planRefreshTimer);
     this.clearProductionPlan();
   }
@@ -407,12 +412,13 @@ class DocumentCreator {
     const formatSelect = document.getElementById('doc-ai-format');
     const toneSelect = document.getElementById('doc-ai-tone');
     const lengthSelect = document.getElementById('doc-ai-length');
+    const styleSelect = document.getElementById('doc-ai-style');
 
     if (promptInput) {
       promptInput.addEventListener('input', () => this.scheduleProductionPlanRefresh());
     }
 
-    [typeSelect, formatSelect, toneSelect, lengthSelect].forEach((element) => {
+    [typeSelect, formatSelect, toneSelect, lengthSelect, styleSelect].forEach((element) => {
       if (element) {
         element.addEventListener('change', () => this.scheduleProductionPlanRefresh());
       }
@@ -438,6 +444,7 @@ class DocumentCreator {
     const format = document.getElementById('doc-ai-format')?.value || '';
     const tone = document.getElementById('doc-ai-tone')?.value || 'professional';
     const length = document.getElementById('doc-ai-length')?.value || 'medium';
+    const style = document.getElementById('doc-ai-style')?.value || '';
 
     if (!force && !prompt && !documentType) {
       this.clearProductionPlan();
@@ -454,6 +461,8 @@ class DocumentCreator {
           format,
           tone,
           length,
+          style,
+          designOptionId: this.selectedDesignOptionId || undefined,
           limit: 3,
         }),
       });
@@ -477,7 +486,10 @@ class DocumentCreator {
       return;
     }
 
+    this.currentProductionPlan = plan;
     const recommendedTemplates = Array.isArray(plan.recommendedTemplates) ? plan.recommendedTemplates : [];
+    const designOptions = Array.isArray(plan.designOptions) ? plan.designOptions : [];
+    const selectedDesignOption = this.resolveSelectedDesignOption(plan, designOptions);
     const outline = Array.isArray(plan.outline) ? plan.outline : [];
     const outlineMarkup = outline.slice(0, 4).map((item) => {
       const label = item.title || item.heading || `Step ${item.index || ''}`.trim();
@@ -499,6 +511,16 @@ class DocumentCreator {
         ${entry.toUpperCase()}
       </button>
     `).join('');
+    const designMarkup = designOptions.map((option) => `
+      <button type="button" class="doc-plan-design-card${option.id === this.selectedDesignOptionId ? ' is-active' : ''}" onclick="documentCreator.useDesignOption('${option.id}')">
+        <span class="doc-plan-design-title">${option.label}</span>
+        <strong>${option.summary}</strong>
+        <em>${option.layout}</em>
+      </button>
+    `).join('');
+    const guardrailMarkup = selectedDesignOption?.guardrails?.length
+      ? `<div class="doc-plan-design-note"><strong>UI guardrails:</strong> ${selectedDesignOption.guardrails.slice(0, 2).join(' ')}</div>`
+      : '';
 
     panel.innerHTML = `
       <div class="doc-plan-header">
@@ -512,12 +534,28 @@ class DocumentCreator {
       <div class="doc-plan-meta">
         <span><strong>Blueprint:</strong> ${plan.blueprint?.label || plan.inferredType || 'document'}</span>
         <span><strong>Suggested format:</strong> ${String(plan.recommendedFormat || '').toUpperCase()}</span>
+        ${selectedDesignOption ? `<span><strong>Layout direction:</strong> ${selectedDesignOption.label}</span>` : ''}
       </div>
       <div class="doc-plan-format-row">${formatButtons}</div>
       <div class="doc-plan-outline">${outlineMarkup}</div>
+      ${designMarkup ? `<div class="doc-plan-designs"><span>Approved layout directions:</span><div class="doc-plan-design-grid">${designMarkup}</div>${guardrailMarkup}</div>` : ''}
       ${templateMarkup ? `<div class="doc-plan-templates"><span>Start from template:</span>${templateMarkup}</div>` : ''}
     `;
     panel.classList.remove('hidden');
+  }
+
+  resolveSelectedDesignOption(plan, designOptions = []) {
+    if (!Array.isArray(designOptions) || designOptions.length === 0) {
+      this.selectedDesignOptionId = '';
+      return null;
+    }
+
+    const selected = designOptions.find((option) => option.id === this.selectedDesignOptionId)
+      || designOptions.find((option) => option.id === plan?.selectedDesignOption?.id)
+      || designOptions[0];
+
+    this.selectedDesignOptionId = selected?.id || '';
+    return selected || null;
   }
 
   clearProductionPlan() {
@@ -527,6 +565,7 @@ class DocumentCreator {
       return;
     }
 
+    this.currentProductionPlan = null;
     panel.classList.add('hidden');
     panel.innerHTML = '';
   }
@@ -545,6 +584,17 @@ class DocumentCreator {
     }
 
     this.selectTemplate(templateId);
+  }
+
+  useDesignOption(designOptionId) {
+    if (!designOptionId) {
+      return;
+    }
+
+    this.selectedDesignOptionId = designOptionId;
+    if (this.currentProductionPlan) {
+      this.renderProductionPlan(this.currentProductionPlan);
+    }
   }
 
   /**
@@ -874,11 +924,14 @@ class DocumentCreator {
           documentType,
           tone,
           length,
+          style,
           format,
+          designOptionId: this.selectedDesignOptionId || undefined,
           options: {
             includePageNumbers: true,
             includeTableOfContents: true,
             theme: style,
+            designOptionId: this.selectedDesignOptionId || undefined,
           }
         })
       });
@@ -1448,6 +1501,73 @@ const documentCreatorStyles = `
 .doc-plan-templates span {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.doc-plan-designs {
+  margin-top: 14px;
+}
+
+.doc-plan-designs > span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.doc-plan-design-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.doc-plan-design-card {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  display: grid;
+  gap: 6px;
+}
+
+.doc-plan-design-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.doc-plan-design-card.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.doc-plan-design-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.doc-plan-design-card strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.doc-plan-design-card em {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.doc-plan-design-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .doc-loading {

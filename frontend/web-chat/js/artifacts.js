@@ -1029,8 +1029,23 @@
         a.download = filename;
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        setTimeout(() => {
+            a.remove();
+            URL.revokeObjectURL(url);
+        }, 60 * 1000);
+    }
+
+    function triggerBlobDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            a.remove();
+            URL.revokeObjectURL(url);
+        }, 60 * 1000);
     }
     
     // Create global artifact manager for external access
@@ -1062,16 +1077,10 @@
                 if (!response.ok) throw new Error('Download failed');
                 
                 const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = artifact?.bundleDownloadUrl
+                const downloadFilename = artifact?.bundleDownloadUrl
                     ? `${getArtifactBaseName(filename || artifact?.filename || 'site')}.zip`
                     : (filename || 'download');
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                triggerBlobDownload(blob, downloadFilename);
             } catch (error) {
                 if (window.uiHelpers?.showToast) {
                     uiHelpers.showToast('Download failed: ' + error.message, 'error');
