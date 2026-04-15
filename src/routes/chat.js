@@ -151,6 +151,7 @@ function resolveConversationTaskType(metadata = {}, session = null) {
 }
 
 function openSseStream(req, res, sessionId = null, route = '/api/chat') {
+    let closed = false;
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -162,27 +163,97 @@ function openSseStream(req, res, sessionId = null, route = '/api/chat') {
     res.write(': stream-open\n\n');
 
     const keepAlive = setInterval(() => {
-        if (res.writableEnded || req.destroyed) {
+        if (closed || res.writableEnded || res.destroyed || req.destroyed) {
             clearInterval(keepAlive);
             return;
         }
 
-        res.write(': keepalive\n\n');
+        try {
+            res.write(': keepalive\n\n');
+        } catch (_error) {
+            closed = true;
+            clearInterval(keepAlive);
+        }
     }, 15000);
 
     const cleanup = () => {
+        closed = true;
         clearInterval(keepAlive);
     };
 
+    req.on('aborted', cleanup);
     req.on('close', cleanup);
     res.on('close', cleanup);
     res.on('finish', cleanup);
 
     console.log(`[ChatRoute] SSE stream opened route=${route} sessionId=${sessionId || 'unknown'}`);
+
+    return {
+        write(payload = '') {
+            if (closed || res.writableEnded || res.destroyed) {
+                return false;
+            }
+
+            try {
+                res.write(payload);
+                return true;
+            } catch (_error) {
+                closed = true;
+                return false;
+            }
+        },
+        end() {
+            if (closed || res.writableEnded) {
+                return false;
+            }
+
+            try {
+                res.end();
+                return true;
+            } catch (_error) {
+                closed = true;
+                return false;
+            }
+        },
+        isClosed() {
+            return closed || res.writableEnded || res.destroyed;
+        },
+    };
+}
+
+function buildStreamErrorPayload(err, sessionId = null) {
+    const status = Number.isFinite(err?.statusCode)
+        ? err.statusCode
+        : (Number.isFinite(err?.status) ? err.status : 502);
+    const message = String(err?.message || 'Connection error.').trim() || 'Connection error.';
+
+    return {
+        type: 'error',
+        error: message,
+        status,
+        sessionId,
+        retryable: status >= 500 || status === 429,
+    };
+}
+
+function closeSseWithError(sse, sessionId, err) {
+    if (!sse || sse.isClosed()) {
+        return false;
+    }
+
+    const payload = buildStreamErrorPayload(err, sessionId);
+    sse.write(`data: ${JSON.stringify(payload)}\n\n`);
+    sse.write(`data: ${JSON.stringify({ type: 'done', sessionId })}\n\n`);
+    sse.write('data: [DONE]\n\n');
+    sse.end();
+    return true;
 }
 
 router.post('/', validate(chatSchema), async (req, res, next) => {
     let runtimeTask = null;
+    let streamRequested = false;
+    let activeSse = null;
+    let activeSessionId = null;
     const startedAt = Date.now();
     try {
         const {
@@ -195,6 +266,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             executionProfile = null,
             metadata: requestMetadata = {},
         } = req.body;
+        streamRequested = stream === true;
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         let { sessionId } = req.body;
@@ -237,6 +309,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         if (session) {
             sessionId = session.id;
         }
+        activeSessionId = sessionId;
         if (!session) {
             return res.status(404).json({ error: { message: 'Session not found' } });
         }
@@ -400,7 +473,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             );
 
             if (stream) {
-                openSseStream(req, res, sessionId);
+                activeSse = openSseStream(req, res, sessionId);
             }
 
             await sessionStore.recordResponse(sessionId, generationArtifacts.responseId);
@@ -504,7 +577,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
         );
 
         if (stream) {
-            openSseStream(req, res, sessionId);
+            activeSse = openSseStream(req, res, sessionId);
 
             const toolManager = await ensureRuntimeToolManager(req.app);
 
@@ -836,6 +909,10 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             model: req.body?.model || null,
             metadata: { reasoningEffort: resolveReasoningEffort(req.body) },
         });
+        if (streamRequested && closeSseWithError(activeSse, activeSessionId, err)) {
+            console.warn(`[ChatRoute] Stream failed gracefully sessionId=${activeSessionId || 'unknown'}: ${err.message}`);
+            return;
+        }
         next(err);
     }
 });

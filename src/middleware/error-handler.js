@@ -7,6 +7,17 @@ function errorHandler(err, req, res, _next) {
     const isCompatApiRequest = typeof req?.path === 'string'
         && (req.path.startsWith('/v1/') || req.path.startsWith('/api/chat'));
 
+    if (res.headersSent || res.writableEnded) {
+        if (!res.writableEnded) {
+            try {
+                res.end();
+            } catch (_error) {
+                // Best-effort close for partially written streaming responses.
+            }
+        }
+        return;
+    }
+
     // OpenAI API errors
     if (err.constructor?.name === 'APIError' || err.status) {
         return res.status(err.status || 502).json({

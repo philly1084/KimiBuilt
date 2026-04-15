@@ -523,6 +523,37 @@ function openSseStream(req, res, sessionId = null, route = 'unknown') {
     };
 }
 
+function buildCompatStreamErrorPayload(err, sessionId = null) {
+    const status = Number.isFinite(err?.statusCode)
+        ? err.statusCode
+        : (Number.isFinite(err?.status) ? err.status : 502);
+    const message = String(err?.message || 'Connection error.').trim() || 'Connection error.';
+
+    return {
+        type: 'error',
+        error: {
+            message,
+            code: err?.code || null,
+            retryable: status >= 500 || status === 429,
+        },
+        status,
+        sessionId,
+    };
+}
+
+function closeCompatSseWithError(sse, sessionId, err) {
+    if (!sse || sse.isClosed()) {
+        return false;
+    }
+
+    const payload = buildCompatStreamErrorPayload(err, sessionId);
+    sse.write(`data: ${JSON.stringify(payload)}\n\n`);
+    sse.write(`data: ${JSON.stringify({ type: 'done', sessionId })}\n\n`);
+    sse.write('data: [DONE]\n\n');
+    sse.end();
+    return true;
+}
+
 function isNotesSurfaceValue(value = '') {
     const normalized = String(value || '').trim().toLowerCase();
     return [
@@ -605,6 +636,8 @@ router.post('/chat/completions', async (req, res, next) => {
     let trackedSessionId = null;
     let pendingForegroundTurn = null;
     let foregroundTurnFinalized = false;
+    let streamRequested = false;
+    let activeSse = null;
     const startedAt = Date.now();
     try {
         const {
@@ -617,6 +650,7 @@ router.post('/chat/completions', async (req, res, next) => {
             executionProfile = null,
             metadata: requestMetadata = {},
         } = req.body;
+        streamRequested = stream === true;
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
@@ -810,7 +844,7 @@ router.post('/chat/completions', async (req, res, next) => {
         });
         if (effectiveOutputFormat) {
             setSessionHeaders(res, sessionId);
-            const sse = stream
+            activeSse = stream
                 ? openSseStream(req, res, sessionId, '/v1/chat/completions#artifact')
                 : null;
             const toolManager = await ensureRuntimeToolManager(req.app);
@@ -911,14 +945,14 @@ router.post('/chat/completions', async (req, res, next) => {
             });
 
             if (stream) {
-                sse?.write(`data: ${JSON.stringify({
+                activeSse?.write(`data: ${JSON.stringify({
                     id: `chatcmpl-${sessionId}-0`,
                     object: 'chat.completion.chunk',
                     created: Math.floor(Date.now() / 1000),
                     model: model || 'gpt-4o',
                     choices: [{ index: 0, delta: { content: generation.assistantMessage }, finish_reason: null }],
                 })}\n\n`);
-                sse?.write(`data: ${JSON.stringify({
+                activeSse?.write(`data: ${JSON.stringify({
                     id: `chatcmpl-${sessionId}`,
                     object: 'chat.completion.chunk',
                     created: Math.floor(Date.now() / 1000),
@@ -931,8 +965,8 @@ router.post('/chat/completions', async (req, res, next) => {
                     assistant_metadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                     assistantMetadata: buildFrontendAssistantMetadata({ artifacts: responseArtifacts }),
                 })}\n\n`);
-                sse?.write('data: [DONE]\n\n');
-                sse?.end();
+                activeSse?.write('data: [DONE]\n\n');
+                activeSse?.end();
                 return;
             }
 
@@ -981,7 +1015,7 @@ router.post('/chat/completions', async (req, res, next) => {
         const input = effectiveMessages;
 
         if (stream) {
-            const sse = openSseStream(req, res, sessionId, '/v1/chat/completions');
+            activeSse = openSseStream(req, res, sessionId, '/v1/chat/completions');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: messages.map((message) => (
@@ -1033,7 +1067,7 @@ router.post('/chat/completions', async (req, res, next) => {
             for await (const event of response) {
                 if (event.type === 'response.output_text.delta') {
                     fullText += event.delta;
-                    sse.write(`data: ${JSON.stringify({
+                    activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -1044,7 +1078,7 @@ router.post('/chat/completions', async (req, res, next) => {
                 }
 
                 if (event.type === 'response.reasoning_summary_text.delta' && event.delta) {
-                    sse.write(`data: ${JSON.stringify({
+                    activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -1059,7 +1093,7 @@ router.post('/chat/completions', async (req, res, next) => {
 
                 if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done')
                     && isResponseToolOutputItem(event.item)) {
-                    sse.write(`data: ${JSON.stringify({
+                    activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}-${chunkIndex}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -1081,7 +1115,7 @@ router.post('/chat/completions', async (req, res, next) => {
                     const missingDelta = getMissingCompletionDelta(fullText, resolvedCompletion.outputText);
                     if (missingDelta) {
                         fullText = resolvedCompletion.outputText;
-                        sse.write(`data: ${JSON.stringify({
+                        activeSse.write(`data: ${JSON.stringify({
                             id: `chatcmpl-${sessionId}-${chunkIndex}`,
                             object: 'chat.completion.chunk',
                             created: Math.floor(Date.now() / 1000),
@@ -1161,7 +1195,7 @@ router.post('/chat/completions', async (req, res, next) => {
                         duration: Date.now() - startedAt,
                         metadata: resolvedCompletion.response?.metadata || {},
                     });
-                    sse.write(`data: ${JSON.stringify({
+                    activeSse.write(`data: ${JSON.stringify({
                         id: `chatcmpl-${sessionId}`,
                         object: 'chat.completion.chunk',
                         created: Math.floor(Date.now() / 1000),
@@ -1180,11 +1214,11 @@ router.post('/chat/completions', async (req, res, next) => {
                             artifacts,
                         }),
                     })}\n\n`);
-                    sse.write('data: [DONE]\n\n');
+                    activeSse.write('data: [DONE]\n\n');
                 }
             }
 
-            sse.end();
+            activeSse.end();
             return;
         }
 
@@ -1408,12 +1442,19 @@ router.post('/chat/completions', async (req, res, next) => {
                 console.warn('[OpenAICompat] Failed to persist foreground turn failure:', foregroundError.message);
             }
         }
+        if (streamRequested && closeCompatSseWithError(activeSse, trackedSessionId, err)) {
+            console.warn(`[OpenAICompat] chat/completions stream failed gracefully sessionId=${trackedSessionId || 'unknown'}: ${err.message}`);
+            return;
+        }
         next(err);
     }
 });
 
 router.post('/responses', async (req, res, next) => {
     let runtimeTask = null;
+    let streamRequested = false;
+    let activeSse = null;
+    let trackedSessionId = null;
     const startedAt = Date.now();
     try {
         const {
@@ -1427,6 +1468,7 @@ router.post('/responses', async (req, res, next) => {
             executionProfile = null,
             metadata: requestMetadata = {},
         } = req.body;
+        streamRequested = stream === true;
         const reasoningEffort = resolveReasoningEffort(req.body);
         const enableConversationExecutor = resolveConversationExecutorFlag(req.body);
         const ownerId = getRequestOwnerId(req);
@@ -1470,6 +1512,7 @@ router.post('/responses', async (req, res, next) => {
         if (session) {
             sessionId = session.id;
         }
+        trackedSessionId = sessionId;
         if (!session) {
             return res.status(404).json({
                 error: {
@@ -1584,7 +1627,7 @@ router.post('/responses', async (req, res, next) => {
                 : session;
 
             if (stream) {
-                openSseStream(req, res, sessionId, '/v1/responses#artifact');
+                activeSse = openSseStream(req, res, sessionId, '/v1/responses#artifact');
             }
 
             const generation = await generateOutputArtifactFromPrompt({
@@ -1726,7 +1769,7 @@ router.post('/responses', async (req, res, next) => {
         console.log(`[OpenAICompat] responses routing sessionId=${sessionId} profile=${effectiveExecutionProfile} stickyRemote=${Boolean(responsesControlState?.lastToolIntent || responsesControlState?.lastSshTarget?.host || responsesControlState?.lastRemoteObjective)} lastRemoteObjective=${JSON.stringify(responsesControlState?.lastRemoteObjective || '')}`);
 
         if (stream) {
-            openSseStream(req, res, sessionId, '/v1/responses');
+            activeSse = openSseStream(req, res, sessionId, '/v1/responses');
             const toolManager = await ensureRuntimeToolManager(req.app);
             const execution = await executeConversationRuntime(req.app, {
                 input: runtimeInput,
@@ -2058,6 +2101,10 @@ router.post('/responses', async (req, res, next) => {
             model: req.body?.model || null,
             metadata: { reasoningEffort: resolveReasoningEffort(req.body) },
         });
+        if (streamRequested && closeCompatSseWithError(activeSse, trackedSessionId, err)) {
+            console.warn(`[OpenAICompat] responses stream failed gracefully sessionId=${trackedSessionId || 'unknown'}: ${err.message}`);
+            return;
+        }
         next(err);
     }
 });
