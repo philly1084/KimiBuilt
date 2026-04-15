@@ -1,5 +1,6 @@
 const {
   DEFAULT_CODEX_MODEL_ID,
+  buildGatewayRealtimeUrl,
   extractSSEData,
   filterCodexBackedModels,
   normalizeGatewayEventPayload,
@@ -21,6 +22,12 @@ describe('openai-sse helpers', () => {
 
   test('extracts multi-line SSE data payloads', () => {
     expect(extractSSEData('event: message\ndata: {"a":1}\ndata: {"b":2}\n')).toBe('{"a":1}\n{"b":2}');
+  });
+
+  test('builds websocket URLs from the backend origin instead of the frontend preview port', () => {
+    expect(buildGatewayRealtimeUrl('http://localhost:3000/v1')).toBe('ws://localhost:3000/ws');
+    expect(buildGatewayRealtimeUrl('https://kimi.example.com')).toBe('wss://kimi.example.com/ws');
+    expect(buildGatewayRealtimeUrl('https://kimi.example.com/api', '/realtime')).toBe('wss://kimi.example.com/realtime');
   });
 
   test('normalizes chat completion chunk payloads', () => {

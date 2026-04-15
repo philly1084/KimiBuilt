@@ -119,6 +119,21 @@
     return normalizedHeaders;
   }
 
+  function buildGatewayRealtimeUrl(baseUrl = '', pathname = '/ws') {
+    const normalizedPath = `/${String(pathname || '/ws').replace(/^\/+/, '')}`;
+
+    try {
+      const parsedBaseUrl = new URL(String(baseUrl || '').trim());
+      parsedBaseUrl.protocol = parsedBaseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      parsedBaseUrl.pathname = normalizedPath;
+      parsedBaseUrl.search = '';
+      parsedBaseUrl.hash = '';
+      return parsedBaseUrl.toString();
+    } catch (_error) {
+      return normalizedPath;
+    }
+  }
+
   function splitSSEFrames(buffer = '') {
     const normalizedBuffer = String(buffer || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const frames = normalizedBuffer.split('\n\n');
@@ -882,6 +897,7 @@
     DEFAULT_GATEWAY_AUTH_TOKEN,
     DEFAULT_CODEX_MODEL_ID,
     DEFAULT_CODEX_MODEL_IDS,
+    buildGatewayRealtimeUrl,
     TERMINAL_FINISH_REASONS,
     buildGatewayHeaders,
     extractAssistantMetadata,

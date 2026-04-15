@@ -331,6 +331,9 @@ class ChatApp {
         this.editingWorkload = null;
         this.workloadSocket = null;
         this.workloadSocketReconnectTimer = null;
+        this.pendingWorkloadSessionId = null;
+        this.workloadSocketReconnectDelayMs = 1500;
+        this.workloadSocketMaxReconnectDelayMs = 15000;
         this.backgroundWorkloadStatusHideTimer = null;
         this.subscribedWorkloadSessionId = null;
         this.isRefreshingSessionSummaries = false;
@@ -387,11 +390,9 @@ class ChatApp {
 
         uiHelpers.ttsManager?.addEventListener('statechange', () => this.updateAudioControls());
         uiHelpers.ttsManager?.addEventListener('configchange', () => this.updateAudioControls());
-        
+
         // Load sessions
         await this.loadSessions();
-
-        this.connectWorkloadSocket();
         
         // Initialize Lucide icons
         uiHelpers.reinitializeIcons();
@@ -1966,23 +1967,45 @@ class ChatApp {
             return;
         }
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        const wsUrl = typeof apiClient?.getRealtimeSocketUrl === 'function'
+            ? apiClient.getRealtimeSocketUrl('/ws')
+            : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
         this.workloadSocket = new WebSocket(wsUrl);
 
         this.workloadSocket.addEventListener('open', () => {
-            this.subscribeToSessionUpdates(sessionManager.currentSessionId);
+            this.workloadSocketReconnectDelayMs = 1500;
+            this.subscribeToSessionUpdates(this.pendingWorkloadSessionId || sessionManager.currentSessionId);
         });
         this.workloadSocket.addEventListener('message', (event) => {
             this.handleWorkloadSocketMessage(event.data);
         });
-        this.workloadSocket.addEventListener('close', () => {
+        this.workloadSocket.addEventListener('close', (event) => {
             this.workloadSocket = null;
             this.subscribedWorkloadSessionId = null;
             clearTimeout(this.workloadSocketReconnectTimer);
+            const currentBackendSessionId = sessionManager.currentSessionId && !sessionManager.isLocalSession?.(sessionManager.currentSessionId)
+                ? sessionManager.currentSessionId
+                : null;
+            const closeCode = Number(event?.code) || 0;
+            const shouldRetry = navigator.onLine !== false
+                && ![4401, 4403, 1008].includes(closeCode)
+                && Boolean(this.pendingWorkloadSessionId || currentBackendSessionId);
+
+            if (!shouldRetry) {
+                if ([4401, 4403, 1008].includes(closeCode)) {
+                    console.warn(`Workload socket closed with auth/policy code ${closeCode}; live workload updates are disabled until the page reconnects.`);
+                }
+                return;
+            }
+
+            const reconnectDelay = this.workloadSocketReconnectDelayMs;
             this.workloadSocketReconnectTimer = setTimeout(() => {
                 this.connectWorkloadSocket();
-            }, 3000);
+            }, reconnectDelay);
+            this.workloadSocketReconnectDelayMs = Math.min(
+                this.workloadSocketReconnectDelayMs * 2,
+                this.workloadSocketMaxReconnectDelayMs,
+            );
         });
         this.workloadSocket.addEventListener('error', (error) => {
             console.warn('Workload socket error:', error);
@@ -1990,11 +2013,36 @@ class ChatApp {
     }
 
     subscribeToSessionUpdates(sessionId) {
-        if (!this.workloadSocket || this.workloadSocket.readyState !== WebSocket.OPEN) {
+        const normalizedSessionId = sessionId && !sessionManager.isLocalSession?.(sessionId)
+            ? sessionId
+            : null;
+        this.pendingWorkloadSessionId = normalizedSessionId;
+
+        if (!normalizedSessionId && this.subscribedWorkloadSessionId && this.workloadSocket?.readyState === WebSocket.OPEN) {
+            this.workloadSocket.send(JSON.stringify({
+                type: 'session_unsubscribe',
+                sessionId: this.subscribedWorkloadSessionId,
+                payload: { sessionId: this.subscribedWorkloadSessionId },
+            }));
+            this.subscribedWorkloadSessionId = null;
             return;
         }
 
-        if (this.subscribedWorkloadSessionId && this.subscribedWorkloadSessionId !== sessionId) {
+        if (!normalizedSessionId) {
+            this.subscribedWorkloadSessionId = null;
+            return;
+        }
+
+        if (!this.workloadSocket || this.workloadSocket.readyState === WebSocket.CLOSED) {
+            this.connectWorkloadSocket();
+            return;
+        }
+
+        if (this.workloadSocket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        if (this.subscribedWorkloadSessionId && this.subscribedWorkloadSessionId !== normalizedSessionId) {
             this.workloadSocket.send(JSON.stringify({
                 type: 'session_unsubscribe',
                 sessionId: this.subscribedWorkloadSessionId,
@@ -2002,15 +2050,15 @@ class ChatApp {
             }));
         }
 
-        this.subscribedWorkloadSessionId = sessionId || null;
-        if (!sessionId) {
+        if (this.subscribedWorkloadSessionId === normalizedSessionId) {
             return;
         }
 
+        this.subscribedWorkloadSessionId = normalizedSessionId;
         this.workloadSocket.send(JSON.stringify({
             type: 'session_subscribe',
-            sessionId,
-            payload: { sessionId },
+            sessionId: normalizedSessionId,
+            payload: { sessionId: normalizedSessionId },
         }));
     }
 

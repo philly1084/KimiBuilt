@@ -20,6 +20,21 @@ const REMOTE_BUILD_AUTONOMY_STORAGE_KEY = 'kimibuilt_remote_build_autonomy';
 const gatewayStreamHelpers = window.KimiBuiltGatewaySSE || {};
 const DEFAULT_CHAT_MODEL = gatewayStreamHelpers.DEFAULT_CODEX_MODEL_ID || 'gpt-5.4-mini';
 const buildGatewayHeaders = gatewayStreamHelpers.buildGatewayHeaders || ((headers) => headers);
+const buildGatewayRealtimeUrl = gatewayStreamHelpers.buildGatewayRealtimeUrl
+    || ((baseUrl, pathname = '/ws') => {
+        const normalizedPath = `/${String(pathname || '/ws').replace(/^\/+/, '')}`;
+
+        try {
+            const parsedBaseUrl = new URL(String(baseUrl || '').trim());
+            parsedBaseUrl.protocol = parsedBaseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+            parsedBaseUrl.pathname = normalizedPath;
+            parsedBaseUrl.search = '';
+            parsedBaseUrl.hash = '';
+            return parsedBaseUrl.toString();
+        } catch (_error) {
+            return normalizedPath;
+        }
+    });
 const resolvePreferredChatModelForWebChat = gatewayStreamHelpers.resolvePreferredChatModel
     || ((models, preferredModel = '', fallbackModel = DEFAULT_CHAT_MODEL) => {
         const availableModels = Array.isArray(models) ? models : [];
@@ -1938,6 +1953,10 @@ class OpenAIAPIClient extends EventTarget {
 
     getSessionId() {
         return this.currentSessionId;
+    }
+
+    getRealtimeSocketUrl(pathname = '/ws') {
+        return buildGatewayRealtimeUrl(BASE_URL_WITHOUT_API, pathname);
     }
 }
 
