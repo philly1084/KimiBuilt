@@ -21,6 +21,9 @@ Useful optional inputs:
 - `tone`
 - `hostAName`, `hostBName`
 - `hostAVoiceId`, `hostBVoiceId`
+- `hostAVoiceIds`, `hostBVoiceIds` (ordered lists to cycle voices)
+- `cycleHostVoices` (default: true)
+- `enhanceSpeech` (`true` by default, use `true` when you want ffmpeg mastering)
 - `hostAPersona`, `hostBPersona`
 - `sourceUrls`
 - `searchDomains`
@@ -38,3 +41,5 @@ Notes:
 - Podcast renders prefer the most natural bundled voices first and default to a light ffmpeg mastering pass for cleaner loudness and tone.
 - Long-form episodes use podcast-specific Piper chunking and timeout controls; override them with `ttsChunkMaxChars` or `ttsTimeoutMs` if a machine is unusually slow.
 - MP3 export and intro/outro/music-bed mixing require ffmpeg audio processing to be configured.
+- Check `/api/tts/voices` for the exact `hostA` / `hostB` voice IDs supported in your current deployment before passing custom `hostAVoiceIds` and `hostBVoiceIds`.
+- Example: `hostAVoiceIds: ["amy-expressive", "amy-medium", "hfc-female-rich"]` and `hostBVoiceIds: ["kathleen-low", "hfc-female-medium", "amy-expressive"]` lets the same host cycle through multiple Piper voices per turn.

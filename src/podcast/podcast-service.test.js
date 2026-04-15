@@ -14,7 +14,10 @@ jest.mock('../tts/piper-tts-service', () => ({
       defaultVoiceId: 'hfc-female-rich',
       voices: [
         { id: 'hfc-female-rich', label: 'HFC Rich', provider: 'piper' },
+        { id: 'hfc-female-medium', label: 'HFC Warm', provider: 'piper' },
+        { id: 'kathleen-low', label: 'Kathleen Gentle', provider: 'piper' },
         { id: 'amy-expressive', label: 'Amy Expressive', provider: 'piper' },
+        { id: 'amy-medium', label: 'Amy Medium', provider: 'piper' },
       ],
     })),
     synthesize: jest.fn(),
@@ -256,6 +259,155 @@ describe('PodcastService', () => {
     }));
     expect(piperTtsService.synthesize.mock.calls[1][0].text.length).toBeLessThan(longTurn.length);
     expect(piperTtsService.synthesize.mock.calls[2][0].text.length).toBeLessThan(longTurn.length);
+  });
+
+  test('cycles host voices across repeated turns from the same speaker', async () => {
+    const service = new PodcastService();
+    const result = await service.synthesizeTurns(
+      [
+        { speaker: 'Maya', text: 'This is the first Maya line.' },
+        { speaker: 'Maya', text: 'This is the second Maya line.' },
+        { speaker: 'Maya', text: 'This is the third Maya line.' },
+      ],
+      [{
+        name: 'Maya',
+        voiceId: 'hfc-female-rich',
+        voiceIds: ['hfc-female-rich', 'amy-expressive'],
+      }],
+      {
+        silenceMs: 250,
+        chunkMaxChars: 1600,
+      },
+    );
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(piperTtsService.synthesize).toHaveBeenCalledTimes(3);
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'amy-expressive',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+    }));
+  });
+
+  test('applies per-host voice cycling for both hosts through createPodcast turn planning', async () => {
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Dual host podcast', url: 'https://example.com/podcast', snippet: 'Podcast style examples.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<p>Reliable examples make a better show.</p>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    createResponse.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        title: 'Pet Behavior and Boundaries',
+        summary: 'A practical dialogue on coexistence.',
+        turns: [
+          { speaker: 'Maya', text: 'Let us start with the high-level principle first.' },
+          { speaker: 'June', text: 'That principle is useful when stress is the trigger.' },
+          { speaker: 'Maya', text: 'Second, pace and routines usually help most.' },
+          { speaker: 'June', text: 'And structure makes escalation less likely.' },
+        ],
+      }),
+    });
+
+    const service = new PodcastService();
+    await service.createPodcast({
+      topic: 'How to reduce stress in multi-pet homes',
+      cycleHostVoices: true,
+      hostAVoiceIds: ['hfc-female-rich', 'amy-expressive', 'amy-medium'],
+      hostBVoiceIds: ['kathleen-low', 'hfc-female-medium', 'hfc-female-rich'],
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'kathleen-low',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      voiceId: 'amy-expressive',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      voiceId: 'hfc-female-medium',
+    }));
+  });
+
+  test('keeps one voice per host when cycleHostVoices is disabled', async () => {
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Pet behavior guide', url: 'https://example.com/pets', snippet: 'Behavior conflicts can be managed.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<p>Resource control and routines reduce dog-cat escalation.</p>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const service = new PodcastService();
+    await service.createPodcast({
+      topic: 'cats and dogs fighting in the house',
+      cycleHostVoices: false,
+      hostAVoiceIds: ['hfc-female-rich', 'amy-expressive'],
+      hostBVoiceIds: ['kathleen-low', 'hfc-female-medium'],
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      voiceId: 'kathleen-low',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      voiceId: 'hfc-female-rich',
+    }));
+    expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      voiceId: 'kathleen-low',
+    }));
   });
 
   test('retries transient script-generation connection failures before succeeding', async () => {

@@ -12,22 +12,48 @@ const DEFAULT_MAX_SOURCES = 4;
 const DEFAULT_SILENCE_MS = 325;
 const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
 const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
+const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
+  'amy-expressive',
+  'amy-medium',
+  'hfc-female-rich',
+  'hfc-female-medium',
+  'kathleen-low',
+]);
 const DEFAULT_HOSTS = Object.freeze([
   {
     key: 'hostA',
     name: 'Maya',
     role: 'Lead host',
     persona: 'Warm, curious, and good at guiding the listener through the big picture.',
-    preferredVoiceIds: ['hfc-female-rich', 'amy-medium', 'hfc-female-medium', 'kathleen-low'],
+    preferredVoiceIds: ['amy-expressive', 'hfc-female-rich', 'kathleen-low', 'amy-medium'],
   },
   {
     key: 'hostB',
     name: 'June',
     role: 'Co-host',
     persona: 'Sharper, more analytical, and slightly playful when unpacking details and tradeoffs.',
-    preferredVoiceIds: ['amy-medium', 'amy-expressive', 'hfc-female-medium', 'kathleen-low'],
+    preferredVoiceIds: ['hfc-female-medium', 'amy-medium', 'hfc-female-rich', 'kathleen-low'],
   },
 ]);
+
+function resolveHighQualityVoicePool(availableVoiceIds = new Set(), preferredVoiceIds = []) {
+  const preferred = uniqueOrdered(preferredVoiceIds)
+    .filter((voiceId) => availableVoiceIds.has(voiceId));
+
+  if (preferred.length > 0) {
+    return preferred;
+  }
+
+  const curated = uniqueOrdered(
+    PODCAST_HIGH_QUALITY_VOICE_IDS.filter((voiceId) => availableVoiceIds.has(voiceId)),
+  );
+
+  if (curated.length > 0) {
+    return curated;
+  }
+
+  return uniqueOrdered(Array.from(availableVoiceIds));
+}
 
 function clampNumber(value, min, max, fallback) {
   const numeric = Number(value);
@@ -61,6 +87,64 @@ function stripUnpairedSurrogates(value = '') {
   }
 
   return output;
+}
+
+function normalizeStringList(value = []) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function uniqueOrdered(items = []) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .filter((value) => {
+      const id = String(value || '').trim();
+      if (!id || seen.has(id)) {
+        return false;
+      }
+
+      seen.add(id);
+      return true;
+    });
+}
+
+function buildHostVoicePool(availableVoices = [], preferredVoiceIds = [], explicitVoiceIds = [], forcedVoiceId = '') {
+  const availableVoiceIds = new Set(
+    (Array.isArray(availableVoices) ? availableVoices : [])
+      .map((voice) => String(voice.id || '').trim())
+      .filter(Boolean),
+  );
+  if (availableVoiceIds.size === 0) {
+    return [];
+  }
+
+  const forced = String(forcedVoiceId || '').trim();
+  const preferred = uniqueOrdered(preferredVoiceIds);
+  const explicit = uniqueOrdered(normalizeStringList(explicitVoiceIds));
+  const requested = uniqueOrdered([
+    forced,
+    ...explicit,
+    ...preferred,
+  ]).filter(Boolean);
+
+  const validRequested = requested.filter((voiceId) => availableVoiceIds.has(voiceId));
+  if (validRequested.length > 0) {
+    return validRequested;
+  }
+
+  return resolveHighQualityVoicePool(availableVoiceIds, preferredVoiceIds);
 }
 
 function sanitizePodcastText(value = '', { preserveNewlines = false } = {}) {
@@ -210,25 +294,65 @@ function normalizeTurn(turn = {}, allowedSpeakers = new Set()) {
   return { speaker, text };
 }
 
-function resolveVoiceId(preferredVoiceIds = [], availableVoices = [], usedVoiceIds = new Set()) {
-  const voices = Array.isArray(availableVoices) ? availableVoices : [];
-  const firstUnusedPreferred = preferredVoiceIds.find((voiceId) => voices.some((voice) => voice.id === voiceId) && !usedVoiceIds.has(voiceId));
-  if (firstUnusedPreferred) {
-    usedVoiceIds.add(firstUnusedPreferred);
-    return firstUnusedPreferred;
+function pickPrimaryHostVoice(voiceIds = [], usedVoiceIds = new Set()) {
+  const candidates = uniqueOrdered(
+    (Array.isArray(voiceIds) ? voiceIds : [])
+      .map((voiceId) => String(voiceId || '').trim())
+      .filter(Boolean),
+  );
+
+  if (candidates.length === 0) {
+    return '';
   }
 
-  const firstUnused = voices.find((voice) => !usedVoiceIds.has(voice.id));
-  if (firstUnused?.id) {
-    usedVoiceIds.add(firstUnused.id);
-    return firstUnused.id;
+  const firstUnused = candidates.find((voiceId) => !usedVoiceIds.has(voiceId));
+  const selected = firstUnused || candidates[0];
+  usedVoiceIds.add(selected);
+  return selected;
+}
+
+function resolveHostVoiceForTurn(host = {}, turnIndex = 0, cycleHostVoices = true) {
+  const voicePool = uniqueOrdered(
+    [...(Array.isArray(host?.voiceIds) ? host.voiceIds : []), host?.voiceId]
+      .map((voiceId) => String(voiceId || '').trim())
+      .filter(Boolean),
+  );
+
+  if (!cycleHostVoices || voicePool.length <= 1) {
+    return voicePool[0] || '';
   }
 
-  const fallback = voices[0]?.id || '';
-  if (fallback) {
-    usedVoiceIds.add(fallback);
+  return voicePool[turnIndex % voicePool.length];
+}
+
+function resolveTurnVoicePlan(turns = [], hosts = [], options = {}) {
+  const cycleHostVoices = options?.cycleHostVoices !== false;
+  const hostByName = new Map((Array.isArray(hosts) ? hosts : []).map((host) => [host.name, host]));
+  const hostTurnCounts = new Map();
+  const turnPlans = [];
+
+  for (const turn of Array.isArray(turns) ? turns : []) {
+    const host = hostByName.get(turn.speaker);
+    if (!host) {
+      throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
+    }
+
+    const turnIndex = Number(hostTurnCounts.get(turn.speaker) || 0);
+    const requestedTurnVoiceId = String(turn?.voiceId || '').trim();
+    const voiceId = requestedTurnVoiceId || resolveHostVoiceForTurn(host, turnIndex, cycleHostVoices);
+    hostTurnCounts.set(turn.speaker, turnIndex + 1);
+
+    turnPlans.push({
+      speaker: turn.speaker,
+      text: turn.text,
+      voiceId,
+      host,
+    });
   }
-  return fallback;
+
+  return {
+    plans: turnPlans,
+  };
 }
 
 function resolveHosts(params = {}, voiceConfig = {}) {
@@ -238,19 +362,35 @@ function resolveHosts(params = {}, voiceConfig = {}) {
   return DEFAULT_HOSTS.map((defaultHost, index) => {
     const suffix = index === 0 ? 'A' : 'B';
     const providedVoiceId = String(params[`host${suffix}VoiceId`] || '').trim();
-    const voiceId = providedVoiceId
-      || resolveVoiceId(defaultHost.preferredVoiceIds, availableVoices, usedVoiceIds)
-      || voiceConfig?.defaultVoiceId
-      || '';
+    const requestedVoiceIds = normalizeStringList(params[`host${suffix}VoiceIds`]);
+    const voiceIds = buildHostVoicePool(
+      availableVoices,
+      defaultHost.preferredVoiceIds,
+      requestedVoiceIds,
+      providedVoiceId,
+    );
 
-    if (voiceId) {
-      usedVoiceIds.add(voiceId);
-    }
+    const fallbackVoiceId = !providedVoiceId && voiceConfig?.defaultVoiceId
+      ? String(voiceConfig.defaultVoiceId || '').trim()
+      : providedVoiceId;
+    const normalizedFallbackVoiceId = String(fallbackVoiceId || '').trim();
+    const configuredVoiceIds = uniqueOrdered([
+      ...voiceIds,
+      normalizedFallbackVoiceId,
+    ]).filter(Boolean);
+    const voiceId = pickPrimaryHostVoice(configuredVoiceIds, usedVoiceIds);
+
+    const fullVoicePool = uniqueOrdered(
+      [voiceId, ...configuredVoiceIds]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean),
+    );
 
     return {
       name: sanitizePodcastText(params[`host${suffix}Name`] || defaultHost.name) || defaultHost.name,
       role: sanitizePodcastText(params[`host${suffix}Role`] || defaultHost.role) || defaultHost.role,
       persona: sanitizePodcastText(params[`host${suffix}Persona`] || defaultHost.persona) || defaultHost.persona,
+      voiceIds: fullVoicePool,
       voiceId,
     };
   });
@@ -563,13 +703,18 @@ class PodcastService {
 
     for (const turn of turns) {
       const host = hostByName.get(turn.speaker);
-      if (!host?.voiceId) {
+      const turnVoiceId = String(turn?.voiceId || '').trim();
+      if (!(host?.voiceId || turnVoiceId)) {
         throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
       }
 
+      const hostForTurn = {
+        ...(host || {}),
+        voiceId: turnVoiceId || host.voiceId,
+      };
       const chunks = chunkText(turn.text, chunkMaxChars);
       for (const chunk of chunks) {
-        const syntheses = await this.synthesizeChunkBuffer(chunk, host, {
+        const syntheses = await this.synthesizeChunkBuffer(chunk, hostForTurn, {
           ttsTimeoutMs: options.ttsTimeoutMs,
           minimumChunkChars,
         });
@@ -640,6 +785,9 @@ class PodcastService {
       model: params.model || context.model || undefined,
       reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
     });
+    const turnVoicePlan = resolveTurnVoicePlan(script.turns, hosts, {
+      cycleHostVoices: params.cycleHostVoices !== false,
+    });
     const transcript = buildTranscript(script.turns);
     const wantsMp3 = prefersMp3(params);
     const wantsMixing = requestedMixing(params);
@@ -652,7 +800,7 @@ class PodcastService {
     });
 
     const speechWavBuffer = await this.synthesizeTurns(
-      script.turns,
+      turnVoicePlan.plans,
       hosts,
       {
         silenceMs: clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
@@ -703,6 +851,10 @@ class PodcastService {
         durationMinutes,
         audience,
         tone,
+        turnVoices: turnVoicePlan.plans.map((turn) => ({
+          speaker: turn.speaker,
+          voiceId: turn.voiceId,
+        })),
         hosts,
         sources,
         summary: script.summary,
@@ -755,6 +907,10 @@ class PodcastService {
           durationMinutes,
           audience,
           tone,
+          turnVoices: turnVoicePlan.plans.map((turn) => ({
+            speaker: turn.speaker,
+            voiceId: turn.voiceId,
+          })),
           hosts,
           sources,
           summary: script.summary,

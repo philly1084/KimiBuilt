@@ -2478,10 +2478,19 @@ class ToolManager {
             hostARole: { type: 'string' },
             hostAPersona: { type: 'string' },
             hostAVoiceId: { type: 'string' },
+            hostAVoiceIds: {
+              type: 'array',
+              items: { type: 'string' },
+            },
             hostBName: { type: 'string' },
             hostBRole: { type: 'string' },
             hostBPersona: { type: 'string' },
             hostBVoiceId: { type: 'string' },
+            hostBVoiceIds: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            cycleHostVoices: { type: 'boolean' },
             sourceUrls: {
               type: 'array',
               items: { type: 'string' },
