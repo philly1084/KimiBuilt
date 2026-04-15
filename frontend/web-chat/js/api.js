@@ -767,6 +767,43 @@ class OpenAIAPIClient extends EventTarget {
             return detailedMessage;
         }
 
+        const asString = (value) => {
+            if (typeof value === 'string') {
+                return value.trim();
+            }
+            if (value && typeof value === 'object' && typeof value.message === 'string') {
+                return value.message.trim();
+            }
+            return '';
+        };
+
+        const rawErrorMessage = asString(error?.message)
+            || asString(error?.cause?.message)
+            || '';
+        const responseErrorMessage = asString(error?.details?.error)
+            || asString(error?.response?.error)
+            || asString(error?.response?.error?.message)
+            || asString(error?.details?.message)
+            || asString(error?.error)
+            || asString(error?.response?.message)
+            || rawErrorMessage;
+        const knownConnectionFailure = [
+            'ECONNREFUSED',
+            'ECONNRESET',
+            'EPIPE',
+            'ETIMEDOUT',
+            'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+            'ENOTFOUND',
+        ].some((token) => rawErrorMessage.toUpperCase().includes(token) || responseErrorMessage.toUpperCase().includes(token));
+
+        if (responseErrorMessage) {
+            return responseErrorMessage;
+        }
+
+        if (knownConnectionFailure) {
+            return rawErrorMessage;
+        }
+
         // Handle specific HTTP status codes
         if (response?.status === 400) {
             return 'Invalid request. Please check your message format and try again.';
@@ -792,10 +829,14 @@ class OpenAIAPIClient extends EventTarget {
             return 'Request was cancelled.';
         }
         if (error.name === 'TypeError' || error.message?.includes('fetch')) {
-            return 'Network error. Please check your connection and try again.';
+            return rawErrorMessage || 'Network error. Please check your connection and try again.';
+        }
+
+        if (rawErrorMessage) {
+            return rawErrorMessage;
         }
         
-        return error.message || 'An unexpected error occurred';
+        return 'An unexpected error occurred';
     }
 
     // ============================================

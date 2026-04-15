@@ -8,6 +8,7 @@ const AMBIENT_REASONING_ROTATE_MIN_MS = 20000;
 const AMBIENT_REASONING_ROTATE_MAX_MS = 30000;
 const AMBIENT_REASONING_TYPE_TICK_MS = 120;
 const AMBIENT_REASONING_IDLE_THRESHOLD_MS = 20000;
+const WEB_CHAT_QUEUE_MAX_SIZE = 3;
 const AMBIENT_REASONING_STARTS = [
     'Just milking the moose',
     'Running with a fowl',
@@ -310,6 +311,8 @@ class ChatApp {
         // Track if we're generating an image
         this.isGeneratingImage = false;
         this.currentImageMessageId = null;
+        this.messageQueue = [];
+        this.isProcessingQueue = false;
         
         // Track retry state
         this.retryAttempt = 0;
@@ -2409,7 +2412,7 @@ class ChatApp {
     async sendMessage() {
         const content = this.messageInput.value.trim();
         
-        if (!content || this.isProcessing) return;
+        if (!content) return;
 
         if (await this.tryHandleToolCommand(content)) {
             this.messageInput.value = '';
@@ -2433,12 +2436,21 @@ class ChatApp {
         this.updateSendButton();
         uiHelpers.updateCharCounter(this.messageInput, this.charCounter);
 
+        if (this.isProcessing || this.messageQueue.length >= WEB_CHAT_QUEUE_MAX_SIZE) {
+            this.enqueueMessage(content);
+            return;
+        }
+
         await this.sendPreparedMessage(content);
     }
 
-    async sendPreparedMessage(content) {
+    async sendPreparedMessage(content, options = {}) {
+        const shouldReuseUserMessage = options.reuseUserMessage === true
+            && options.userMessage
+            && String(options.userMessage.id || '').trim()
+            && String(options.userMessage.role || '').trim() === 'user';
         const normalizedContent = String(content || '').trim();
-        if (!normalizedContent || this.isProcessing) {
+        if (!normalizedContent) {
             return false;
         }
 
@@ -2457,18 +2469,26 @@ class ChatApp {
         uiHelpers.hideWelcomeMessage();
 
         // Add user message
-        const userMessage = {
-            role: 'user',
-            content: normalizedContent,
-            timestamp: new Date().toISOString()
-        };
+        const userMessage = shouldReuseUserMessage
+            ? options.userMessage
+            : {
+                role: 'user',
+                content: normalizedContent,
+                timestamp: new Date().toISOString(),
+            };
+        const storedUserMessage = shouldReuseUserMessage
+            ? {
+                ...userMessage,
+                content: normalizedContent,
+            }
+            : sessionManager.addMessage(sessionId, userMessage);
 
-        const storedUserMessage = sessionManager.addMessage(sessionId, userMessage);
-
-        const userMessageEl = uiHelpers.renderMessage(storedUserMessage);
-        this.messagesContainer.appendChild(userMessageEl);
-        uiHelpers.playAcknowledgementCue();
-        uiHelpers.scrollToBottom();
+        if (!shouldReuseUserMessage) {
+            const userMessageEl = uiHelpers.renderMessage(storedUserMessage);
+            this.messagesContainer.appendChild(userMessageEl);
+            uiHelpers.playAcknowledgementCue();
+            uiHelpers.scrollToBottom();
+        }
 
         // Show typing indicator
         this.isProcessing = true;
@@ -2601,10 +2621,76 @@ class ChatApp {
             return !streamFailed;
         } catch (error) {
             console.error('Chat error:', error);
-            this.handleError(error.message || 'Failed to get response');
+            this.handleError(error.message || 'Failed to get response', error?.status);
             return false;
         } finally {
             this.currentAbortController = null;
+        }
+    }
+
+    clearCurrentStreamingMessage() {
+        const sessionId = sessionManager.currentSessionId;
+        const streamingMessageId = this.currentStreamingMessageId;
+        if (!streamingMessageId || !sessionId) {
+            return false;
+        }
+
+        const removedElement = document.getElementById(streamingMessageId);
+        if (removedElement) {
+            removedElement.remove();
+        }
+
+        const messages = sessionManager.getMessages(sessionId);
+        const messageIndex = messages.findIndex((message) => message.id === streamingMessageId);
+        if (messageIndex === -1) {
+            return false;
+        }
+
+        const removedMessage = messages[messageIndex];
+        messages.splice(messageIndex, 1);
+        sessionManager.saveToStorage();
+        return removedMessage;
+    }
+
+    enqueueMessage(content) {
+        const normalizedContent = String(content || '').trim();
+        if (!normalizedContent) {
+            return false;
+        }
+
+        if (this.messageQueue.length >= WEB_CHAT_QUEUE_MAX_SIZE) {
+            uiHelpers.showToast(`You can queue up to ${WEB_CHAT_QUEUE_MAX_SIZE} messages.`, 'warning');
+            return false;
+        }
+
+        this.messageQueue.push({
+            content: normalizedContent,
+            queuedAt: Date.now(),
+        });
+        this.updateSendButton();
+        uiHelpers.showToast(`Message queued (${this.messageQueue.length}/${WEB_CHAT_QUEUE_MAX_SIZE})`, 'info');
+        return true;
+    }
+
+    async processMessageQueue() {
+        if (this.isProcessingQueue || this.messageQueue.length === 0) {
+            return;
+        }
+
+        this.isProcessingQueue = true;
+
+        try {
+            while (!this.isProcessing && this.messageQueue.length > 0) {
+                const next = this.messageQueue.shift();
+                if (!next?.content) {
+                    continue;
+                }
+                uiHelpers.showToast('Processing queued message.', 'info');
+                await this.sendPreparedMessage(next.content);
+            }
+        } finally {
+            this.isProcessingQueue = false;
+            this.updateSendButton();
         }
     }
 
@@ -5051,6 +5137,7 @@ class ChatApp {
         // Update session info (timestamp changed)
         this.updateSessionInfo();
         uiHelpers.renderSessionsList(sessionManager.sessions, sessionManager.currentSessionId);
+        void this.processMessageQueue();
     }
 
     handleError(message, status = null) {
@@ -5172,6 +5259,7 @@ class ChatApp {
         }
         
         uiHelpers.showToast(displayMessage, 'error', errorTitle);
+        void this.processMessageQueue();
     }
     
     retryLastRequest() {
@@ -5180,15 +5268,31 @@ class ChatApp {
         const sessionId = sessionManager.currentSessionId;
         const messages = sessionManager.getMessages(sessionId);
         const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+
+        if (this.currentAbortController) {
+            this.currentAbortController.abort();
+            this.currentAbortController = null;
+        }
+
+        this.isProcessing = false;
+        this.liveResponseState = {
+            phase: 'idle',
+            detail: '',
+            reasoningSummary: '',
+            hasRealReasoning: false,
+        };
+        this.clearLiveIndicatorTimer();
+        this.resetAmbientReasoningState();
+        uiHelpers.hideTypingIndicator();
+        this.clearCurrentStreamingMessage();
+        this.updateSendButton();
         
         if (lastUserMessage) {
-            // Remove the incomplete assistant message if exists
-            if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-                messages.pop();
-            }
-            
             // Retry sending
-            this.sendMessage();
+            this.sendPreparedMessage(lastUserMessage.content, {
+                reuseUserMessage: true,
+                userMessage: lastUserMessage,
+            });
         } else {
             // Can't retry - show error
             this.handleError('Could not retry request', null);
@@ -5227,6 +5331,7 @@ class ChatApp {
             hasRealReasoning: false,
         };
         this.updateSendButton();
+        void this.processMessageQueue();
     }
 
     async regenerateResponse(messageId) {
@@ -5371,7 +5476,7 @@ class ChatApp {
             }
         } catch (error) {
             console.error('Regenerate error:', error);
-            this.handleError(error.message || 'Failed to regenerate response');
+            this.handleError(error.message || 'Failed to regenerate response', error?.status);
         } finally {
             this.currentAbortController = null;
         }
@@ -5763,7 +5868,8 @@ class ChatApp {
 
     updateSendButton() {
         const hasContent = this.messageInput?.value?.trim()?.length > 0;
-        const canSend = hasContent && !this.isProcessing && !this.isGeneratingImage;
+        const canQueue = this.messageQueue.length < WEB_CHAT_QUEUE_MAX_SIZE;
+        const canSend = hasContent && canQueue && !this.isGeneratingImage;
         
         if (this.sendBtn) {
             this.sendBtn.disabled = !canSend;
@@ -6233,6 +6339,7 @@ class ChatApp {
                 this.resetAmbientReasoningState();
                 this.updateSendButton();
                 this.scheduleLiveIndicatorHide();
+                void this.processMessageQueue();
                 return;
             }
 
@@ -6363,6 +6470,7 @@ class ChatApp {
         this.updateSendButton();
         uiHelpers.hideTypingIndicator();
         uiHelpers.showToast('Connection was restored, but the latest reply could not be synced. Retry if needed.', 'warning', 'Sync incomplete');
+        void this.processMessageQueue();
     }
 
     handleInterruptedStreamResync(chunk = {}) {
