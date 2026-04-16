@@ -111,6 +111,37 @@ describe('/api/podcast', () => {
     }));
   });
 
+  test('accepts prompt as a topic alias for podcast generation', async () => {
+    podcastService.createPodcast.mockResolvedValue({
+      title: 'Battery Breakdown',
+      audio: { artifactId: 'artifact-podcast-1' },
+      artifacts: [],
+      artifactIds: [],
+      script: { turns: [] },
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.user = { username: 'phill' };
+      next();
+    });
+    app.locals.toolManager = { executeTool: jest.fn() };
+    app.use('/api/podcast', podcastRouter);
+
+    const response = await request(app)
+      .post('/api/podcast/generate')
+      .send({
+        prompt: 'How batteries work',
+      });
+
+    expect(response.status).toBe(200);
+    expect(podcastService.createPodcast).toHaveBeenCalledWith(expect.objectContaining({
+      topic: 'How batteries work',
+      prompt: 'How batteries work',
+    }), expect.any(Object));
+  });
+
   test('maps known podcast errors to JSON responses', async () => {
     const error = new Error('ffmpeg is unavailable.');
     error.statusCode = 503;

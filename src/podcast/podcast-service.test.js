@@ -160,6 +160,51 @@ describe('PodcastService', () => {
     expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
   });
 
+  test('falls back to provided source urls when web search is unavailable', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: false,
+          error: 'Search is temporarily unavailable.',
+          errorCode: 'web_search_unavailable',
+          statusCode: 400,
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Battery storage shifts energy from low-demand periods to high-demand periods.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+      sourceUrls: ['https://example.com/seed-source'],
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      toolManager: { executeTool },
+    });
+
+    expect(executeTool).toHaveBeenCalledWith('web-search', expect.any(Object), expect.any(Object));
+    expect(executeTool).toHaveBeenCalledWith('web-fetch', expect.objectContaining({
+      url: 'https://example.com/seed-source',
+    }), expect.any(Object));
+    expect(result.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url: 'https://example.com/seed-source',
+      }),
+    ]));
+  });
+
   test('exports mp3 and applies optional audio mixing when requested', async () => {
     persistGeneratedAudio
       .mockResolvedValueOnce({

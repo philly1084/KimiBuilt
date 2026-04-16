@@ -10,6 +10,7 @@ const DEFAULT_DURATION_MINUTES = 10;
 const DEFAULT_TARGET_WPM = 145;
 const DEFAULT_MAX_SOURCES = 4;
 const DEFAULT_SILENCE_MS = 325;
+const DEFAULT_MINIMUM_VALID_TURNS = 4;
 const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
 const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
@@ -225,6 +226,10 @@ function isTransientPodcastError(error = {}) {
   const message = String(error?.message || '').trim().toLowerCase();
   const code = String(error?.code || '').trim().toLowerCase();
   const statusCode = Number(error?.statusCode || error?.status || 0);
+
+  if (statusCode >= 400 && statusCode < 500 && statusCode !== 408 && statusCode !== 429) {
+    return false;
+  }
 
   if (statusCode >= 500 || statusCode === 408 || statusCode === 429) {
     return true;
@@ -534,18 +539,6 @@ class PodcastService {
       throw new Error('Podcast research requires tool execution support.');
     }
 
-    const searchData = await this.runTool(context.executeTool, 'web-search', {
-      query: `${topic} explainer key facts overview`,
-      engine: 'perplexity',
-      researchMode: 'search',
-      limit: Math.max(maxSources * 2, 6),
-      includeSnippets: true,
-      includeUrls: true,
-      domains: searchDomains,
-      region: 'us-en',
-      timeRange: 'all',
-    }, context.toolContext);
-
     const seededSources = (Array.isArray(sourceUrls) ? sourceUrls : [])
       .map((url) => ({
         title: url,
@@ -554,12 +547,37 @@ class PodcastService {
       }))
       .filter((entry) => entry.url);
 
+    let searchData = null;
+    let searchError = null;
+    try {
+      searchData = await this.runTool(context.executeTool, 'web-search', {
+        query: `${topic} explainer key facts overview`,
+        engine: 'perplexity',
+        researchMode: 'search',
+        limit: Math.max(maxSources * 2, 6),
+        includeSnippets: true,
+        includeUrls: true,
+        domains: searchDomains,
+        region: 'us-en',
+        timeRange: 'all',
+      }, context.toolContext);
+    } catch (error) {
+      searchError = error;
+      if (seededSources.length === 0) {
+        throw error;
+      }
+    }
+
     const candidates = uniqueUrls([
       ...seededSources,
       ...(Array.isArray(searchData?.verifiedPages) ? searchData.verifiedPages : []),
       ...(Array.isArray(searchData?.results) ? searchData.results : []),
       ...(Array.isArray(searchData?.citations) ? searchData.citations : []),
     ]).slice(0, maxSources);
+
+    if (candidates.length === 0) {
+      throw searchError || new Error('Podcast research did not return any usable sources.');
+    }
 
     const verifiedSources = [];
     for (const candidate of candidates) {
@@ -592,6 +610,9 @@ class PodcastService {
     }
 
     if (verifiedSources.length === 0) {
+      if (searchError) {
+        throw searchError;
+      }
       throw new Error('Podcast research did not return any usable sources.');
     }
 
@@ -631,8 +652,9 @@ class PodcastService {
     const turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
       .map((turn) => normalizeTurn(turn, allowedSpeakers))
       .filter(Boolean);
+    const representedSpeakers = new Set(turns.map((turn) => turn.speaker));
 
-    if (turns.length < 8) {
+    if (turns.length < DEFAULT_MINIMUM_VALID_TURNS || representedSpeakers.size < allowedSpeakers.size) {
       throw new Error('Podcast script generation returned too few valid turns.');
     }
 
@@ -686,6 +708,7 @@ class PodcastService {
   async synthesizeTurns(turns = [], hosts = [], options = {}) {
     const maxTextChars = Math.max(200, Number(this.ttsService?.getPublicConfig?.().maxTextChars) || 2400);
     const silenceMs = clampNumber(options.silenceMs, 100, 1200, DEFAULT_SILENCE_MS);
+    const cycleHostVoices = options?.cycleHostVoices !== false;
     const chunkMaxChars = clampNumber(
       options.chunkMaxChars,
       250,
@@ -699,18 +722,26 @@ class PodcastService {
       Math.max(350, Math.floor(chunkMaxChars / 2)),
     );
     const hostByName = new Map(hosts.map((host) => [host.name, host]));
+    const hostTurnCounts = new Map();
     const wavBuffers = [];
 
     for (const turn of turns) {
       const host = hostByName.get(turn.speaker);
       const turnVoiceId = String(turn?.voiceId || '').trim();
-      if (!(host?.voiceId || turnVoiceId)) {
+      const turnIndex = Number(hostTurnCounts.get(turn.speaker) || 0);
+      const resolvedVoiceId = turnVoiceId
+        || resolveHostVoiceForTurn(host, turnIndex, cycleHostVoices)
+        || host?.voiceId
+        || '';
+      hostTurnCounts.set(turn.speaker, turnIndex + 1);
+
+      if (!resolvedVoiceId) {
         throw new Error(`No Piper voice is configured for speaker "${turn.speaker}".`);
       }
 
       const hostForTurn = {
         ...(host || {}),
-        voiceId: turnVoiceId || host.voiceId,
+        voiceId: resolvedVoiceId,
       };
       const chunks = chunkText(turn.text, chunkMaxChars);
       for (const chunk of chunks) {
@@ -806,6 +837,7 @@ class PodcastService {
         silenceMs: clampNumber(params.pauseMs, 100, 1200, DEFAULT_SILENCE_MS),
         ttsTimeoutMs: podcastTtsTimeoutMs,
         chunkMaxChars: podcastChunkMaxChars,
+        cycleHostVoices: params.cycleHostVoices !== false,
       },
     );
     const finalAudioBuffer = (wantsMixing || wantsEnhancement)

@@ -42,6 +42,8 @@ describe('/api/canvas helpers', () => {
         expect(instructions).toContain('DEMO WEBSITE FRONTEND');
         expect(instructions).toContain('metadata.bundle');
         expect(instructions).toContain('metadata.handoff');
+        expect(instructions).toContain('<frontend_format_router>');
+        expect(instructions).toContain('documentation-site');
         expect(instructions).toContain('Existing demo');
     });
 
@@ -62,10 +64,10 @@ describe('/api/canvas helpers', () => {
             'document',
             '',
             'Create an executive brief',
-            '[Recursive template store]\n- Template 1: Executive Brief [executive-brief]',
+            '[Reference pattern library]\n- Executive Brief [executive-brief]',
         );
 
-        expect(instructions).toContain('[Recursive template store]');
+        expect(instructions).toContain('[Reference pattern library]');
         expect(instructions).toContain('Executive Brief [executive-brief]');
     });
 

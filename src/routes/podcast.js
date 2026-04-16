@@ -11,6 +11,8 @@ const router = Router();
 
 const generateSchema = {
   topic: { required: true, type: 'string' },
+  prompt: { required: false, type: 'string' },
+  subject: { required: false, type: 'string' },
   sessionId: { required: false, type: 'string' },
   durationMinutes: { required: false, type: 'number' },
   audience: { required: false, type: 'string' },
@@ -33,6 +35,21 @@ const generateSchema = {
   ttsTimeoutMs: { required: false, type: 'number' },
   ttsChunkMaxChars: { required: false, type: 'number' },
 };
+
+function normalizePodcastGenerateRequest(req, _res, next) {
+  if (!req.body || typeof req.body !== 'object') {
+    return next();
+  }
+
+  if (typeof req.body.topic !== 'string' || !req.body.topic.trim()) {
+    const fallbackTopic = String(req.body.prompt || req.body.subject || '').trim();
+    if (fallbackTopic) {
+      req.body.topic = fallbackTopic;
+    }
+  }
+
+  return next();
+}
 
 function getRequestOwnerId(req) {
   return String(req.user?.username || req.user?.id || '').trim() || null;
@@ -92,7 +109,7 @@ router.get('/runtime', (_req, res) => {
   });
 });
 
-router.post('/generate', validate(generateSchema), async (req, res, next) => {
+router.post('/generate', normalizePodcastGenerateRequest, validate(generateSchema), async (req, res, next) => {
   try {
     const toolManager = await ensureRuntimeToolManager(req.app);
     const sessionId = await resolvePodcastSessionId(req, req.body.sessionId);

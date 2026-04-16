@@ -173,7 +173,7 @@ describe('/api/documents route', () => {
     const app = buildApp(documentService);
     app.locals.templateStore = {
       buildPromptContext: jest.fn().mockReturnValue({
-        context: '[Recursive template store]\n- Template 1: Executive Brief [executive-brief]',
+        context: '[Reference pattern library]\n- Executive Brief [executive-brief]',
         matches: [{ id: 'executive-brief', name: 'Executive Brief' }],
       }),
       noteTemplateUse: jest.fn().mockResolvedValue(undefined),
@@ -189,7 +189,7 @@ describe('/api/documents route', () => {
     expect(documentService.aiGenerate).toHaveBeenCalledWith(
       'Write an executive brief for Q2 priorities',
       expect.objectContaining({
-        templateContext: expect.stringContaining('[Recursive template store]'),
+        templateContext: expect.stringContaining('[Reference pattern library]'),
       }),
     );
     expect(response.body.templateMatches).toEqual([

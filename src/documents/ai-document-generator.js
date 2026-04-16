@@ -154,6 +154,201 @@ const PRESENTATION_TEMPLATE_CATALOG = [
   },
 ];
 
+const DOCUMENT_FORMAT_CATALOG = [
+  {
+    id: 'briefing-memo',
+    label: 'Briefing Memo',
+    bestFor: 'Executive briefs, memos, board updates, one-page internal decision docs',
+    shape: 'Headline summary, fast signal blocks, recommendation, risk, and next step',
+    rules: [
+      'Lead with the decision, takeaway, or request as early as possible.',
+      'Keep section titles direct, operational, and specific to the request.',
+      'Favor short paragraphs, bullets, and evidence panels over long scene-setting copy.',
+    ],
+  },
+  {
+    id: 'report-brief',
+    label: 'Report / Analytical Brief',
+    bestFor: 'Reports, case studies, analytical summaries, data-backed explainers, findings documents',
+    shape: 'Topline takeaway, findings, evidence, interpretation, recommendation',
+    rules: [
+      'Show the takeaway before the supporting detail.',
+      'Pair evidence with interpretation instead of listing facts without meaning.',
+      'Use tables, stats, and charts only when they sharpen the analysis.',
+    ],
+  },
+  {
+    id: 'proposal-plan',
+    label: 'Proposal / Plan',
+    bestFor: 'Proposals, business cases, strategic plans, rollout plans, recommendations',
+    shape: 'Opportunity framing, recommended approach, scope, value, timeline, explicit ask',
+    rules: [
+      'Make the recommendation concrete enough to approve or reject.',
+      'Use section headings that sound like the actual project, not a template rubric.',
+      'Surface tradeoffs, ownership, and timing without weakening the recommendation.',
+    ],
+  },
+  {
+    id: 'guide-playbook',
+    label: 'Guide / Playbook',
+    bestFor: 'How-to guides, manuals, onboarding docs, playbooks, SOPs, rollout instructions',
+    shape: 'Orientation, steps or stages, checkpoints, examples, pitfalls, completion criteria',
+    rules: [
+      'Write like an operator who has done the work, not like a marketer describing it.',
+      'Prefer sequences, checkpoints, examples, and warnings over abstract narrative.',
+      'Break complex work into task-shaped sections with practical headings.',
+    ],
+  },
+  {
+    id: 'reference-doc',
+    label: 'Reference / Documentation',
+    bestFor: 'API docs, product docs, reference pages, help centers, FAQs, technical references',
+    shape: 'Overview, prerequisites, definitions, examples, reference tables, troubleshooting or FAQ',
+    rules: [
+      'Optimize for lookup speed and wayfinding, not story pacing.',
+      'Use definitions, examples, and compact reference blocks where they help scanning.',
+      'Keep headings literal and discoverable for someone searching for an answer.',
+    ],
+  },
+  {
+    id: 'editorial-feature',
+    label: 'Editorial Feature',
+    bestFor: 'Articles, thought pieces, narrative explainers, magazine-style stories, feature docs',
+    shape: 'Strong opening thesis, paced story beats, proof moments, reflective close',
+    rules: [
+      'Let the section titles sound authored and human rather than procedural.',
+      'Use narrative rhythm and contrast between heavier and lighter sections.',
+      'Do not turn an article into a memo broken into chunks.',
+    ],
+  },
+  {
+    id: 'newsletter-digest',
+    label: 'Newsletter / Digest',
+    bestFor: 'Roundups, recurring updates, digests, editorial newsletters, curation docs',
+    shape: 'Lead note, curated sections, highlights, quick reads, closing CTA or watchlist',
+    rules: [
+      'Use modular sections with crisp summaries and scannable highlights.',
+      'Keep the voice current and specific instead of sounding evergreen or generic.',
+      'Let recurring sections feel intentional, not like placeholder blocks.',
+    ],
+  },
+  {
+    id: 'formal-letter',
+    label: 'Formal Letter',
+    bestFor: 'Business letters, cover letters, formal correspondence, outreach with a clear purpose',
+    shape: 'Purpose, supporting detail, clear request or statement, professional close',
+    rules: [
+      'Keep the tone human and specific rather than stiff boilerplate.',
+      'Do not over-structure the body into report-like sections unless the request demands it.',
+      'Make the purpose obvious in the opening paragraph.',
+    ],
+  },
+];
+
+const BLUEPRINT_DOCUMENT_FORMAT_MAP = {
+  document: 'editorial-feature',
+  report: 'report-brief',
+  proposal: 'proposal-plan',
+  memo: 'briefing-memo',
+  letter: 'formal-letter',
+  'executive-brief': 'briefing-memo',
+  'data-story': 'report-brief',
+};
+
+function findDocumentFormat(id = '') {
+  const normalized = String(id || '').trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return DOCUMENT_FORMAT_CATALOG.find((entry) => entry.id === normalized) || null;
+}
+
+function selectDocumentFormat({
+  prompt = '',
+  documentType = 'document',
+  format = 'html',
+  designPlan = null,
+} = {}) {
+  const explicitFormatId = String(
+    designPlan?.documentFormatId
+    || designPlan?.selectedDocumentFormat?.id
+    || '',
+  ).trim().toLowerCase();
+  if (explicitFormatId) {
+    return findDocumentFormat(explicitFormatId) || findDocumentFormat(BLUEPRINT_DOCUMENT_FORMAT_MAP.document);
+  }
+
+  const normalizedPrompt = String(prompt || '').trim().toLowerCase();
+  const normalizedFormat = String(format || '').trim().toLowerCase();
+  const normalizedDocumentType = normalizeDocumentType(documentType || 'document');
+
+  if (/\b(api|reference|troubleshooting|faq|knowledge base|help center|docs?|documentation)\b/.test(normalizedPrompt)) {
+    return findDocumentFormat('reference-doc');
+  }
+
+  if (/\b(playbook|runbook|manual|guide|onboarding|checklist|how to|how-to|workflow|sop|standard operating procedure)\b/.test(normalizedPrompt)) {
+    return findDocumentFormat('guide-playbook');
+  }
+
+  if (/\b(newsletter|digest|roundup|weekly note|monthly note|briefing email)\b/.test(normalizedPrompt)) {
+    return findDocumentFormat('newsletter-digest');
+  }
+
+  if (/\b(letter|cover letter|outreach|correspondence)\b/.test(normalizedPrompt) || normalizedDocumentType === 'letter') {
+    return findDocumentFormat('formal-letter');
+  }
+
+  if (/\b(proposal|business case|plan|roadmap|rollout|recommendation|strategy)\b/.test(normalizedPrompt) || normalizedDocumentType === 'proposal') {
+    return findDocumentFormat('proposal-plan');
+  }
+
+  if (/\b(report|analysis|findings|case study|insight|insights|data story|postmortem|review)\b/.test(normalizedPrompt)
+    || normalizedDocumentType === 'report'
+    || normalizedDocumentType === 'data-story') {
+    return findDocumentFormat('report-brief');
+  }
+
+  if (/\b(memo|brief|board update|executive update|decision)\b/.test(normalizedPrompt)
+    || normalizedDocumentType === 'memo'
+    || normalizedDocumentType === 'executive-brief') {
+    return findDocumentFormat('briefing-memo');
+  }
+
+  if (/\b(article|blog|essay|story|feature|editorial|magazine|narrative)\b/.test(normalizedPrompt)
+    || normalizedFormat === 'html') {
+    return findDocumentFormat('editorial-feature');
+  }
+
+  return findDocumentFormat(BLUEPRINT_DOCUMENT_FORMAT_MAP[normalizedDocumentType] || 'editorial-feature');
+}
+
+function renderDocumentFormatPromptContext(formatProfile = null, options = {}) {
+  if (!formatProfile) {
+    return '';
+  }
+
+  const normalizedFormat = String(options.format || '').trim().toLowerCase();
+  const lines = [
+    '<document_formats>',
+    'Choose the document format that best fits the request. Do not default to a generic numbered brief or a recycled template scaffold.',
+    normalizedFormat === 'html' || normalizedFormat === 'pdf'
+      ? 'For HTML and PDF outputs, this format choice should change the information architecture and writing pattern, not just the visual shell.'
+      : 'Use the selected format to shape the document architecture and pacing.',
+    ...DOCUMENT_FORMAT_CATALOG.map((entry) => (
+      `- ${entry.label} [${entry.id}] :: best for ${entry.bestFor} :: shape ${entry.shape}`
+    )),
+    `Selected document format: ${formatProfile.label} [${formatProfile.id}]`,
+    'Format rules:',
+    ...formatProfile.rules.map((entry) => `- ${entry}`),
+    '- Use concrete, request-specific section headings instead of copying blueprint labels or generic template wording.',
+    '- Never mention template ids, internal format names, layout labels, or planning notes in visible copy.',
+    '</document_formats>',
+  ];
+
+  return lines.join('\n');
+}
+
 class AIDocumentGenerator {
   constructor(openaiClient) {
     this.openai = openaiClient;
@@ -222,7 +417,10 @@ class AIDocumentGenerator {
    * @returns {Promise<Object>} Generated content structure
    */
   async generate(prompt, options = {}) {
-    const systemPrompt = this.buildSystemPrompt(options);
+    const systemPrompt = this.buildSystemPrompt({
+      ...options,
+      prompt,
+    });
     
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -422,6 +620,12 @@ Return JSON:
     const length = options.length || 'medium';
     const language = options.language || 'en';
     const blueprint = resolveDocumentBlueprint(documentType);
+    const formatProfile = selectDocumentFormat({
+      prompt: options.prompt || '',
+      documentType,
+      format: options.format || '',
+      designPlan: options.designPlan,
+    });
     const planPrompt = this.renderDesignPlanPrompt(options.designPlan);
 
     const lengthGuidance = {
@@ -449,6 +653,9 @@ Return JSON:
       '</writing_style>',
       options.templateContext || null,
       renderBlueprintPrompt(blueprint),
+      renderDocumentFormatPromptContext(formatProfile, {
+        format: options.format || '',
+      }),
       renderDocumentLayoutPromptContext(options.designPlan, options.format),
       planPrompt,
       '<output_contract>',
@@ -499,6 +706,8 @@ Return JSON:
       '- Use paragraphs for explanation and structured fields for scan speed.',
       '- When a section benefits from metrics, tables, or a chart, populate the matching structured field instead of burying everything in prose.',
       '- Only include bullets, stats, tables, charts, or callouts when they strengthen the document.',
+      '- Convert abstract coverage beats into natural, request-specific headings and prose.',
+      '- Do not let the output read like a template, rubric, or plan for a future document.',
       '- Do not output markdown fences, commentary, or any text outside the JSON object.',
       '</rules>',
     ].filter(Boolean).join('\n');
@@ -525,7 +734,7 @@ Return JSON:
       ...(Array.isArray(designPlan.sampleHandling)
         ? designPlan.sampleHandling.map((entry) => `- ${entry}`)
         : []),
-      outline.length > 0 ? 'Planned structure:' : null,
+      outline.length > 0 ? 'Coverage beats to address (adapt these into natural, request-specific headings rather than copying the labels verbatim):' : null,
       ...outline.map((item) => {
         const label = item.title || item.heading || `Section ${item.index || ''}`.trim();
         const detail = [

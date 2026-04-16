@@ -53,6 +53,23 @@ describe('AIDocumentGenerator', () => {
     expect(result.metadata.parseRecovery).toBe('plain-text-fallback');
   });
 
+  test('document system prompt includes request-matched format guidance for html docs', () => {
+    const generator = new AIDocumentGenerator({
+      createResponse: jest.fn(),
+    });
+
+    const prompt = generator.buildSystemPrompt({
+      prompt: 'Create an HTML API documentation page with examples and troubleshooting notes',
+      documentType: 'document',
+      format: 'html',
+    });
+
+    expect(prompt).toContain('<document_formats>');
+    expect(prompt).toContain('Selected document format: Reference / Documentation [reference-doc]');
+    expect(prompt).toContain('Do not default to a generic numbered brief');
+    expect(prompt).toContain('Use concrete, request-specific section headings');
+  });
+
   test('presentation prompt includes template-gallery guidance and treats templates as examples', async () => {
     const createResponse = jest.fn(async () => buildResponse(
       JSON.stringify({

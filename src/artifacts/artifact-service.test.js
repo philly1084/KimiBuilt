@@ -355,6 +355,7 @@ describe('ArtifactService', () => {
 
         expect(createResponse).toHaveBeenCalledTimes(1);
         expect(createResponse.mock.calls[0][0]?.instructions).toContain('Build a polished frontend demo instead of a plain document.');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Match the request instead of defaulting to the same landing-page stack.');
         expect(createResponse.mock.calls[0][0]?.instructions).toContain('Use realistic example data by default');
         expect(renderArtifact).toHaveBeenCalledWith(expect.objectContaining({
             format: 'html',
@@ -713,6 +714,7 @@ describe('ArtifactService', () => {
 
         expect(createResponse).toHaveBeenCalledTimes(1);
         expect(createResponse.mock.calls[0][0]?.instructions).toContain('You are generating a full website preview bundle');
+        expect(createResponse.mock.calls[0][0]?.instructions).toContain('Choose the right site shape before writing');
         expect(createResponse.mock.calls[0][0]?.instructions).toContain('Use realistic example data by default');
         expect(renderArtifact).not.toHaveBeenCalled();
         expect(artifactStore.create).toHaveBeenCalledWith(expect.objectContaining({

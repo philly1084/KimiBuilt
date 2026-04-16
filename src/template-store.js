@@ -1374,13 +1374,15 @@ class TemplateStore {
         }
 
         const lines = [
-            '[Recursive template store]',
-            'Use these templates as reusable structure and composition guidance. Keep the architecture and section logic; rewrite the copy and specifics for the current request.',
+            '[Reference pattern library]',
+            'Use these patterns as reusable structure and composition guidance. Adapt, combine, or ignore them when the request calls for a better fit.',
+            'Keep the architecture, information flow, and section logic; rewrite the copy, labels, and specifics for the current request.',
+            'Never surface template ids, reference labels, or internal library wording in the final user-visible output.',
         ];
 
         summaries.forEach((template, index) => {
             lines.push(
-                `- Template ${index + 1}: ${template.name} [${template.id}] | surface=${template.surface} | kind=${template.kind} | source=${template.source} | usage=${template.usageCount || 0}`,
+                `- ${template.name} [${template.id}] | surface=${template.surface} | kind=${template.kind} | source=${template.source} | usage=${template.usageCount || 0}`,
             );
             if (template.description) {
                 lines.push(`  Description: ${template.description}`);

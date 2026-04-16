@@ -337,6 +337,29 @@ router.post('/', validate(canvasSchema), async (req, res, next) => {
     }
 });
 
+function buildFrontendFormatGuide() {
+    return [
+        '<frontend_format_router>',
+        'Choose the artifact family that best matches the request before writing any HTML.',
+        '- marketing-landing :: product launches, brand storytelling, conversion-focused pages :: hero, proof, feature beats, CTA',
+        '- dashboard-control-room :: ops, admin, analytics, support, finance, internal monitoring :: filters, metrics, tables, alerts, drill-downs',
+        '- app-workspace :: SaaS tools, product UIs, settings, portals, builders :: navigation, toolbar, panels, data views, task flows',
+        '- documentation-site :: docs, manuals, guides, references, help centers, API pages :: table of contents, anchors, examples, callouts, code or reference blocks',
+        '- report-or-brief :: executive briefs, case studies, findings, analytical summaries :: headline takeaway, evidence panels, charts, recommendations',
+        '- editorial-feature :: magazine-style stories, explainers, timelines, immersive narratives :: chapter rhythm, pull quotes, image-led sections, calmer reading flow',
+        '- campaign-microsite :: event pages, launches, seasonal campaigns, narrative promos :: scene-based sections, strong transitions, focused CTA',
+        '- portfolio-showcase :: studio, creator, or product showcase pages :: project index, case studies, credibility, contact or inquiry path',
+        'Selection rules:',
+        '- Match the request. Do not default to a hero-features-testimonials-pricing stack unless the prompt clearly calls for it.',
+        '- For documentation or reference requests, prioritize information architecture, wayfinding, examples, and utilities over marketing polish.',
+        '- For reports or briefs, prioritize findings, proof, and decisions over conversion patterns.',
+        '- For app or dashboard requests, build real working surfaces with controls and data regions rather than brochure sections.',
+        '- Create multi-page bundles only when the request implies a full site, documentation set, or multiple destinations.',
+        '- Never expose internal template labels, section archetype names, dashboard zone labels, or planning language in the visible copy.',
+        '</frontend_format_router>',
+    ].join('\n');
+}
+
 function buildCanvasInstructions(canvasType, existingContent, requestPrompt = '', templateContext = '') {
     const base = `You are an AI assistant working in canvas mode. You generate structured content that can be displayed in an editable canvas interface.
 
@@ -358,10 +381,14 @@ Always respond with valid JSON in this format:
         code: '\n\nYou are generating CODE. Include the programming language in metadata.language. Provide working, well-commented code. Suggestions should be improvements or alternative approaches.',
         document: '\n\nYou are generating a DOCUMENT. Use markdown formatting. Include a title in metadata.title. Suggestions should be ways to expand or improve the document.',
         diagram: '\n\nYou are generating a DIAGRAM using Mermaid syntax. Include the diagram type in metadata.type (flowchart, sequence, etc). Suggestions should be ways to enhance the diagram.',
-        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML for the entry page. Favor polished marketing sites, product pages, landing pages, editorial promos, dashboards, news sites, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "vite", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"world.html","language":"html","purpose":"Secondary page","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. When the request implies a full website or multiple pages, include a linked multi-page bundle instead of a single screen. If metadata.frameworkTarget is "vite", still keep the preview files browser-runnable from a static server by using relative modules or browser-compatible URLs instead of unresolved bare imports. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or clearly swappable data adapter. Include purposeful interactions such as filters, tabs, carousels, drill-downs, sticky nav, or chart toggles instead of a static screenshot-like mockup. When the request is dashboard-oriented, choose one dashboard template from the provided catalog, include metadata.dashboardTemplate as {"id":"...","label":"...","rationale":"..."}, include metadata.dashboardTemplateOptions as [{"id":"...","label":"..."}], set <body data-dashboard-template="template-id">, and add data-dashboard-zone attributes on major layout regions. Suggestions should be concrete next frontend iterations.',
+        frontend: '\n\nYou are generating a DEMO WEBSITE FRONTEND. The content field must be ready-to-preview standalone HTML for the entry page. Favor polished but request-matched HTML artifacts: landing pages, product sites, dashboards, app workspaces, documentation sites, editorial features, briefs, or microsites with deliberate visual direction. Include metadata.language as "html", metadata.frameworkTarget as "static", "vite", "react", or "nextjs", and metadata.previewMode as "iframe". Include metadata.bundle in the shape {"entry":"index.html","files":[{"path":"index.html","language":"html","purpose":"Preview entry","content":"..."},{"path":"world.html","language":"html","purpose":"Secondary page","content":"..."},{"path":"styles.css","language":"css","purpose":"Shared styles","content":"..."},{"path":"app.js","language":"javascript","purpose":"Interactions","content":"..."}]}. When the request implies a full website or multiple pages, include a linked multi-page bundle instead of a single screen. If metadata.frameworkTarget is "vite", still keep the preview files browser-runnable from a static server by using relative modules or browser-compatible URLs instead of unresolved bare imports. Include metadata.handoff in the shape {"summary":"...","targetFramework":"...","componentMap":[{"name":"Hero","purpose":"...","targetPath":"src/components/Hero.jsx"}],"integrationSteps":["..."]}. Keep the demo portable so the bundle files can be copied into a real repository later. Use realistic example data by default, and when a live source is known, wire it behind a small fetch layer or clearly swappable data adapter. Include purposeful interactions such as filters, tabs, carousels, drill-downs, sticky nav, chart toggles, search states, anchor navigation, or content toggles instead of a static screenshot-like mockup. Do not default every request to the same landing-page scaffold. For documentation requests, build a docs-style experience with information architecture and wayfinding. For report or brief requests, build an evidence-led reading experience rather than a marketing page. When the request is dashboard-oriented, choose one dashboard template from the provided catalog, include metadata.dashboardTemplate as {"id":"...","label":"...","rationale":"..."}, include metadata.dashboardTemplateOptions as [{"id":"...","label":"..."}], set <body data-dashboard-template="template-id">, and add data-dashboard-zone attributes on major layout regions. Suggestions should be concrete next frontend iterations.',
     };
 
     let instructions = base + (typeInstructions[canvasType] || typeInstructions.document);
+
+    if (canvasType === 'frontend') {
+        instructions += `\n\n${buildFrontendFormatGuide()}`;
+    }
 
     if (templateContext) {
         instructions += `\n\n${templateContext}`;
