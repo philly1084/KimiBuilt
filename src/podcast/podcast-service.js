@@ -2,7 +2,13 @@ const { createResponse } = require('../openai-client');
 const { piperTtsService, normalizeTextForSpeech } = require('../tts/piper-tts-service');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
-const { concatWavBuffers, createSilenceWavBuffer, parseWavBuffer } = require('../audio/wav-utils');
+const {
+  concatWavBuffers,
+  createSilenceWavBuffer,
+  normalizeWavBufferFormat,
+  parseWavBuffer,
+  wavFormatsMatch,
+} = require('../audio/wav-utils');
 const { chunkText, normalizeWhitespace, stripHtml, stripNullCharacters } = require('../utils/text');
 const { parseLenientJson } = require('../utils/lenient-json');
 
@@ -723,6 +729,7 @@ class PodcastService {
     );
     const hostByName = new Map(hosts.map((host) => [host.name, host]));
     const hostTurnCounts = new Map();
+    let outputFormat = null;
     const wavBuffers = [];
 
     for (const turn of turns) {
@@ -750,8 +757,17 @@ class PodcastService {
           minimumChunkChars,
         });
         for (const synthesis of syntheses) {
-          wavBuffers.push(synthesis.audioBuffer);
-          wavBuffers.push(createSilenceWavBuffer(parseWavBuffer(synthesis.audioBuffer), silenceMs));
+          const parsedSynthesisBuffer = parseWavBuffer(synthesis.audioBuffer);
+          if (!outputFormat) {
+            outputFormat = parsedSynthesisBuffer;
+          }
+
+          const normalizedAudioBuffer = wavFormatsMatch(parsedSynthesisBuffer, outputFormat)
+            ? synthesis.audioBuffer
+            : normalizeWavBufferFormat(synthesis.audioBuffer, outputFormat);
+
+          wavBuffers.push(normalizedAudioBuffer);
+          wavBuffers.push(createSilenceWavBuffer(outputFormat, silenceMs));
         }
       }
     }

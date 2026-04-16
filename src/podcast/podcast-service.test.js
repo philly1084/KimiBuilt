@@ -54,7 +54,7 @@ const { createResponse } = require('../openai-client');
 const { piperTtsService } = require('../tts/piper-tts-service');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
-const { writeWavBuffer } = require('../audio/wav-utils');
+const { parseWavBuffer, writeWavBuffer } = require('../audio/wav-utils');
 const { PodcastService } = require('./podcast-service');
 
 function createTestWav(bytes) {
@@ -336,6 +336,48 @@ describe('PodcastService', () => {
     expect(piperTtsService.synthesize).toHaveBeenNthCalledWith(3, expect.objectContaining({
       voiceId: 'hfc-female-rich',
     }));
+  });
+
+  test('normalizes mixed voice wav formats before concatenating the episode audio', async () => {
+    piperTtsService.synthesize
+      .mockResolvedValueOnce({
+        audioBuffer: createTestWav([1, 2, 3, 4]),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text: 'segment-a',
+      })
+      .mockResolvedValueOnce({
+        audioBuffer: writeWavBuffer({
+          sampleRate: 16000,
+          bitsPerSample: 16,
+          numChannels: 1,
+          data: Buffer.from([5, 6, 7, 8]),
+        }),
+        voice: { provider: 'piper' },
+        contentType: 'audio/wav',
+        text: 'segment-b',
+      });
+
+    const service = new PodcastService();
+    const result = await service.synthesizeTurns(
+      [
+        { speaker: 'Maya', text: 'This is Maya.' },
+        { speaker: 'June', text: 'This is June.' },
+      ],
+      [
+        { name: 'Maya', voiceId: 'hfc-female-rich' },
+        { name: 'June', voiceId: 'kathleen-low' },
+      ],
+      {
+        silenceMs: 250,
+        chunkMaxChars: 1600,
+      },
+    );
+
+    const parsed = parseWavBuffer(result);
+    expect(parsed.sampleRate).toBe(22050);
+    expect(parsed.bitsPerSample).toBe(16);
+    expect(parsed.numChannels).toBe(1);
   });
 
   test('applies per-host voice cycling for both hosts through createPodcast turn planning', async () => {

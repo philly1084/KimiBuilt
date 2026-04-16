@@ -1,6 +1,7 @@
 const {
   concatWavBuffers,
   createSilenceWavBuffer,
+  normalizeWavBufferFormat,
   parseWavBuffer,
   writeWavBuffer,
 } = require('./wav-utils');
@@ -54,5 +55,27 @@ describe('wav-utils', () => {
     expect(parsed.bitsPerSample).toBe(16);
     expect(parsed.numChannels).toBe(1);
     expect(parsed.data.some((value) => value !== 0)).toBe(false);
+  });
+
+  test('normalizes a wav buffer to a different pcm sample rate', () => {
+    const source = writeWavBuffer({
+      sampleRate: 16000,
+      bitsPerSample: 16,
+      numChannels: 1,
+      data: Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]),
+    });
+
+    const normalized = normalizeWavBufferFormat(source, {
+      audioFormat: 1,
+      sampleRate: 22050,
+      bitsPerSample: 16,
+      numChannels: 1,
+    });
+    const parsed = parseWavBuffer(normalized);
+
+    expect(parsed.sampleRate).toBe(22050);
+    expect(parsed.bitsPerSample).toBe(16);
+    expect(parsed.numChannels).toBe(1);
+    expect(parsed.data.length).toBeGreaterThan(Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]).length);
   });
 });
