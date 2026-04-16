@@ -54,6 +54,7 @@ const { createResponse } = require('../openai-client');
 const { piperTtsService } = require('../tts/piper-tts-service');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
+const settingsController = require('../routes/admin/settings.controller');
 const { parseWavBuffer, writeWavBuffer } = require('../audio/wav-utils');
 const { PodcastService } = require('./podcast-service');
 
@@ -67,8 +68,18 @@ function createTestWav(bytes) {
 }
 
 describe('PodcastService', () => {
+  let originalModelSettings;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    originalModelSettings = {
+      ...(settingsController.settings?.models || {}),
+    };
+    settingsController.settings.models = {
+      ...(settingsController.settings?.models || {}),
+      defaultModel: 'gpt-4o',
+      fallbackModel: 'gpt-4o-mini',
+    };
     createResponse.mockResolvedValue({
       output_text: JSON.stringify({
         title: 'The Battery Breakdown',
@@ -97,6 +108,10 @@ describe('PodcastService', () => {
       audio: { artifactId: 'artifact-podcast-1', downloadUrl: '/api/artifacts/artifact-podcast-1/download' },
     });
     updateGeneratedAudioSessionState.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    settingsController.settings.models = originalModelSettings;
   });
 
   test('creates a researched two-host podcast and persists the final audio', async () => {
@@ -158,6 +173,49 @@ describe('PodcastService', () => {
     expect(result.script.turns).toHaveLength(8);
     expect(result.hosts).toHaveLength(2);
     expect(result.hosts[0].voiceId).not.toBe(result.hosts[1].voiceId);
+  });
+
+  test('uses the configured podcast script model instead of inheriting the active chat model', async () => {
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Grid battery guide', url: 'https://example.com/batteries', snippet: 'Battery storage helps balance power systems.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Battery systems absorb excess power and discharge it later.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    await service.createPodcast({
+      topic: 'How grid batteries work',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      model: 'gemini-3.1-pro-preview',
+      toolManager: { executeTool },
+    });
+
+    expect(createResponse).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-4o',
+      requestTimeoutMs: 120000,
+      requestMaxRetries: 0,
+    }));
   });
 
   test('falls back to provided source urls when web search is unavailable', async () => {
@@ -554,6 +612,71 @@ describe('PodcastService', () => {
 
     expect(createResponse).toHaveBeenCalledTimes(2);
     expect(result.script.turns).toHaveLength(8);
+  });
+
+  test('falls back to the configured fallback model after repeated transient script-generation failures', async () => {
+    const transientError = new Error('Connection terminated unexpectedly.');
+    createResponse
+      .mockRejectedValueOnce(transientError)
+      .mockRejectedValueOnce(transientError)
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          title: 'Battery Backstop',
+          summary: 'Fallback-model generation succeeded.',
+          turns: [
+            { speaker: 'Maya', text: 'Battery systems help shift energy in time.' },
+            { speaker: 'June', text: 'That makes them useful when demand spikes or solar production drops.' },
+            { speaker: 'Maya', text: 'They also give operators a faster way to stabilize parts of the grid.' },
+            { speaker: 'June', text: 'And the economics depend on duration, cycle life, and local market rules.' },
+          ],
+        }),
+      });
+
+    const service = new PodcastService();
+    const executeTool = jest.fn(async (toolId) => {
+      if (toolId === 'web-search') {
+        return {
+          success: true,
+          data: {
+            results: [
+              { title: 'Grid battery guide', url: 'https://example.com/batteries', snippet: 'Battery storage helps balance power systems.' },
+            ],
+          },
+        };
+      }
+
+      if (toolId === 'web-fetch') {
+        return {
+          success: true,
+          data: {
+            headers: { 'content-type': 'text/html' },
+            body: '<article><p>Battery systems absorb excess power and discharge it later.</p></article>',
+          },
+        };
+      }
+
+      throw new Error(`Unexpected tool: ${toolId}`);
+    });
+
+    const result = await service.createPodcast({
+      topic: 'How grid batteries work',
+    }, {
+      sessionId: 'session-1',
+      clientSurface: 'chat',
+      model: 'gemini-3.1-pro-preview',
+      toolManager: { executeTool },
+    });
+
+    expect(createResponse).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      model: 'gpt-4o',
+    }));
+    expect(createResponse).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      model: 'gpt-4o',
+    }));
+    expect(createResponse).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      model: 'gpt-4o-mini',
+    }));
+    expect(result.script.summary).toBe('Fallback-model generation succeeded.');
   });
 
   test('sanitizes malformed unicode from topics and fetched source text before script generation', async () => {

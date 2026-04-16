@@ -1,7 +1,9 @@
+const { config } = require('../config');
 const { createResponse } = require('../openai-client');
 const { piperTtsService, normalizeTextForSpeech } = require('../tts/piper-tts-service');
 const { persistGeneratedAudio, updateGeneratedAudioSessionState } = require('../generated-audio-artifacts');
 const { audioProcessingService } = require('../audio/audio-processing-service');
+const settingsController = require('../routes/admin/settings.controller');
 const {
   concatWavBuffers,
   createSilenceWavBuffer,
@@ -17,6 +19,9 @@ const DEFAULT_TARGET_WPM = 145;
 const DEFAULT_MAX_SOURCES = 4;
 const DEFAULT_SILENCE_MS = 325;
 const DEFAULT_MINIMUM_VALID_TURNS = 4;
+const DEFAULT_PODCAST_SEARCH_TIMEOUT_MS = 45000;
+const DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS = 120000;
+const DEFAULT_PODCAST_SCRIPT_RETRY_ATTEMPTS = 1;
 const DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 2;
 const DEFAULT_TRANSIENT_RETRY_DELAY_MS = 1200;
 const PODCAST_HIGH_QUALITY_VOICE_IDS = Object.freeze([
@@ -226,6 +231,22 @@ function uniqueUrls(items = []) {
     seen.add(url);
     return true;
   });
+}
+
+function resolvePodcastScriptModelCandidates(params = {}, context = {}) {
+  const requestedModel = String(params?.model || '').trim();
+  const defaultModel = String(settingsController?.settings?.models?.defaultModel || '').trim();
+  const fallbackModel = String(settingsController?.settings?.models?.fallbackModel || '').trim();
+  const configuredModel = String(config.openai?.model || '').trim();
+  const contextModel = String(context?.model || '').trim();
+
+  return uniqueOrdered([
+    requestedModel,
+    defaultModel,
+    configuredModel,
+    fallbackModel,
+    contextModel,
+  ]);
 }
 
 function isTransientPodcastError(error = {}) {
@@ -561,6 +582,7 @@ class PodcastService {
         engine: 'perplexity',
         researchMode: 'search',
         limit: Math.max(maxSources * 2, 6),
+        timeout: DEFAULT_PODCAST_SEARCH_TIMEOUT_MS,
         includeSnippets: true,
         includeUrls: true,
         domains: searchDomains,
@@ -632,43 +654,63 @@ class PodcastService {
     durationMinutes,
     hosts,
     sources,
-    model,
+    models = [],
     reasoningEffort,
   }) {
-    const response = await this.retryTransientOperation(() => this.createResponse({
-      input: buildResearchPrompt({
-        topic,
-        audience,
-        tone,
-        durationMinutes,
-        hosts,
-        sources,
-      }),
-      instructions: 'You write polished, factual, natural-sounding podcast scripts and must return valid JSON only.',
-      stream: false,
-      model,
-      reasoningEffort,
-      enableAutomaticToolCalls: false,
-    }), {
-      label: 'podcast script generation',
+    const modelCandidates = uniqueOrdered(Array.isArray(models) ? models : [models]);
+    const prompt = buildResearchPrompt({
+      topic,
+      audience,
+      tone,
+      durationMinutes,
+      hosts,
+      sources,
     });
-
-    const parsed = parseLenientJson(getResponseText(response));
     const allowedSpeakers = new Set(hosts.map((host) => host.name));
-    const turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
-      .map((turn) => normalizeTurn(turn, allowedSpeakers))
-      .filter(Boolean);
-    const representedSpeakers = new Set(turns.map((turn) => turn.speaker));
+    let lastError = null;
 
-    if (turns.length < DEFAULT_MINIMUM_VALID_TURNS || representedSpeakers.size < allowedSpeakers.size) {
-      throw new Error('Podcast script generation returned too few valid turns.');
+    for (const modelCandidate of (modelCandidates.length > 0 ? modelCandidates : [''])) {
+      try {
+        const response = await this.retryTransientOperation(() => this.createResponse({
+          input: prompt,
+          instructions: 'You write polished, factual, natural-sounding podcast scripts and must return valid JSON only.',
+          stream: false,
+          model: modelCandidate || undefined,
+          reasoningEffort,
+          enableAutomaticToolCalls: false,
+          requestTimeoutMs: DEFAULT_PODCAST_SCRIPT_REQUEST_TIMEOUT_MS,
+          requestMaxRetries: 0,
+        }), {
+          label: 'podcast script generation',
+          retries: DEFAULT_PODCAST_SCRIPT_RETRY_ATTEMPTS,
+        });
+
+        const parsed = parseLenientJson(getResponseText(response));
+        const turns = (Array.isArray(parsed?.turns) ? parsed.turns : [])
+          .map((turn) => normalizeTurn(turn, allowedSpeakers))
+          .filter(Boolean);
+        const representedSpeakers = new Set(turns.map((turn) => turn.speaker));
+
+        if (turns.length < DEFAULT_MINIMUM_VALID_TURNS || representedSpeakers.size < allowedSpeakers.size) {
+          throw new Error('Podcast script generation returned too few valid turns.');
+        }
+
+        return {
+          title: String(parsed?.title || `${topic} Podcast`).trim() || `${topic} Podcast`,
+          summary: String(parsed?.summary || '').trim(),
+          turns,
+        };
+      } catch (error) {
+        lastError = error;
+        if (modelCandidate && modelCandidates[modelCandidates.length - 1] !== modelCandidate) {
+          console.warn(`[PodcastService] Falling back podcast script generation from model "${modelCandidate}" after: ${error.message}`);
+          continue;
+        }
+        throw error;
+      }
     }
 
-    return {
-      title: String(parsed?.title || `${topic} Podcast`).trim() || `${topic} Podcast`,
-      summary: String(parsed?.summary || '').trim(),
-      turns,
-    };
+    throw lastError || new Error('Podcast script generation failed.');
   }
 
   async synthesizeChunkBuffer(text = '', host = {}, options = {}, splitDepth = 0) {
@@ -829,7 +871,7 @@ class PodcastService {
       durationMinutes,
       hosts,
       sources,
-      model: params.model || context.model || undefined,
+      models: resolvePodcastScriptModelCandidates(params, context),
       reasoningEffort: params.reasoningEffort || context.reasoningEffort || undefined,
     });
     const turnVoicePlan = resolveTurnVoicePlan(script.turns, hosts, {

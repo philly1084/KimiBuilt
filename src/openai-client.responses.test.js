@@ -51,7 +51,8 @@ describe('openai-client response threading', () => {
         });
 
         const client = OpenAI.mock.results[0].value;
-        expect(client.responses.create).toHaveBeenCalledWith(expect.objectContaining({
+        const [[requestParams]] = client.responses.create.mock.calls;
+        expect(requestParams).toEqual(expect.objectContaining({
             previous_response_id: 'resp_prev_123',
         }));
     });
@@ -74,7 +75,8 @@ describe('openai-client response threading', () => {
         });
 
         const client = OpenAI.mock.results[0].value;
-        expect(client.responses.create).toHaveBeenCalledWith(expect.objectContaining({
+        const [[requestParams]] = client.responses.create.mock.calls;
+        expect(requestParams).toEqual(expect.objectContaining({
             previous_response_id: 'resp_prev_123',
             input: expect.arrayContaining([
                 { type: 'message', role: 'user', content: 'Continue the previous reply.' },
@@ -97,10 +99,11 @@ describe('openai-client response threading', () => {
         });
 
         const client = OpenAI.mock.results[0].value;
-        expect(client.responses.create).toHaveBeenCalledWith(expect.not.objectContaining({
+        const [[requestParams]] = client.responses.create.mock.calls;
+        expect(requestParams).not.toEqual(expect.objectContaining({
             previous_response_id: 'resp_prev_123',
         }));
-        expect(client.responses.create).toHaveBeenCalledWith(expect.objectContaining({
+        expect(requestParams).toEqual(expect.objectContaining({
             input: expect.arrayContaining([
                 { type: 'message', role: 'system', content: 'New instructions' },
                 { type: 'message', role: 'user', content: 'Continue the previous reply.' },

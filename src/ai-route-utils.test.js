@@ -179,6 +179,7 @@ describe('ai-route-utils', () => {
                 filename: 'space-zine.pdf',
             }],
             outputText: '<html><body>Space zine</body></html>',
+            model: 'gpt-test',
             assistantMessage: 'Created the PDF artifact (space-zine.pdf).',
             metadata: {},
         });

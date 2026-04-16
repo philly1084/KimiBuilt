@@ -497,7 +497,7 @@ async function handleChat(ws, session, payload = {}, toolManager = null, ownerId
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
                 output: generation.assistantMessage,
-                model: model || null,
+                model: generation.model || model || null,
                 duration: Date.now() - startedAt,
                 metadata: {
                     outputFormat: effectiveOutputFormat,

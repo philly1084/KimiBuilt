@@ -532,7 +532,7 @@ router.post('/', validate(chatSchema), async (req, res, next) => {
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generationArtifacts.responseId,
                 output: generationArtifacts.assistantMessage,
-                model: model || session?.metadata?.model || null,
+                model: generationArtifacts.model || model || session?.metadata?.model || null,
                 duration: Date.now() - startedAt,
                 metadata: {
                     outputFormat: effectiveOutputFormat,

@@ -4094,6 +4094,8 @@ async function createResponse({
     toolContext = {},
     enableAutomaticToolCalls = false,
     executionProfile = 'default',
+    requestTimeoutMs = null,
+    requestMaxRetries = null,
 }) {
     const openai = getClient();
     const apiMode = resolveOpenAIApiMode();
@@ -4150,6 +4152,13 @@ async function createResponse({
             reusedThreadedPrompt: promptState.canReuseThreadedPrompt,
         },
     };
+    const requestOptions = {};
+    if (Number.isFinite(Number(requestTimeoutMs)) && Number(requestTimeoutMs) > 0) {
+        requestOptions.timeout = Number(requestTimeoutMs);
+    }
+    if (Number.isFinite(Number(requestMaxRetries)) && Number(requestMaxRetries) >= 0) {
+        requestOptions.maxRetries = Number(requestMaxRetries);
+    }
 
     try {
         if (enableAutomaticToolCalls) {
@@ -4243,7 +4252,7 @@ async function createResponse({
         }
 
         if (apiMode === 'responses') {
-            const response = await openai.responses.create(params);
+            const response = await openai.responses.create(params, requestOptions);
             attachKimibuiltMetadata(response, kimibuiltMetadata);
             if (stream) {
                 console.log('[OpenAI] Stream mode=native-responses');
@@ -4265,7 +4274,7 @@ async function createResponse({
         })) {
             chatParams.reasoning_effort = normalizedReasoningEffort;
         }
-        const response = await openai.chat.completions.create(chatParams);
+        const response = await openai.chat.completions.create(chatParams, requestOptions);
         attachKimibuiltMetadata(response, kimibuiltMetadata);
         if (stream) {
             console.log('[OpenAI] Stream mode=native-chat-completions');

@@ -524,25 +524,33 @@ class Dashboard {
      */
     async loadModels() {
         try {
-            const [modelsResponse, usageResponse] = await Promise.all([
+            const [modelsResult, usageResult] = await Promise.allSettled([
                 apiClient.get('/api/admin/models'),
-                apiClient.get('/api/admin/models/usage/stats').catch(() => null),
+                apiClient.get('/api/admin/models/usage/stats'),
             ]);
-            const usageById = new Map(
-                this.unwrapApiPayload(usageResponse, []).map((usage) => [usage.modelId, usage])
-            );
-            const models = this.unwrapApiPayload(modelsResponse, []).map((model) =>
-                this.normalizeModel({
-                    ...model,
-                    ...(usageById.get(model.id) || {}),
-                })
-            );
+            const liveModels = modelsResult.status === 'fulfilled'
+                ? this.unwrapApiPayload(modelsResult.value, [])
+                : [];
+            const usageRows = usageResult.status === 'fulfilled'
+                ? this.unwrapApiPayload(usageResult.value, [])
+                : [];
+            const models = this.mergeModelsWithUsage(liveModels, usageRows);
+
+            if (modelsResult.status === 'rejected') {
+                console.warn('Admin live model inventory unavailable, showing runtime usage data only:', modelsResult.reason);
+            }
+            if (usageResult.status === 'rejected') {
+                console.warn('Admin model usage unavailable, showing live inventory only:', usageResult.reason);
+            }
+
             this.state.models = models;
             this.syncModelOptions(models);
             this.renderModels(models);
         } catch (error) {
             console.error('Error loading models:', error);
-            this.renderModels(this.getMockModels());
+            this.state.models = [];
+            this.syncModelOptions([]);
+            this.renderModels([]);
         }
     }
     
@@ -918,8 +926,8 @@ class Dashboard {
                 <div class="model-card">
                     <div class="model-card-header">
                         <div>
-                            <span class="model-name">No live models returned</span>
-                            <span class="model-provider">provider inventory</span>
+                            <span class="model-name">No model data yet</span>
+                            <span class="model-provider">live inventory and runtime usage</span>
                         </div>
                     </div>
                     <div class="model-stats">
@@ -954,6 +962,10 @@ class Dashboard {
                     <div class="model-stat">
                         <span class="model-stat-value">${model.avgLatency || 0}ms</span>
                         <span class="model-stat-label">Avg Latency</span>
+                    </div>
+                    <div class="model-stat">
+                        <span class="model-stat-value">${Number(model.totalTokens || 0).toLocaleString()}</span>
+                        <span class="model-stat-label">Tokens</span>
                     </div>
                 </div>
                 <div class="model-capabilities">
@@ -2464,6 +2476,10 @@ class Dashboard {
             active: Boolean(model.active ?? model.isActive ?? model.isDefault),
             requests: Number(model.requests || 0),
             avgLatency: Number(model.avgLatency || model.avgResponseTime || 0),
+            inputTokens: Number(model.inputTokens ?? model.tokens?.input ?? 0),
+            outputTokens: Number(model.outputTokens ?? model.tokens?.output ?? 0),
+            totalTokens: Number(model.totalTokens ?? model.tokens?.total ?? 0)
+                || (Number(model.inputTokens ?? model.tokens?.input ?? 0) + Number(model.outputTokens ?? model.tokens?.output ?? 0)),
         };
     }
 
@@ -3687,7 +3703,48 @@ class Dashboard {
             active: Boolean(model.active ?? model.isActive ?? model.isDefault),
             requests: Number(model.requests ?? model.usageCount ?? 0),
             avgLatency: Number(model.avgLatency ?? model.avgResponseTime ?? 0),
+            inputTokens: Number(model.inputTokens ?? model.tokens?.input ?? 0),
+            outputTokens: Number(model.outputTokens ?? model.tokens?.output ?? 0),
+            totalTokens: Number(model.totalTokens ?? model.tokens?.total ?? 0)
+                || (Number(model.inputTokens ?? model.tokens?.input ?? 0) + Number(model.outputTokens ?? model.tokens?.output ?? 0)),
         };
+    }
+
+    mergeModelsWithUsage(liveModels = [], usageRows = []) {
+        const merged = new Map();
+
+        (Array.isArray(liveModels) ? liveModels : []).forEach((model) => {
+            if (!model?.id) return;
+            merged.set(model.id, this.normalizeModel(model));
+        });
+
+        (Array.isArray(usageRows) ? usageRows : []).forEach((usage) => {
+            const modelId = String(usage?.modelId || '').trim();
+            if (!modelId) return;
+
+            const existing = merged.get(modelId) || {};
+            merged.set(modelId, this.normalizeModel({
+                id: modelId,
+                name: usage.modelName || existing.name || modelId,
+                provider: usage.provider || existing.provider || 'unknown',
+                capabilities: existing.capabilities || [],
+                isActive: existing.isActive ?? false,
+                usageOnly: !existing.id,
+                ...existing,
+                requests: usage.requests ?? existing.requests ?? 0,
+                avgResponseTime: usage.avgResponseTime ?? existing.avgResponseTime ?? 0,
+                inputTokens: usage.tokens?.input ?? existing.inputTokens ?? 0,
+                outputTokens: usage.tokens?.output ?? existing.outputTokens ?? 0,
+                totalTokens: usage.tokens?.total ?? existing.totalTokens ?? 0,
+            }));
+        });
+
+        return Array.from(merged.values())
+            .sort((a, b) => (
+                Number(b.totalTokens || 0) - Number(a.totalTokens || 0)
+                || Number(b.requests || 0) - Number(a.requests || 0)
+                || String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''))
+            ));
     }
 
     getFeatureSettingsPatch(featureId, enabled) {

@@ -934,7 +934,7 @@ router.post('/chat/completions', async (req, res, next) => {
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
                 output: generation.assistantMessage,
-                model: model || null,
+                model: generation.model || model || null,
                 duration: Date.now() - startedAt,
                 metadata: {
                     outputFormat: effectiveOutputFormat,
@@ -1707,7 +1707,7 @@ router.post('/responses', async (req, res, next) => {
             completeRuntimeTask(runtimeTask?.id, {
                 responseId: generation.responseId,
                 output: generation.assistantMessage,
-                model: model || null,
+                model: generation.model || model || null,
                 duration: Date.now() - startedAt,
                 metadata: {
                     outputFormat: effectiveOutputFormat,

@@ -1248,6 +1248,7 @@ async function generateOutputArtifactFromPrompt({
         artifact: result.artifact,
         artifacts: [result.artifact],
         outputText: result.outputText,
+        model: result.model || model || null,
         assistantMessage: buildArtifactCompletionMessage(outputFormat, result.artifact),
         metadata: result.usage
             ? {

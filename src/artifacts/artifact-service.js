@@ -1923,6 +1923,7 @@ class ArtifactService {
             responseId: response.id,
             outputText: extractResponseText(response),
             rawOutputText: extractRawResponseText(response),
+            model: response.model || model || null,
             usage: extractResponseUsageMetadata(response),
         };
     }
@@ -2269,6 +2270,7 @@ class ArtifactService {
             responseId: compositionPass.responseId,
             title: expandedDocument.title || normalizedPlan.title,
             outputText: finalOutputText,
+            model: compositionPass.model || expansionPass.model || planPass.model || model || null,
             usage: mergeUsageMetadata(
                 planPass.usage,
                 expansionPass.usage,
@@ -2520,6 +2522,7 @@ class ArtifactService {
             responseId: generated.responseId,
             artifact: this.serializeArtifact(artifact),
             outputText,
+            model: generated.model || model || null,
             usage: generated.usage || null,
         };
     }

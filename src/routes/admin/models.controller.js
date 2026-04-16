@@ -119,14 +119,21 @@ class ModelsController {
 
   async getUsageStats(req, res) {
     try {
-      const models = await this.getLiveModels();
+      let models = [];
+      let source = 'runtime-logs';
+      try {
+        models = await this.getLiveModels();
+        source = 'runtime-logs+live-provider';
+      } catch (error) {
+        console.warn('Falling back to runtime logs for model usage stats:', error.message);
+      }
       const usage = this.buildUsageStats(models);
       const summary = this.buildUsageSummary(usage);
       res.json({
         success: true,
         data: usage,
         meta: {
-          source: 'runtime-logs',
+          source,
           count: usage.length,
           summary,
           providerTotals: summary.providerTotals,
@@ -222,6 +229,7 @@ class ModelsController {
 
   buildUsageStats(models = []) {
     const usageByModel = new Map();
+    const catalogById = new Map((models || []).map((model) => [model.id, model]));
 
     for (const log of logsController.logs || []) {
       const modelId = String(log.model || '').trim();
@@ -243,8 +251,16 @@ class ModelsController {
       usageByModel.set(modelId, current);
     }
 
-    return models.map((model) => {
-      const usage = usageByModel.get(model.id) || {
+    const orderedModelIds = [
+      ...new Set([
+        ...(models || []).map((model) => model.id),
+        ...usageByModel.keys(),
+      ]),
+    ];
+
+    return orderedModelIds.map((modelId) => {
+      const model = catalogById.get(modelId) || null;
+      const usage = usageByModel.get(modelId) || {
         requests: 0,
         inputTokens: 0,
         outputTokens: 0,
@@ -253,9 +269,9 @@ class ModelsController {
       };
 
       return {
-        modelId: model.id,
-        modelName: model.name,
-        provider: model.provider || model.raw?.owned_by || 'unknown',
+        modelId,
+        modelName: model?.name || this.humanizeModelName(modelId),
+        provider: model?.provider || model?.raw?.owned_by || 'unknown',
         requests: usage.requests,
         tokens: {
           input: usage.inputTokens,
@@ -269,9 +285,13 @@ class ModelsController {
         },
         avgResponseTime: usage.requests > 0 ? Math.round(usage.totalLatency / usage.requests) : 0,
         successRate: usage.requests > 0 ? Math.round((usage.successCount / usage.requests) * 100) : 0,
-        isDefault: model.isDefault,
+        isDefault: Boolean(model?.isDefault),
       };
-    });
+    }).sort((a, b) => (
+      Number(b.tokens?.total || 0) - Number(a.tokens?.total || 0)
+      || Number(b.requests || 0) - Number(a.requests || 0)
+      || String(a.modelName || '').localeCompare(String(b.modelName || ''))
+    ));
   }
 
   buildUsageSummary(usage = []) {
