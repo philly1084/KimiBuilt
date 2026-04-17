@@ -4,13 +4,20 @@ metadata:
   name: kimibuilt-ingress
   namespace: kimibuilt
   annotations:
-    # Traefik (k3s default ingress controller)
+    kubernetes.io/ingress.class: traefik
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    # WebSocket support
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "100"
     traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - kimibuilt.secdevsolutions.help
+      secretName: kimibuilt-tls
   rules:
-    - host: kimibuilt.local
+    - host: kimibuilt.secdevsolutions.help
       http:
         paths:
           - path: /

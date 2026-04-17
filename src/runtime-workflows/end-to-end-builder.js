@@ -676,17 +676,74 @@ function buildGitCommitMessage(workflow = null) {
     return `KimiBuilt: ${objective || 'update deployment workflow'}`;
 }
 
+function extractRequestedHost(text = '') {
+    const normalized = normalizeText(text);
+    if (!normalized) {
+        return '';
+    }
+
+    const match = normalized.match(/\b(?:https?:\/\/)?((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?::\d+)?\b/i);
+    return match?.[1] ? String(match[1]).toLowerCase() : '';
+}
+
+function requiresPublicDeploymentVerification(workflow = null) {
+    const objective = normalizeText(workflow?.objective).toLowerCase();
+    if (!objective) {
+        return false;
+    }
+
+    if (extractRequestedHost(objective)) {
+        return true;
+    }
+
+    const hasWebsiteTarget = /\b(site|website|web ?site|web ?page|webpage|homepage|landing page|domain|dns)\b/.test(objective);
+    const hasPublicIngressSignals = /\b(ingress|traefik|tls|https|certificate|cert-manager|let'?s encrypt|acme)\b/.test(objective);
+    return hasWebsiteTarget && hasPublicIngressSignals;
+}
+
 function buildVerificationCommand(workflow = null) {
     const deploy = workflow?.deploy || {};
     const namespace = normalizeText(deploy.namespace) || 'kimibuilt';
     const deployment = normalizeText(deploy.deployment) || 'backend';
+    const expectedHost = extractRequestedHost(workflow?.objective || '');
 
-    return [
+    const command = [
         'set -e',
         `kubectl rollout status deployment/${deployment} -n '${namespace}' --timeout=180s`,
         `kubectl get deployment/${deployment} -n '${namespace}' -o wide`,
         `kubectl get pods -n '${namespace}' -o wide`,
-    ].join('\n');
+        `kubectl get svc,ingress -n '${namespace}'`,
+    ];
+
+    if (!requiresPublicDeploymentVerification(workflow)) {
+        return command.join('\n');
+    }
+
+    return command.concat([
+        `expected_host=${quoteShellArg(expectedHost)}`,
+        `ingress_hosts=$(kubectl get ingress -n '${namespace}' -o jsonpath='{range .items[*].spec.rules[*]}{.host}{"\\n"}{end}' | grep -v '^$' || true)`,
+        'if [ -n "$ingress_hosts" ]; then echo "--- ingress hosts ---"; printf "%s\\n" "$ingress_hosts"; fi',
+        'if [ -n "$expected_host" ] && ! printf "%s\\n" "$ingress_hosts" | grep -Fx "$expected_host" >/dev/null; then',
+        '  echo "Expected ingress host not found: $expected_host" >&2',
+        '  exit 1',
+        'fi',
+        'host="$expected_host"',
+        'if [ -z "$host" ]; then host=$(printf "%s\\n" "$ingress_hosts" | head -n 1 || true); fi',
+        'if [ -z "$host" ]; then',
+        `  echo "No ingress host found in namespace ${namespace}" >&2`,
+        '  exit 1',
+        'fi',
+        `tls_secret=$(kubectl get ingress -n '${namespace}' -o jsonpath='{range .items[*].spec.tls[*]}{.secretName}{"\\n"}{end}' | grep -v '^$' | head -n 1 || true)`,
+        'if [ -z "$tls_secret" ]; then',
+        `  echo "No TLS secret configured on ingress in namespace ${namespace}" >&2`,
+        '  exit 1',
+        'fi',
+        `kubectl get secret "$tls_secret" -n '${namespace}' >/dev/null`,
+        'echo "--- https headers ---"',
+        'curl -fsSIL --max-time 20 "https://$host"',
+        'echo "--- https body preview ---"',
+        'curl -fsS --max-time 20 "https://$host" | sed -n "1,20p"',
+    ]).join('\n');
 }
 
 function buildInspectCommand(workflow = null) {
@@ -758,7 +815,26 @@ function buildRemoteWorkspaceDeployCommand(workflow = null) {
         'fi',
         'if ! command -v kubectl >/dev/null 2>&1; then echo "kubectl is required on the remote host" >&2; exit 1; fi',
         `if [ ! -e ${quoteShellArg(manifestTarget)} ]; then echo "manifests path not found: ${manifestTarget}" >&2; exit 1; fi`,
-        `kubectl apply -f ${quoteShellArg(manifestTarget)}`,
+        `manifest_target=${quoteShellArg(manifestTarget)}`,
+        'if [ -d "$manifest_target" ]; then',
+        '  manifest_dir="$manifest_target"',
+        '  if [ -f "$manifest_dir/namespace.yaml" ]; then kubectl apply -f "$manifest_dir/namespace.yaml"; fi',
+        '  if [ -f "$manifest_dir/cluster-issuer.yaml" ]; then kubectl apply -f "$manifest_dir/cluster-issuer.yaml"; fi',
+        '  for manifest_file in $(find "$manifest_dir" -maxdepth 1 -type f \\( -name "*.yaml" -o -name "*.yml" \\) | sort); do',
+        '    manifest_name=$(basename "$manifest_file")',
+        '    case "$manifest_name" in',
+        '      namespace.yaml|cluster-issuer.yaml|secret.yaml|rancher-simple.yaml|rancher-stack-update.yaml)',
+        '        continue',
+        '        ;;',
+        '      ingress-https.yaml)',
+        '        if [ -f "$manifest_dir/ingress.yaml" ]; then continue; fi',
+        '        ;;',
+        '    esac',
+        '    kubectl apply -f "$manifest_file"',
+        '  done',
+        'else',
+        '  kubectl apply -f "$manifest_target"',
+        'fi',
         deployment
             ? `kubectl rollout status deployment/${deployment} -n ${quoteShellArg(namespace)} --timeout=180s`
             : `kubectl get all -n ${quoteShellArg(namespace)}`,
@@ -831,14 +907,22 @@ function evaluateEndToEndBuilderWorkflow({
         );
     }
 
-    if (currentWorkflow.requiresVerification
-        && !currentWorkflow.progress.verified
-        && !candidateToolIds.has(remoteTool)
-        && !(candidateToolIds.has('k3s-deploy') && currentWorkflow.deploy.deployment)) {
-        return buildBlockedWorkflowState(
-            currentWorkflow,
-            `The workflow needs \`${remoteTool}\` or rollout-status access to verify the remote result.`,
-        );
+    if (currentWorkflow.requiresVerification && !currentWorkflow.progress.verified) {
+        if (requiresPublicDeploymentVerification(currentWorkflow) && !candidateToolIds.has(remoteTool)) {
+            return buildBlockedWorkflowState(
+                currentWorkflow,
+                `The workflow needs \`${remoteTool}\` to verify ingress, TLS, and public site reachability before it can claim the deployment is live.`,
+            );
+        }
+
+        if (!requiresPublicDeploymentVerification(currentWorkflow)
+            && !candidateToolIds.has(remoteTool)
+            && !(candidateToolIds.has('k3s-deploy') && currentWorkflow.deploy.deployment)) {
+            return buildBlockedWorkflowState(
+                currentWorkflow,
+                `The workflow needs \`${remoteTool}\` or rollout-status access to verify the remote result.`,
+            );
+        }
     }
 
     return currentWorkflow;
@@ -885,7 +969,7 @@ function buildEndToEndWorkflowPlan({
         && candidateToolIds.has(remoteTool)) {
         return [{
             tool: remoteTool,
-            reason: 'Build the remote workspace on the target server, apply the k3s manifests, and verify the rollout.',
+            reason: 'Build the remote workspace on the target server and apply the k3s manifests. Verification runs as a separate step.',
             params: {
                 ...(currentWorkflow.remoteTarget?.host ? { host: currentWorkflow.remoteTarget.host } : {}),
                 ...(currentWorkflow.remoteTarget?.username ? { username: currentWorkflow.remoteTarget.username } : {}),
@@ -951,7 +1035,9 @@ function buildEndToEndWorkflowPlan({
                 tool: remoteTool,
                 reason: currentWorkflow.lane === 'inspect-only'
                     ? 'Inspect the remote deployment and capture a verification snapshot.'
-                    : 'Verify the rollout and post-deploy runtime health.',
+                    : (requiresPublicDeploymentVerification(currentWorkflow)
+                        ? 'Verify the rollout, ingress, TLS, and public site reachability.'
+                        : 'Verify the rollout and post-deploy runtime health.'),
                 params: {
                     ...(currentWorkflow.remoteTarget?.host ? { host: currentWorkflow.remoteTarget.host } : {}),
                     ...(currentWorkflow.remoteTarget?.username ? { username: currentWorkflow.remoteTarget.username } : {}),
@@ -964,7 +1050,9 @@ function buildEndToEndWorkflowPlan({
             }];
         }
 
-        if (candidateToolIds.has('k3s-deploy') && currentWorkflow.deploy.deployment) {
+        if (!requiresPublicDeploymentVerification(currentWorkflow)
+            && candidateToolIds.has('k3s-deploy')
+            && currentWorkflow.deploy.deployment) {
             return [{
                 tool: 'k3s-deploy',
                 reason: 'Verify the deployment rollout status.',
@@ -1057,17 +1145,19 @@ function advanceEndToEndBuilderWorkflow({
         }
 
         if (toolId === 'k3s-deploy') {
+            const verificationSatisfied = action === 'rollout-status'
+                && !requiresPublicDeploymentVerification(currentWorkflow);
             currentWorkflow = markMeaningfulProgress({
                 ...currentWorkflow,
                 progress: {
                     ...currentWorkflow.progress,
                     deployed: true,
-                    ...(action === 'rollout-status' ? { verified: true } : {}),
+                    ...(verificationSatisfied ? { verified: true } : {}),
                 },
-                stage: action === 'rollout-status'
+                stage: verificationSatisfied
                     ? 'completed'
                     : (currentWorkflow.requiresVerification ? 'verifying' : 'completed'),
-                status: action === 'rollout-status' || !currentWorkflow.requiresVerification
+                status: verificationSatisfied || !currentWorkflow.requiresVerification
                     ? COMPLETED_WORKFLOW_STATUS
                     : ACTIVE_WORKFLOW_STATUS,
             });
@@ -1076,15 +1166,16 @@ function advanceEndToEndBuilderWorkflow({
 
         if (toolId === 'remote-command' || toolId === 'ssh-execute') {
             if (workflowAction === 'build-and-deploy-remote-workspace') {
+                const verificationSatisfied = currentWorkflow.requiresVerification !== true;
                 currentWorkflow = markMeaningfulProgress({
                     ...currentWorkflow,
                     progress: {
                         ...currentWorkflow.progress,
                         deployed: true,
-                        verified: true,
+                        ...(verificationSatisfied ? { verified: true } : {}),
                     },
-                    stage: 'completed',
-                    status: COMPLETED_WORKFLOW_STATUS,
+                    stage: verificationSatisfied ? 'completed' : 'verifying',
+                    status: verificationSatisfied ? COMPLETED_WORKFLOW_STATUS : ACTIVE_WORKFLOW_STATUS,
                 });
                 continue;
             }

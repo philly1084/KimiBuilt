@@ -45,6 +45,20 @@ echo -e "${GREEN}✓ Gateway found${NC}"
 echo -e "${YELLOW}Creating namespace...${NC}"
 kubectl apply -f namespace.yaml
 
+# Ensure Traefik and cert-manager prerequisites for TLS ingress
+echo -e "${YELLOW}Checking Traefik ingress controller...${NC}"
+if ! kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik &> /dev/null; then
+    echo -e "${RED}Error: Traefik ingress controller not found in kube-system${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}Applying Let's Encrypt ClusterIssuer...${NC}"
+if ! kubectl api-resources | grep -q '^clusterissuers[[:space:]]'; then
+    echo -e "${RED}Error: cert-manager CRDs are not installed. Install cert-manager before running this deploy.${NC}"
+    exit 1
+fi
+kubectl apply -f cluster-issuer.yaml
+
 # Create or update secret
 if [ -n "$API_KEY" ]; then
     echo -e "${YELLOW}Creating secret with provided API key...${NC}"
@@ -110,6 +124,12 @@ kubectl get pods -n "$NAMESPACE"
 echo ""
 echo -e "${BLUE}Services:${NC}"
 kubectl get svc -n "$NAMESPACE"
+echo ""
+echo -e "${BLUE}Ingress:${NC}"
+kubectl get ingress -n "$NAMESPACE"
+echo ""
+echo -e "${BLUE}Certificates:${NC}"
+kubectl get certificate -n "$NAMESPACE" || true
 
 echo ""
 echo -e "${GREEN}=== Deployment Complete ===${NC}"

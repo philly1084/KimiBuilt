@@ -3838,6 +3838,8 @@ function buildCompactToolSynthesisPrompt({
                 'Return plain text only.',
             ]),
         'If a tool failed, state the exact failure plainly.',
+        'Do not claim a deployment is live, publicly reachable, or TLS-ready unless the verified tool results show that evidence directly.',
+        'A successful rollout status or Ready pod alone is not enough to prove ingress, DNS, HTTPS, or website availability.',
         `Task type: ${taskType}`,
         '',
         'User request:',
@@ -7457,6 +7459,8 @@ class ConversationOrchestrator extends EventEmitter {
                 ]),
             'Do not generate SVG placeholders, HTML overlays, or fake image mockups when verified image URLs are available.',
             'Do not mention the local CLI environment, local workspace state, startup health, or shell behavior unless a verified tool result is directly about that.',
+            'Do not claim a deployment is live, publicly reachable, or TLS-ready unless the verified tool results show that evidence directly.',
+            'A successful rollout status or Ready pod alone is not enough to prove ingress, DNS, HTTPS, or website availability.',
             ...(toolPolicy?.classification?.groundingRequirement === 'required'
                 ? [
                     'This request requires grounded evidence.',

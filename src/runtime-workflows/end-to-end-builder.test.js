@@ -313,12 +313,124 @@ describe('end-to-end builder workflow', () => {
             ],
         });
         expect(completedWorkflow).toEqual(expect.objectContaining({
-            stage: 'completed',
-            status: 'completed',
+            stage: 'verifying',
+            status: 'active',
             progress: expect.objectContaining({
                 deployed: true,
-                verified: true,
+                verified: false,
             }),
+        }));
+
+        const verificationPlan = buildEndToEndWorkflowPlan({
+            workflow: completedWorkflow,
+            toolPolicy,
+            remoteToolId: 'remote-command',
+        });
+        expect(verificationPlan).toEqual([
+            expect.objectContaining({
+                tool: 'remote-command',
+                reason: expect.stringContaining('Verify the rollout'),
+                params: expect.objectContaining({
+                    host: '10.0.0.5',
+                    username: 'ubuntu',
+                    port: 22,
+                    timeout: 240000,
+                    command: expect.stringContaining("kubectl get svc,ingress -n 'kimibuilt'"),
+                }),
+            }),
+        ]);
+    });
+
+    test('requires ingress and HTTPS verification for public website deployments before completing the workflow', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Deploy the penguin site to penguin.demoserver2.buzz on k3s with Traefik TLS and Let\'s Encrypt.',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        const afterDeploy = advanceEndToEndBuilderWorkflow({
+            workflow,
+            toolEvents: [
+                buildToolEvent('k3s-deploy', {
+                    action: 'sync-and-apply',
+                }, {
+                    data: {
+                        action: 'sync-and-apply',
+                        stdout: 'deployment "backend" successfully rolled out',
+                    },
+                }),
+            ],
+        });
+
+        expect(afterDeploy).toEqual(expect.objectContaining({
+            stage: 'verifying',
+            status: 'active',
+            progress: expect.objectContaining({
+                deployed: true,
+                verified: false,
+            }),
+        }));
+
+        const verificationPlan = buildEndToEndWorkflowPlan({
+            workflow: afterDeploy,
+            toolPolicy: {
+                candidateToolIds: ['k3s-deploy', 'remote-command'],
+                preferredRemoteToolId: 'remote-command',
+            },
+            remoteToolId: 'remote-command',
+        });
+
+        expect(verificationPlan).toEqual([
+            expect.objectContaining({
+                tool: 'remote-command',
+                reason: expect.stringContaining('ingress, TLS, and public site reachability'),
+                params: expect.objectContaining({
+                    command: expect.stringContaining("expected_host='penguin.demoserver2.buzz'"),
+                }),
+            }),
+        ]);
+        expect(verificationPlan[0].params.command).toContain('curl -fsSIL --max-time 20 "https://$host"');
+    });
+
+    test('blocks public website deploy verification when only rollout-status access is available', () => {
+        const workflow = inferEndToEndBuilderWorkflow({
+            objective: 'Deploy the penguin site to penguin.demoserver2.buzz on k3s with Traefik TLS and Let\'s Encrypt.',
+            remoteTarget: {
+                host: '10.0.0.5',
+                username: 'ubuntu',
+                port: 22,
+            },
+        });
+
+        const afterDeploy = advanceEndToEndBuilderWorkflow({
+            workflow,
+            toolEvents: [
+                buildToolEvent('k3s-deploy', {
+                    action: 'sync-and-apply',
+                }, {
+                    data: {
+                        action: 'sync-and-apply',
+                        stdout: 'deployment "backend" successfully rolled out',
+                    },
+                }),
+            ],
+        });
+
+        const evaluated = evaluateEndToEndBuilderWorkflow({
+            workflow: afterDeploy,
+            toolPolicy: {
+                candidateToolIds: ['k3s-deploy'],
+            },
+            remoteToolId: 'remote-command',
+        });
+
+        expect(evaluated).toEqual(expect.objectContaining({
+            stage: 'blocked',
+            status: 'blocked',
+            lastError: expect.stringContaining('verify ingress, TLS, and public site reachability'),
         }));
     });
 

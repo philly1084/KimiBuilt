@@ -4,11 +4,14 @@ metadata:
   name: kimibuilt-ingress
   namespace: kimibuilt
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
     traefik.ingress.kubernetes.io/router.priority: "100"
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
+  ingressClassName: traefik
   tls:
     - hosts:
         - kimibuilt.secdevsolutions.help
