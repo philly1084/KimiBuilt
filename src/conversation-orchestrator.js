@@ -122,6 +122,7 @@ function hasExplicitForegroundResumeIntent(text = '') {
     }
 
     return [
+        /^(?:yes|yeah|yep)[.!]?\s+(?:we can\s+)?(?:continue|resume|go ahead|proceed)\b/,
         /^(continue|keep going|go ahead|next step|next steps|finish|resume|proceed)\b/,
         /^(do it|do that|ship it|deploy it|verify it|push it)\b/,
         /\b(obvious next step|obvious next steps|from there|from this point)\b/,

@@ -29,6 +29,36 @@ function isRemotePermissionGrantText(text = '') {
     return !/\b(health|report|summary|status|state|check|inspect|diagnose|debug|deploy|restart|install|fix|repair|update|change|configure|build|logs?|kubectl|pod|service|ingress)\b/.test(normalized);
 }
 
+function hasRemoteResumeIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /^(?:yes|yeah|yep)[.!]?\s+(?:we can\s+)?(?:continue|resume|go ahead|proceed)\b/,
+        /^(?:we can\s+)?(?:continue|resume|go ahead|proceed)\b/,
+        /^(continue|proceed|next|go ahead|do it|do that|finish|use remote-build|use the remote build)\b/,
+        /\b(next step|next steps|keep going|from this page|from there|on the server|against the server)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
+function hasActiveRemoteWorkflowState(controlState = {}) {
+    const workflowStatus = String(controlState?.workflow?.status || '').trim().toLowerCase();
+    const projectPlanStatus = String(controlState?.projectPlan?.status || '').trim().toLowerCase();
+    const hasWorkflow = Boolean(controlState?.workflow)
+        && !['completed', 'failed', 'cancelled', 'done', 'stopped'].includes(workflowStatus);
+    const hasProjectPlan = Boolean(controlState?.projectPlan)
+        && !['completed', 'cancelled', 'done'].includes(projectPlanStatus);
+    const hasContinuationGate = controlState?.foregroundContinuationGate?.paused === true;
+    const hasRemoteObjective = Boolean(
+        String(controlState?.lastRemoteObjective || '').trim()
+        || String(controlState?.activeTaskFrame?.objective || '').trim(),
+    );
+
+    return hasWorkflow || hasProjectPlan || (hasContinuationGate && hasRemoteObjective);
+}
+
 function inferRecallProfile(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -168,7 +198,8 @@ function inferExecutionProfile(payload = {}) {
         controlState?.lastSshTarget?.host
         || controlState?.remoteWorkingState?.target?.host,
     );
-    const stickyRemoteContext = stickyRemoteIntent || stickyRemoteTarget;
+    const stickyRemoteWorkflow = hasActiveRemoteWorkflowState(controlState);
+    const stickyRemoteContext = stickyRemoteIntent || stickyRemoteTarget || stickyRemoteWorkflow;
     const pageEditIntent = normalized
         ? [
             /\b(put|add|insert|place|append|prepend|move|drop|apply|write|turn|convert|use|set)\b[\s\S]{0,40}\b(on|into|to|in)\b[\s\S]{0,20}\b(page|note|document|doc)\b/,
@@ -194,10 +225,8 @@ function inferExecutionProfile(payload = {}) {
         /\b(kubectl|kubernetes|k8s|docker compose|docker-compose|systemctl|journalctl|nginx|pm2)\b/,
         /\b(build|compile|install|run)\b[\s\S]{0,40}\b(on|via)\b[\s\S]{0,20}\b(server|ssh|remote)\b/,
     ].some((pattern) => pattern.test(normalized));
-    const remoteContinuationIntent = stickyRemoteIntent && [
-        /^(continue|proceed|next|go ahead|do it|do that|finish|use remote-build|use the remote build)\b/,
-        /\b(next step|next steps|keep going|from this page|from there|on the server|against the server)\b/,
-    ].some((pattern) => pattern.test(normalized));
+    const remoteContinuationIntent = (stickyRemoteIntent || stickyRemoteWorkflow)
+        && hasRemoteResumeIntentText(normalized);
     const stickyRemoteWorkIntent = stickyRemoteContext && [
         /^(continue|proceed|next|go ahead|do it|do that|finish|retry|try again|rerun|re-run|resume|keep going|keep working)\b/,
         /\b(replace|update|deploy|publish|push|upload|install|restart|reload|rollout|fix|repair|override|swap|remove|copy)\b[\s\S]{0,50}\b(site|website|app|application|game|frontend|ingress|deployment|service|pod|html|index\.html|homepage|landing)\b/,

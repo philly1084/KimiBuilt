@@ -267,6 +267,32 @@ describe('runtime-execution', () => {
         })).toBe('remote-build');
     });
 
+    test('keeps active deploy workflows in remote-build mode for yes-style continuation replies', () => {
+        expect(inferExecutionProfile({
+            input: 'Yes. We can continue the penguin research paper deployment for penguin.demoserver2.buzz.',
+            session: {
+                metadata: {
+                    controlState: {
+                        workflow: {
+                            kind: 'end-to-end-builder',
+                            lane: 'deploy-only',
+                            status: 'active',
+                            stage: 'deploying',
+                            objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify TLS.',
+                        },
+                        activeTaskFrame: {
+                            objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify TLS.',
+                        },
+                        foregroundContinuationGate: {
+                            paused: true,
+                        },
+                        lastRemoteObjective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify TLS.',
+                    },
+                },
+            },
+        })).toBe('remote-build');
+    });
+
     test('does not force generic local content creation into remote-build just because a remote session exists', () => {
         expect(inferExecutionProfile({
             input: 'Make me a page about dolphins.',

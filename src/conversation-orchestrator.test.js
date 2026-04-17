@@ -6660,6 +6660,90 @@ describe('ConversationOrchestrator', () => {
         expect(result.output).toBe('Deployment completed and the rollout was verified.');
     });
 
+    test('resumes the active deploy workflow on yes-style continuation replies instead of drifting into web search', () => {
+        settingsController.getEffectiveSshConfig.mockReturnValue({
+            enabled: true,
+            host: '10.0.0.5',
+            port: 22,
+            username: 'ubuntu',
+            password: 'secret',
+            privateKeyPath: '',
+        });
+
+        const orchestrator = new ConversationOrchestrator({
+            llmClient: {
+                createResponse: jest.fn(),
+                complete: jest.fn(),
+            },
+            toolManager: {
+                getTool: jest.fn((toolId) => (
+                    ['remote-command', 'k3s-deploy', 'web-search', 'tool-doc-read']
+                        .includes(toolId)
+                        ? { id: toolId, description: toolId }
+                        : null
+                )),
+            },
+        });
+
+        const session = {
+            metadata: {
+                controlState: {
+                    workflow: {
+                        kind: 'end-to-end-builder',
+                        lane: 'deploy-only',
+                        status: 'active',
+                        stage: 'deploying',
+                        objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                        remoteTarget: {
+                            host: '10.0.0.5',
+                            username: 'ubuntu',
+                            port: 22,
+                        },
+                        deploy: {
+                            namespace: 'kimibuilt',
+                            deployment: 'backend',
+                            publicDomain: 'demoserver2.buzz',
+                        },
+                        progress: {
+                            deployed: false,
+                            verified: false,
+                        },
+                    },
+                    activeTaskFrame: {
+                        objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                    },
+                    foregroundContinuationGate: {
+                        paused: true,
+                    },
+                    lastRemoteObjective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                },
+            },
+        };
+        const objective = 'Yes. We can continue the penguin research paper deployment for penguin.demoserver2.buzz.';
+        const toolPolicy = orchestrator.buildToolPolicy({
+            objective,
+            executionProfile: 'remote-build',
+            toolManager: orchestrator.toolManager,
+            session,
+        });
+        const directAction = orchestrator.buildDirectAction({
+            objective,
+            session,
+            toolPolicy,
+            toolContext: {},
+        });
+
+        expect(toolPolicy.workflow).toEqual(expect.objectContaining({
+            lane: 'deploy-only',
+            status: 'active',
+        }));
+        expect(toolPolicy.candidateToolIds).toContain('k3s-deploy');
+        expect(directAction).toEqual(expect.objectContaining({
+            tool: 'k3s-deploy',
+            reason: 'Run the standard k3s deployment flow for this request.',
+        }));
+    });
+
     test('blocks a mixed repo-and-deploy workflow when opencode is unavailable for the required repo lane', async () => {
         settingsController.getEffectiveSshConfig.mockReturnValue({
             enabled: true,
