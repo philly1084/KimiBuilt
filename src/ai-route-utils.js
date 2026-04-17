@@ -450,6 +450,50 @@ function isArtifactContinuationPrompt(text = '') {
     return continuationPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function isGenericContinuationPrompt(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    const genericContinuation = [
+        /^(continue|finish|keep going|go ahead|next|then|retry|rerun|re-run|recheck|resume|proceed)\b/,
+        /\b(keep going|go ahead|retry that|rerun that|re-run that|recheck that|keep working on it|continue now)\b/,
+    ].some((pattern) => pattern.test(normalized));
+    if (!genericContinuation) {
+        return false;
+    }
+
+    return !/\b(artifact|file|document|html|page|markup|pdf|docx|spreadsheet|workbook|diagram|mermaid|export|download|bundle|zip)\b/i.test(normalized);
+}
+
+function hasActiveForegroundContinuationWork(session = null) {
+    const controlState = getSessionControlState(session);
+    if (!controlState || typeof controlState !== 'object') {
+        return false;
+    }
+
+    const workflowStatus = String(controlState?.workflow?.status || '').trim().toLowerCase();
+    const projectPlanStatus = String(controlState?.projectPlan?.status || '').trim().toLowerCase();
+    const hasWorkflow = Boolean(controlState?.workflow) && !['completed', 'failed', 'cancelled', 'done', 'stopped'].includes(workflowStatus);
+    const hasProjectPlan = Boolean(controlState?.projectPlan) && !['completed', 'cancelled', 'done'].includes(projectPlanStatus);
+    const hasActiveTaskFrame = Boolean(String(controlState?.activeTaskFrame?.objective || '').trim());
+    const hasContinuationGate = controlState?.foregroundContinuationGate?.paused === true;
+    const hasRemoteContinuation = Boolean(
+        String(controlState?.lastRemoteObjective || '').trim()
+        || controlState?.lastSshTarget?.host
+        || controlState?.remoteWorkingState?.target?.host
+        || String(controlState?.remoteWorkingState?.lastCommand || '').trim()
+        || String(controlState?.remoteWorkingState?.lastError || '').trim(),
+    );
+
+    return hasWorkflow
+        || hasProjectPlan
+        || hasActiveTaskFrame
+        || hasContinuationGate
+        || hasRemoteContinuation;
+}
+
 function hasImplementationTransitionIntent(text = '') {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -1076,6 +1120,10 @@ function inferOutputFormatFromSession(text = '', session = null) {
     if (hasImplementationTransitionIntent(text)
         && !hasExplicitStandaloneHtmlIntent(text)
         && !hasExplicitArtifactDeliveryIntent(text)) {
+        return null;
+    }
+
+    if (isGenericContinuationPrompt(text) && hasActiveForegroundContinuationWork(session)) {
         return null;
     }
 

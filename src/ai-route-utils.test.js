@@ -243,6 +243,41 @@ describe('ai-route-utils', () => {
         })).toBe('pdf');
     });
 
+    test('inferOutputFormatFromSession does not reuse the last artifact on bare continue when a foreground workflow is paused', () => {
+        expect(inferOutputFormatFromSession('continue', {
+            metadata: {
+                lastOutputFormat: 'html',
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+            controlState: {
+                foregroundContinuationGate: {
+                    paused: true,
+                },
+                activeTaskFrame: {
+                    objective: 'Deploy the site on the server and verify TLS.',
+                },
+                lastRemoteObjective: 'Deploy the site on the server and verify TLS.',
+            },
+        })).toBeNull();
+    });
+
+    test('inferOutputFormatFromSession keeps explicit artifact follow-ups even when a foreground workflow is paused', () => {
+        expect(inferOutputFormatFromSession('continue that pdf and tighten the summary', {
+            metadata: {
+                lastOutputFormat: 'pdf',
+                lastGeneratedArtifactId: 'artifact-1',
+            },
+            controlState: {
+                foregroundContinuationGate: {
+                    paused: true,
+                },
+                activeTaskFrame: {
+                    objective: 'Deploy the site on the server and verify TLS.',
+                },
+            },
+        })).toBe('pdf');
+    });
+
     test('inferRequestedOutputFormat does not treat casual diagram mentions as mermaid exports', () => {
         expect(inferRequestedOutputFormat('Can you explain the architecture diagram from earlier?')).toBeNull();
         expect(inferRequestedOutputFormat('I want the content, not a diagram.')).toBeNull();
