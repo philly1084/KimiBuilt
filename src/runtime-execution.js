@@ -43,6 +43,21 @@ function hasRemoteResumeIntentText(text = '') {
     ].some((pattern) => pattern.test(normalized));
 }
 
+function hasStickyRemoteStatusIntentText(text = '') {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+
+    return [
+        /\b(status|state|progress|blocker|blockers|error|errors|issue|issues|failure|failures)\b/,
+        /\b(where (?:are|did) we)\b/,
+        /\b(what(?:'s| is) (?:the )?(?:current )?(?:status|state|progress|blocker|issue|error|failure))\b/,
+        /\b(show|summarize|recap|explain)\b[\s\S]{0,30}\b(status|state|progress|blocker|error|issue|failure)\b/,
+        /\b(why|what)\b[\s\S]{0,24}\b(failing|failed|stopped|broken|wrong)\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 function hasActiveRemoteWorkflowState(controlState = {}) {
     const workflowStatus = String(controlState?.workflow?.status || '').trim().toLowerCase();
     const projectPlanStatus = String(controlState?.projectPlan?.status || '').trim().toLowerCase();
@@ -236,13 +251,14 @@ function inferExecutionProfile(payload = {}) {
         /\b(current html|index\.html|site html|website html)\b/,
         /\b(game|website|site|app)\b[\s\S]{0,30}\b(live|online|deployment|ingress|domain|dns|tls)\b/,
     ].some((pattern) => pattern.test(normalized));
+    const stickyRemoteStatusIntent = stickyRemoteContext && hasStickyRemoteStatusIntentText(normalized);
     const stickyRemoteApprovalIntent = stickyRemoteContext && isRemotePermissionGrantText(normalized);
 
     if (requestedNotesProfile || pageEditIntent) {
         return NOTES_EXECUTION_PROFILE;
     }
 
-    return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent || stickyRemoteApprovalIntent)
+    return (remoteBuildIntent || remoteContinuationIntent || stickyRemoteWorkIntent || stickyRemoteStatusIntent || stickyRemoteApprovalIntent)
         ? REMOTE_BUILD_EXECUTION_PROFILE
         : DEFAULT_EXECUTION_PROFILE;
 }

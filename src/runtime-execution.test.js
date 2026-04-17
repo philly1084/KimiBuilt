@@ -293,6 +293,84 @@ describe('runtime-execution', () => {
         })).toBe('remote-build');
     });
 
+    test('keeps active remote workflows in remote-build mode for status and blocker follow-ups', () => {
+        const session = {
+            metadata: {
+                controlState: {
+                    workflow: {
+                        kind: 'end-to-end-builder',
+                        lane: 'deploy-only',
+                        status: 'active',
+                        stage: 'verifying',
+                        objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                    },
+                    activeTaskFrame: {
+                        objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                    },
+                    lastRemoteObjective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                },
+            },
+        };
+
+        expect(inferExecutionProfile({
+            input: 'What is the current deployment status?',
+            session,
+        })).toBe('remote-build');
+
+        expect(inferExecutionProfile({
+            input: 'What is the current blocker?',
+            session,
+        })).toBe('remote-build');
+
+        expect(inferExecutionProfile({
+            input: 'Why is it failing?',
+            session,
+        })).toBe('remote-build');
+    });
+
+    test('routes status-style follow-ups for active remote workflows through the executor in remote-build mode', async () => {
+        const executeConversation = jest.fn().mockResolvedValue({
+            success: true,
+            response: { id: 'resp_executor_remote_status' },
+        });
+
+        const result = await executeConversationRuntime({
+            locals: {
+                conversationOrchestrator: {
+                    executeConversation,
+                },
+            },
+        }, {
+            sessionId: 'session-remote-status',
+            input: 'What is the current deployment status?',
+            taskType: 'chat',
+            session: {
+                metadata: {
+                    controlState: {
+                        workflow: {
+                            kind: 'end-to-end-builder',
+                            lane: 'deploy-only',
+                            status: 'active',
+                            stage: 'verifying',
+                            objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                        },
+                        activeTaskFrame: {
+                            objective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                        },
+                        lastRemoteObjective: 'Deploy the penguin research paper site to penguin.demoserver2.buzz and verify ingress, DNS, and HTTPS.',
+                    },
+                },
+            },
+        });
+
+        expect(executeConversation).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: 'session-remote-status',
+            executionProfile: 'remote-build',
+        }));
+        expect(createResponse).not.toHaveBeenCalled();
+        expect(result.runtimeMode).toBe('orchestrated');
+    });
+
     test('does not force generic local content creation into remote-build just because a remote session exists', () => {
         expect(inferExecutionProfile({
             input: 'Make me a page about dolphins.',
